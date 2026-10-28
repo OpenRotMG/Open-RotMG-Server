@@ -18,7 +18,7 @@ export async function prepare(api){
   grave=map.entities.find(e=>e.kind===0x6db&&[-3,-2,-1,0].every(dx=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(','))));
   assert(target&&grave,'Expected natural Red Demon and approachable Kage grave');
   await writeFile(join(out,'natural-targets.json'),JSON.stringify({target,grave}));
-  return base;
+  return {...base,worldSeed:892};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8'));
@@ -31,7 +31,13 @@ export async function run(game){
   const initial=await game.observe();
   const peer=await game.join({...base,world:initial.session.world,position:initial.position,backpack:Array(8).fill(-1)});
   for(const actor of [game.actor,peer.actor])await change(actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
-  await game.act({keys:[],duration_ms:600},{name:'seasonal-before',when:()=>true});
+  await game.act({keys:[],duration_ms:2500},{name:'seasonal-before',when:v=>v.game_ms>=initial.game_ms+2000});
+  game.check('seeded cave spawn exercises firecracker boundary refusal',initial.position.x<20||initial.position.y<20);
+  for(const key of ['2','3']){
+    const before=await game.observe();await game.act({keys:[key],duration_ms:250});
+    const after=await game.observe();
+    game.check('unsafe-boundary firecracker '+key+' consumes nothing',after.character.inventory_revision===before.character.inventory_revision&&JSON.stringify(after.character.items)===JSON.stringify(before.character.items));
+  }
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:634,y:385}}});
   game.check('Sand Pail refuses equipment slot without consuming',JSON.stringify((await game.observe()).character.items)===JSON.stringify(initial.character.items));
   // Selected doses and advertised effects, not recovered server constants: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
@@ -44,7 +50,7 @@ export async function run(game){
   }
   const spent=await game.observe();await game.act({keys:['1'],duration_ms:250});
   game.check('empty pail cannot consume or summon again',(await game.observe()).character.inventory_revision===spent.character.inventory_revision&&(await castles()).length===5);
-  await change(game.actor,{kind:'item',slot:4,item:0xc34});
+  await change(game.actor,{kind:'item',slot:4,item:0xc34});await game.act({keys:[],duration_ms:250});
   for(let i=0;i<3;i++)await game.act({keys:['1'],duration_ms:250});
   const capped=await game.observe();await game.act({keys:['1'],duration_ms:250});
   const denied=await game.observe();
