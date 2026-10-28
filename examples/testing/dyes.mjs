@@ -25,6 +25,16 @@ export async function run(game){
     await writeFile(join(out,'dye-observations.json'),JSON.stringify({preparedRefills:true,samples},null,2));return sample;
   }
   await capture(game,'dyes-before');
+  for(const [i,color] of palette.entries()){
+    const accessory=palette[(i+1)%palette.length];
+    if(i){await refill(4,color.kind);await refill(5,accessory.kind+0x100);}
+    const before=await game.observe();let appliedAt;
+    const result=await game.act([{actor:game.actor,input:{keys:[],duration_ms:100}},{actor:game.actor,input:{keys:['1'],duration_ms:200}},{actor:game.actor,input:{keys:['2'],duration_ms:200}},{actor:game.actor,input:{keys:[],duration_ms:900}}],{name:'palette-'+i.toString().padStart(3,'0'),when:v=>{if(v.character.items[4]!==-1||v.character.items[5]!==-1)return false;appliedAt??=v.game_ms;return v.game_ms>=appliedAt+400;}});
+    const after=await save(color.name,game);
+    game.check(color.name+' and next accessory consume exactly their slots once',after.view.character.inventory_revision===before.character.inventory_revision+2&&after.view.character.items.every((item,slot)=>slot===4||slot===5?item===-1:item===before.character.items[slot]));
+    game.check(color.name+' and next accessory retain distinct texture channels',after.diagnostic.character.tex1===color.texture&&after.diagnostic.character.tex2===accessory.texture);
+    game.check(color.name+' first native use preserves the second vial',result.steps[1].character.items[4]===-1&&result.steps[1].character.items[5]===accessory.kind+0x100&&result.steps[1].character.inventory_revision===before.character.inventory_revision+1);
+  }
   const clearPreview=state=>state.diagnostic.entities.every(e=>!e.extra_stats.some(([id,kind])=>id===34&&kind>=0x1000&&kind<0x1400)||Math.hypot(e.pos.x-state.view.position.x,e.pos.y-state.view.position.y)>=1);
   for(const [name,x,y,stock] of [['clothing',75.5,58.5,0x1007],['accessory',84.5,54.5,0x1185]]){
     const client=await game.join({...fixture,world:-2,position:{x,y:y+1.6},backpack:[0x1071,0x1109,-1,-1,-1,-1,-1,-1]});
@@ -41,16 +51,6 @@ export async function run(game){
     const cancelled=await save(name+'-cancelled',client);await capture(client,name+'-cancelled');
     game.check(name+' preview cancels clear of every appearance merchant',clearPreview(cancelled));
     for(const state of [before,preview,cancelled])game.check(name+' preview never consumes or persists the trial color',state.diagnostic.character.tex1===0x01ff0000&&state.diagnostic.character.tex2===0x010000ff&&JSON.stringify(state.view.character.items)===JSON.stringify(before.view.character.items)&&state.view.character.inventory_revision===before.view.character.inventory_revision);
-  }
-  for(const [i,color] of palette.entries()){
-    const accessory=palette[(i+1)%palette.length];
-    if(i){await refill(4,color.kind);await refill(5,accessory.kind+0x100);}
-    const before=await game.observe();
-    const result=await game.act([{actor:game.actor,input:{keys:[],duration_ms:100}},{actor:game.actor,input:{keys:['1'],duration_ms:200}},{actor:game.actor,input:{keys:['2'],duration_ms:200}},{actor:game.actor,input:{keys:[],duration_ms:500}}],{name:'palette-'+i.toString().padStart(3,'0'),when:v=>v.character.items[4]===-1&&v.character.items[5]===-1&&v.game_ms>=before.game_ms+700});
-    const after=await save(color.name,game);
-    game.check(color.name+' and next accessory consume exactly their slots once',after.view.character.inventory_revision===before.character.inventory_revision+2&&after.view.character.items.every((item,slot)=>slot===4||slot===5?item===-1:item===before.character.items[slot]));
-    game.check(color.name+' and next accessory retain distinct texture channels',after.diagnostic.character.tex1===color.texture&&after.diagnostic.character.tex2===accessory.texture);
-    game.check(color.name+' first native use preserves the second vial',result.steps[1].character.items[4]===-1&&result.steps[1].character.items[5]===accessory.kind+0x100&&result.steps[1].character.inventory_revision===before.character.inventory_revision+1);
   }
   const retained=await save('before-reconnect',game);
   await game.act({keys:['Insert'],duration_ms:1000});await game.act({keys:[],duration_ms:600});
