@@ -44,6 +44,7 @@ export async function enter({account}) {
 export async function run(game) {
   const peer=await game.join({...fixture,seed:912});
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8')),accounts=JSON.parse(await readFile(join(root,'result.json'),'utf8')).participants.map(p=>p.account);
+  const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
   const wallet=account=>db('SELECT balance,earned FROM account_fame WHERE account=?',[account]);
   const members=()=>db('SELECT a.name,g.name,m.rank FROM guild_members m JOIN accounts a ON a.id=m.account JOIN guilds g ON g.id=m.guild ORDER BY a.id');
   const records=[];
@@ -70,7 +71,7 @@ export async function run(game) {
     await ui(player,index,'command-'+records.length,async c=>{await key(c,'Enter','Enter',13);await c.call('Input.insertText',{text});await key(c,'Enter','Enter',13);});
   }
   async function walk(player,x,y) {
-    const start=await player.observe(),response=await fetch(config.origin+'/dev/map?player='+start.session.player);assert(response.ok);
+    const start=await player.observe(),response=await fetch(config.origin+'/dev/map?player='+start.session.player,{headers});assert(response.ok,'Owned test map read: '+response.status);
     const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(','))),pass=(x,y)=>x>=0&&y>=0&&x<map.width&&y<map.height&&!blocked.has(x+','+y);
     const goal=[Math.floor(x),Math.floor(y)],queue=[goal],distance=new Map([[goal.join(','),0]]);
     for(let i=0;i<queue.length;i++) {
@@ -94,6 +95,7 @@ export async function run(game) {
     throw Error('Native walk failed: '+JSON.stringify({x,y,position:(await player.observe()).position}));
   }
   const initial=await Promise.all([game.observe(),peer.observe()]);
+  await game.act({keys:[],duration_ms:5000});
   for(const [index,player] of [game,peer].entries()) {
     await ui(player,index,'guest-name-refused-'+index,c=>click(c,700,580));
     game.check('guest cannot choose a name before registration '+index,(await db('SELECT name FROM accounts WHERE id=?',[accounts[index]]))[0][0]===`Guest${accounts[index]}`);
