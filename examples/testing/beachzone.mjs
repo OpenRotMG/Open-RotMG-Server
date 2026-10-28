@@ -16,10 +16,10 @@ export async function run(game){
     }
     throw Error('Native walk did not reach '+JSON.stringify(point));
   }
-  async function enter(from,name){
-    await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
-    for(let n=0;n<8&&(await game.observe()).session.world===from;n++)await game.act({keys:[],duration_ms:500});
-    const s=await save(name);assert.notEqual(s.view.session.world,from);return s;
+  async function enter(from,name,actor=game){
+    await actor.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
+    for(let n=0;n<8&&(await actor.observe()).session.world===from;n++)await actor.act({keys:[],duration_ms:500});
+    const s=await save(name,actor);assert.notEqual(s.view.session.world,from);return s;
   }
   const initial=await save('nexus');
   await game.act({keys:['1'],duration_ms:400});
@@ -48,8 +48,8 @@ export async function run(game){
   await game.act({keys:[],duration_ms:5500});
   const healed=await save('silent-recovery');
   game.check('un-stunned Party God silently recovers full health',entities(healed).find(e=>e.id===boss.id).hp===30000);
-  const stunner=await game.join({...fixture,seed:866,world:entry.view.session.world,position:{x:69.5,y:66.5},equipment:[0xb0b,0xa08,0xafc,0xacb],backpack:Array(8).fill(0xa23)});
-  const wizard=await game.join({class:0x30e,level:20,seed:867,world:entry.view.session.world,position:{x:70.5,y:68.5},equipment:[0xb08,0xa2e,0xb05,0xacb],backpack:Array(8).fill(0xa23),stats:[670,385,75,25,50,75,40,60]});
+  const stunner=await game.join({...fixture,seed:866,world:entry.view.session.world,position:{x:69.5,y:66.5},equipment:[0xb0b,0xa08,0xafc,0xacb],backpack:[-1,...Array(7).fill(0xa23)]});
+  const wizard=await game.join({class:0x30e,level:20,seed:867,world:entry.view.session.world,position:{x:70.5,y:68.5},equipment:[0xb08,0xa2e,0xb05,0xacb],backpack:[-1,...Array(7).fill(0xa23)],stats:[670,385,75,25,50,75,40,60]});
   const party=[game,stunner,wizard],target={entity:boss.id,camera_angle:-Math.PI/4,fire:true};
   let stunned=false,broken=false,suppressed=false;
   for(let n=0;n<50;n++){
@@ -71,22 +71,35 @@ export async function run(game){
   await game.act({keys:[],duration_ms:700},{name:'party-god-defeated',when:()=>true});
   const defeated=await save('defeated');
   game.check('ordinary cooperative sword, shield and spell combat defeats Party God',!entities(defeated).some(e=>e.id===boss.id)&&stunned&&broken&&suppressed);
-  for(const actor of party){const s=await save('clear-credit',actor);game.check('participating character receives exactly one Beachzone clear '+actor.actor,s.diagnostic.character.beaches===1&&s.view.lifecycle.alive);}
   const exit=entities(defeated).find(e=>e.kind===0x704);assert(exit,'No committed Realm exit');
-  const drinks=[0xc39,0xc3a,0xc3b,0xc3c];
-  const bag=entities(defeated).find(e=>e.items.some(i=>drinks.includes(i))&&e.extra_stats.some(([stat,owner])=>stat===54&&owner===defeated.view.session.account));assert(bag,'No owned cocktail for first Knight in this seeded outcome');
-  await walk(game,bag.pos);
-  await game.act({keys:[],duration_ms:700},{name:'beach-reward',when:()=>true});
-  const beforePickup=await save('before-pickup'),slot=bag.items.findIndex(i=>drinks.includes(i));assert(slot>=0);
-  await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(slot%4),y:528+44*Math.floor(slot/4)},to:{x:634,y:428}}});
-  const picked=await save('picked');
-  game.check('ordinary loot drag commits an owned cocktail exactly once',drinks.includes(picked.view.character.items[4])&&picked.view.character.inventory_revision===beforePickup.view.character.inventory_revision+1);
-  await walk(game,exit.pos);
-  const returned=await enter(entry.view.session.world,'realm-exit');
-  game.check('earned Realm exit preserves same living character, cocktail and once-only clear',returned.view.map.name==='Realm'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.diagnostic.character.beaches===1&&returned.view.character.items[4]===picked.view.character.items[4]);
-  await game.act({keys:['1'],duration_ms:500},{name:'cocktail-used',when:()=>true});
-  const used=await save('cocktail-used');
-  game.check('earned cocktail consumes once through ordinary item use',used.view.character.items[4]===-1&&used.view.character.inventory_revision===returned.view.character.inventory_revision+1&&used.diagnostic.character.beaches===1);
-  const boosts={0xc39:[[0,50],[5,10]],0xc3a:[[0,50],[1,50]],0xc3b:[[2,10],[5,10]],0xc3c:[[3,10],[6,10]]}[picked.view.character.items[4]];
-  game.check('earned cocktail applies its selected stat boosts and Drunk',boosts.every(([index,amount])=>used.view.character.stats[index]===returned.view.character.stats[index]+amount)&&!!(used.view.character.conditions&(1<<9)));
+  const drinks=[0xc39,0xc3a,0xc3b,0xc3c],awards=[];
+  for(const actor of party){
+    const s=await save('clear-credit',actor);
+    game.check('participating character receives exactly one Beachzone clear '+actor.actor,s.diagnostic.character.beaches===1&&s.view.lifecycle.alive);
+    const bag=entities(s).find(e=>e.items.some(i=>drinks.includes(i))&&e.extra_stats.some(([stat,owner])=>stat===54&&owner===s.view.session.account));
+    if(bag)awards.push({actor,bag});
+  }
+  await writeFile(output('reward-outcome.json'),JSON.stringify({awards:awards.map(({actor,bag})=>({actor:actor.actor,bag})),noDrop:awards.length===0}));
+  let picked,inventorySlot;
+  if(awards.length){
+    const {actor,bag}=awards[0];await walk(actor,bag.pos);
+    await actor.act({keys:[],duration_ms:700},{name:'beach-reward',when:()=>true});
+    const beforePickup=await save('before-pickup',actor),slot=bag.items.findIndex(i=>drinks.includes(i));
+    inventorySlot=beforePickup.view.character.items.findIndex((item,i)=>i>=4&&item===-1);assert(inventorySlot>=4);
+    await actor.act({keys:[],duration_ms:350,drag:{from:{x:634+44*(slot%4),y:528+44*Math.floor(slot/4)},to:{x:634+44*((inventorySlot-4)%4),y:428+44*Math.floor((inventorySlot-4)/4)}}});
+    picked=await save('picked',actor);
+    game.check('ordinary loot drag commits an owned cocktail exactly once',drinks.includes(picked.view.character.items[inventorySlot])&&picked.view.character.inventory_revision===beforePickup.view.character.inventory_revision+1);
+  }
+  for(const actor of party){
+    const before=await actor.inspect();await walk(actor,exit.pos);
+    const returned=await enter(entry.view.session.world,'realm-exit',actor);
+    game.check('earned Realm exit preserves same living character, inventory and once-only clear '+actor.actor,returned.view.map.name==='Realm'&&returned.view.lifecycle.alive&&returned.view.session.character===before.view.session.character&&returned.diagnostic.character.beaches===1&&JSON.stringify(returned.view.character.items)===JSON.stringify(before.view.character.items));
+    if(awards.length&&actor===awards[0].actor){
+      await actor.act({keys:[String(inventorySlot-3)],duration_ms:500},{name:'cocktail-used',when:()=>true});
+      const used=await save('cocktail-used',actor);
+      game.check('earned cocktail consumes once through ordinary item use',used.view.character.items[inventorySlot]===-1&&used.view.character.inventory_revision===returned.view.character.inventory_revision+1&&used.diagnostic.character.beaches===1);
+      const boosts={0xc39:[[0,50],[5,10]],0xc3a:[[0,50],[1,50]],0xc3b:[[2,10],[5,10]],0xc3c:[[3,10],[6,10]]}[picked.view.character.items[inventorySlot]];
+      game.check('earned cocktail applies its selected stat boosts and Drunk',boosts.every(([index,amount])=>used.view.character.stats[index]===returned.view.character.stats[index]+amount)&&!!(used.view.character.conditions&(1<<9)));
+    }
+  }
 }
