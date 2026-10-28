@@ -39,8 +39,12 @@ export async function run(game){
     const view=await game.observe();assert.equal(view.world,'Realm');return view;
   }
   const initial=await save('initial');
-  const portals=(await game.inspect()).diagnostic.entities.filter(e=>e.kind===0x712);
-  assert.equal(portals.length,2);
+  let portals=[];
+  for(let i=0;i<60&&portals.length<2;i++){
+    await game.act({keys:['d','w'],duration_ms:300});
+    portals=(await game.inspect()).diagnostic.entities.filter(e=>e.kind===0x712);
+  }
+  assert.equal(portals.length,2,'Walking north did not reveal both Realm entrances');
   await walk(portals[0].pos);
   await game.act({keys:[],duration_ms:700},{name:'realm-portals-open',when:()=>true});
   const open=await save('open');
