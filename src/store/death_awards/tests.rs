@@ -38,6 +38,55 @@ fn fatal(ch: &mut Character, fame: i32) {
 }
 
 #[tokio::test]
+async fn heavy_armor_fame_counts_only_equipped_selected_bonuses() {
+    let (_, content, _, mut ch) = setup().await;
+    let armor = [
+        (0xa7b, 0),
+        (0xa0f, 0),
+        (0xa7c, 0),
+        (0xa7d, 0),
+        (0xa10, 0),
+        (0xa11, 0),
+        (0xadf, 0),
+        (0xa12, 1),
+        (0xa13, 1),
+        (0xa91, 2),
+        (0xa92, 3),
+        (0xa93, 4),
+        (0xafc, 4),
+        (0xafd, 5),
+        (0xafe, 6),
+    ];
+    for class in [0x31d, 0x31e, 0x31f] {
+        ch.class = class;
+        ch.base = content.classes[&class].caps;
+        ch.items.fill(-1);
+        ch.fame = 1234;
+        for (item, percent) in armor {
+            ch.items[2] = item;
+            assert_eq!(equipment_percent(&ch, &content).unwrap(), percent);
+            let receipt =
+                evaluate(&ch, &ch.lifetime, history(), &content, empty_balances()).unwrap();
+            let bonus = receipt
+                .rows
+                .iter()
+                .find(|row| row.kind == BonusKind::WellEquipped);
+            assert_eq!(
+                bonus.map(|row| row.amount),
+                (percent > 0).then_some((1234 * percent / 100) as i32)
+            );
+            ch.items.swap(2, 4);
+            assert_eq!(equipment_percent(&ch, &content).unwrap(), 0);
+            ch.items[4] = -1;
+        }
+    }
+    ch.class = WIZARD;
+    ch.base = content.classes[&WIZARD].caps;
+    ch.items[2] = 0xafc;
+    assert!(equipment_percent(&ch, &content).is_err());
+}
+
+#[tokio::test]
 async fn class_stars_retain_live_deleted_and_committed_death_bests_not_wallets() {
     let (path, content, store, mut ch) = setup().await;
     ch.level = 20;
