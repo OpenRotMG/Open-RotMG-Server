@@ -3,6 +3,7 @@ import {execFileSync} from 'node:child_process';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {setTimeout as wait} from 'node:timers/promises';
 export {enter} from './level-to-20.mjs';
 const root=()=>process.argv[process.argv.indexOf('--run-dir')+1];
 export const fixture={class:0x30e,level:19,seed:889,world:'kitchen',position:{x:13.5,y:40.5},
@@ -56,10 +57,17 @@ export async function run(game){
   await living.act({keys:['1'],duration_ms:300});const live=await snapshot('active-before-reconnect',living);
   await living.act({keys:['Insert'],duration_ms:800});const retained=await snapshot('active-reconnect',living);
   game.check('active boost survives same-character native reconnect',live.diagnostic.character.xp_boost.active&&retained.view.map.name==='Nexus'&&retained.view.session.player!==live.view.session.player&&retained.view.session.character===live.view.session.character&&retained.view.character.items[4]===-1&&retained.diagnostic.character.xp_boost.active);
-  const victim=await game.join({...fixture,level:1,world:'abyss-of-demons',position:w=>{assert(w.damaging_ground.length);return w.damaging_ground[0];},equipment:[-1,-1,-1,-1],stats:null});
-  await api({op:'cheat',actor:victim.actor,change:{kind:'protection',condition:'invincible',duration_ms:1000}});
-  await victim.act({keys:['1'],duration_ms:300});const doomed=await snapshot('active-before-hazard-death',victim);
-  game.check('native victim uses booster before real hazard damage',doomed.diagnostic.character.xp_boost.active&&doomed.view.lifecycle.alive);
+  const {world}=await api({op:'world',template:'abyss-of-demons'}),info=await api({op:'world_info',world});assert(info.damaging_ground.length);
+  const position=info.damaging_ground[0];
+  const victim=await api({op:'spawn',spec:{...fixture,level:1,world,position,equipment:[-1,-1,-1,-1],stats:null,guid:'booster-death',controller:'direct',profile:null}});
+  await api({op:'cheat',actor:victim.actor,change:{kind:'protection',condition:'invincible',duration_ms:5000}});
+  await Promise.all([game.act({keys:[],duration_ms:1800}),(async()=>{
+    const end=Date.now()+10000;
+    while((await game.observe()).paused){assert(Date.now()<end,'Native observer did not resume');await wait(30);}
+    await api({op:'act',actor:victim.actor,action:{command:'use',slot:4,x:position.x,y:position.y},duration_ms:0,pauseAfter:false});
+  })()]);
+  const doomed=await snapshot('direct-active-before-hazard-death',{inspect:()=>api({op:'inspect',actor:victim.actor})});
+  game.check('direct lifecycle companion uses ordinary booster handler before real hazard damage',doomed.diagnostic.character.xp_boost.active&&doomed.view.lifecycle.alive);
   await game.act({keys:[],duration_ms:8000});
   const dead=JSON.parse(execFileSync('python3',['-c',`import json,sqlite3,sys
 with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
