@@ -359,10 +359,9 @@ mod tests {
     fn magic_potions_commit_once_from_inventory_or_accessible_ground() {
         for (kind, amount) in [(0xadd, 50), (0xa23, 100), (0xaec, 200)] {
             for ground in [false, true] {
-                for (mp, quiet) in [(10, false), (380, false), (385, false), (0, true)] {
+                for (mp, quiet) in [(10, false), (95, false), (100, false), (0, true)] {
                     let (mut w, id) = super::super::movement_tests::fixture(0x18, false);
                     let p = w.players.get_mut(&id).unwrap();
-                    p.character.base[1] = 385;
                     p.character.mp = mp;
                     p.lab_conditions = if quiet { bit(QUIET) } else { 0 };
                     p.character.items[4] = kind;
@@ -388,7 +387,7 @@ mod tests {
                     assert!(w.use_item(id, slot, pos).is_err());
                     w.finish_inventory(plan, Ok(before.revision + 1)).unwrap();
                     let after = &w.players[&id].character;
-                    assert_eq!(after.mp, if quiet { 0 } else { (mp + amount).min(385) });
+                    assert_eq!(after.mp, if quiet { 0 } else { (mp + amount).min(100) });
                     assert_eq!(after.revision, before.revision + 1);
                     assert_eq!(after.items[4], if ground { kind } else { -1 });
                     assert_eq!(after.lifetime.inventory_potion_used, !ground);
@@ -400,7 +399,7 @@ mod tests {
 
     #[test]
     fn inaccessible_magic_potion_cannot_reserve_or_restore() {
-        for (owner, distance) in [(Some(2), 0.), (None, 2.)] {
+        for (owner, distance, kind) in [(Some(2), 0., 0xaec), (None, 2., 0xa23)] {
             let (mut w, id) = super::super::movement_tests::fixture(0x18, false);
             let p = w.players.get_mut(&id).unwrap();
             p.character.mp = 10;
@@ -412,7 +411,7 @@ mod tests {
                         y: pos.y,
                     },
                     owner,
-                    vec![0xaec],
+                    vec![kind],
                 )
                 .unwrap();
             assert!(
@@ -421,7 +420,7 @@ mod tests {
                     Slot {
                         object: bag,
                         slot: 0,
-                        kind: 0xaec
+                        kind
                     },
                     pos
                 )
@@ -429,7 +428,7 @@ mod tests {
             );
             assert_eq!(w.players[&id].character.mp, 10);
             assert_eq!(w.players[&id].character.revision, 0);
-            assert_eq!(w.entities[&bag].items[0], 0xaec);
+            assert_eq!(w.entities[&bag].items[0], kind);
             assert!(!w.entities[&bag].reserved && !w.players[&id].pending);
         }
     }
