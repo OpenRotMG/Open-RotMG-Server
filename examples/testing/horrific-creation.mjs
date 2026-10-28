@@ -49,8 +49,10 @@ export async function run(game) {
     throw Error('Native walk did not reach '+x+','+y);
   }
   async function defeat(kind,name) {
+    const victim=(await entities()).find(e=>e.kind===kind);
+    if(!victim)throw Error('Missing native fight target: '+name);
     for(let n=0;n<80;n++) {
-      const e=(await entities()).find(e=>e.kind===kind);
+      const e=(await entities()).find(e=>e.id===victim.id);
       if(!e){game.check(name+' defeated through native shots',true);return;}
       const view=await game.observe();
       if(Math.hypot(e.pos.x-view.position.x,e.pos.y-view.position.y)>7)await go(e.pos.x-2,e.pos.y+2);
