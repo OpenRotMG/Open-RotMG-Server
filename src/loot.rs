@@ -1567,9 +1567,13 @@ mod tests {
     }
 
     #[test]
-    fn ent_god_and_leviathan_defense_thresholds_do_not_erase_gear() {
+    fn defense_god_thresholds_do_not_erase_gear() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
-        for (kind, rate, threshold) in [(0x655, 0.015, 180), (0x6d8, 0.025, 360)] {
+        for (kind, rate, threshold) in [
+            (0x655, 0.015, 180),
+            (0x658, 0.015, 180),
+            (0x6d8, 0.025, 360),
+        ] {
             assert_eq!(bonus(kind), &[(rate, 0xa20)]);
             let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
             let loot = god_loot(
