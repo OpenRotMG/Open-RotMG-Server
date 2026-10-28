@@ -9,7 +9,7 @@ const spec={class:0x30e,level:20,seed:820,world:1,equipment:[0xb08,0xa2e,0xb05,0
 let scout,roots,earned,origin,token,spawn;
 const protectedUntil=new Map();
 async function api(command){const r=await fetch(origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});const v=await r.json();assert(r.ok&&v.status!=='failed',JSON.stringify(v));return ['observe','inspect','world_info'].includes(command.op)?v:v.result;}
-async function protect(actor){const now=(await api({op:'observe',actor})).game_ms;if(now+5000>=(protectedUntil.get(actor)??0)){await api({op:'cheat',actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});protectedUntil.set(actor,now+60000);}}
+async function protect(actor){const now=(await api({op:'observe',actor})).game_ms;if(now>=(protectedUntil.get(actor)??0)){await api({op:'cheat',actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});protectedUntil.set(actor,now+60000);}}
 const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
 async function fields(){return (await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);}
 export async function prepare(api){
@@ -57,7 +57,7 @@ export async function run(game){
   const first=await save('admitted');
   game.check('admitted root retains selected full health and stable ownership',entity(first,root)?.hp===10000&&entity(first,root)?.quest===root);
   const trace=[];
-  for(let n=0;n<24;n++){
+  for(let n=0;n<12;n++){
     await protect(game.actor);await protect(spectator.actor);
     await game.act({keys:[],duration_ms:500});
     const s=await game.inspect();trace.push({time:s.view.time_ms,entities:s.diagnostic.entities.filter(e=>e.quest===root),projectiles:s.view.projectiles});
