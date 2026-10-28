@@ -5,7 +5,7 @@ import {execFileSync} from 'node:child_process';
 const output=name=>join(process.env.QA_RESULTS_DIR,name);
 let root;
 export async function prepare(api){
-  const spec={class:0x30e,level:20,seed:847,world:1,equipment:[0xb08,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,30,10,0,0]};
+  const spec={class:0x307,level:20,seed:847,world:1,equipment:[0xb02,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,252,75,0,30,50,0,0]};
   const report=JSON.parse(await readFile(output('native/result.json'),'utf8'));
   const info=await api({op:'world_info',world:1}),[x,y]=info.spawn_points[0];
   const scout=await api({op:'spawn',spec:{...spec,guid:'slime-scout',position:{x,y},controller:'direct',profile:null}});
@@ -52,18 +52,18 @@ export async function run(game){
       const angles=fan.map(p=>p.angle).sort((a,b)=>a-b);return angles.slice(1).every((a,i)=>Math.abs(a-angles[i]-Math.PI/18)<.001);
     }));
     game.check('zero-damage Green Star applies Slowed through native hit reporting',samples.some(s=>s.view.character.conditions&(1<<3)));
-    for(let n=0;n<100&&enemy(await game.inspect());n++){
+    for(let n=0;n<40&&enemy(await game.inspect());n++){
       const s=await game.inspect(),e=enemy(s),dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>5;
       const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
       await act({keys,duration_ms:200,target:{entity:root.id,camera_angle:-Math.PI/4,fire:!approach}});
     }
     const dead=await act({keys:[],duration_ms:500},{name:'slime-god-defeated',when:()=>true});
-    game.check('ordinary native staff fire defeats natural Slime God and earns XP',!enemy(dead)&&dead.view.character.experience>=combat.view.character.experience+100);
+    game.check('ordinary native bow fire defeats natural Slime God and earns XP',!enemy(dead)&&dead.view.character.experience>=combat.view.character.experience+100);
     const end=await act({keys:[],duration_ms:8000},{name:'slime-god-recovered',when:()=>true});
     game.check('Slowed clears after the defeated encounter',!(end.view.character.conditions&(1<<3)));
     game.check('defeated Slime God stays absent without repeated XP',!enemy(end)&&end.view.character.experience===dead.view.character.experience);
-    game.check('same prepared living Wizard remains in the Realm',end.view.lifecycle.alive&&end.view.session.world===1&&end.view.session.character===arrival.view.session.character);
+    game.check('same prepared living Archer remains in the Realm',end.view.lifecycle.alive&&end.view.session.world===1&&end.view.session.character===arrival.view.session.character);
     await writeFile(output('outcomes.json'),JSON.stringify({arrival,hurt,combat,dead,end}));
   }finally{await writeFile(output('combat.json'),JSON.stringify({root,samples}));}
 }
