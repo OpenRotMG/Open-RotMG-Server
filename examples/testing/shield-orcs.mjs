@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-const spec={class:0x30e,level:20,seed:831,world:1,equipment:[0xa9f,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
+const spec={class:0x30e,level:20,seed:831,world:1,equipment:[0xb08,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,40,60]};
 const root=()=>join(process.env.QA_RESULTS_DIR,'native');
 let queen;
 export async function prepare(api){
@@ -13,12 +13,15 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root(),'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  for(const e of map.entities.filter(e=>e.kind===0x900))for(let dx=-3;dx<=3;dx++)for(let dy=-3;dy<=3;dy++){
-    const position={x:Math.floor(e.pos.x)+dx+.5,y:Math.floor(e.pos.y)+dy+.5};
-    if(Math.hypot(dx,dy)<2||Math.hypot(dx,dy)>3)continue;
-    if([-1,0,1].every(x=>[-1,0,1].every(y=>!blocked.has([Math.floor(position.x)+x,Math.floor(position.y)+y].join(','))))){
-      queen=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(m=>m.camp===e.camp)));
-      return {...spec,position};
+  for(const e of map.entities.filter(e=>e.kind===0x900)){
+    const king=map.entities.find(m=>m.camp===e.camp&&m.kind===0x901);assert(king);
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+      const position={x:Math.floor(king.pos.x)+dx+.5,y:Math.floor(king.pos.y)+dy+.5};
+      if(Math.hypot(dx,dy)<1)continue;
+      if([-1,0,1].every(x=>[-1,0,1].every(y=>!blocked.has([Math.floor(position.x)+x,Math.floor(position.y)+y].join(','))))){
+        queen=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(m=>m.camp===e.camp)));
+        return {...spec,position};
+      }
     }
   }
   throw Error('No natural HighPlains Shield Orc camp with a clear approach');
@@ -58,17 +61,17 @@ export async function run(game){
     game.check(kind+': selected projectile is observed during native combat', [...shots.values()].some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime));
     game.check(kind+': natural actor activates and moves',samples.some(s=>family(s).some(e=>e.kind===kind&&e.activated!==null&&family(begin).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.2))));
   }
-  const warrior=family(begin).find(e=>e.kind===0x902);assert(warrior);
-  for(let n=0;n<100&&!samples.some(s=>family(s).some(e=>e.id===warrior.id&&e.hp<2500));n++)await act({keys:[],duration_ms:150,target:{entity:warrior.id,camera_angle:-Math.PI/4,fire:true}});
+  const king=family(begin).find(e=>e.kind===0x901);assert(king);
+  for(let n=0;n<30&&!samples.some(s=>family(s).some(e=>e.id===king.id&&e.hp<1000));n++)await act({keys:[],duration_ms:500,target:{entity:king.id,camera_angle:-Math.PI/4,fire:true}});
   await act({keys:[],duration_ms:2000});
   // Kithio heals to full, unlike our 250-HP reconstruction: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Heal.cs#L40-L47
-  game.check('current wounded-warrior reconstruction heals while Queen lives',samples.some((s,i)=>{const e=family(s).find(e=>e.id===warrior.id),p=i&&family(samples[i-1]).find(e=>e.id===warrior.id);return e&&p&&p.hp<2500&&e.hp>p.hp;}));
-  for(let n=0;n<180&&family(await game.inspect()).some(e=>e.id===warrior.id);n++)await act({keys:[],duration_ms:250,target:{entity:warrior.id,camera_angle:-Math.PI/4,fire:true}});
-  const followerDead=await save('warrior-defeated');
-  game.check('ordinary staff defeats the Warrior without killing Queen',!family(followerDead).some(e=>e.id===warrior.id)&&family(followerDead).some(e=>e.id===queen.id));
+  game.check('current wounded-King reconstruction heals while Queen lives',samples.some((s,i)=>{const e=family(s).find(e=>e.id===king.id),p=i&&family(samples[i-1]).find(e=>e.id===king.id);return e&&p&&p.hp<1000&&e.hp>p.hp;}));
+  for(let n=0;n<30&&family(await game.inspect()).some(e=>e.id===king.id);n++)await act({keys:[],duration_ms:500,target:{entity:king.id,camera_angle:-Math.PI/4,fire:true}});
+  const followerDead=await save('king-defeated');
+  game.check('ordinary staff defeats King without killing Queen',!family(followerDead).some(e=>e.id===king.id)&&family(followerDead).some(e=>e.id===queen.id));
   await act({keys:[],duration_ms:10000});
-  const unreplaced=await save('warrior-not-replaced');
-  game.check('current once-only camp does not replace a dead Warrior',family(unreplaced).filter(e=>e.kind===0x902).length===1);
+  const unreplaced=await save('king-not-replaced');
+  game.check('current once-only camp does not replace a dead King',!family(unreplaced).some(e=>e.kind===0x901));
   const xp=unreplaced.view.character.experience;
   for(let n=0;n<60;n++){
     const q=family(await game.inspect()).find(e=>e.id===queen.id);if(!q||q.stage===2)break;
