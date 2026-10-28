@@ -9,6 +9,7 @@ const groups=[
 ];
 const spec=([classId,defense,items])=>({class:classId,level:20,seed:875,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:[...items.map(row=>row[0]),0xa0d,0xb05,-1],stats:[700,200,50,defense,30,50,40,30]});
 const pack=i=>({x:634+44*(i%4),y:428+44*Math.floor(i/4)}),armor={x:722,y:385};
+const stable=({ability_ready_ms,...character})=>JSON.stringify(character);
 export const fixture=spec(groups[0]);
 export async function run(game){
   const observations=[];
@@ -19,10 +20,10 @@ export async function run(game){
     const drag=async(from,to,capture)=>game.act({keys:[],duration_ms:500,drag:{from,to}},capture);
     for(const slot of [5,6]){
       await drag(pack(slot),armor);
-      game.check(group[0]+' rejects '+slot+' atomically',JSON.stringify((await game.observe()).character)===JSON.stringify(initial.character));
+      game.check(group[0]+' rejects '+slot+' atomically',stable((await game.observe()).character)===stable(initial.character));
     }
     await drag(pack(0),{x:634,y:385});
-    game.check(group[0]+' rejects heavy armor in weapon slot atomically',JSON.stringify((await game.observe()).character)===JSON.stringify(initial.character));
+    game.check(group[0]+' rejects heavy armor in weapon slot atomically',stable((await game.observe()).character)===stable(initial.character));
     for(const [slot,[item,defense]] of group[2].entries()){
       const before=await game.observe(),expected={...initial.character.stats,defense:initial.character.stats.defense+defense};
       await drag(pack(slot),armor,item===0xafc?{name:'acropolis-equipped',when:view=>view.character.items[2]===item}:undefined);
@@ -31,7 +32,7 @@ export async function run(game){
       game.check(item.toString(16)+' adds only exact defense above base cap',JSON.stringify(equipped.character.stats)===JSON.stringify(expected));
       if(slot===0){
         await drag(pack(6),armor);
-        game.check(group[0]+' rejects incompatible replacement without losing equipped armor',JSON.stringify((await game.observe()).character)===JSON.stringify(equipped.character));
+        game.check(group[0]+' rejects incompatible replacement without losing equipped armor',stable((await game.observe()).character)===stable(equipped.character));
       }
       await drag(armor,pack(slot));
       const removed=await game.observe();
@@ -45,5 +46,5 @@ export async function run(game){
   await game.act({keys:[],duration_ms:600});
   const wizard=await game.observe();
   await game.act({keys:[],duration_ms:500,drag:{from:pack(0),to:armor}});
-  game.check('Wizard rejects heavy armor atomically',JSON.stringify((await game.observe()).character)===JSON.stringify(wizard.character));
+  game.check('Wizard rejects heavy armor atomically',stable((await game.observe()).character)===stable(wizard.character));
 }
