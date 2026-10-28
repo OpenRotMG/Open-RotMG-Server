@@ -56,22 +56,23 @@ export async function run(game){
   await game.act({keys:['s'],duration_ms:150});
   game.check('ordinary movement works at the natural ruin',Math.hypot((await game.observe()).position.x-initial.view.position.x,(await game.observe()).position.y-initial.view.position.y)>.3);
   await approach(game,initial.view.position,.3);
-  for(let n=0;n<index-1;n++){
+  for(let n=0;n<(index>=2?2:0);n++){
     const partner=await game.join({...spec,seed:794+n,class:n===1?0x31f:spec.class,stats:n===1?[770,252,50,25,50,50,40,75]:spec.stats,position:initial.view.position,equipment:[0xb0b,n===1?0xb26:0xb29,0xa7b,0xacc]});
     partners.push(partner);await protect(partner);
   }
-  if(index>0)for(const actor of [game,...partners])await cheat(actor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
-  for(let n=0;n<20&&entity(await game.inspect(),root.entity).stage!==1;n++)await fire(game,root.entity);
+  if(index>=2)for(const actor of [game,...partners])await approach(actor,root.entity,2.5);
+  if(index>0)for(const actor of [game,...partners])await cheat(actor,{kind:'stat_modifier',index:2,amount:index===2?50:100,duration_ms:60000});
+  for(let n=0;n<20&&entity(await game.inspect(),root.entity).stage!==1;n++){
+    if(index>=2)await game.act({keys:[' '],duration_ms:150,target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}});
+    else await fire(game,root.entity);
+  }
   let state=await save('admitted');
-  game.check('native sword damage admits the shielded evaluation introduction',entity(state,root.entity).stage===1&&!!(entity(state,root.entity).condition&(1<<24)));
+  game.check('native projectile damage admits the shielded evaluation introduction',entity(state,root.entity).stage===1&&!!(entity(state,root.entity).condition&(1<<24)));
   if(index>0){
     const target={entity:root.entity,camera_angle:-Math.PI/4,fire:true};
     const sequence=index===1?[{actor:game.actor,input:{keys:[],duration_ms:2000}}]:[];
-    sequence.push([game,...partners].map(actor=>({actor:actor.actor,input:{keys:index>=2?(actor===game?['1']:[' ']):[' '],duration_ms:index>=2?1000:250,target}})));
-    const interval=index>=2?1000:250,burst=[0,700,3000,2000][index];
-    for(let ms=0;ms<burst;ms+=interval){
-      sequence.push([game,...partners].map(actor=>({actor:actor.actor,input:{keys:index>=2&&actor===game?[' ']:[],duration_ms:Math.min(interval,burst-ms),target}})));
-    }
+    sequence.push([game,...partners].map(actor=>({actor:actor.actor,input:{keys:index>=2?(actor===game?['1',' ']:[' ']):[' '],duration_ms:index>=2?(index===2?1500:3000):250,target}})));
+    if(index===1)for(let ms=0;ms<700;ms+=250)sequence.push({actor:game.actor,input:{keys:[],duration_ms:Math.min(250,700-ms),target}});
     await game.act(sequence);
     if(index>=2)game.check('one native Dexterity effusion supplies the evaluation fixture',(await game.observe()).character.stats.dexterity===93);
   }
