@@ -708,10 +708,12 @@ impl World {
         }
         let target = target.into();
         let e = &self.entities[&id];
-        // Actual sprite armor setup has no inherited motor, including the shared home leash.
+        // These states inherit no motor, including the shared home leash.
         // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.EntAncient.cs#L263-L277
+        // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Lich.cs#L263-L286
         if (matches!(e.kind, 0x91f | 0x928) && matches!(e.stage, Some(3..=6)))
             || (e.kind == 0x924 && elapsed < 1000)
+            || (e.kind == 0x91e && elapsed % 10000 >= 7000)
         {
             return (Motion::Stationary, 0.);
         }
@@ -851,7 +853,6 @@ impl World {
                 if e.hp >= 3900 { 5.5 } else { 6.5 },
             ),
             0x91d => (Motion::Wander, if e.hp >= 3900 { 5.5 } else { 6.5 }),
-            0x91e if elapsed % 10000 >= 7000 => (Motion::Stationary, 0.),
             0x91e => (Motion::Wander, 10.),
             0x929..=0x92c
                 if self.entities[&id].condition & condition::bit(condition::INVULNERABLE) == 0 =>
@@ -1627,6 +1628,89 @@ fn quest_preparation_motors_preserve_other_phases() {
             assert_eq!(e.bullet, 0);
             assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
         }
+        assert!(world.players.values().all(|p| p.character.alive));
+        assert!(world.critical_deaths.is_empty());
+        world.remove_entity(id);
+    }
+    // Preserve one tick while probing pre-entered phases without unsigned age underflow.
+    world.now = world.now.max(10000);
+    world.last_npc_step = world.now;
+    for (age, offset) in [
+        (6999_u64, 0_f32),
+        (6999, 12.),
+        (7000, 0.),
+        (7000, 12.),
+        (9999, 0.),
+        (9999, 12.),
+        (10000, 0.),
+        (10000, 12.),
+    ] {
+        use crate::encounter::{Anchor, Motion};
+        world.now += 50;
+        let attack = age % 10000 >= 7000;
+        let id = world.spawn_entity(0x91e, home, vec![]).unwrap();
+        let position = Pos {
+            x: home.x + offset,
+            y: home.y,
+        };
+        world.position_entity(id, position).unwrap();
+        let entered = if offset == 0. {
+            Motion::Wander
+        } else {
+            Motion::Protect {
+                anchor: Anchor::Home,
+                distance: 1.,
+            }
+        };
+        let activated = world.now - age;
+        let e = world.entities.get_mut(&id).unwrap();
+        e.quest.set(Some(id), id, &mut world.quest_ids);
+        e.stage = Some(0);
+        e.activated = Some(activated);
+        e.next_shot = u64::MAX;
+        assert_eq!(e.hp, 4000);
+        e.motion = Some(entered);
+        e.goal = Some(if offset == 0. {
+            Pos {
+                x: position.x + 1.,
+                y: position.y,
+            }
+        } else {
+            home
+        });
+        let rng = rand::RngCore::next_u64(&mut world.rng.clone());
+        world.npc_step();
+        let e = &world.entities[&id];
+        assert_eq!(
+            (e.pos.x, e.pos.y) != (position.x, position.y),
+            !attack,
+            "91e age={age}, offset={offset}"
+        );
+        let dx = if attack {
+            0.
+        } else if offset == 0. {
+            0.3145
+        } else {
+            -0.4
+        };
+        assert!(
+            (e.pos.x - position.x - dx).abs() <= 2. * f32::EPSILON * position.x,
+            "91e age={age}, offset={offset}, dx={}",
+            e.pos.x - position.x
+        );
+        assert_eq!(e.pos.y, position.y);
+        assert_eq!(
+            e.motion,
+            Some(if attack { Motion::Stationary } else { entered })
+        );
+        assert_eq!(
+            (e.home.x, e.home.y, *e.quest, e.hp, e.stage, e.activated),
+            (home.x, home.y, Some(id), 4000, Some(0), Some(activated))
+        );
+        assert_eq!(e.next_shot, u64::MAX);
+        assert_eq!(e.bullet, 0);
+        assert!(!world.bullets.iter().any(|b| b.owner == id));
+        assert_eq!(rand::RngCore::next_u64(&mut world.rng.clone()), rng);
         assert!(world.players.values().all(|p| p.character.alive));
         assert!(world.critical_deaths.is_empty());
         world.remove_entity(id);
