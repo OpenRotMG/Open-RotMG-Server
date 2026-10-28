@@ -54,7 +54,7 @@ mod tests {
 
     #[tokio::test]
     async fn resurrection_preserves_progress_rejects_replays_and_later_death_pays_once() {
-        let content = Content::load(Path::new("data")).unwrap();
+        let content = std::sync::Arc::new(Content::load(Path::new("data")).unwrap());
         let dir = std::env::temp_dir().join(format!("resurrection-{}", rand::random::<u64>()));
         std::fs::create_dir(&dir).unwrap();
         let path = dir.join("game.db");
