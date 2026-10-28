@@ -23,17 +23,18 @@ export async function run(game){
     game.check('empty drink slot cannot repeat '+item,(await actor.observe()).character.inventory_revision===after.character.inventory_revision);
     return {before,after};
   }
-  const restored=(before,after,key,amount)=>after.character[key]-before.character[key]>=amount&&after.character[key]-before.character[key]<=amount+2;
+  const recovery=(before,after,key)=>Math.ceil((after.game_ms-before.game_ms)/1000*(key==='hp'?1+before.character.stats.vitality/8:.6+before.character.stats.wisdom/16.7))+1;
+  const restored=(before,after,key,amount)=>after.character[key]-before.character[key]>=amount&&after.character[key]-before.character[key]<=amount+recovery(before,after,key);
   for(let item=0xb36;item<=0xb3d;item++){
     await prepare(game,{kind:'vitals',hp:100,mp:100});
     const {before,after}=await use(item,item-0xb36+4),key=item%2===0?'hp':'mp',other=key==='hp'?'mp':'hp';
-    game.check('wine '+item+' restores only its selected resource by 150',restored(before,after,key,150)&&after.character[other]-before.character[other]<=2);
+    game.check('wine '+item+' restores only its selected resource by 150',restored(before,after,key,150)&&after.character[other]-before.character[other]<=recovery(before,after,other));
     game.check('wine '+item+' does not cause Drunk',!(after.character.conditions&(1<<9)));
   }
   await prepare(game,{kind:'vitals',hp:100,mp:100});
   let result=await use(0x707);
   game.check('Healing Ichor restores 150 HP only',restored(result.before,result.after,'hp',150)&&result.after.character.mp-result.before.character.mp<=2);
-  // Selected 123.5.1 definitions, not the September 2025 rebalance: https://www.realmeye.com/wiki/coral-juice#history
+  // Keep selected restoration amounts instead of modern rebalances: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
   for(const [hp,mp] of [[100,100],[670,100],[100,385],[669,384],[670,385]]){
     await prepare(game,{kind:'vitals',hp,mp});result=await use(0xc12);
     game.check('Coral Juice independently clamps both resources '+hp+'/'+mp,Math.abs(result.after.character.hp-Math.min(670,hp+100))<=2&&Math.abs(result.after.character.mp-Math.min(385,mp+100))<=2);
@@ -43,12 +44,12 @@ export async function run(game){
   const far=await game.join({...fixture,world:origin.session.world,position:{x:origin.position.x+10.5,y:origin.position.y},backpack:Array(8).fill(-1)});
   for(const item of [0xa3f,0xc1a]){
     for(const actor of [game,near,far])await prepare(actor,{kind:'vitals',hp:100,mp:100});
-    const before=await Promise.all([game.observe(),near.observe(),far.observe()]);
-    result=await use(item);
-    const after=await Promise.all([game.observe(),near.observe(),far.observe()]),key=item===0xa3f?'hp':'mp',other=key==='hp'?'mp':'hp';
-    game.check('group drink includes self and recipient at 9.5 but excludes 10.5 '+item,restored(before[0],after[0],key,100)&&restored(before[1],after[1],key,100)&&after[2].character[key]-before[2].character[key]<=2);
-    game.check('group drink affects only selected resource '+item,after.every((v,i)=>v.character[other]-before[i].character[other]<=2));
-    await save('group-near-'+item,near);await save('group-far-'+item,far);
+    const before=[];for(const actor of [game,near,far])before.push(await save('group-before-'+item,actor));
+    await use(item);
+    const after=[];for(const actor of [game,near,far])after.push(await save('group-after-'+item,actor));
+    const key=item===0xa3f?'hp':'mp',other=key==='hp'?'mp':'hp';
+    game.check('group drink includes self and recipient at 9.5 but excludes 10.5 '+item,restored(before[0],after[0],key,100)&&restored(before[1],after[1],key,100)&&after[2].character[key]-before[2].character[key]<=recovery(before[2],after[2],key));
+    game.check('group drink affects only selected resource '+item,after.every((v,i)=>v.character[other]-before[i].character[other]<=recovery(before[i],v,other)));
   }
   const base=(await game.observe()).character.stats;
   for(const [item,boosts,duration] of [[0xc39,{max_hp:50,dexterity:10},20],[0xc3a,{max_hp:50,max_mp:50},20],[0xc3b,{attack:10,dexterity:10},20],[0xc3c,{defense:10,vitality:10},30]]){
