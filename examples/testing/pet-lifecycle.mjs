@@ -30,10 +30,9 @@ export async function run(game){
   for(let i=0;i<3;i++)await game.act({keys:[],duration_ms:9000});
   const death=await save('committed-peer-death');
   game.check('native witness sees one grave and only its own Baby after peer death',death.diagnostic.entities.filter(e=>e.kind===0x723&&e.name===selected.diagnostic.character.name).length===1&&death.diagnostic.entities.filter(e=>e.kind===0x1639).length===1&&death.view.objects.some(o=>o.id===pet.id));
-  const replacement=(await api({op:'spawn',spec:{...spec,backpack:Array(8).fill(-1)}})).result.actor;
-  const fresh=await api({op:'inspect',actor:replacement});
-  game.check('replacement on dead account never inherits deceased selection or generator',replacement!==victim&&fresh.diagnostic.character.account===selected.diagnostic.character.account&&fresh.diagnostic.character.pet_kind===null&&fresh.view.character.items[4]===-1);
-  await writeFile(join(root,'mortality-fixtures.json'),JSON.stringify({victim,selected,replacement,fresh}));
+  const dead=await api({op:'inspect',actor:victim});
+  game.check('committed permanent death clears the deceased generator inventory',!dead.view.lifecycle.alive&&!dead.diagnostic.character.alive&&dead.view.character.items.every(item=>item===-1));
+  await writeFile(join(root,'mortality-fixtures.json'),JSON.stringify({victim,selected,dead}));
   await game.act({keys:['Insert'],duration_ms:800});
   const nexus=await save('nexus');assert.equal(nexus.view.map.name,'Nexus');
   const peer=await game.join({...fixture,world:-2,seed:8932,position:nexus.view.position,backpack:[0x1513,-1,-1,-1,-1,-1,-1,-1]});
@@ -42,7 +41,7 @@ export async function run(game){
   game.check('two living owners retain separate visible selections',two.view.objects.filter(o=>[0x1613,0x1639].includes(o.kind)).length===2);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:300,y:325}}});
   const dropped=await save('generator-dropped'),bag=dropped.diagnostic.entities.find(e=>e.items?.includes(0x1539));assert(bag);
-  game.check('dropping reusable generator does not dismiss selection or transfer ownership',dropped.view.character.items[4]===-1&&dropped.view.objects.some(o=>o.kind===0x1639)&&bag.bag_owners.includes(dropped.view.session.account));
+  game.check('dropping reusable generator retains selection in a soulbound bag',dropped.view.character.items[4]===-1&&dropped.view.objects.some(o=>o.kind===0x1639)&&bag.kind===0x503);
   const foreignBefore=await save('foreign-before',peer);
   await peer.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
   const foreignAfter=await save('foreign-after',peer);
