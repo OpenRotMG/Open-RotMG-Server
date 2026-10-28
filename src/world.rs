@@ -4402,7 +4402,9 @@ impl World {
         };
         let condition = p.conditions(self.now);
         let origin = if native {
-            self.validate_native_position(id, center, time).map(|_| 0.)
+            // Terrain checks undo client prediction and recreate MOVE snap-backs: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/networking/handlers/PlayerShootPacketHandler.cs
+            self.validate_native_coordinates(id, center, time)
+                .map(|_| 0.)
         } else if !p.paused && p.pos.distance(center) > 0.001 {
             self.validate_move_at(id, center, time, received)
         } else {
@@ -5965,6 +5967,7 @@ impl World {
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if defeated.kind == crate::dungeon::trench::HERMIT {
+            // The comparator's 0.01 threshold tests integer damage, not an HP fraction: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs#L106
             0
         } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
             100
@@ -6015,7 +6018,9 @@ impl World {
             // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
             return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
-        if crate::loot::potion_damage(defeated.kind).is_some() {
+        if crate::loot::potion_damage(defeated.kind).is_some()
+            || matches!(defeated.kind, 0x91d | 0x91e)
+        {
             let loot =
                 crate::loot::god_loot(&self.content, defeated.kind, &eligible, &mut self.rng);
             return self.god_loot_bags(defeated.pos, loot);
@@ -6375,7 +6380,8 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
                 0x617 => 12.,
-                0x61a => 10.5,
+                // Rings wake beyond aimed-shot range: https://web.archive.org/web/20120122074638id_/http://forums.wildshadow.com/wiki/realm-mad-god/undead-hobbit-mage
+                0x61a => 12.,
                 0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
@@ -7537,6 +7543,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 mod shop_tests;
 
 #[cfg(test)]
+mod combat_tests;
+#[cfg(test)]
 mod movement_tests;
 
 #[cfg(test)]
@@ -7559,6 +7567,8 @@ mod priest_tests;
 
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod travel_tests;
 
 #[cfg(test)]
 mod knight_tests;

@@ -248,14 +248,6 @@ impl World {
         );
         Ok(())
     }
-    pub(super) fn validate_native_position(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
-        self.validate_native_coordinates(id, pos, time)?;
-        ensure!(
-            self.player_step_valid(self.players[&id].pos, pos),
-            crate::server::lifecycle::controller("native position is outside walkable terrain")
-        );
-        Ok(())
-    }
 
     pub fn acknowledge_autonomous_goto(&mut self, id: i32) -> Result<()> {
         ensure!(
