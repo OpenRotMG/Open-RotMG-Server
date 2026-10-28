@@ -99,7 +99,7 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
         &["account", "items", "revision"]
     };
     ensure!(
-        (0..=20).contains(&version)
+        (0..=21).contains(&version)
             && mask == (version >= 13)
             && columns
                 .iter()

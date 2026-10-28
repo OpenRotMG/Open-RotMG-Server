@@ -1,13 +1,13 @@
 use super::*;
 
-fn fixture() -> (std::path::PathBuf, Store) {
+pub(super) fn fixture() -> (std::path::PathBuf, Store) {
     let dir = std::env::temp_dir().join(format!("email-verification-{}", rand::random::<u64>()));
     std::fs::create_dir(&dir).unwrap();
     let content = Content::load(Path::new("data")).unwrap();
     let store = Store::open(&dir.join("game.db"), &content).unwrap();
     (dir, store)
 }
-async fn register(store: &Store, name: &str) -> i32 {
+pub(super) async fn register(store: &Store, name: &str) -> i32 {
     store
         .register(
             name.into(),
@@ -17,7 +17,7 @@ async fn register(store: &Store, name: &str) -> i32 {
         .await
         .unwrap()
 }
-fn ip() -> std::net::IpAddr {
+pub(super) fn ip() -> std::net::IpAddr {
     "127.0.0.1".parse().unwrap()
 }
 
@@ -186,7 +186,7 @@ async fn migration_does_not_grandfather_accounts_or_recreate_missing_verificatio
     let account = register(&store, "migration").await;
     drop(store);
     let db = Connection::open(dir.join("game.db")).unwrap();
-    db.execute_batch("DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; PRAGMA user_version=19;").unwrap();
+    db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; PRAGMA user_version=19;").unwrap();
     let content = Content::load(Path::new("data")).unwrap();
     let store = Store::open(&dir.join("game.db"), &content).unwrap();
     assert!(!store.email_verified(account).await.unwrap());

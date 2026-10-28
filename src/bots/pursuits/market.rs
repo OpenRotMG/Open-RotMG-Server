@@ -3,7 +3,10 @@ use rand::seq::IteratorRandom;
 use std::time::{Duration, Instant};
 
 mod incoming;
+mod replies;
 use incoming::Incoming;
+pub(in crate::bots) use replies::PendingTrade;
+use replies::{BoundReply, ReplyKind};
 
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
@@ -125,6 +128,10 @@ pub(crate) struct Market {
     #[serde(skip)]
     pub(in crate::bots) incoming: Option<Incoming>,
     #[serde(skip)]
+    reply: Option<BoundReply>,
+    #[serde(skip)]
+    pub(in crate::bots) pending_trade: Option<PendingTrade>,
+    #[serde(skip)]
     pub(in crate::bots) revoke_trade: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -193,6 +200,8 @@ impl Market {
         self.session = None;
         self.session_used = false;
         self.incoming = None;
+        self.reply = None;
+        self.pending_trade = None;
         self.outgoing = None;
         self.trade = None;
         self.next_ad = 0;
@@ -461,6 +470,9 @@ impl Market {
         c: &Content,
         future: Option<u16>,
     ) -> Result<bool> {
+        if let Some(current) = self.response_current(message, v, c, future)? {
+            return Ok(current);
+        }
         if let Some(q) = parse_quote(&message.text, c) {
             Ok(v.map.name == "Nexus"
                 && self.incoming.is_none()
@@ -564,7 +576,13 @@ impl Market {
         let body = text
             .strip_prefix(&format!("{}, ", self.name))
             .unwrap_or(&text);
-        let Some(q) = parse_quote(body, c) else {
+        let ad = if let Some(counter) = counter_body(&body.trim().to_ascii_lowercase()) {
+            parse_advertisement(counter, |s| parse_goods(s, c))
+                .filter(|ad| matches!(ad, Advertisement::Quote(_)))
+        } else {
+            parse_advertisement(body, |s| parse_goods(s, c))
+        };
+        let Some(ad) = ad else {
             return Ok(false);
         };
         if v.map.name != "Nexus"
@@ -577,9 +595,41 @@ impl Market {
         {
             return Ok(true);
         }
+        let Some(objective) = self.quote(v, c, future)? else {
+            return Ok(true);
+        };
+        let related = match &ad {
+            Advertisement::Quote(q) => {
+                objective[0].kind == q[1].kind && objective[1].kind == q[0].kind
+            }
+            Advertisement::Buying(g) => g.kind == objective[0].kind,
+            Advertisement::Selling(g) => g.kind == objective[1].kind,
+        };
+        // Interest alone supplies neither a peer price nor permission to open a trade.
+        let Advertisement::Quote(q) = ad else {
+            if related
+                && self.outgoing.is_none()
+                && v.elapsed_ms >= self.next_message_ms
+                && let Some(account) = peer.account
+                && v.character
+                    .items
+                    .iter()
+                    .skip(4)
+                    .filter(|k| **k == objective[0].kind)
+                    .count()
+                    >= usize::from(objective[0].quantity)
+            {
+                self.respond(
+                    v,
+                    (peer.id, account, name),
+                    ReplyKind::Counter(objective),
+                    c,
+                )?;
+            }
+            return Ok(true);
+        };
         // Ads are invitations to inspect a WINDOW, never evidence of consent or payment.
-        if let Some(objective) = self.quote(v, c, future)?
-            && objective[0].kind == q[1].kind
+        if objective[0].kind == q[1].kind
             && objective[1].kind == q[0].kind
             && q[1].quantity <= objective[0].quantity
             && q[0].quantity >= objective[1].quantity
@@ -596,6 +646,24 @@ impl Market {
                 name,
                 [q[1].clone(), q[0].clone()],
             ));
+        } else if related
+            && self.outgoing.is_none()
+            && v.elapsed_ms >= self.next_message_ms
+            && let Some(account) = peer.account
+            && v.character
+                .items
+                .iter()
+                .skip(4)
+                .filter(|k| **k == objective[0].kind)
+                .count()
+                >= usize::from(objective[0].quantity)
+        {
+            self.respond(
+                v,
+                (peer.id, account, name),
+                ReplyKind::Counter(objective),
+                c,
+            )?;
         }
         let _ = channel;
         Ok(true)
@@ -924,13 +992,14 @@ impl Market {
         if self.trade.is_some() {
             return Ok(Some(d));
         }
-        if self.session.is_none() && self.session_used {
+        if !self.preparing && self.session.is_none() && self.session_used {
             return Ok(None);
         }
-        if self
-            .session
-            .as_ref()
-            .is_some_and(|s| v.elapsed_ms >= s.until)
+        if !self.preparing
+            && self
+                .session
+                .as_ref()
+                .is_some_and(|s| v.elapsed_ms >= s.until)
         {
             self.end_session(v, "elapsed");
             return Ok(None);
@@ -940,9 +1009,9 @@ impl Market {
             return Ok(None);
         };
         self.quote = Some(quote.clone());
-        if self.session.is_none() {
+        if self.session.is_none() && !self.preparing {
             self.session_used = true;
-            let admitted = self.preparing || self.trader || rng.gen_ratio(1, 5);
+            let admitted = self.trader || rng.gen_ratio(1, 5);
             tracing::info!(
                 account = v.session.account,
                 admitted,
@@ -1010,10 +1079,13 @@ impl Market {
             return Ok(None);
         }
         self.preparing = false;
-        let s = self
-            .session
-            .as_mut()
-            .expect("market session just initialized");
+        let Some(s) = self.session.as_mut() else {
+            return Ok(None);
+        };
+        if v.elapsed_ms >= s.until {
+            self.end_session(v, "elapsed");
+            return Ok(None);
+        }
         if v.position.distance(center(s.anchor)) > 1.5 {
             d.movement = grid.towards(v.position, center(s.anchor));
             return Ok(Some(d));
@@ -1075,6 +1147,7 @@ impl Market {
                 let peer = r.utf()?;
                 let (theirs, _) = read_items(&mut r)?;
                 r.done()?;
+                self.pending_trade = None;
                 self.trade = Some(SessionTrade {
                     binding: [v.session.world, v.session.player, v.session.character],
                     peer,
@@ -1092,6 +1165,7 @@ impl Market {
                 r.done()?;
                 if let Some(t) = &mut self.trade {
                     if t.offers[1] != values {
+                        self.pending_trade = None;
                         t.empty_offer_until = v.clock_at + Duration::from_secs(20);
                     }
                     t.offers[1] = values;
@@ -1109,6 +1183,9 @@ impl Market {
                 let reason = r.utf()?;
                 r.done()?;
                 self.trade = None;
+                if result != 0 {
+                    self.pending_trade = None;
+                }
                 if self.incoming.is_some() {
                     self.end_incoming(v);
                 }
@@ -1161,63 +1238,112 @@ pub(in crate::bots) fn goods_text(g: &Goods, c: &Content) -> Result<String> {
     };
     Ok(format!("{} {name}", g.quantity))
 }
-pub(in crate::bots) fn parse_quote(text: &str, c: &Content) -> Option<[Goods; 2]> {
-    let lower = text.trim().to_ascii_lowercase();
-    let lower = lower.split(" @").next()?;
-    let mut body = None;
-    let mut buying = false;
-    for prefix in [
-        "wts ", "sell ", "selling ", "s> ", "trading ", "wtb ", "buy ", "buying ",
-    ] {
-        if let Some(s) = lower.strip_prefix(prefix) {
-            body = Some(s);
-            buying = matches!(prefix, "wtb " | "buy " | "buying ");
-            break;
-        }
-    }
-    let body = body?;
-    let parse = |s: &str| -> Option<Goods> {
-        let s = s.trim();
-        let (quantity, name) = if let Some((n, rest)) = s.split_once(' ') {
-            if let Ok(n) = n.parse::<u8>() {
-                (n, rest)
-            } else {
-                (1, s)
-            }
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::bots) enum Advertisement {
+    Quote([Goods; 2]),
+    Buying(Goods),
+    Selling(Goods),
+}
+
+pub(in crate::bots) fn parse_goods(s: &str, c: &Content) -> Option<Goods> {
+    let s = s.trim();
+    let (quantity, name) = if let Some((n, rest)) = s.split_once(' ') {
+        if let Ok(n) = n.parse::<u8>() {
+            (n, rest)
         } else {
             (1, s)
-        };
-        if !(1..=8).contains(&quantity) {
+        }
+    } else {
+        (1, s)
+    };
+    if !(1..=8).contains(&quantity) {
+        return None;
+    }
+    let kind = match name {
+        "spd" | "speed" => SPEED,
+        "def" | "defense" => DEFENSE,
+        "life" => LIFE,
+        "dhide" => 0xad3,
+        "hydra" => 0xaf9,
+        _ => {
+            let mut items = c
+                .objects
+                .values()
+                .filter(|o| o.class == "Equipment" && o.name.eq_ignore_ascii_case(name));
+            let kind = i32::from(items.next()?.kind);
+            if items.next().is_some() {
+                return None;
+            }
+            kind
+        }
+    };
+    Some(Goods { kind, quantity })
+}
+
+pub(in crate::bots) fn counter_body(text: &str) -> Option<&str> {
+    ["nty ", "nah ", "can do ", "no thx ", "sry "]
+        .into_iter()
+        .find_map(|p| text.strip_prefix(p))
+}
+
+// Templates and human chat share the same shapes; the caller supplies literal slots or real goods.
+pub(in crate::bots) fn parse_advertisement(
+    text: &str,
+    parse: impl Fn(&str) -> Option<Goods>,
+) -> Option<Advertisement> {
+    let lower = text.trim().to_ascii_lowercase();
+    let text = lower.strip_suffix('!').unwrap_or(&lower).trim_end();
+    let text = if let Some((body, name)) = text.rsplit_once(" @") {
+        if name != "{name}"
+            && (name.is_empty()
+                || name.len() > 16
+                || !name.bytes().all(|b| b.is_ascii_alphanumeric()))
+        {
             return None;
         }
-        let kind = match name {
-            "spd" | "speed" => SPEED,
-            "def" | "defense" => DEFENSE,
-            "life" => LIFE,
-            "dhide" => 0xad3,
-            "hydra" => 0xaf9,
-            _ => {
-                let mut items = c
-                    .objects
-                    .values()
-                    .filter(|o| o.class == "Equipment" && o.name.eq_ignore_ascii_case(name));
-                let kind = i32::from(items.next()?.kind);
-                if items.next().is_some() {
-                    return None;
-                }
-                kind
-            }
-        };
-        Some(Goods { kind, quantity })
-    };
-    let mut candidates = Vec::new();
-    if let Some((give, want)) = body.split_once(" for ").or_else(|| body.split_once(" = ")) {
-        candidates.push([parse(give)?, parse(want)?]);
+        body
     } else {
+        text
+    };
+    if text.contains(['@', '!']) {
+        return None;
+    }
+    let opening = [
+        "wts ", "sell ", "selling ", "s>", "trading ", "trade ", "t>", "wtb ", "buy ", "buying ",
+        "b>",
+    ]
+    .into_iter()
+    .find_map(|prefix| {
+        text.strip_prefix(prefix).map(|body| {
+            (
+                body.trim(),
+                matches!(prefix, "wtb " | "buy " | "buying " | "b>"),
+            )
+        })
+    });
+    let (body, buying) = opening.unwrap_or((text, false));
+    let explicit = body
+        .split_once(" for ")
+        .or_else(|| body.split_once('='))
+        .or_else(|| body.strip_suffix(')').and_then(|s| s.split_once(" (")));
+    let mut candidates = Vec::new();
+    if let Some((first, second)) = explicit {
+        candidates.push([parse(first.trim())?, parse(second.trim())?]);
+    } else if opening.is_some() {
         for (i, _) in body.char_indices().filter(|(_, ch)| *ch == ' ') {
-            if let (Some(give), Some(want)) = (parse(&body[..i]), parse(&body[i + 1..])) {
-                candidates.push([give, want]);
+            if let (Some(first), Some(second)) =
+                (parse(body[..i].trim()), parse(body[i + 1..].trim()))
+            {
+                candidates.push([first, second]);
             }
+        }
+        if candidates.is_empty() {
+            let goods = parse(body)?;
+            return Some(if buying {
+                Advertisement::Buying(goods)
+            } else {
+                Advertisement::Selling(goods)
+            });
         }
     }
     if candidates.len() != 1 {
@@ -1230,7 +1356,15 @@ pub(in crate::bots) fn parse_quote(text: &str, c: &Content) -> Option<[Goods; 2]
     if buying {
         q.swap(0, 1);
     }
-    Some(q)
+    Some(Advertisement::Quote(q))
+}
+
+pub(in crate::bots) fn parse_quote(text: &str, c: &Content) -> Option<[Goods; 2]> {
+    match parse_advertisement(text, |s| parse_goods(s, c))? {
+        Advertisement::Quote(q) => Some(q),
+        // Interest alone supplies neither a price nor consent to an exchange.
+        Advertisement::Buying(_) | Advertisement::Selling(_) => None,
+    }
 }
 pub(in crate::bots) fn read_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
     ensure!(r.i16()? == 12, "market offer shape");
@@ -1241,4 +1375,67 @@ pub(in crate::bots) fn read_offer(r: &mut Reader<'_>) -> Result<[bool; 12]> {
         *b = n == 1;
     }
     Ok(a)
+}
+
+#[cfg(test)]
+mod interaction_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn market_current_message_cancels_after_stock_context_changes() {
+        let (dir, app) = crate::server::test_app();
+        app.world.clock.set_paused(true);
+        let (owner, id, _packets, _brain) = crate::bots::runtime::tests::actor(
+            &app,
+            "market-current-747",
+            "Trader",
+            [SPEED, SPEED, SPEED, SPEED, SPEED, -1, -1, -1],
+        )
+        .await;
+        let mut v = app.world.player_view(id).await.unwrap();
+        let mut market = Market {
+            name: "Trader".into(),
+            ..Market::default()
+        };
+        market.session = Some(MarketSession {
+            anchor: tile(v.position),
+            until: v.elapsed_ms + 60000,
+            next_move: 0,
+            destination: None,
+        });
+        let q = market.quote(&v, &app.content, None).unwrap().unwrap();
+        let message = Message {
+            text: format!(
+                "wts {} for {}",
+                goods_text(&q[0], &app.content).unwrap(),
+                goods_text(&q[1], &app.content).unwrap()
+            ),
+            channel: Channel::Local,
+        };
+        assert!(
+            market
+                .message_current(&message, &v, &app.content, None)
+                .unwrap()
+        );
+        v.character.items[4..].fill(-1);
+        assert!(
+            !market
+                .message_current(&message, &v, &app.content, None)
+                .unwrap()
+        );
+        let refusal = Message {
+            text: format!("nty need {}", goods_text(&q[1], &app.content).unwrap()),
+            channel: Channel::Local,
+        };
+        assert!(
+            !market
+                .message_current(&refusal, &v, &app.content, None)
+                .unwrap()
+        );
+        drop((owner, app));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

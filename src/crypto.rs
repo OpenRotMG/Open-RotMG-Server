@@ -126,7 +126,7 @@ fn patch_abc(
     let mut out = abc[..pool].to_vec();
     put_u30(
         &mut out,
-        count + if gold { 2 } else { 0 } + u32::from(email),
+        count + if gold { 2 } else { 0 } + 2 * u32::from(email),
     );
     let mut changed = 0;
     let mut music = 0;
@@ -144,6 +144,10 @@ fn patch_abc(
             put_u30(&mut out, path.len() as u32);
             out.extend(path);
             music += 1;
+        } else if email && s == b"Forgot your password?  We'll email it." {
+            let text = b"Forgot password? Request a reset link.";
+            put_u30(&mut out, text.len() as u32);
+            out.extend(text);
         } else if email && s == b"Sent..." {
             let text = b"Sending...";
             put_u30(&mut out, text.len() as u32);
@@ -168,16 +172,21 @@ fn patch_abc(
         }
     }
     if email {
-        let text = b"Email sent. Check inbox/spam.";
-        put_u30(&mut out, text.len() as u32);
-        out.extend(text);
+        for text in [
+            b"Email sent. Check inbox/spam.".as_slice(),
+            b"If registered, check email/spam.".as_slice(),
+        ] {
+            put_u30(&mut out, text.len() as u32);
+            out.extend(text);
+        }
     }
     out.extend(&abc[p..]);
     if gold {
         gold::patch(&mut out, count, count + 1)?;
     }
     if email {
-        email::patch(&mut out, count + if gold { 2 } else { 0 })?;
+        let accepted = count + if gold { 2 } else { 0 };
+        email::patch(&mut out, accepted, accepted + 1)?;
     }
     Ok((out, changed, music, usize::from(gold), usize::from(email)))
 }
