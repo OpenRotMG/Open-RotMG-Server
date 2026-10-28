@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-export const fixture={class:0x30e,level:20,seed:834,world:'snake-pit',worldSeed:834,position:'spawn',equipment:[0xa9f,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,50,50,75,40,60]};
+export const fixture={class:0x30e,level:20,seed:834,world:'snake-pit',worldSeed:834,position:'spawn',equipment:[0xa9f,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
 const kinds=[0x225,0x226,0x227];
 export async function run(game){
   const root=join(process.env.QA_RESULTS_DIR,'native'),config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
