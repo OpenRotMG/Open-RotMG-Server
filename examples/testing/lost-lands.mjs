@@ -57,11 +57,10 @@ export async function run(game){
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
   async function protect(){
-    const now=(await game.observe()).game_ms,through=now+15000;
-    // Ten-second native actions and their setup must not cross the prepared protection expiry.
-    if(through>=until){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});until=now+60000;}
-    if(through>=scoutUntil){await prepareScout({kind:'protection',condition:'invulnerable',duration_ms:60000});scoutUntil=now+60000;}
-    if(companion&&through>=companionUntil){await api({op:'cheat',actor:companion.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});companionUntil=now+60000;}
+    const now=(await game.observe()).game_ms;
+    if(now>=until){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});until=now+60000;}
+    if(now>=scoutUntil){await prepareScout({kind:'protection',condition:'invulnerable',duration_ms:60000});scoutUntil=now+60000;}
+    if(companion&&now>=companionUntil){await api({op:'cheat',actor:companion.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});companionUntil=now+60000;}
   }
   async function idle(ms){while(ms>0){await protect();const now=(await game.observe()).game_ms,step=Math.min(ms,10000,until-now,scoutUntil-now,...(companion?[companionUntil-now]:[]));await game.act({keys:[],duration_ms:step});ms-=step;}}
   async function at(point){
@@ -158,13 +157,9 @@ export async function run(game){
   await game.act({keys:[],duration_ms:500},{name:'lost-lands-waiting',when:()=>true});
   const entry=await save('entry'),lord=entity(entry,admitted.entity);assert(lord?.hp===70000&&lord.stage===0);
   game.check('ordinary prepared scout defeats admit the untouched reserved Lord',lord.id===reserved[0].entity&&lord.kind===0xd50&&lord.quest===lord.id);
-  companion=await game.join({...spec,world,seed:818,position:lord.pos});await protect();
-  const peerBefore=await companion.observe(),peerCharacter=peerBefore.session.character;
-  for(let n=0;n<8&&(entity(await game.inspect(),lord.id).damage[peerCharacter]??0)<=700;n++)await companion.act({keys:[],duration_ms:500,target:{entity:lord.id,camera_angle:-Math.PI/4,fire:true}});
   for(let n=0;n<8&&(entity(await game.inspect(),lord.id).damage[initial.view.session.character]??0)<=700;n++)await fire(lord.id,500);
   await idle(4000);
   let state=await save('activated');
-  game.check('two native players each contribute above the Lord private threshold',[peerCharacter,initial.view.session.character].every(id=>entity(state,lord.id).damage[id]>700));
   const family=s=>s.diagnostic.entities.filter(e=>e.quest===lord.id),crystals=s=>family(s).filter(e=>e.kind===0xd51);
   game.check('native damage activates Lord and summons Guardians and Knights',entity(state,lord.id).hp<69300&&[0xd52,0xd53].every(k=>family(state).some(e=>e.kind===k)));
   const samples=[];let pending,error;
@@ -200,6 +195,12 @@ export async function run(game){
   await idle(500);state=await save('shield-released');
   const defeats=await history();
   game.check('native crystal defeats release the shield without waiting for decay',protectionIds.every(id=>defeats.some(f=>f.message==='enemy defeated'&&f.entity===id))&&!crystals(state).length&&entity(state,lord.id).stage!==8&&!(entity(state,lord.id).condition&(1<<24)));
+  // Late entry keeps the cofighter's finite protection for combat, not the crystal observation wait.
+  companion=await game.join({...spec,world,seed:818,position:entity(state,lord.id).pos});await protect();
+  const peerBefore=await companion.observe(),peerCharacter=peerBefore.session.character;
+  for(let n=0;n<8&&(entity(await game.inspect(),lord.id).damage[peerCharacter]??0)<=700;n++)await companion.act({keys:[],duration_ms:500,target:{entity:lord.id,camera_angle:-Math.PI/4,fire:true}});
+  state=await save('cooperative');
+  game.check('two native players each contribute above the Lord private threshold',[peerCharacter,initial.view.session.character].every(id=>entity(state,lord.id).damage[id]>700));
   cooperate=true;
   const beforeFinalXp=state.view.character.experience,existingBags=new Set(state.diagnostic.entities.filter(e=>e.items).map(e=>e.id));
   for(let n=0;n<300&&entity(await game.inspect(),lord.id);n++){
