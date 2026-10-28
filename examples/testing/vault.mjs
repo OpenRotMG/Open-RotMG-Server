@@ -3,7 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const stock=[0xa22,0xa23,0xa25,0xa2a,0xa4a,0xa3c,0xc0c,0xb3e];
-export const fixture={class:0x30e,level:20,seed:898,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:stock,stats:[670,385,50,25,75,50,40,75]};
+export const fixture={class:0x30e,level:20,seed:898,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:stock,stats:[670,385,50,25,50,50,40,75]};
 export async function run(game){
   const out=join(process.env.QA_RESULTS_DIR,'native'),records=[];
   const config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));
@@ -38,7 +38,8 @@ with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
   game.check('durable account chest identities and exact contents agree with native views',durable.integrity==='ok'&&durable.foreign_keys.length===0&&durable.vault.length===2&&durable.vault.some(([a,c,items])=>a===initial.view.session.account&&c===0&&same(items,reordered))&&durable.vault.some(([a,c,items])=>a===privatePeer.view.session.account&&c===0&&same(items,Array(8).fill(-1))));
   await writeFile(join(out,'vault-durable.json'),JSON.stringify(durable,null,2));
   const seller=returned.diagnostic.entities.find(e=>e.kind===0x505);assert(seller);await walk(seller.pos);
-  const beforeBuy=await save('guest-buy-before');await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1400},{name:'vault-guest-refusal',when:()=>true});
+  const beforeBuy=await save('guest-buy-before'),buyStart=(await game.observe()).game_ms;
+  await game.act({keys:[],mouse:{x:700,y:575},duration_ms:1800},{name:'vault-guest-refusal',when:v=>v.game_ms>=buyStart+700});
   const guestRefusal=await save('guest-buy-refused');
   game.check('guest purchase leaves chest ownership inventory and revision unchanged',same(guestRefusal.view.character.items,beforeBuy.view.character.items)&&guestRefusal.view.character.inventory_revision===beforeBuy.view.character.inventory_revision&&guestRefusal.diagnostic.entities.filter(e=>e.kind===0x504).length===1&&guestRefusal.diagnostic.entities.some(e=>e.id===seller.id&&e.kind===0x505));
 }
