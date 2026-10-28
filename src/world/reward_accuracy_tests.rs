@@ -136,22 +136,16 @@ async fn lair_slime_splits_leave_potion_rolls_to_terminal_forms() {
         }
     }
     for kind in [0xd9d, 0xd9f] {
-        assert_eq!(
-            crate::loot::rewards(
-                &world.content,
-                kind,
-                &mut rand::rngs::mock::StepRng::new(0, 0)
-            ),
-            [0xa22, 0xa23]
-        );
-        assert!(
-            crate::loot::rewards(
-                &world.content,
-                kind,
-                &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
-            )
-            .is_empty()
-        );
+        let outcomes: BTreeSet<_> = (0..256)
+            .map(|seed| {
+                crate::loot::rewards(
+                    &world.content,
+                    kind,
+                    &mut rand::rngs::StdRng::seed_from_u64(seed),
+                )
+            })
+            .collect();
+        assert_eq!(outcomes, BTreeSet::from([vec![], vec![0xa22], vec![0xa23]]));
     }
 }
 
