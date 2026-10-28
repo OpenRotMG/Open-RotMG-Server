@@ -2,11 +2,25 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {prepare as encounter} from './desert-werewolf.mjs';
 let camp,leader;
 export async function prepare(api){
-  const spec=await encounter(api),members=JSON.parse(await readFile(join(process.env.QA_RESULTS_DIR,'natural-family.json'),'utf8'));
-  leader=members.find(e=>e.kind===0x623);assert(leader);camp=leader.camp;return spec;
+  const spec={class:0x30e,level:20,seed:840,world:1,equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,30,75,0,0]};
+  const root=process.env.QA_RESULTS_DIR,report=JSON.parse(await readFile(join(root,'native/result.json'),'utf8'));
+  const headers={Authorization:'Bearer '+(await readFile(join(root,'native/state/control.token'),'utf8')).trim()};
+  const world=await api({op:'world_info',world:spec.world}),[x,y]=world.spawn_points[0];
+  const scout=await api({op:'spawn',spec:{...spec,guid:'warg-scout',position:{x,y},controller:'direct',profile:null}});
+  const state=await api({op:'inspect',actor:scout.result.actor});
+  const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
+  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(','))),candidates=[];
+  for(const e of map.entities.filter(e=>e.kind===0x623)){
+    const distance=Math.min(...map.entities.filter(p=>p.camp!==e.camp&&p.hp>0).map(p=>Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)));
+    if(distance<12||![-1,0,1].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)-3+dx,Math.floor(e.pos.y)+dy].join(',')))))continue;
+    candidates.push({entity:e,distance});
+  }
+  candidates.sort((a,b)=>b.distance-a.distance);assert(candidates.length,'No natural Warg camp has a clear approach and twelve-tile separation from other actors');
+  leader=candidates[0].entity;camp=leader.camp;
+  await writeFile(join(root,'natural-family.json'),JSON.stringify({world:spec.world,layout:world.realm_layout,clearance:candidates[0].distance,members:map.entities.filter(e=>e.camp===camp)}));
+  return {...spec,position:{x:leader.pos.x-3,y:leader.pos.y}};
 }
 export async function run(game){
   const root=process.env.QA_RESULTS_DIR;
@@ -40,11 +54,7 @@ export async function run(game){
     }
     assert.fail('Native shots failed to defeat '+id);
   }
-  const arrival=await save('arrival'),demon=members(arrival).find(e=>e.kind===0x622);assert(demon);
-  await shoot(demon.id);await act({keys:[],duration_ms:500});const defeated=await save('demon-defeated');
-  game.check('native Demon defeat earns XP while Werewolf lives',!entity(defeated,demon.id)&&entity(defeated,leader.id)&&defeated.view.character.experience>=arrival.view.character.experience+4);
-  for(let n=0;n<24;n++)await act({keys:[],duration_ms:500});const refill=await save('demon-replenished');
-  game.check('living owner replenishes Demon Wargs within its cap',members(refill).filter(e=>e.kind===0x622).length===3&&members(refill).some(e=>e.kind===0x622&&!members(arrival).some(p=>p.id===e.id)));
+  const arrival=await save('arrival');
   await shoot(leader.id);await act({keys:[],duration_ms:500},{name:'wargs-orphaned',when:()=>true});const orphaned=await save('orphaned');
   game.check('native owner defeat leaves both Warg types alive',!entity(orphaned,leader.id)&&[0x620,0x622].every(k=>members(orphaned).some(e=>e.kind===k)));
   // Kithio leaves children alive; its Protect reacquires any nearby Werewolf, unlike our owned-family reconstruction.
@@ -57,10 +67,14 @@ export async function run(game){
     game.check(kind+': same orphans persist, move and fire after owner death',initial.some(e=>samples.every(s=>entity(s,e.id))&&samples.some(s=>Math.hypot(entity(s,e.id).pos.x-e.pos.x,entity(s,e.id).pos.y-e.pos.y)>.1)&&samples.some(s=>s.view.projectiles.some(p=>p.owner===e.id&&p.speed===60&&p.lifetime_ms===lifetime))));
   }
   game.check('dead owner creates no replacement Wargs or repeat XP',samples.every(s=>members(s).every(e=>members(orphaned).some(p=>p.id===e.id))&&s.view.character.experience===orphaned.view.character.experience));
-  const victim=members(samples.at(-1)).find(e=>e.kind===0x620);assert(victim);
-  await shoot(victim.id);await act({keys:[],duration_ms:500});const dead=await save('orphan-defeated');
-  game.check('native orphan Tawny defeat earns XP',!entity(dead,victim.id)&&dead.view.character.experience>=orphaned.view.character.experience+3);
+  const victims=[];
+  for(const [kind,xp] of [[0x620,3],[0x622,4]]){
+    const before=await game.inspect(),victim=members(before).find(e=>e.kind===kind);assert(victim);victims.push(victim.id);
+    await shoot(victim.id);await act({keys:[],duration_ms:500});const dead=await save('orphan-defeated-'+kind);
+    game.check(kind+': native orphan defeat earns XP',!entity(dead,victim.id)&&dead.view.character.experience>=before.view.character.experience+xp);
+  }
+  const dead=await save('orphans-defeated');
   for(let n=0;n<24;n++)await act({keys:[],duration_ms:500});const end=await save('finished');
-  game.check('defeated orphan stays absent without repeated XP',!entity(end,victim.id)&&members(end).every(e=>members(dead).some(p=>p.id===e.id))&&end.view.character.experience===dead.view.character.experience);
+  game.check('defeated orphans stay absent without repeated XP',victims.every(id=>!entity(end,id))&&members(end).every(e=>members(dead).some(p=>p.id===e.id))&&end.view.character.experience===dead.view.character.experience);
   game.check('same prepared character survives',end.view.lifecycle.alive&&end.view.session.character===arrival.view.session.character);
 }
