@@ -1021,6 +1021,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ghost_waves_keep_retired_class_escorts_out_of_the_replacement_roster() {
+        for (tier, company, expected) in [
+            (0, false, [1, 4, 0, 0]),
+            (1, false, [0, 3, 3, 0]),
+            (2, false, [0, 3, 0, 3]),
+            (3, false, [0, 3, 0, 3]),
+            (1, true, [1, 2, 3, 0]),
+            (2, true, [1, 0, 2, 3]),
+            (3, true, [1, 0, 2, 3]),
+        ] {
+            let (mut world, _) = super::super::movement_tests::fixture(0x18, false);
+            // XML survival is not spawn evidence; the compiled primary uses only the replacement roster:
+            // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.GhostKing.cs
+            for kind in 0x662..=0x667 {
+                let object = world.content.get(kind).unwrap();
+                assert_eq!(object.terrain, 0);
+                assert_eq!(object.spawn_weight, None);
+                assert!(!quest::ROSTER.contains(&kind));
+                assert!(
+                    population::FAMILIES
+                        .iter()
+                        .all(|f| f.leader != kind && f.roles.iter().all(|r| r.kind != kind))
+                );
+            }
+            world
+                .spawn_named_quest(0x928, Pos { x: 16., y: 16. })
+                .unwrap();
+            let root = *world.quest_ids.iter().next().unwrap();
+            world.ghost_wave(root, tier, company).unwrap();
+            assert_eq!(world.pending_named(root, None), expected.iter().sum::<usize>());
+            world.now += 1500;
+            world.named_birth_step();
+            assert_eq!(world.pending_named(root, None), 0);
+            assert_eq!(
+                world.quest_actors(root).count(),
+                1 + expected.iter().sum::<usize>()
+            );
+            for (kind, count) in (0x929..=0x92c).zip(expected) {
+                assert_eq!(
+                    world.quest_members(root, &[kind]).len(),
+                    count,
+                    "tier={tier}, company={company}, kind={kind:#x}"
+                );
+            }
+            assert!(world.actors().all(|e| !(0x662..=0x667).contains(&e.kind)));
+        }
+    }
+
+    #[test]
     fn shrine_capacity_allows_both_colours_and_replacement_without_raising_other_caps() {
         let (mut world, _) = super::super::movement_tests::fixture(0x18, false);
         let pos = Pos { x: 8.5, y: 8.5 };
@@ -1120,6 +1169,7 @@ mod tests {
             }
             world.populate_named_quests(&sites).unwrap();
             world.populate_realm_heroes(&sites).unwrap();
+            assert!(world.actors().all(|e| !(0x662..=0x667).contains(&e.kind)));
             for (kind, minimum, maximum) in
                 [(0x928, 8, 14), (0x668, 3, 4), (0x67d, 4, 6), (0x678, 0, 4)]
             {
