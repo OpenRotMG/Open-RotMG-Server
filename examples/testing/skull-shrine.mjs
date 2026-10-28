@@ -37,19 +37,25 @@ export async function run(observer){
   async function fire(actor,id,ms=500){await protect(observer);await protect(actor);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   const initial=await map();await writeFile(join(out,'initial-map.json'),JSON.stringify(initial));
   game.check('no Skull Shrine is active before an earned event',!initial.entities.some(e=>e.kind===0xd56));
+  const blocked=new Set(initial.blocked.map(p=>p.join(',')));
+  function approachPoint(point){
+    const position=[[1.5,0],[-1.5,0],[0,1.5],[0,-1.5],[1,1],[-1,1],[1,-1],[-1,-1]].map(([x,y])=>({x:point.x+x,y:point.y+y})).find(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')));
+    assert(position,'No walkable prepared attack position beside the observed hero');return position;
+  }
   const order=[0x678,0x67d,0x668,0x91f,0x91b,0x675,0x928];
   const candidates=initial.entities.filter(e=>order.includes(e.kind)).sort((a,b)=>order.indexOf(a.kind)-order.indexOf(b.kind));
   const events=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
   let admission;
   for(const candidate of candidates){
-    await cheat({actor:admissionActor},{kind:'teleport',position:{x:candidate.pos.x+1.5,y:candidate.pos.y}});
+    await cheat({actor:admissionActor},{kind:'teleport',position:approachPoint(candidate.pos)});
     for(let n=0;n<80;n++){
       await protect(observer);await protect({actor:admissionActor,observe:()=>api({op:'observe',actor:admissionActor})});
       const scene=await api({op:'inspect',actor:admissionActor});
       const target=scene.diagnostic.entities.find(e=>e.id===candidate.id)||scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
       if(!target)break;
-      await cheat({actor:admissionActor},{kind:'teleport',position:{x:target.pos.x+1.5,y:target.pos.y}});
-      await direct({command:'shoot',angle:Math.PI},1000);
+      const position=approachPoint(target.pos);
+      await cheat({actor:admissionActor},{kind:'teleport',position});
+      await direct({command:'shoot',angle:Math.atan2(target.pos.y-position.y,target.pos.x-position.x)},1000);
       admission=(await events()).find(f=>f.message==='quest defeat summoned a Realm event'&&f.kind===0xd56);if(admission)break;
     }
     if(admission)break;
