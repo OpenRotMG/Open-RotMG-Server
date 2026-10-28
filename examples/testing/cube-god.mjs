@@ -22,7 +22,7 @@ export async function prepare(api){
   roots=(await response.json()).entities.filter(e=>kinds.includes(e.kind)).map(e=>({entity:e.id,kind:e.kind,x:e.pos.x,y:e.pos.y}));
   roots.sort((a,b)=>kinds.indexOf(a.kind)-kinds.indexOf(b.kind));assert(roots.length>0);
   await writeFile(join(out,'placement.json'),JSON.stringify({world,roots,scout}));
-  return {...spec,position:'spawn'};
+  return {...spec,position:()=>{assert(earned,'Admission must precede native placement');return {x:earned.x,y:earned.y};}};
 }
 export async function beforeNavigate(){
   if(earned)return;
@@ -47,10 +47,9 @@ export async function beforeNavigate(){
   await api({op:'cheat',actor:scout,change:{kind:'teleport',position:spawn}});
   await api({op:'cheat',actor:scout,change:{kind:'pause',paused:true}});
 }
-export async function run(spectator){
-  spectator.check('qualifying combat admits an ordinarily selected Cube God',roots.some(r=>r.entity===earned.source));
-  await protect(spectator.actor);
-  const game=await spectator.join({...spec,position:{x:earned.x,y:earned.y}}),root=earned.entity;
+export async function run(game){
+  game.check('qualifying combat admits an ordinarily selected Cube God',roots.some(r=>r.entity===earned.source));
+  const spectator={actor:scout,observe:()=>api({op:'observe',actor:scout}),inspect:()=>api({op:'inspect',actor:scout})},root=earned.entity;
   await protect(game.actor);
   const snapshots=[];
   async function save(label){const s=await game.inspect();snapshots.push({label,state:s});await writeFile(join(out,'encounter.json'),JSON.stringify(snapshots));return s;}
