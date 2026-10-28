@@ -63,10 +63,10 @@ export async function run(game){
     parent[start]=start;queue[0]=start;let head=0,tail=1,goal;
     while(head<tail){
       const i=queue[head++],point={x:i%width+.5,y:Math.floor(i/width)+.5};
-      if(Math.hypot(point.x-anchor.x,point.y-anchor.y)<range&&clear(point,anchor)){goal=i;break;}
+      if(Math.hypot(point.x-anchor.x,point.y-anchor.y)<range){goal=i;break;}
       for(const n of [i-width,i-1,i+1,i+width])if(n>=0&&n<total&&Math.abs(n%width-i%width)<=1&&!blocked[n]&&parent[n]===-1){parent[n]=i;queue[tail++]=n;}
     }
-    assert.notEqual(goal,undefined,'No walkable route to the living encounter');
+    assert.notEqual(goal,undefined,'No walkable route to the living encounter: '+JSON.stringify({anchor,range,position:before.position,visited:head}));
     const path=[];for(let i=goal;i!==start;i=parent[i])path.push({x:i%width+.5,y:Math.floor(i/width)+.5});
     path.push({x:start%width+.5,y:Math.floor(start/width)+.5});
     const point=path.find(p=>{const dx=Math.abs(p.x-before.position.x),dy=Math.abs(p.y-before.position.y);return Math.hypot(dx,dy)<45&&Math.min(dx,dy,Math.abs(dx-dy))<.6&&clear(before.position,p);});
@@ -109,8 +109,8 @@ export async function run(game){
       const target=healer??vulnerable.find(e=>roots.has(e.kind)||[0x920,0x91c,0x92d,0x6c1,0x929,0xd5e,0xd62].includes(e.kind));
       const anchor=target??family.find(e=>roots.has(e.kind)||[0x920,0x91c,0x92d,0x6c1,0x6c2].includes(e.kind));assert(anchor,'Encounter has no living leader or required combat target');
       const view=await game.observe();
-      const range=anchor.kind===0xd5e?12:3;
-      if(Math.hypot(anchor.pos.x-view.position.x,anchor.pos.y-view.position.y)>range||!clear(view.position,anchor.pos)){await walk(anchor.pos,range);continue;}
+      const range=5.5;
+      if(Math.hypot(anchor.pos.x-view.position.x,anchor.pos.y-view.position.y)>range){await walk(anchor.pos,range);continue;}
       if(target){
         const nearby=(await game.inspect()).view.objects.some(e=>e.id===target.id);assert(nearby,'Combat target must be visible to the native client');
         await act({keys:[],duration_ms:target.stage===2&&[0x91f,0x91b,0x928].includes(target.kind)?4000:2000,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
