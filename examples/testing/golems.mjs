@@ -76,7 +76,15 @@ export async function run(game){
       const survivors=family(defeated,camp).filter(e=>e.kind>=0x6d2&&e.kind<=0x6d7);
       game.check(tag+': satellites survive root death with bounded cleanup',survivors.length>0&&survivors.every(e=>e.expires>defeated.view.time_ms&&e.expires<=defeated.view.time_ms+30000));
       const target=survivors.find(e=>e.id===hub.id);assert(target,'Colored satellite must survive root defeat');
-      const xp=defeated.view.character.experience,awardStart=(await awards()).length;
+      for(let n=0;n<20;n++){
+        const s=await game.inspect(),e=family(s,camp).find(e=>e.id===target.id);assert(e,'Satellite expired before native approach');
+        const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;if(Math.hypot(dx,dy)<=1.5)break;
+        const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+        await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:250});
+      }
+      const approached=await game.inspect(),subject=family(approached,camp).find(e=>e.id===target.id);
+      game.check(tag+': ordinary native movement reaches satellite through scenery',subject&&Math.hypot(subject.pos.x-approached.view.position.x,subject.pos.y-approached.view.position.y)<=1.5);
+      const xp=approached.view.character.experience,awardStart=(await awards()).length;
       for(let n=0;n<30&&family(await game.inspect(),camp).some(e=>e.id===target.id);n++){
         await act({keys:[],duration_ms:250,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
         await act({keys:[],duration_ms:500});
