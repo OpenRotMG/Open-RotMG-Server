@@ -294,6 +294,78 @@ async fn equipment_death_atomic_wallet_guild_rollback_and_concurrent_retry() {
     assert!(store.load(ch.account, ch.id).await.is_err());
 }
 
+#[tokio::test]
+async fn every_selected_ring_pays_only_its_equipped_fame_once() {
+    let (path, content, store, mut ch) = setup().await;
+    let rings: Vec<_> = content
+        .objects
+        .values()
+        .filter(|o| o.slot_type == 9 && !o.resurrects)
+        .collect();
+    assert_eq!(rings.len(), 56);
+    for ring in rings {
+        let percent = match ring.kind {
+            0xba0..=0xba2 => 5,
+            0xc13 | 0xc31 => 4,
+            0xc20 | 0xc2d | 0xc3e => 3,
+            0xc27 | 0xc3f => 2,
+            0xc40 => 1,
+            _ => ring.tier.map_or(0, |t| u64::from(t - 1)),
+        };
+        ch.items.fill(-1);
+        ch.items[4] = i32::from(ring.kind);
+        assert_eq!(
+            equipment_percent(&ch, &content).unwrap(),
+            0,
+            "{} in backpack",
+            ring.name
+        );
+        ch.items[4] = -1;
+        ch.items[3] = i32::from(ring.kind);
+        assert_eq!(
+            equipment_percent(&ch, &content).unwrap(),
+            percent,
+            "{} equipped",
+            ring.name
+        );
+        let items = ch.items.clone();
+        equip(&store, &mut ch, items).await;
+        assert_eq!(store.load(ch.account, ch.id).await.unwrap().items, ch.items);
+        fatal(&mut ch, 1000);
+        store
+            .death(ch.clone(), "ring fixture".into())
+            .await
+            .unwrap();
+        let db = Connection::open(&path).unwrap();
+        let raw: String = db
+            .query_row(
+                "SELECT receipt FROM deaths WHERE character=?1",
+                [ch.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let receipt = decode_receipt(&raw).unwrap();
+        assert_eq!(
+            receipt
+                .rows
+                .iter()
+                .filter(|r| r.kind == BonusKind::WellEquipped)
+                .map(|r| r.amount)
+                .sum::<i32>(),
+            percent as i32 * 10,
+            "{} death bonus",
+            ring.name
+        );
+        let wallet = store.presentation(ch.account).await.unwrap().fame;
+        assert!(store.death(ch.clone(), "duplicate".into()).await.is_err());
+        assert_eq!(store.presentation(ch.account).await.unwrap().fame, wallet);
+        ch = store
+            .create(ch.account, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+    }
+}
+
 #[test]
 fn leather_armor_selected_bonuses_caps_eligibility_and_fame() {
     let content = Content::load(Path::new("data")).unwrap();
