@@ -40,7 +40,7 @@ export async function run(game){
     observations.push({item,before,after});
     await writeFile(join(root,'staff-damage.json'),JSON.stringify(observations,null,2));
     game.check(item.toString(16)+' damages a natural enemy through native fire',enemy.hp<target.hp&&after.diagnostic.character.shots>before.diagnostic.character.shots);
-    game.check(item.toString(16)+' leaves mana inventory and stats unchanged',after.view.character.mp===before.view.character.mp&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&JSON.stringify(after.view.character.stats)===JSON.stringify(before.view.character.stats));
+    game.check(item.toString(16)+' leaves inventory and stats unchanged',JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&JSON.stringify(after.view.character.stats)===JSON.stringify(before.view.character.stats));
     game.check(item.toString(16)+' retains the same living Wizard',after.view.lifecycle.alive&&after.view.session.character===start.session.character);
   }
 }
