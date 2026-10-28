@@ -104,7 +104,7 @@ export async function run(game){
         else await act({keys:[],duration_ms:1000});
         continue;
       }
-      const vulnerable=family.filter(e=>e.hp>0&&!(e.condition&((1<<24)|(1<<25))));
+      const vulnerable=family.filter(e=>e.hp>0&&!(e.condition&((1<<21)|(1<<23)|(1<<24))));
       const healer=vulnerable.find(e=>e.kind===0x91d);
       const target=healer??vulnerable.find(e=>roots.has(e.kind)||[0x920,0x91c,0x92d,0x6c1,0x929,0xd5e,0xd62].includes(e.kind));
       const anchor=target??family.find(e=>roots.has(e.kind)||[0x920,0x91c,0x92d,0x6c1,0x6c2].includes(e.kind));assert(anchor,'Encounter has no living leader or required combat target');
