@@ -3,7 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const output=name=>join(process.env.QA_RESULTS_DIR,name);
-const spec={class:0x300,level:20,seed:850,world:1,equipment:[0xa14,0xb27,-1,-1],backpack:Array(8).fill(-1),stats:[720,252,50,0,50,75,0,50]};
+const spec={class:0x300,level:20,seed:850,world:1,equipment:[0xaff,0xb27,-1,-1],backpack:Array(8).fill(-1),stats:[720,252,50,0,50,75,0,50]};
 let root;
 export async function prepare(api){
   const info=await api({op:'world_info',world:1}),[x,y]=info.spawn_points[0];
@@ -25,16 +25,18 @@ export async function run(game){
   const samples=[];let serial=0,protectedUntil=0;
   const enemy=s=>s.diagnostic.entities.find(e=>e.id===root.id);
   async function act(input,capture){
-    const now=(await game.observe()).game_ms;
+    const now=(await game.inspect()).view.time_ms;
     if(now>=protectedUntil){
       const path=output('protection.json');
       await writeFile(path,JSON.stringify({id:'leviathan-protection-'+serial++,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
       execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);protectedUntil=now+60000;
     }
+    assert(now+input.duration_ms+3000<protectedUntil,'Prepared protection window exhausted before native defeat');
+    const captureAt=Date.now()+1500;
     let pending,error;
     const record=s=>samples.push(s);
     const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},100);
-    try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
+    try{await game.act(input,capture&&{...capture,when:v=>Date.now()>=captureAt&&capture.when(v)});}finally{clearInterval(timer);if(pending)await pending;}
     if(error)throw error;const state=await game.inspect();record(state);return state;
   }
   try{
@@ -57,13 +59,13 @@ export async function run(game){
     const volleys=samples.flatMap(groups);
     for(const [count,speed,lifetime] of [[9,67,1700],[12,67,1700],[2,85,1800]])game.check('native volley '+count+' has selected speed and lifetime',volleys.some(g=>g.length===count&&g.every(p=>p.speed===speed&&p.lifetime_ms===lifetime)));
     game.check('native blue pairs have fifteen-degree spacing',volleys.some(g=>g.length===2&&g[0].speed===85&&Math.abs(Math.abs(g[0].angle-g[1].angle)-Math.PI/12)<.0001));
-    for(let n=0;n<100;n++){
+    for(let n=0;n<60;n++){
       const s=await game.inspect(),e=enemy(s);if(!e)break;
-      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>3.5;
+      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,distance=Math.hypot(dx,dy),approach=distance>4;
       const keys=approach?[Math.abs(x)>.2?(x>0?'d':'a'):null,Math.abs(y)>.2?(y>0?'s':'w'):null].filter(Boolean):[];
-      await act({keys,duration_ms:300,target:{entity:root.id,camera_angle:-Math.PI/4,fire:!approach}});
+      await act({keys,duration_ms:300,target:{entity:root.id,camera_angle:-Math.PI/4,fire:distance<5}});
     }
-    await act({keys:[],duration_ms:500},{name:'leviathan-defeated',when:()=>true});
+    await act({keys:[],duration_ms:3000},{name:'leviathan-defeated',when:()=>true});
     const dead=await game.inspect();
     game.check('ordinary native dagger defeats the same natural Leviathan and earns XP',!enemy(dead)&&dead.view.character.experience>=combat.view.character.experience+200);
     await act({keys:[],duration_ms:3000});const end=await game.inspect();
