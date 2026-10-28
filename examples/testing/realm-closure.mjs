@@ -177,7 +177,7 @@ export async function run(game){
       others.sort((a,b)=>Number(seen.get(a).kind!==kind)-Number(seen.get(b).kind!==kind)||Math.hypot(seen.get(a).pos.x-seen.get(first).pos.x,seen.get(a).pos.y-seen.get(first).pos.y)-Math.hypot(seen.get(b).pos.x-seen.get(first).pos.x,seen.get(b).pos.y-seen.get(first).pos.y));
       if(others.length)batch.push(others[0]);
     }
-    // Independent native fights share phase time instead of spending a receipt per waiting encounter.
+    // Staying on separate encounters avoids regrouping travel and unnecessary mid-batch buff renewals.
     const roles=clients.map((client,i)=>batch.length===1?first:batch[i]);
     clients.forEach((client,i)=>combatAnchors.set(client.actor,seen.get(roles[i]).pos));
     if(await ready()<50000)await renewOnShore(false);
@@ -195,19 +195,13 @@ export async function run(game){
     for(let step=0;step<100;step++){
       const dead=new Set((await events()).filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin).map(e=>e.hero));
       if(batch.every(id=>dead.has(id))){completed=true;break;}
-      if(batch.length===2)for(let i=0;i<clients.length;i++)if(dead.has(roles[i])){
-        const other=roles[1-i];assert(!dead.has(other),'A live partner encounter is required');
-        roles[i]=other;combatAnchors.set(clients[i].actor,seen.get(other).pos);
-        // Resetting teleport cooldown with a short buffer would block the next shore departure.
-        if(await ready()<30000)await renewOnShore(true);
-        else await travel(seen.get(other).pos,()=>[],[clients[i]]);
-      }
       if(await ready()<(kind===0xd5f?30000:20000)){await renewOnShore(true);continue;}
       const views=await Promise.all(clients.map(c=>c.observe()));
       const snapshots=kind===0xd5f?[await api({op:'inspect',actor:scout.actor})]:await Promise.all(clients.map(c=>api({op:'inspect',actor:c.actor})));
-      const families=clients.map((_,i)=>snapshots[kind===0xd5f?0:i].diagnostic.entities.filter(e=>e.id===roles[i]||e.quest===roles[i]));
+      const families=clients.map((_,i)=>dead.has(roles[i])?[]:snapshots[kind===0xd5f?0:i].diagnostic.entities.filter(e=>e.id===roles[i]||e.quest===roles[i]));
       const targets=families.map((family,i)=>{
-        const candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&!(e.condition&((1<<21)|(1<<23)|(1<<24))));
+        // Waiting for a sampled Actual Ent shield opening can miss it again after native resume.
+        const candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&!(e.condition&((1<<21)|(1<<23)|(e.kind===0x920?0:(1<<24)))));
         candidates.sort((a,b)=>Math.hypot(a.pos.x-views[i].position.x,a.pos.y-views[i].position.y)-Math.hypot(b.pos.x-views[i].position.x,b.pos.y-views[i].position.y));
         return candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>e.kind===0x929)??candidates.find(e=>[0xd51,0xd5e,0xd62].includes(e.kind));
       });
