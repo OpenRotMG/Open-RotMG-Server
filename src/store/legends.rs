@@ -130,11 +130,11 @@ mod tests {
     #[tokio::test]
     async fn legends_only_rank_bot_lives_with_complete_earned_history() {
         let (store, content, human) = fixture().await;
-        let bot = store.list("earned-legends-bot".into()).await.unwrap().id;
-        store.call(move |db| {
-            db.execute("INSERT INTO shore_bots(name,account) VALUES('persona:v1:LegendBot',?1)", [bot])?;
-            Ok(())
-        }).await.unwrap();
+        let mut preset = Character::fresh(content.get(WIZARD).unwrap()).unwrap();
+        preset.lifetime = FameLifetime::known_only();
+        preset.exp = 1_000_000;
+        preset.fame = 1000;
+        let bot = store.persona_character("persona:v1:LegendBot".into(), vec![preset], vec![[-1;8]], 0, None).await.unwrap().account;
         let mut seeded = Vec::new();
         for _ in 0..21 {
             let mut ch = store.create(bot, content.get(WIZARD).unwrap()).await.unwrap();
