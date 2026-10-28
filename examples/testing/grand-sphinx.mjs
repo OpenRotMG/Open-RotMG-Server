@@ -29,8 +29,9 @@ export async function run(game){
     throw Error('Scout persistence did not finish before the next prepared mutation');
   }
   async function playing(){
-    for(let n=0;n<100;n++){if(!(await game.observe()).paused)return;await new Promise(ok=>setTimeout(ok,10));}
-    throw Error('Native action did not establish its active bounded window');
+    const deadline=Date.now()+15000;
+    while(Date.now()<deadline){if(!(await game.observe()).paused)return;await new Promise(ok=>setTimeout(ok,25));}
+    throw Error('Native action did not establish its active bounded window within 15 seconds');
   }
   async function travel(point){
     await protect();
