@@ -105,7 +105,7 @@ export async function run(game){
   await button(peer,1,'accept-replacement',750,580);
   game.check('replacement accepts the currently displayed guild',(await members()).some(r=>r[0]==='GuildBeta'&&r[1]==='Gamma Guild'));
   for(const [player,index] of [[other,2],[peer,1]]){
-    await walk(player,76.5,42.5);await walk(player,76.5,77.5);
+    await walk(player,78.5,42.5);await walk(player,78.5,77.5);await walk(player,76.5,77.5);
     await button(player,index,'enter-guild-hall',700,580);
     game.check('ordinary portal admits current guild member '+index,(await player.observe()).world==='Guild Hall');
     await walk(player,14.5,22.5);await walk(player,14.5,8.2);
