@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
-export const fixture={class:0x30e,level:20,seed:879,world:'pirate-cave',position:'spawn',equipment:[-1,0xa2e,-1,0xa25],backpack:[0xa2a,0xa3c,0xa23,0xa23,0xa23,0xa23,0xa23,0xa23],stats:[670,385,75,25,50,75,40,0]};
+export const fixture={class:0x30e,level:20,seed:879,world:'pirate-cave',position:'spawn',equipment:[-1,0xa2e,-1,0xa25],backpack:[0xa2a,0xa3c,0xa23,0xa23,0xa23,0xa23,0xc0c,0xa4a],stats:[670,385,75,25,50,75,40,0]};
 export async function run(game){
   const root=join(process.env.QA_RESULTS_DIR,'native'),records=[];
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
@@ -64,7 +64,7 @@ export async function run(game){
   try{
     const rect=await cdp.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()');
     assert(rect.width===800&&rect.height===600);
-    for(const [name,x,y] of [['unusable-sword',678,428],['ring-comparison',722,428]]){
+    for(const [name,x,y] of [['unusable-sword',678,428],['ring-comparison',722,428],['untiered-spell',722,472],['three-dose-elixir',766,472]]){
       let moved=false;
       const start=(await game.observe()).game_ms;
       const action=game.act({keys:[],duration_ms:1600},{name,when:view=>moved&&view.game_ms>=start+800});
