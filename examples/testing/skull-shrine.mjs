@@ -7,9 +7,10 @@ import {promisify} from 'node:util';
 const exec=promisify(execFile);
 const out=process.env.QA_RESULTS_DIR;
 const spec={class:0x31d,level:20,seed:819,world:1,position:'spawn',equipment:[0xb0b,0xb29,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
-let admissionActor;
+let admissionActor,safePosition;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];
+  safePosition={x,y};
   admissionActor=(await api({op:'spawn',spec:{...spec,guid:'shrine-admission',position:{x,y},controller:'direct',profile:null}})).result.actor;
   return spec;
 }
@@ -33,7 +34,17 @@ export async function run(observer){
   }
   async function save(label){const state=await game.inspect();records.push({label,state});await writeFile(join(out,'encounter.json'),JSON.stringify(records));return state;}
   const protectedUntil=new Map();
-  async function protect(actor){const now=(await actor.observe()).game_ms;if(now>=(protectedUntil.get(actor.actor)??0)){await cheat(actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});protectedUntil.set(actor.actor,now+60000);}}
+  async function protect(actor){
+    const before=await actor.observe();let now=before.game_ms,restore;const until=protectedUntil.get(actor.actor)??0;
+    if(actor.actor===admissionActor&&now<until&&until-now<5000){
+      restore=before.position;
+      await cheat(actor,{kind:'teleport',position:safePosition});
+      await observer.act({keys:[],duration_ms:until-now+100});
+      now=(await actor.observe()).game_ms;
+    }
+    if(now>=until){await cheat(actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});protectedUntil.set(actor.actor,now+60000);}
+    if(restore)await cheat(actor,{kind:'teleport',position:restore});
+  }
   async function fire(actor,id,ms=500){await protect(observer);await protect(actor);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   const initial=await map();await writeFile(join(out,'initial-map.json'),JSON.stringify(initial));
   game.check('no Skull Shrine is active before an earned event',!initial.entities.some(e=>e.kind===0xd56));
