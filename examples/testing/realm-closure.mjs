@@ -8,20 +8,36 @@ const out=process.env.QA_RESULTS_DIR,attackBonus=100;
 const spec={class:0x307,level:20,seed:787,world:1,equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 const roots=new Set([0x668,0x67d,0x91f,0x91b,0x928,0x675,0x678,0xd56,0xd59,0xd5f,0xd50,0xd54,0xd61,0xe37]);
 const leaders=new Set([...roots,0x920,0x91c,0x92d,0x6c1,0x6c2]),evaluations=new Set([0x91f,0x91b,0x928]);
+// Both routes must finish before the first dead tower revives.
+function towerPair(towers,views,assignments){
+  const used=new Set([...assignments.values()].filter(id=>towers.some(e=>e.id===id)));
+  return views.map((view,i)=>{
+    const previous=towers.find(e=>e.id===assignments.get(i));if(previous)return previous;
+    const available=towers.length===1?towers:towers.filter(e=>!used.has(e.id));
+    assert(available.length,'Each parallel fighter needs a living tower');
+    available.sort((a,b)=>Math.hypot(a.pos.x-view.position.x,a.pos.y-view.position.y)-Math.hypot(b.pos.x-view.position.x,b.pos.y-view.position.y));
+    assignments.set(i,available[0].id);used.add(available[0].id);return available[0];
+  });
+}
 let scout,spawnPoints;
 export async function prepare(api){
-  const world=await api({op:'world_info',world:1}),boss=world.encounter_markers.find(e=>e.kind===0x67d);
+  const candidates=await Promise.all([-3,1].map(async id=>({id,...await api({op:'world_info',world:id})})));
+  const count=w=>w.encounter_markers.filter(e=>roots.has(e.kind)).length;
+  // Selecting an existing smaller Realm fits the receipt cap without removing encounters.
+  candidates.sort((a,b)=>count(a)-count(b));
+  const world=candidates[0],boss=world.encounter_markers.find(e=>e.kind===0x67d);
+  assert(candidates.every(w=>w.name==='Realm'&&count(w)>20),'Both existing ordinary Realm slots must be fully populated');
   assert(boss,'An ordinarily populated Cyclops encounter is required');
   assert(Array.isArray(world.spawn_points)&&world.spawn_points.length&&world.spawn_points.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isFinite)),'World spawn_points must contain coordinate pairs');
   spawnPoints=world.spawn_points.map(([x,y])=>({x,y}));
-  scout=(await api({op:'spawn',spec:{...spec,guid:'closure-scout-'+randomUUID(),position:{x:Math.floor(boss.position.x)+.5,y:Math.floor(boss.position.y)+.5},controller:'direct',profile:null}})).result;
-  await writeFile(join(out,'scout-preparation.json'),JSON.stringify({...scout,spawnPoints}));
-  return {...spec,position:boss.position};
+  scout=(await api({op:'spawn',spec:{...spec,world:world.id,guid:'closure-scout-'+randomUUID(),position:{x:Math.floor(boss.position.x)+.5,y:Math.floor(boss.position.y)+.5},controller:'direct',profile:null}})).result;
+  await writeFile(join(out,'scout-preparation.json'),JSON.stringify({...scout,spawnPoints,selectedWorld:world.id,candidates:candidates.map(w=>({world:w.id,roots:count(w),layout:w.realm_layout}))}));
+  return {...spec,world:world.id,position:boss.position};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},protection=new Map(),modifiers=new Map(),jumps=new Map(),records=[],stalled=new Map();
-  let blocked,peer;
+  let blocked,peer,combatAnchor;
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)}),value=await response.json();
     const valid=command.op==='observe'?value.actor===command.actor:command.op==='inspect'?value.view?.session.character===command.actor:value.status==='succeeded';
@@ -90,15 +106,18 @@ export async function run(game){
         return s.view.objects.filter(e=>e.contents.length>0||portals.has(e.id));
       });
       if(states.every(s=>objects.every(e=>Math.hypot(s.view.position.x-e.position.x,s.view.position.y-e.position.y)>1.4)))return;
-      const position=states[0].view.position,points=[];
-      for(const dy of [-3,0,3])for(const dx of [-3,0,3]){
-        const p={x:Math.floor(position.x)+dx+.5,y:Math.floor(position.y)+dy+.5};
-        const clear=states.every(s=>Array.from({length:16},(_,i)=>(i+1)/16).every(t=>!blocked[Math.floor(s.view.position.y+(p.y-s.view.position.y)*t)*width+Math.floor(s.view.position.x+(p.x-s.view.position.x)*t)]));
-        if((dx||dy)&&clear&&p.x>=0&&p.y>=0&&p.x<width&&p.y<opening.height&&!blocked[Math.floor(p.y)*width+Math.floor(p.x)]&&objects.every(e=>Math.hypot(p.x-e.position.x,p.y-e.position.y)>3))points.push(p);
-      }
-      assert(points.length,'No walkable party-menu clearance away from nearby containers/portals');
-      await appendFile(join(out,'party-clearance.jsonl'),JSON.stringify({positions:states.map(s=>s.view.position),objects:objects.map(e=>({id:e.id,position:e.position})),point:points[0]})+'\n');
-      await approach(points[0],1);
+      const points=states.map(state=>{
+        const position=state.view.position,options=[];
+        if(objects.every(e=>Math.hypot(position.x-e.position.x,position.y-e.position.y)>1.4))return position;
+        for(const dy of [-3,0,3])for(const dx of [-3,0,3]){
+          const p={x:Math.floor(position.x)+dx+.5,y:Math.floor(position.y)+dy+.5};
+          const clear=Array.from({length:16},(_,i)=>(i+1)/16).every(t=>!blocked[Math.floor(position.y+(p.y-position.y)*t)*width+Math.floor(position.x+(p.x-position.x)*t)]);
+          if((dx||dy)&&clear&&p.x>=0&&p.y>=0&&p.x<width&&p.y<opening.height&&!blocked[Math.floor(p.y)*width+Math.floor(p.x)]&&objects.every(e=>Math.hypot(p.x-e.position.x,p.y-e.position.y)>3))options.push(p);
+        }
+        assert(options.length,'No walkable party-menu clearance away from nearby containers/portals');return options[0];
+      });
+      await appendFile(join(out,'party-clearance.jsonl'),JSON.stringify({positions:states.map(s=>s.view.position),objects:objects.map(e=>({id:e.id,position:e.position})),points})+'\n');
+      await approach(points,1);
     }
     assert.fail('Native movement did not clear the interaction panel for party-menu travel');
   }
@@ -126,7 +145,7 @@ export async function run(game){
   async function approach(point,range){
     const group=[],before=await Promise.all(clients.map(c=>c.observe()));
     for(let i=0;i<clients.length;i++){
-      const view=before[i],dx=point.x-view.position.x,dy=point.y-view.position.y,d=Math.hypot(dx,dy),bend=(stalled.get(clients[i].actor)??0)>0;
+      const view=before[i],dx=point[i].x-view.position.x,dy=point[i].y-view.position.y,d=Math.hypot(dx,dy),bend=(stalled.get(clients[i].actor)??0)>0;
       const horizontal=Math.abs(dx)>=Math.abs(dy)*.2||bend&&Math.abs(dx)>.001,vertical=Math.abs(dy)>=Math.abs(dx)*.2||bend&&Math.abs(dy)>.001;
       const keys=d<=range?[]:horizontal&&vertical?[dy>0?(dx>0?'s':'a'):(dx>0?'d':'w')]:horizontal?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
       group.push({actor:clients[i].actor,input:{keys,duration_ms:d<=range?100:Math.max(100,Math.min(1200,Math.round((d-range+1)*800/(4+5.6*view.character.stats.speed/75))))}});
@@ -143,7 +162,7 @@ export async function run(game){
     while(now<until){await act(game,{keys:[],duration_ms:Math.min(10000,until-now)});now=(await game.observe()).game_ms;}
     await ready();
     await appendFile(join(out,'renewals.jsonl'),JSON.stringify({before_ms:before.game_ms,renewed_ms:now,restPoint,returnToCombat})+'\n');
-    if(returnToCombat)await travel(before.position);
+    if(returnToCombat)await travel(combatAnchor);
   }
   const seen=new Map(original.map(e=>[e.quest??e.id,e]));
   for(let encounter=0;encounter<100;encounter++){
@@ -158,26 +177,28 @@ export async function run(game){
       tail.push({actor:fighter.actor,input:{keys:[],duration_ms:evaluations.has(kind)?500:8800,target:{entity:next,camera_angle:-Math.PI/4,fire:true}}});
       if(evaluations.has(kind))tail.push({actor:game.actor,input:{keys:[],duration_ms:8300}});
     }
-    await travel(seen.get(next).pos,()=>tail);
+    combatAnchor=seen.get(next).pos;
+    await travel(combatAnchor,()=>tail);
     if(kind===0xd5f&&await ready()<50000)await renewOnShore(true);
-    let completed=false;
+    let completed=false;const towerAssignments=new Map();
     for(let step=0;step<100;step++){
       if((await events()).some(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin&&e.hero===next)){completed=true;break;}
-      if(await ready()<30000){await renewOnShore(true);continue;}
+      if(await ready()<(kind===0xd5f?30000:20000)){await renewOnShore(true);continue;}
       // A held burst spans Ent's cycling shield, but must not damage an assessment window.
       const state=await api({op:'inspect',actor:scout.actor}),family=state.diagnostic.entities.filter(e=>e.id===next||e.quest===next),candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&(!(e.condition&((1<<21)|(1<<23)|(1<<24)))||e.kind===0x920));
       const views=await Promise.all(clients.map(c=>c.observe())),position=views[0].position;
       candidates.sort((a,b)=>Math.hypot(a.pos.x-position.x,a.pos.y-position.y)-Math.hypot(b.pos.x-position.x,b.pos.y-position.y));
-      const target=candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>[0x929,0xd5e,0xd62].includes(e.kind));
-      await appendFile(join(out,'combat.jsonl'),JSON.stringify({root:next,step,game_ms:state.diagnostic.time_ms,target:target?.id,family:family.map(({id,kind,pos,hp,condition,stage,activated})=>({id,kind,pos,hp,condition,stage,activated}))})+'\n');
+      const target=candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>e.kind===0x929)??candidates.find(e=>[0x92a,0x92b,0x92c,0xd5e,0xd62].includes(e.kind));
       const anchor=target??family.find(e=>leaders.has(e.kind));
+      const aims=target?.kind===0xd5e?towerPair(candidates.filter(e=>e.kind===0xd5e),views,towerAssignments):clients.map(()=>anchor);
+      await appendFile(join(out,'combat.jsonl'),JSON.stringify({root:next,step,game_ms:state.diagnostic.time_ms,target:target?.id,pair:[...towerAssignments.values()],family:family.map(({id,kind,pos,hp,condition,stage,activated})=>({id,kind,pos,hp,condition,stage,activated}))})+'\n');
       if(!anchor){await act(game,{keys:[],duration_ms:1000});continue;}
       const range=target?.kind===0xd5e?6.5:5.5;
-      if(views.some(v=>Math.hypot(v.position.x-anchor.pos.x,v.position.y-anchor.pos.y)>range)){await approach(anchor.pos,range);continue;}
+      if(views.some((v,i)=>Math.hypot(v.position.x-aims[i].pos.x,v.position.y-aims[i].pos.y)>range)){await approach(aims.map(e=>e.pos),range);continue;}
       if(target){
-        const firing=evaluations.has(target.kind)?[fighter]:clients,duration_ms=target.kind===0xd5e?1000:evaluations.has(target.kind)?500:4000,states=await Promise.all(firing.map(c=>c.inspect()));
+        const firing=evaluations.has(target.kind)?[fighter]:clients,duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:4000,states=await Promise.all(firing.map(c=>c.inspect()));
         const group=states.map((s,i)=>{
-          const known=s.view.objects.find(e=>e.id===target.id&&e.hp>0);assert(known,'A living target must be known to each actual native client');
+          const aim=target.kind===0xd5e?aims[i]:target,known=s.view.objects.find(e=>e.id===aim.id&&e.hp>0);assert(known,'A living target must be known to each actual native client');
           const dx=known.position.x-s.view.position.x,dy=known.position.y-s.view.position.y,scale=Math.min(50,200/Math.hypot(dx,dy));
           return {actor:firing[i].actor,input:{keys:[],duration_ms,mouse:{x:300+(dx-dy)*scale/Math.SQRT2,y:325+(dx+dy)*scale/Math.SQRT2}}};
         });
