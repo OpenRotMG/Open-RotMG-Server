@@ -4,9 +4,9 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
 const mode=process.env.CASTLE_MODE??'route';
-const positions={route:'spawn',left:{x:127.5,y:39.5},right:{x:127.5,y:39.5},tower:{x:127.5,y:61.5},armor:{x:114.5,y:39.5},ordinary:{x:123.5,y:88.5}};
+const positions={route:'spawn',left:{x:127.5,y:39.5},right:{x:127.5,y:39.5},tower:{x:127.5,y:61.5},armor:{x:114.5,y:39.5},ordinary:{x:94.5,y:110.5}};
 assert(Object.hasOwn(positions,mode),'Unknown CASTLE_MODE');
-export const fixture={class:0x30e,level:20,seed:866,world:'oryx-castle',position:positions[mode],equipment:[0xb08,-1,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
+export const fixture={class:0x307,level:20,seed:866,world:'oryx-castle',position:positions[mode],equipment:[0xc02,0xb28,-1,0xac5],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 export async function run(game){
   const root=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(root,'native/native.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(config.state,'control.token'),'utf8')).trim(),'Content-Type':'application/json'};
@@ -14,10 +14,10 @@ export async function run(game){
   const map=async()=>{const v=await game.observe(),r=await fetch(config.origin+'/dev/map?player='+v.session.player,{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);return r.json();};
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),samples=[];
   async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(join(root,'castle-journey.json'),JSON.stringify(samples));console.log(name,JSON.stringify(state.view.position));return state;}
-  let until=0,boosted=false;
+  let until=0,boostUntil=0;
   async function act(input,capture){
     const v=await game.observe();
-    if(!boosted){await api({op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});boosted=true;}
+    if(v.game_ms>=boostUntil){await api({op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});boostUntil=(await game.observe()).game_ms+60000;}
     if(v.game_ms>=until){await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});until=(await game.observe()).game_ms+60000;}
     input.duration_ms=Math.min(input.duration_ms,until-(await game.observe()).game_ms);
     assert(input.duration_ms>0);
@@ -38,8 +38,9 @@ export async function run(game){
       const moving=[0xd78,0xd79,0xd7c].includes(e.kind);
       if(distance(v.position,e.pos)>6){await walk([0xd78,0xd79].includes(e.kind)?e.home:e.pos,2);continue;}
       if(moving){
-        const lead=(distance(v.position,e.pos)/18+.15)/.05,dx=e.pos.x+e.last_step.x*lead-v.position.x,dy=e.pos.y+e.last_step.y*lead-v.position.y,x=50*(dx-dy)/Math.SQRT2,y=50*(dx+dy)/Math.SQRT2,scale=Math.max(1,Math.hypot(x,y)/270);
-        await act({keys:[],duration_ms:150,mouse:{x:300+x/scale,y:325+y/scale}});
+        if(v.character.mp<75)await api({op:'cheat',actor:game.actor,change:{kind:'vitals',hp:v.character.hp,mp:v.character.stats.max_mp}});
+        const lead=(distance(v.position,e.pos)/14+.1)/.05,dx=e.pos.x+e.last_step.x*lead-v.position.x,dy=e.pos.y+e.last_step.y*lead-v.position.y,x=50*(dx-dy)/Math.SQRT2,y=50*(dx+dy)/Math.SQRT2,scale=Math.max(1,Math.hypot(x,y)/270);
+        await act({keys:[' '],duration_ms:700,mouse:{x:300+x/scale,y:325+y/scale}});
       }else await act({keys:[],duration_ms:350,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
     }
     throw Error('Native damage did not defeat '+id);
