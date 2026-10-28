@@ -29,7 +29,13 @@ export async function run(game){
  const rooms=JSON.parse(generated.layout.replaceAll('(','[').replaceAll(')',']')),path=[];
  for(let i=generated.boss_room;i!==0;i=rooms[i][2])path.unshift(i);
  await writeFile(join(out,'route.json'),JSON.stringify({generated,path}));
- for(const i of path){const [x,y]=rooms[i];await move({x:20+x*20+.5-(i===generated.boss_room?9:0),y:20+y*20+.5});await heal();await log('room-'+i);}
+ let previous=0;
+ for(const i of path){
+  const [x,y]=rooms[i],[px,py]=rooms[previous],dx=x-px,dy=y-py,from={x:20+px*20+.5,y:20+py*20+.5},to={x:20+x*20+.5,y:20+y*20+.5};
+  await heal();await move({x:from.x-4*dy,y:from.y+4*dx});await move({x:from.x+4*dx,y:from.y+4*dy});
+  await move({x:to.x-4*dx,y:to.y-4*dy});await heal();await log('room-'+i);previous=i;
+ }
+ const [bx,by]=rooms[generated.boss_room];await move({x:20+bx*20+.5-9,y:20+by*20+.5});
  await capture('boss-arrival');const stages=new Set();
  for(let n=0;n<90;n++){
   const s=await log('boss-'+n),boss=s.diagnostic.entities.find(e=>e.kind===0xdc3);if(!boss)break;stages.add(boss.stage);
