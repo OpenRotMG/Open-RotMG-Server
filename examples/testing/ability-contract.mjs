@@ -5,8 +5,10 @@ export async function run(game){
   const records=[];
   const record=async label=>{const v=await game.inspect();records.push({label,...v});await writeFile(join(process.env.QA_RESULTS_DIR,'ability-observations.json'),JSON.stringify(records));return v.view;};
   const initial=await record('initial');
-  await game.act({keys:[' '],duration_ms:180});
+  await game.act({keys:[' '],mouse:{x:500,y:325},duration_ms:180});
   const thunder=await record('thunder');
+  const shots=records.at(-1).diagnostic.own_projectiles;
+  game.check('ordinary cursor aim produces one correctly directed authoritative Thunder projectile',shots.length===1&&Math.abs(Math.sin(shots[0].angle+Math.PI/4))<0.001&&Math.cos(shots[0].angle+Math.PI/4)>0.999);
   game.check('Thunder accepted with 100 MP spend and six-second cooldown',thunder.character.mp<=initial.character.mp-99&&thunder.character.ability_ready_ms-thunder.game_ms>5500);
   await game.act({keys:[],duration_ms:250,drag:{from:{x:634,y:428},to:{x:678,y:384}}});
   const swapped=await record('swapped');
