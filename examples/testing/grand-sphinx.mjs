@@ -3,7 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
-const out=process.env.QA_RESULTS_DIR;let refuge;
+const out=process.env.QA_RESULTS_DIR,sources=[0x678,0x67d,0x668,0xd56,0xd59,0x928,0x91b,0x675];let refuge;
 const spec={class:0x323,level:20,seed:818,world:1,equipment:[0xb0a,0xb2d,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]};
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),spawn=world.spawn_points[0];assert(spawn?.length===2);refuge={x:spawn[0],y:spawn[1]};
@@ -55,7 +55,8 @@ export async function run(game){
     while(ms>0){await protect();const now=(await game.observe()).game_ms,step=Math.min(ms,10000,protection-now,scoutProtection-now);await game.act({keys:[],duration_ms:step},capture);capture=undefined;ms-=step;}
   }
   async function map(){
-    const view=await game.observe(),response=await fetch(config.origin+'/dev/map?player='+view.session.player,{headers});assert(response.ok);return response.json();
+    const view=await game.observe(),response=await fetch(config.origin+'/dev/map?player='+view.session.player,{headers});assert(response.ok);const scene=await response.json();
+    return {width:scene.width,height:scene.height,entities:scene.entities.filter(e=>e.kind===0xd54||sources.includes(e.kind))};
   }
   async function save(label){const state=await game.inspect();observations.push({label,state,scout:(await api({op:'inspect',actor:scout})).view});await writeFile(join(out,'sphinx.json'),JSON.stringify(observations));return state;}
   const entity=(state,id)=>state.diagnostic.entities.find(e=>e.id===id);
@@ -99,11 +100,11 @@ export async function run(game){
     const scene=await map();sphinx=scene.entities.find(e=>e.kind===0xd54);if(sphinx)break;
     const here=(await game.observe()).position;
     const rank=e=>Math.hypot(e.pos.x-here.x,e.pos.y-here.y)+([0x928,0x91b].includes(e.kind)?scene.width+scene.height:0);
-    const root=scene.entities.filter(e=>[0x678,0x67d,0x668,0xd56,0xd59,0x928,0x91b,0x675].includes(e.kind)&&!attempted.has(e.id)).sort((a,b)=>rank(a)-rank(b))[0];
+    const root=scene.entities.filter(e=>sources.includes(e.kind)&&!attempted.has(e.id)).sort((a,b)=>rank(a)-rank(b))[0];
     assert(root,'No unattempted qualifying Realm source remains');attempted.add(root.id);
     await prepareScout({kind:'teleport',position:root.pos});await protect();
     for(let hit=0;hit<30;hit++){
-      const scene=await map(),target=scene.entities.filter(e=>(e.id===root.id||e.quest===root.id&&[0x92d,0x91c,0x6c1,0x91d,0x929].includes(e.kind))&&!(e.kind===0x929&&e.stage===3)).sort((a,b)=>Number(![0x91d,0x929].includes(a.kind))-Number(![0x91d,0x929].includes(b.kind)))[0];
+      const state=await api({op:'inspect',actor:scout}),target=state.diagnostic.entities.filter(e=>(e.id===root.id||e.quest===root.id&&[0x92d,0x91c,0x6c1,0x91d,0x929].includes(e.kind))&&!(e.kind===0x929&&e.stage===3)).sort((a,b)=>Number(![0x91d,0x929].includes(a.kind))-Number(![0x91d,0x929].includes(b.kind)))[0];
       if(!target)break;await sourceFire(target);
     }
     await game.act({keys:[],duration_ms:200});await save('admission-source-'+root.id);

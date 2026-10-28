@@ -2852,13 +2852,13 @@ async fn map(State(a): State<App>, headers: HeaderMap, Query(view): Query<MapVie
         Some(id) => a.world.for_player(id),
         None => a.world.in_world(-1),
     };
-    let result: Result<serde_json::Value> = async {
+    let result: Result<Vec<u8>> = async {
         control(&a, &headers)?;
         world.call(move |w| w.inspect_map(view.player)).await
     }
     .await;
     match result {
-        Ok(v) => Json(v).into_response(),
+        Ok(v) => ([(axum::http::header::CONTENT_TYPE, "application/json")], v).into_response(),
         Err(e) => error(e),
     }
 }
