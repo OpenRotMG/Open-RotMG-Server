@@ -53,6 +53,7 @@ export async function run(game){
     game.check(kind+': moves in its natural camp',samples.some(s=>family(s).some(e=>ids.has(e.id)&&family(begin).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.2))));
   }
   game.check('current one-shot population does not grow or replace actors',samples.every(s=>family(s).length===9&&family(s).every(e=>family(begin).some(p=>p.id===e.id))));
+  await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));
   async function defeat(id){
     const xp=(await game.observe()).character.experience;
     for(let n=0;n<100;n++){
@@ -76,5 +77,4 @@ export async function run(game){
   game.check('King stays dead and cannot duplicate XP',!family(end).some(e=>e.kind===0x645)&&end.view.character.experience===cleared.view.character.experience);
   game.check('dead camp cannot replace defeated escorts',family(end).every(e=>family(cleared).some(p=>p.id===e.id)));
   game.check('same prepared living native Wizard completes encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
-  await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));
 }
