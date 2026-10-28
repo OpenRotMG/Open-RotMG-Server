@@ -37,7 +37,7 @@ export async function run(game){
       await actor.act({keys,duration_ms:Math.max(40,Math.min(200,Math.round(Math.hypot(dx,dy)/(4+5.6*v.character.stats.speed/75)*500)))});
     }throw Error('Native walk did not reach target');
   }
-  async function fire(id,ms=150){await approach(game,id);return game.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
+  async function fire(id,ms=150){await approach(game,id,1);return game.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   await protect(game);let state=await save('initial');
   const crystal=kinds(state,0x935)[0];assert(crystal);
   game.check('one natural Mountains Crystal has selected million HP',kinds(state,0x935).length===1&&crystal.hp===1000000&&crystal.pos.x===placement.x+2.5&&crystal.pos.y===placement.y+2.5);
