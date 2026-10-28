@@ -24,6 +24,10 @@ export async function run(game){
   }
   async function protect(actor){const now=(await actor.observe()).game_ms;if(now>=(protectedUntil.get(actor.actor)??0)){await cheat(actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});protectedUntil.set(actor.actor,now+60000);}}
   async function idle(ms){assert(Number.isFinite(ms)&&ms>=0);const end=(await game.observe()).game_ms+ms;while((await game.observe()).game_ms<end){for(const a of [game,mystic].filter(Boolean))await protect(a);const now=(await game.observe()).game_ms,step=Math.min(end-now,5000,...[...protectedUntil.values()].map(t=>t-now));assert(step>0);await game.act({keys:[],duration_ms:step});}}
+  async function sample(ms,values){
+    let done=false;const action=idle(ms).finally(()=>done=true),collect=(async()=>{while(!done){values.push(await game.inspect());await new Promise(ok=>setTimeout(ok,150));}})();
+    for(const r of await Promise.allSettled([action,collect]))if(r.status==='rejected')throw r.reason;
+  }
   async function approach(actor,id,range=4){
     for(let n=0;n<80;n++){
       await protect(actor);const p=typeof id==='number'?entity(await actor.inspect(),id)?.pos:id;assert(p,'Living walking target required');
@@ -53,14 +57,15 @@ export async function run(game){
   state=await save('cracked');game.check('native burst crosses five-percent threshold into shielded break',entity(state,crystal.id)?.stage===4&&!!(entity(state,crystal.id).condition&bit(25)));
   await idle(4300);state=await save('released');const prisoner=kinds(state,0x941)[0];assert(prisoner);
   game.check('release replaces Crystal with shielded Prisoner and clears damage credit',!entity(state,crystal.id)&&prisoner.hp===27000&&!!(prisoner.condition&bit(25))&&Object.keys(prisoner.damage).length===0);
-  await idle(1000);state=await save('steeds');game.check('Prisoner produces three owned Steeds',kinds(state,0x943).filter(e=>e.quest===prisoner.quest).length===3);
+  await idle(1000);state=await save('steeds');const steeds=kinds(state,0x943);game.check('Prisoner produces three owned Steeds',steeds.filter(e=>e.quest===prisoner.quest).length===3);
   await approach(game,prisoner.id,5);await game.act({keys:[],duration_ms:700},{name:'prisoner-released',when:v=>v.nearby.some(e=>e.kind===0x941)});
   const samples=[];
-  while((await game.observe()).game_ms<prisoner.activated+21500){await idle(200);samples.push(await game.inspect());}
+  await sample(Math.max(0,prisoner.activated+21500-(await game.observe()).game_ms),samples);
   await writeFile(join(out,'daisy.json'),JSON.stringify(samples));
   game.check('Daisy moves and alternates shield/vulnerability',samples.some(s=>entity(s,prisoner.id)?.stage===1&&!(entity(s,prisoner.id).condition&bit(25)))&&samples.some(s=>entity(s,prisoner.id)?.stage===1&&(entity(s,prisoner.id).condition&bit(25)))&&samples.some(s=>Math.hypot(entity(s,prisoner.id).pos.x-prisoner.pos.x,entity(s,prisoner.id).pos.y-prisoner.pos.y)>.2));
   for(const [owner,speed] of [[prisoner.id,80],[prisoner.id,47]])game.check('Daisy projectile speed '+speed,samples.some(s=>s.view.projectiles.some(p=>p.owner===owner&&p.speed===speed)));
-  game.check('Steeds move and fire selected bolts',samples.some(s=>s.view.projectiles.some(p=>kinds(s,0x943).some(e=>e.id===p.owner)&&p.speed===67)));
+  game.check('Steeds move and fire selected bolts',samples.some(s=>s.view.projectiles.some(p=>kinds(s,0x943).some(e=>e.id===p.owner)&&p.speed===67))&&samples.some(s=>steeds.some(e=>{const p=entity(s,e.id)?.pos;return p&&Math.hypot(p.x-e.pos.x,p.y-e.pos.y)>.2;})));
+  game.check('native hits publish Weak during Daisy',samples.some(s=>s.view.character.conditions&bit(3)));
   for(let n=0;n<15&&entity(await game.inspect(),prisoner.id).stage!==3;n++)await idle(500);
   await idle(1500);state=await save('clones');const clones=kinds(state,0x942).filter(e=>e.quest===prisoner.quest);
   game.check('clone phase admits four spawned and four tossed owned Clones',clones.length===8&&clones.every(e=>e.hp===15000));
@@ -77,7 +82,7 @@ export async function run(game){
   for(let n=0;n<40&&entity(await game.inspect(),prisoner.id).stage!==5;n++)await idle(500);
   state=await save('whoa');game.check('timed cycle reaches Whoa phase',entity(state,prisoner.id).stage===5);
   await approach(game,prisoner.id,1);
-  const late=[],until=entity(state,prisoner.id).activated+13000;while((await game.observe()).game_ms<until){await idle(300);late.push(await game.inspect());}
+  const late=[];await sample(Math.max(0,entity(state,prisoner.id).activated+13000-(await game.observe()).game_ms),late);
   await writeFile(join(out,'late-attacks.json'),JSON.stringify(late));
   game.check('late phases fire selected star-speed projectiles',late.some(s=>s.view.projectiles.some(p=>p.owner===prisoner.id&&p.speed===60&&p.lifetime_ms===1700)));
   for(const [condition,name] of [[4,'Slowed'],[11,'Confused']])game.check('native star hits apply '+name,late.some(s=>s.view.character.conditions&bit(condition)));
