@@ -1,6 +1,128 @@
 use super::*;
 
 #[tokio::test]
+async fn wallets_keep_death_earnings_purchases_and_swap_separate_after_reopen() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let root = std::env::temp_dir().join(format!("wallets-{}", rand::random::<u64>()));
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join("game.db");
+    let store = Store::open(&path, &content).unwrap();
+    let guid = "wallets-owner".to_owned();
+    let account = store.list(guid.clone()).await.unwrap().id;
+    let foreign = store.list("wallets-foreign".into()).await.unwrap().id;
+    assert_eq!(
+        (
+            store.presentation(account).await.unwrap().credits,
+            store.presentation(account).await.unwrap().fame
+        ),
+        (100, 0)
+    );
+    let mut ch = store
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    ch.gain_experience(
+        &content,
+        200000,
+        &mut <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(903),
+    )
+    .unwrap();
+    store.progress(ch.clone()).await.unwrap();
+    assert_eq!(store.presentation(account).await.unwrap().fame, 0);
+    ch.alive = false;
+    ch.hp = 0;
+    store
+        .death(ch.clone(), "wallet fixture".into())
+        .await
+        .unwrap();
+    let paid = store.presentation(account).await.unwrap().fame;
+    assert!(paid >= ch.fame && paid > 36);
+    assert!(store.death(ch, "replay".into()).await.is_err());
+    assert_eq!(store.presentation(account).await.unwrap().fame, paid);
+    store
+        .register(
+            guid,
+            "wallets@example.invalid".into(),
+            "wallet-fixture".into(),
+        )
+        .await
+        .unwrap();
+    let mut ch = store
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    for (slot, currency, item, price) in [(4, 0, 0x705, 25), (5, 1, 0xa50, 35)] {
+        let mut items = ch.items.clone();
+        items[slot] = i32::from(item);
+        let write = InventoryWrite {
+            id: ch.id,
+            account,
+            revision: ch.revision,
+            items,
+        };
+        let offer = purchases::Purchase {
+            item,
+            slot,
+            price,
+            currency,
+        };
+        let mut wrong_owner = write.clone();
+        wrong_owner.account = foreign;
+        assert!(store.purchase(wrong_owner, offer.clone()).await.is_err());
+        let too_expensive = purchases::Purchase {
+            price: i32::MAX,
+            ..offer.clone()
+        };
+        assert!(
+            store
+                .purchase(write.clone(), too_expensive)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(store.load(account, ch.id).await.unwrap().items, ch.items);
+        assert_eq!(
+            store.purchase(write.clone(), offer.clone()).await.unwrap(),
+            Some((ch.revision + 1, if currency == 0 { 75 } else { paid - 35 }))
+        );
+        assert!(store.purchase(write, offer).await.is_err());
+        ch = store.load(account, ch.id).await.unwrap();
+    }
+    assert_eq!(
+        (
+            store.presentation(account).await.unwrap().credits,
+            store.presentation(account).await.unwrap().fame
+        ),
+        (75, paid - 35)
+    );
+    for amount in [0, -2, 3, i32::MAX - 1] {
+        assert!(store.swap_fame(account, amount).await.is_err());
+    }
+    assert_eq!(store.swap_fame(account, 2).await.unwrap(), (paid - 37, 76));
+    let retained = store.presentation(account).await.unwrap();
+    assert_eq!(store.presentation(foreign).await.unwrap().credits, 100);
+    assert_eq!(store.presentation(foreign).await.unwrap().fame, 0);
+    drop(store);
+    let store = Store::open(&path, &content).unwrap();
+    let listed = store
+        .characters("wallets@example.invalid".into(), "wallet-fixture".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        (listed.credits, listed.fame, listed.earned_fame),
+        (76, i64::from(paid - 37), i64::from(paid))
+    );
+    assert_eq!(store.presentation(account).await.unwrap(), retained);
+    let loaded = store.load(account, ch.id).await.unwrap();
+    assert_eq!(
+        (loaded.items, loaded.revision, loaded.fame),
+        (ch.items, ch.revision, 0)
+    );
+    drop(store);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn class_quest_gold_pays_each_colour_once_and_survives_reopen() {
     let content = Content::load(Path::new("data")).unwrap();
     let root = std::env::temp_dir().join(format!("class-quest-gold-{}", rand::random::<u64>()));
