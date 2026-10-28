@@ -645,6 +645,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0xd07..=0xd0a
         | 0xda2
         | 0xda3
+        | 0xd9b
+        | 0xd9c
+        | 0xd9e
         | 0x918
         | 0x919
         | crate::dungeon::snake::BUTTON
@@ -664,7 +667,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0xd91..=0xd94
         | 0xd96
         | 0xd97
-        | 0xd9b..=0xd9f
+        | 0xd9d
+        | 0xd9f
         | 0xda4..=0xda6
         | 0xdb0..=0xdb2 => &[(0.05, Item(0xa22)), (0.03, Item(0xa23))],
         0x60d => &[
@@ -1563,6 +1567,14 @@ mod tests {
         let mut rng = rand::rngs::mock::StepRng::new(0, 0);
         let observed = [0x921, 0x922].map(|kind| rewards(&content, kind, &mut rng));
         assert_eq!(observed, [vec![0xb0c], vec![]]);
+        assert!(content.objects[&0xb0c].soulbound);
+        let mut no_drop = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(
+            [0x921, 0x922]
+                .map(|kind| rewards(&content, kind, &mut no_drop))
+                .iter()
+                .all(Vec::is_empty)
+        );
         assert!(matches!(table(0x921), [(chance, Pick::Item(0xb0c))] if *chance == 0.02));
     }
 

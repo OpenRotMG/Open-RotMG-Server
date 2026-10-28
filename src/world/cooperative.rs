@@ -115,6 +115,8 @@ impl World {
                 | "Abyss of Demons"
                 // Trench groups teleport to rushers: https://www.realmeye.com/wiki/ocean-trench#tips-and-strategies
                 | "Ocean Trench"
+                // Tomb parties teleport to rushers: https://web.archive.org/web/20130502034124id_/http://forums.wildshadow.com/wiki/realm-mad-god/tomb-ancients
+                | "Tomb of the Ancients"
         )
     }
 
