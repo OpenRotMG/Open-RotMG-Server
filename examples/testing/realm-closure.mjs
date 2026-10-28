@@ -59,7 +59,7 @@ export async function run(game){
     let ahead=path.length-1;
     for(let i=1;i<path.length-1;i++)if(path[i]-path[i-1]!==path[i+1]-path[i]){ahead=i+1;break;}
     const point={x:path[ahead]%width+.5,y:Math.floor(path[ahead]/width)+.5},dx=point.x-before.position.x,dy=point.y-before.position.y;
-    const horizontal=Math.abs(dx)>.2||Math.abs(dx)>=Math.abs(dy),vertical=Math.abs(dy)>.2||Math.abs(dy)>Math.abs(dx);
+    const horizontal=Math.abs(dx)>=Math.abs(dy)*.2,vertical=Math.abs(dy)>=Math.abs(dx)*.2;
     const keys=horizontal&&vertical?[dy>0?(dx>0?'s':'a'):(dx>0?'d':'w')]:horizontal?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
     const distance=horizontal&&vertical?Math.min(Math.abs(dx),Math.abs(dy))*Math.SQRT2:Math.max(Math.abs(dx),Math.abs(dy));
     assert(distance>0,'Route requires a nonzero client movement');
