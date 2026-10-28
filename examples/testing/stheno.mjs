@@ -62,7 +62,8 @@ export async function run(observer){
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
   for(let n=0;n<8&&(await game.observe()).session.world===origin.session.world;n++)await game.act({keys:[],duration_ms:500});
   const returned=await save('stheno-returned');
-  game.check('earned exit returns the same living character with its reward',returned.view.world==='Realm'&&returned.view.session.character===initial.view.session.character&&returned.view.lifecycle.alive&&returned.view.character.items[4]===0xa21);
+  game.check('earned exit returns the same living character with its reward',returned.view.map.name==='Realm'&&returned.view.session.character===initial.view.session.character&&returned.view.lifecycle.alive&&returned.view.character.items[4]===0xa21);
+  await game.act({keys:[],duration_ms:2500});
   await game.act({keys:['d'],duration_ms:300});
   const final=await save('stheno-final');
   game.check('return admission finishes and movement works',Math.hypot(final.view.position.x-returned.view.position.x,final.view.position.y-returned.view.position.y)>.1);
