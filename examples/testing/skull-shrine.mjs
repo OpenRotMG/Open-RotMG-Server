@@ -39,22 +39,23 @@ export async function run(observer){
   game.check('no Skull Shrine is active before an earned event',!initial.entities.some(e=>e.kind===0xd56));
   const order=[0x678,0x67d,0x668,0x91f,0x91b,0x675,0x928];
   const candidates=initial.entities.filter(e=>order.includes(e.kind)).sort((a,b)=>order.indexOf(a.kind)-order.indexOf(b.kind));
-  let shrine;
+  const events=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
+  let admission;
   for(const candidate of candidates){
+    await cheat({actor:admissionActor},{kind:'teleport',position:{x:candidate.pos.x+1.5,y:candidate.pos.y}});
     for(let n=0;n<80;n++){
       await protect(observer);await protect({actor:admissionActor,observe:()=>api({op:'observe',actor:admissionActor})});
-      const scene=await map();shrine=scene.entities.find(e=>e.kind===0xd56);if(shrine)break;
-      const target=scene.entities.find(e=>e.id===candidate.id)||scene.entities.find(e=>e.quest===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
+      const scene=await api({op:'inspect',actor:admissionActor});
+      const target=scene.diagnostic.entities.find(e=>e.id===candidate.id)||scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
       if(!target)break;
-      await cheat({actor:admissionActor},{kind:'teleport',position:target.pos});
-      await direct({command:'shoot',angle:0},500);
+      await cheat({actor:admissionActor},{kind:'teleport',position:{x:target.pos.x+1.5,y:target.pos.y}});
+      await direct({command:'shoot',angle:Math.PI},1000);
+      admission=(await events()).find(f=>f.message==='quest defeat summoned a Realm event'&&f.kind===0xd56);if(admission)break;
     }
-    await game.act({keys:[],duration_ms:250});
-    shrine=(await map()).entities.find(e=>e.kind===0xd56);if(shrine)break;
+    if(admission)break;
   }
-  assert(shrine,'Bounded ordinary hero defeats did not admit a Skull Shrine');
-  const logs=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
-  const admission=logs.find(f=>f.message==='quest defeat summoned a Realm event'&&f.entity===shrine.id);
+  assert(admission,'Bounded ordinary hero defeats did not admit a Skull Shrine');
+  const shrine={id:admission.entity,kind:0xd56,pos:{x:admission.x,y:admission.y}},logs=await events();
   game.check('ordinary qualifying defeat admits the reserved shrine exactly once',!!admission&&logs.filter(f=>f.message==='quest defeat summoned a Realm event'&&f.entity===shrine.id).length===1);
   await writeFile(join(out,'admission.json'),JSON.stringify({shrine,admission}));
   game=await observer.join({...spec,seed:820,position:{x:shrine.pos.x+3,y:shrine.pos.y}});
@@ -91,7 +92,7 @@ export async function run(observer){
     throw Error('Native walking did not reach the observed shrine target');
   }
   await approach(game,victim.pos,1.5);
-  for(let n=0;n<12&&(await map()).entities.some(e=>e.id===victim.id);n++)await fire(game,victim.id,250);
+  for(let n=0;n<12&&(await game.inspect()).diagnostic.entities.some(e=>e.id===victim.id);n++)await fire(game,victim.id,250);
   await approach(game,{x:shrine.pos.x+2,y:shrine.pos.y});
   await game.act({keys:[],duration_ms:1000});
   const replenished=(await map()).entities.filter(e=>e.quest===shrine.id&&e.kind===0xd57);
