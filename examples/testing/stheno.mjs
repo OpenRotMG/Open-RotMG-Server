@@ -9,7 +9,7 @@ export async function run(observer){
   let serial=0;
   const api=async command=>{const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:'stheno-'+(++serial),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok&&s.status!=='failed',JSON.stringify(s));return s;};
   const origin=await observer.observe();
-  const map=async()=>{const r=await fetch(config.origin+'/dev/map?player='+origin.session.player,{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);return r.json();};
+  const map=async(player=origin.session.player)=>{const r=await fetch(config.origin+'/dev/map?player='+player,{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);return r.json();};
   const layout=await map(),boss=layout.entities.find(e=>e.kind===0x917);assert(boss,'Generated Stheno missing');
   const {worldSeed,...spec}=fixture;
   const game=await observer.join({...spec,world:origin.session.world,position:{x:boss.pos.x-3,y:boss.pos.y}});
@@ -32,14 +32,15 @@ export async function run(observer){
   game.check('native client sees both selected Stheno projectile families',[...shots.values()].some(p=>p.owner===boss.id&&p.speed===70&&p.lifetime_ms===1500)&&[...shots.values()].some(p=>p.owner===boss.id&&p.speed===62&&p.lifetime_ms===2000));
   const active=samples.filter(s=>entity(s,boss.id)?.stage!==null);
   const radii=active.flatMap(s=>s.diagnostic.entities.filter(e=>e.kind===0x918&&e.parent===boss.id).map(e=>Math.hypot(e.pos.x-entity(s,boss.id).pos.x,e.pos.y-entity(s,boss.id).pos.y)));
-  game.check('four stable circling guardians stay on their ten-tile orbit',active.some(s=>s.diagnostic.entities.filter(e=>e.kind===0x918&&e.parent===boss.id).length===4)&&radii.length>20&&radii.every(r=>Math.abs(r-10)<.35));
+  const pets=active.find(s=>s.diagnostic.entities.filter(e=>e.kind===0x918&&e.parent===boss.id).length===4)?.diagnostic.entities.filter(e=>e.kind===0x918&&e.parent===boss.id);
+  game.check('four moving guardians stay on their ten-tile orbit',pets?.every(p=>active.some(s=>{const e=entity(s,p.id);return e&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>1;}))&&radii.length>20&&radii.every(r=>Math.abs(r-10)<.35));
   game.check('swarm appears in its phase and is removed for blind rings',samples.some(s=>entity(s,boss.id)?.stage===1&&s.diagnostic.entities.some(e=>e.kind===0x919&&e.parent===boss.id))&&samples.some(s=>entity(s,boss.id)?.stage===2&&!s.diagnostic.entities.some(e=>e.kind===0x919&&e.parent===boss.id)));
   const masks=samples.map(s=>s.view.objects.find(e=>e.id===boss.id)?.condition_mask).filter(Number.isInteger);
   game.check('native Stheno alternates invulnerable and vulnerable',masks.some(m=>m&(1<<24))&&masks.some(m=>!(m&(1<<24))));
   await writeFile(join(root,'stheno-phases.json'),JSON.stringify({boss,samples,shots:[...shots.values()]}));
   for(let n=0;n<24&&entity(await game.inspect(),boss.id);n++)await game.act({keys:[],duration_ms:1000,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
   await game.act({keys:[],duration_ms:500});
-  const defeated=await save('stheno-defeated'),cleared=await map();
+  const defeated=await save('stheno-defeated'),cleared=await map(defeated.view.session.player);
   game.check('ordinary native staff defeats Stheno and grants XP',!cleared.entities.some(e=>e.id===boss.id)&&defeated.view.character.experience>initial.view.character.experience);
   const bag=cleared.entities.find(e=>e.items?.includes(0xa21)&&e.bag_owners?.includes(defeated.view.session.account));assert(bag,'No eligible private Speed reward');
   const toward=(a,b)=>{const dx=b.x-a.x,dy=b.y-a.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;return [Math.abs(x)>.15&&Math.abs(x)>=Math.abs(y)*.4142?(x>0?'d':'a'):null,Math.abs(y)>.15&&Math.abs(y)>=Math.abs(x)*.4142?(y>0?'s':'w'):null].filter(Boolean);};
