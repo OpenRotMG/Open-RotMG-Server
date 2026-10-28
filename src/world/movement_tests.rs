@@ -1,7 +1,7 @@
 use super::*;
 use std::time::Duration;
 
-fn fixture(ground: u8, wall: bool) -> (World, i32) {
+pub(super) fn fixture(ground: u8, wall: bool) -> (World, i32) {
     let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
     let content = Arc::new(Content::load(&data).unwrap());
     let mut map = Map {
