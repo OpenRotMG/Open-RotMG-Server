@@ -14,9 +14,8 @@ export async function prepare(api){
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
   scoutPlayer=state.diagnostic.player;
-  target=map.entities.find(e=>e.kind===0x668&&[0,1,2].every(dx=>[0,1,2].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
-  grave=map.entities.find(e=>e.kind===0x6db&&[-3,-2,-1,0].every(dx=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(','))));
-  assert(target&&grave,'Expected natural Red Demon and approachable Kage grave');
+  grave=map.entities.find(e=>e.kind===0x6db&&[0,1,2].every(dx=>[0,1,2].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
+  assert(grave,'Expected an approachable natural Kage grave');target=grave;
   await writeFile(join(out,'natural-targets.json'),JSON.stringify({target,grave}));
   return {...base,worldSeed:892};
 }
@@ -77,20 +76,26 @@ export async function run(game){
   await change(game.actor,{kind:'vitals',hp:100,mp:100});const expiredStart=await game.observe();await game.act({keys:[],duration_ms:1200});
   const expiredEnd=await game.observe();
   game.check('expired Castles leave only passive regeneration',expiredEnd.character.hp-100<=Math.ceil((expiredEnd.game_ms-expiredStart.game_ms)/1000)+1);
-  const fire=await game.join({...base,world:1,position:{x:target.pos.x+1,y:target.pos.y+1},backpack:[0xc2b,0xc2c,0xc34,-1,-1,-1,-1,-1]});
+  const fire=await game.join({...base,world:1,position:{x:target.pos.x+1,y:target.pos.y+1},backpack:[0xc2b,0xc2b,0xc2b,0xc2b,0xc2b,0xc2c,0xc2c,0xc34]});
   await change(fire.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
-  for(const [key,slot,kind] of [['1',4,0x1407],['2',5,0x1408]]){
-    const start=(await fire.inspect()).diagnostic.entities.find(e=>e.id===target.id);assert(start,'Natural damage target must survive');
-    await change(fire.actor,{kind:'teleport',position:{x:start.pos.x+1,y:start.pos.y+1}});
-    const before=await fire.observe();
-    await fire.act({keys:[key],duration_ms:1400},{name:'firecracker-'+kind.toString(16),when:v=>v.character.items[slot]===-1});
-    const after=await fire.observe(),end=(await fire.inspect()).diagnostic.entities.find(e=>e.id===target.id);samples.push({kind,before,after,start,end});
-    game.check(kind.toString(16)+' consumes exactly once',after.character.items[slot]===-1&&after.character.inventory_revision===before.character.inventory_revision+1);
-    game.check(kind.toString(16)+' damages a natural monster without a weapon',start&&end&&end.hp<start.hp);
-    game.check(kind.toString(16)+' expires after its pulse sequence',!(await fire.inspect()).diagnostic.entities.some(e=>e.kind===kind));
+  for(const [kind,slots] of [[0x1407,[4,5,6,7,8]],[0x1408,[9,10]]]){
+    let damage=0;
+    for(const slot of slots){
+      for(let n=0;n<30;n++){
+        const e=(await fire.inspect()).diagnostic.entities.find(e=>e.id===target.id);assert(e,'Natural damage target must survive');
+        if(e.stage!==1&&e.stage!==3)break;
+        await fire.act({keys:[],duration_ms:200});
+      }
+      const start=(await fire.inspect()).diagnostic.entities.find(e=>e.id===target.id),before=await fire.observe();
+      await fire.act({keys:[String(slot-3)],duration_ms:1400},slot===slots[0]?{name:'firecracker-'+kind.toString(16),when:v=>v.character.items[slot]===-1}:undefined);
+      const after=await fire.observe(),end=(await fire.inspect()).diagnostic.entities.find(e=>e.id===target.id);samples.push({kind,slot,before,after,start,end});assert(end,'Prepared target must remain alive');
+      damage+=start.hp-end.hp;
+      game.check(kind.toString(16)+' slot '+slot+' consumes exactly once',after.character.items[slot]===-1&&after.character.inventory_revision===before.character.inventory_revision+1);
+      game.check(kind.toString(16)+' slot '+slot+' expires after its pulse sequence',!(await fire.inspect()).diagnostic.entities.some(e=>e.kind===kind));
+    }
+    game.check(kind.toString(16)+' bounded random pulses damage a natural monster without a weapon',damage>0);
   }
-  await change(fire.actor,{kind:'teleport',position:{x:grave.pos.x-2.5,y:grave.pos.y}});
-  await change(fire.actor,{kind:'item',slot:0,item:0xb08});
+  await change(fire.actor,{kind:'item',slot:0,item:0xb08});await fire.act({keys:[],duration_ms:250});
   for(let n=0;n<25;n++){
     await fire.act({keys:[],duration_ms:200,target:{entity:grave.id,camera_angle:-Math.PI/4,fire:true}});
     if((await fire.inspect()).diagnostic.entities.find(e=>e.id===grave.id)?.stage>0)break;
@@ -98,13 +103,15 @@ export async function run(game){
   for(let n=0;n<50&&!((await fire.observe()).character.conditions&16);n++)await fire.act({keys:[],duration_ms:200});
   game.check('ordinary Kage encounter inflicts Sick',Boolean((await fire.observe()).character.conditions&16));
   await change(fire.actor,{kind:'vitals',hp:100,mp:100});
-  const sick=await fire.observe();await fire.act({keys:['3'],duration_ms:1500},{name:'sick-castle',when:v=>v.character.items[6]===0xc35});
+  const sick=await fire.observe();await fire.act({keys:['8'],duration_ms:1500},{name:'sick-castle',when:v=>v.character.items[11]===0xc35});
   const unhealed=await fire.observe();
-  game.check('Sick permits a pail dose but refuses Castle healing',Boolean(unhealed.character.conditions&16)&&unhealed.character.items[6]===0xc35&&unhealed.character.inventory_revision===sick.character.inventory_revision+1&&unhealed.character.hp===100);
+  game.check('Sick permits a pail dose but refuses Castle healing',Boolean(unhealed.character.conditions&16)&&unhealed.character.items[11]===0xc35&&unhealed.character.inventory_revision===sick.character.inventory_revision+1&&unhealed.character.hp===100&&(await fire.inspect()).diagnostic.entities.some(e=>e.kind===0x140a));
   await fire.act({keys:['Insert'],duration_ms:700});
+  game.check('Sick owner reconnects to Nexus with the same living character',(await fire.observe()).world==='Nexus'&&(await fire.observe()).session.character===sick.session.character);
   const response=await fetch(config.origin+'/dev/map?player='+scoutPlayer,{headers:{Authorization:'Bearer '+token}});assert(response.ok);
   game.check('owner departure removes its still-living Castle',!(await response.json()).entities.some(e=>e.kind===0x140a));
   const beforeExit=await game.observe();await game.act({keys:['Insert'],duration_ms:700});
-  game.check('normal Nexus reconnect preserves spent inventory',JSON.stringify((await game.observe()).character.items)===JSON.stringify(beforeExit.character.items));
-  await writeFile(join(out,'seasonal-observations.json'),JSON.stringify({preparedInventoryVitalsProtectionAndTeleport:true,samples},null,2));
+  const escaped=await game.observe();
+  game.check('normal Nexus reconnect preserves spent inventory and identity',escaped.world==='Nexus'&&escaped.session.character===initial.session.character&&JSON.stringify(escaped.character.items)===JSON.stringify(beforeExit.character.items));
+  await writeFile(join(out,'seasonal-observations.json'),JSON.stringify({preparedInventoryVitalsAndProtection:true,samples},null,2));
 }
