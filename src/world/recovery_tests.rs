@@ -123,6 +123,43 @@ fn potion_publication_is_silent_atomic_and_reports_only_actual_restoration() {
 }
 
 #[test]
+fn fountain_cadence_recipients_range_sickness_and_caps() {
+    let (mut w, near) = fixture();
+    w.players.get_mut(&near).unwrap().pos = Pos { x: 8.5, y: 8.5 };
+    w.fountains = vec![(999, Pos { x: 8.5, y: 8.5 })];
+    let mut ids = vec![near];
+    for account in 2..=5 {
+        let mut ch = w.players[&near].character.clone();
+        ch.account = account;
+        ch.id = account;
+        let id = w.enter(ch, None).unwrap();
+        w.players.get_mut(&id).unwrap().pos = Pos { x: 8.5, y: 8.5 };
+        ids.push(id);
+    }
+    let [_, ally, boundary, sick, pending] = ids[..] else {
+        unreachable!()
+    };
+    w.players.get_mut(&ally).unwrap().character.hp = 669;
+    w.players.get_mut(&boundary).unwrap().pos.x += 5.;
+    w.apply_condition(sick, SICK, 10000).unwrap();
+    w.players.get_mut(&pending).unwrap().pending = true;
+    w.fountain_heal();
+    let hp = |w: &World| {
+        ids.iter()
+            .map(|id| w.players[id].character.hp)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(hp(&w), [200, 670, 100, 100, 100]);
+    assert!(ids.iter().all(|id| w.players[id].character.mp == 100));
+    w.now = 999;
+    w.fountain_heal();
+    assert_eq!(hp(&w), [200, 670, 100, 100, 100]);
+    w.now = 1000;
+    w.fountain_heal();
+    assert_eq!(hp(&w), [300, 670, 100, 100, 100]);
+}
+
+#[test]
 fn recovery_rates_and_condition_matrix() {
     // This guards reconstruction, not fidelity: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/StatsManager.cs#L87-L141 conflicts with Kithio's MP divisor.
     for (conditions, hp, mp) in [

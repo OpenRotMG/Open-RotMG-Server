@@ -171,7 +171,7 @@ impl World {
         Ok(q.pos)
     }
 
-    // The original server heals on a 1s cadence: White Fountain HealPlayer(5, 1000, 100).
+    // Multi-recipient healing follows this comparator, not authenticated 123.5.1 policy: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/HealPlayer.cs
     pub(super) fn fountain_heal(&mut self) {
         const RANGE: f32 = 5.;
         const AMOUNT: i32 = 100;
