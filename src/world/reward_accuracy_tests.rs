@@ -39,6 +39,7 @@ async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor(
         .chain(0x605..=0x607)
         .chain(0x65f..=0x661)
         .chain(0x91d..=0x91e)
+        .chain([0x6c6])
     {
         for seed in 0..64 {
             let expected = crate::loot::rewards(

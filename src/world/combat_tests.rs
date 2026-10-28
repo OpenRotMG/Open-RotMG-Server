@@ -271,6 +271,56 @@ fn night_elf_selected_multihit_crosses_players_and_native_reports_commit_once() 
 }
 
 #[test]
+fn nomad_primary_cycle_and_selected_blind_are_independent() {
+    let (mut w, player) = fixture(0x18, false);
+    let mut clocks = crate::encounter::attacks::Clocks::default();
+    for age in (0..10600).step_by(50) {
+        let shots = crate::encounter::phased_attacks(0x6c6, 140, 1., age);
+        let phase = age % 5300;
+        let magic = phase < 3100;
+        let elapsed = if magic { phase } else { phase - 3100 };
+        let interval = if magic { 500 } else { 700 };
+        let due = elapsed >= interval && elapsed % interval == 0;
+        assert_eq!(
+            shots.len(),
+            if due { if magic { 3 } else { 1 } } else { 0 },
+            "age={age}"
+        );
+        let schedule = crate::encounter::attacks::schedule(0x6c6, 140, age).unwrap();
+        assert_eq!(
+            clocks.due(&schedule, age).len(),
+            usize::from(due),
+            "age={age}"
+        );
+        for (i, (index, angle)) in shots.iter().enumerate() {
+            assert_eq!(*index, u8::from(!magic));
+            let expected = 1.
+                + if magic {
+                    (i as f32 - 1.) * 11f32.to_radians()
+                } else {
+                    0.
+                };
+            assert!((angle - expected).abs() < 0.0001);
+        }
+    }
+    w.now = 1000;
+    let b = shot(&w, 999, 0x6c6, 1);
+    assert_eq!((b.damage, b.spec.effects.clone()), (30, vec![(8, 1500)]));
+    assert!(native_hits::expect_shoot_ack(
+        w.players.get_mut(&player).unwrap(),
+        vec![b],
+        &w.clock
+    ));
+    w.acknowledge_shoot(player, 1000).unwrap();
+    w.native_player_hit(player, 999, 255).unwrap();
+    assert_eq!(w.players[&player].character.hp, 170);
+    assert_ne!(w.players[&player].conditions(2499) & bit(8), 0);
+    assert_eq!(w.players[&player].conditions(2500) & bit(8), 0);
+    w.native_player_hit(player, 999, 255).unwrap();
+    assert_eq!(w.players[&player].character.hp, 170);
+}
+
+#[test]
 fn selected_rng_keeps_equal_bounds_and_half_open_damage_draws() {
     let (mut w, id) = fixture(0x18, false);
     let p = w.players.get_mut(&id).unwrap();

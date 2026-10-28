@@ -252,7 +252,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
         0x629 | 0x62c => (chase(1.), 12., 1000, 3.),
         0x62a => (Wander, 12., 1000, 10.),
         0x62b => (chase(7.), 12., 0, 0.),
-        0x6c6 => (chase(2.), 4., 200, 10.),
+        0x6c6 => (chase(2.), 4., 500, 10.),
         0x647 | 0x648 => (chase(7.), 12., 1000, 10.),
         0x649 => (chase(7.), 10., 1000, 10.),
         0x900..=0x902 => (Wander, 1., 500, 8.),
@@ -376,7 +376,6 @@ pub fn stage(kind: u16, hp: i32, elapsed: u64) -> u64 {
         0x614 => u64::from(hp <= 182),
         0x953 => u64::from(hp <= 80),
         0x61f => (elapsed / 2500) % 2,
-        0x6c6 => (elapsed / 1000) % 2,
         0x649 => (elapsed / 1000) % 2,
         0x646 => minotaur::phase(elapsed).0,
         0x91a if hp < 400 => 2,
@@ -535,17 +534,6 @@ pub fn phased_attacks(kind: u16, hp: i32, heading: f32, elapsed: u64) -> Vec<(u8
         0x625 | 0xd01 => spread(0, 3, 7., heading),
         0x626 | 0xd02 => spread(0, 4, 7., heading),
         0xd03 | 0xd04 => spread(0, 5, 7., heading),
-        0x6c6 => {
-            if elapsed % 1000 % 400 < 200 {
-                if (elapsed / 1000).is_multiple_of(2) {
-                    spread(0, 3, 15., heading)
-                } else {
-                    vec![(1, heading)]
-                }
-            } else {
-                vec![]
-            }
-        }
         0x62a => spread(0, 3, 15., heading),
         0x62b => vec![],
 
