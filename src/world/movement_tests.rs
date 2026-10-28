@@ -1,7 +1,7 @@
 use super::*;
 use std::time::Duration;
 
-fn fixture(ground: u8, wall: bool) -> (World, i32) {
+pub(super) fn fixture(ground: u8, wall: bool) -> (World, i32) {
     fixture_map(ground, wall.then_some((9, 8)), 32)
 }
 

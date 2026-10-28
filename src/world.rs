@@ -7539,6 +7539,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 mod shop_tests;
 
 #[cfg(test)]
+mod combat_tests;
+#[cfg(test)]
 mod movement_tests;
 
 #[cfg(test)]
@@ -7561,6 +7563,8 @@ mod priest_tests;
 
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod travel_tests;
 
 #[cfg(test)]
 mod knight_tests;
