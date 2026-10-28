@@ -18,17 +18,17 @@ export async function run(game){
   async function act(input,capture){
     let v=await game.observe();assert(v.lifecycle.alive,'Abyss character died');
     if(protectedUntil&&protectedUntil-v.game_ms<15000){
-      const position=v.position,[x,y]=originalSpawn;
-      await command({op:'cheat',actor:game.actor,change:{kind:'teleport',position:{x,y}}});
-      while(v.game_ms<protectedUntil){await game.act({keys:[],duration_ms:Math.min(10000,protectedUntil-v.game_ms)});v=await game.observe();assert(v.lifecycle.alive,'Safe protection renewal failed');}
-      await command({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=v.game_ms+60000;
-      await command({op:'cheat',actor:game.actor,change:{kind:'teleport',position}});renewals.push({game_ms:v.game_ms,position});
-      await writeFile(join(out,'protection-renewals.json'),JSON.stringify(renewals));
+      while(v.game_ms<protectedUntil){
+        await command({op:'cheat',actor:game.actor,change:{kind:'vitals',hp:v.character.stats.max_hp,mp:v.character.mp}});
+        const target=(await game.inspect()).view.objects.find(e=>e.hp>0&&(e.kind===0x651||e.kind>=0x66d&&e.kind<=0x672));
+        await game.act({keys:target&&v.character.mp>=85?[' ']:[],duration_ms:Math.min(200,protectedUntil-v.game_ms),...(target?{target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}}:{})});
+        v=await game.observe();assert(v.lifecycle.alive,'Prepared protection renewal failed');
+      }
+      renewals.push({game_ms:v.game_ms,position:v.position});await writeFile(join(out,'protection-renewals.json'),JSON.stringify(renewals));
     }
-    if(!protectedUntil){await command({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=v.game_ms+60000;}
+    if(v.game_ms>=protectedUntil){await command({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=v.game_ms+60000;}
     const result=await game.act(input,capture);for(const e of (await game.observe()).nearby)seen.add(e.kind);return result;
   }
-  const originalSpawn=[initial.position.x,initial.position.y];
   const original=await map(),idols=original.entities.filter(e=>e.kind===0xe1d),boss=original.entities.find(e=>e.kind===0x90a);assert(boss);
   await writeFile(join(out,'generated-map.json'),JSON.stringify(original));
   game.check('generated Abyss has natural Malphas and ordinary demons',boss.hp===10000&&original.entities.some(e=>e.kind>=0x66d&&e.kind<=0x672));
@@ -105,5 +105,5 @@ export async function run(game){
   await act({keys:[],duration_ms:800},{name:'abyss-exit',when:()=>true});await act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
   const returned=await save('returned');
   game.check('completion exit preserves living character and rewards',returned.view.map.name==='Realm'&&returned.view.session.character===initial.session.character&&returned.view.lifecycle.alive&&returned.diagnostic.character.abysses===dead.diagnostic.character.abysses&&returned.view.character.items.filter(i=>i===0xa20).length===idols.length+1);
-  await writeFile(join(out,'coverage.json'),JSON.stringify({seed:fixture.worldSeed,idols:idols.length,seen:[...seen],phases,renewals,scope:'Prepared generated dungeon spawn, supplied level/gear, timed invincibility and explicit safe-spawn/return placements for nonoverlapping renewal. Native walking/combat/loot/exit between placements, not uninterrupted earned traversal or survival difficulty.'}));
+  await writeFile(join(out,'coverage.json'),JSON.stringify({seed:fixture.worldSeed,idols:idols.length,seen:[...seen],phases,renewals,scope:'Prepared generated dungeon spawn, supplied level/gear, timed invincibility with explicit bounded HP restoration at nonoverlapping renewal. Native walking/combat/loot/exit without spatial edits, not earned entry or ordinary-risk survival.'}));
 }
