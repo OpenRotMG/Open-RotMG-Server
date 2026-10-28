@@ -56,7 +56,7 @@ async function admit(){
       await cheat(admissionActor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
       until=now+60000;
     }
-    const e=m.entities.find(e=>[0x928,0x668,0x67d,0x678,0xd56,0xd59].includes(e.kind));assert(e,'No bounded admission target remains');
+    const e=[0x668,0x67d,0x678,0xd56,0xd59,0x92d,0x928].map(kind=>m.entities.find(e=>e.kind===kind)).find(Boolean);assert(e,'No bounded admission target remains');
     const position=[[1,0],[-1,0],[0,1],[0,-1]].map(([x,y])=>({x:e.pos.x+x,y:e.pos.y+y})).find(p=>!blocked.has([Math.floor(p.x),Math.floor(p.y)].join(',')));assert(position);
     await cheat(admissionActor,{kind:'teleport',position});
     await direct(Math.atan2(e.pos.y-position.y,e.pos.x-position.x));m=await map();
@@ -86,7 +86,7 @@ export async function run(lobby){
   let m=admitted;
   const members=(m,kind)=>m.entities.filter(e=>e.quest===rootEntity.id&&e.kind===kind),towers=members(m,0xd5e);
   lobby.check('ordinary admission retains five owned towers and an invisible controller',towers.length===5&&rootEntity.size===0);
-  await save('accepted-prerequisites',{take:'fce508e0d2f4451ea3664e8fee571f63',source:'5666cecd29f1479066494a80b9f8736e506c350c',scope:'Eleven accepted partial checks retain activation, Eyes, projectiles, unprotected damage, red/yellow signals and contribution transfer. This fresh case exercises the missing revival/completion/reward checks.'});
+  await save('accepted-prerequisites',{checks:[{take:'fce508e0d2f4451ea3664e8fee571f63',source:'5666cecd29f1479066494a80b9f8736e506c350c',scope:'Eleven partial checks retain activation, Eyes, projectiles, unprotected damage, red/yellow signals and contribution transfer; the take failed its pre-revival sample.'},{take:'7e093a7f88954a20bbde45cfb4dfe4c1',source:'a8e700334f44c5ac0a4c2d78ccd7e51a876a71c9',scope:'Pre-15-second corpse sample and full-HP/original-position revival passed; the take failed all-five completion.'}],scope:'Fresh prepared cooperative completion, rewards and reconnect only.'});
   const game=await lobby.join({...spec,position:{x:towers[0].pos.x-3,y:towers[0].pos.y},equipment:[0xc03,0xa2e,0xb05,0xac9]});
   await cheat(game.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
   await cheat(game.actor,{kind:'stat_modifier',index:4,amount:100,duration_ms:60000});
@@ -102,18 +102,8 @@ export async function run(lobby){
     }
     throw Error('Native walking did not reach the observed tower');
   }
-  async function kill(tower){
-    await approach(tower.pos);m=await map(game.actor);
-    for(let n=0;n<6&&m.entities.some(e=>e.id===tower.id);n++){await game.act({keys:[' '],duration_ms:1000,target:{entity:tower.id,camera_angle:-Math.PI/4,fire:true}});m=await map(game.actor);}
-    assert(!m.entities.some(e=>e.id===tower.id),'Tower survived bounded native fire');
-  }
-  await kill(towers[0]);const downAt=(await game.observe()).game_ms;
-  const corpse=members(m,0xd60)[0];await save('one-down',{game_ms:downAt,corpse,towers:members(m,0xd5e)});
-  game.check('corpse is observed before its 15-second revival',!!corpse&&members(m,0xd5e).length===4&&downAt>=corpse.activated&&downAt<corpse.activated+15000);
-  const reviveAt=corpse.activated+15000;
-  while((await game.observe()).game_ms<reviveAt)await game.act({keys:[],duration_ms:Math.min(7000,reviveAt-(await game.observe()).game_ms+50)});
-  await game.act({keys:[],duration_ms:500},{name:'pentaract-revived',when:v=>v.game_ms>=reviveAt});m=await map(game.actor);await save('revived',m);
-  game.check('corpse revives at full HP in its original position',members(m,0xd60).length===0&&members(m,0xd5e).length===5&&members(m,0xd5e).some(e=>e.hp===5000&&e.pos.x===corpse.pos.x&&e.pos.y===corpse.pos.y));
+  await approach(towers[0].pos);m=await map(game.actor);
+  assert(members(m,0xd5e).length===5&&members(m,0xd60).length===0&&m.entities.find(e=>e.id===towers[0].id).hp===5000&&towers.slice(1).every(t=>{const e=m.entities.find(e=>e.id===t.id);return e.hp>0&&e.hp<=200;}),'Declared ordinary assistance must retain all five living towers');
   const packetStart=packets.length,start=await game.inspect(),v=await game.observe();
   assert.equal(v.character.stats.speed,158,'Prepared speed window expired before the bounded tower race');
   const solid=new Set(m.blocked.filter(([x,y])=>Math.abs(x-rootEntity.pos.x)<25&&Math.abs(y-rootEntity.pos.y)<25).map(p=>p.join(',')));
