@@ -79,10 +79,10 @@ export async function run(game,{finishOnly=false}={}){
   for(let n=0;n<20&&entity(await game.inspect(),id).stage===0;n++)await fire(id);
   state=await save('activated');game.check('native damage activates the shielded introduction',entity(state,id).stage===1&&!!(entity(state,id).condition&(1<<24)));
   await idle(3500);state=await save('battle');game.check('introduction opens the battle',entity(state,id).stage===3);
-  await idle(8500);state=await save('skulls');const spirit=state.diagnostic.entities.find(e=>e.kind===0xe39&&e.quest===id);assert(spirit,'Owned Vengeful Spirit required');
+  await idle(8500);state=await save('skulls');const previousSpirits=new Set(state.diagnostic.entities.filter(e=>e.kind===0xe39&&e.quest===id).map(e=>e.id)),spirit=state.diagnostic.entities.find(e=>previousSpirits.has(e.id));assert(spirit,'Owned Vengeful Spirit required');
   for(let n=0;n<10&&entity(await game.inspect(),spirit.id);n++)await fire(spirit.id,750);
   state=await save('skull-defeated');game.check('summoned skull defeat grants no XP',!entity(state,spirit.id)&&state.view.character.experience===xp);
-  await idle(5000);state=await save('skull-replacement');game.check('skull replenishment retains ownership and no-XP policy',state.diagnostic.entities.some(e=>e.kind===0xe39&&e.quest===id&&e.id!==spirit.id));
+  await idle(5000);state=await save('skull-replacement');game.check('skull replenishment retains ownership and no-XP policy',state.diagnostic.entities.some(e=>e.kind===0xe39&&e.quest===id&&!previousSpirits.has(e.id)));
   }
   const stages=new Set(),samples=[];
   for(let n=0;n<150;n++){
