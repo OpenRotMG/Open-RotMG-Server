@@ -19,7 +19,7 @@ assert c.execute('SELECT credits FROM accounts WHERE id=?',(account,)).fetchone(
 classes=[int(o.get('type'),16) for o in E.parse('data/objects.xml').getroot().findall('Object') if o.findtext('Class')=='Player']
 assert len(classes)==13
 for i,kind in enumerate(classes,actor+1):
- ch=json.loads(raw);ch.update(id=i,**{'class':kind},exp=20000,fame=20,alive=False,hp=0,items=[-1]*12)
+ ch=json.loads(raw);ch.update(id=i,**{'class':kind},exp=20000,fame=20,alive=False,hp=0,mp=0,base=[100,50,10,0,10,10,10,10],items=[-1]*12)
  c.execute('INSERT INTO characters(id,account,stats,items,revision,alive) VALUES(?,?,?,?,0,0)',(i,account,json.dumps(ch),json.dumps([-1]*12)))
 assert c.execute('SELECT stats FROM characters WHERE id=?',(actor,)).fetchone()[0]==raw
 assert not c.execute('PRAGMA foreign_key_check').fetchall()
