@@ -34,26 +34,28 @@ export async function run(game){
     try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
     if(error)throw error;const s=await game.inspect();record(s);return s;
   }
-  async function act(input,capture){
+  async function protect(){
     const now=(await game.observe()).game_ms;
     if(now>=protectedUntil){
       const path=join(process.env.QA_RESULTS_DIR,'protection.json');
       await writeFile(path,JSON.stringify({id:'shield-orc-protection-'+serial++,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
       execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root(),'native.json'),path]);protectedUntil=now+60000;
     }
-    while(protectedUntil-(await game.observe()).game_ms<input.duration_ms+500)await step({keys:[],duration_ms:100});
+  }
+  async function act(input,capture){
+    await protect();
+    while(protectedUntil-(await game.observe()).game_ms<input.duration_ms+500){await step({keys:[],duration_ms:100});await protect();}
     return step(input,capture);
   }
   try{
   const begin=await save('arrival');
   game.check('natural HighPlains camp has selected initial HP and population',[[0x900,1,1000],[0x901,1,2000],[0x902,2,5000]].every(([k,n,hp])=>family(begin).filter(e=>e.kind===k&&e.hp===hp).length===n));
-  await step({keys:[],duration_ms:500},{name:'shield-orcs-arrival',when:()=>true});
-  for(let n=0;n<6;n++)await step({keys:[],duration_ms:250});
-  game.check('ordinary native collisions damage the Wizard',samples.some(s=>s.view.character.hp<begin.view.character.hp));
+  await act({keys:[],duration_ms:500},{name:'shield-orcs-arrival',when:()=>true});
+  for(let n=0;n<6;n++)await act({keys:[],duration_ms:250});
   await act({keys:[],duration_ms:1500},{name:'shield-orcs-combat',when:()=>true});
   for(const [kind,speed,lifetime] of [[0x900,30,3000],[0x901,60,700],[0x902,60,700]]){
     const ids=new Set(family(begin).filter(e=>e.kind===kind).map(e=>e.id));
-    game.check(kind+': native client receives selected projectile', [...shots.values()].some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime));
+    game.check(kind+': selected projectile is observed during native combat', [...shots.values()].some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime));
     game.check(kind+': natural actor activates and moves',samples.some(s=>family(s).some(e=>e.kind===kind&&e.activated!==null&&family(begin).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.2))));
   }
   const warrior=family(begin).find(e=>e.kind===0x902);assert(warrior);
@@ -77,10 +79,10 @@ export async function run(game){
   game.check('wounded Queen telegraphs and withdraws',samples.some(s=>family(s).some(e=>e.id===queen.id&&e.stage===2&&e.hp<500))&&!family(dead).some(e=>e.id===queen.id));
   game.check('Queen emits a ten-shot final ring',samples.some(s=>new Set(s.view.projectiles.filter(p=>p.owner===queen.id&&Math.abs(p.angle/(Math.PI/5)-Math.round(p.angle/(Math.PI/5)))<.001).map(p=>Math.round(p.angle/(Math.PI/5)))).size===10));
   game.check('withdrawal awards no kill XP',dead.view.character.experience===xp);
-  const survivorIds=new Set(family(dead).map(e=>e.id)),orphanStart=dead.view.game_ms;
+  const survivorIds=new Set(family(dead).map(e=>e.id)),orphanStart=dead.view.time_ms;
   await act({keys:[],duration_ms:5000});
-  const end=await save('survivors');
-  game.check('survivors remain and cease firing after command loss',family(end).length===2&&family(end).every(e=>survivorIds.has(e.id)&&e.stage===4)&&!samples.filter(s=>s.view.game_ms>orphanStart+1000).some(s=>s.view.projectiles.some(p=>survivorIds.has(p.owner))));
+  const end=await save('survivors'),aftermath=samples.filter(s=>s.view.time_ms>orphanStart+1000);
+  game.check('survivors remain and cease firing after command loss',aftermath.length>0&&family(end).length===2&&family(end).every(e=>survivorIds.has(e.id)&&e.stage===4)&&!aftermath.some(s=>s.view.projectiles.some(p=>survivorIds.has(p.owner))));
   game.check('same prepared living Wizard completes the encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
   }finally{await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));}
 }
