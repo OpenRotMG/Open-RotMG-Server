@@ -12,9 +12,11 @@ export async function run(game){
   const boss=(await response.json()).entities.find(e=>e.kind===0xd90);assert(boss);
   const {worldSeed,...knight}=fixture;
   game=await game.join({...knight,world:initial.view.session.world,position:{x:boss.pos.x-1,y:boss.pos.y}});
+  let protectedUntil=0;
   async function protect(){
+    const now=(await game.observe()).game_ms;if(now<protectedUntil)return;
     const protection=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}),signal:AbortSignal.timeout(10000)});
-    const receipt=await protection.json();assert(protection.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
+    const receipt=await protection.json();assert(protection.ok&&receipt.status==='succeeded',JSON.stringify(receipt));protectedUntil=now+60000;
   }
   await protect();
   await game.act({keys:[],duration_ms:600});
