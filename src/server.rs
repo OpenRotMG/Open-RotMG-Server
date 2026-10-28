@@ -1,4 +1,4 @@
-mod bot_view;
+pub(crate) mod bot_view;
 mod input;
 mod name_claims;
 
@@ -3202,6 +3202,11 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/realmdex/stats", get(realmdex_stats))
         .route("/api/bots", get(crate::bots::cctv::list))
         .route("/api/bots/{name}/socket", get(bot_view::socket))
+        .route("/api/bots/{name}/control", get(bot_view::control::socket))
+        .route(
+            "/api/bots/views/{view}/socket",
+            get(bot_view::control::data),
+        )
         .route(
             "/api/bots/{name}/perspective/{target}",
             get(bot_view::perspective::get),
