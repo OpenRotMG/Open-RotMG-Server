@@ -31,7 +31,6 @@ export async function run(game){
   // Large/Small select channels, not atlas size: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf (0x1200/0x1300).
   for(let i=0;i<cloths.length;i++){
     const c=cloths[i],slot=i%8+4;
-    if(i===72)await change({kind:'protection',condition:'invulnerable',duration_ms:60000});
     if(i>=8&&i%8===0){
       for(let j=0;j<8;j++)await change({kind:'item',slot:j+4,item:cloths[i+j]?.kind??-1});
       await game.act({keys:[],duration_ms:150});
@@ -41,7 +40,7 @@ export async function run(game){
     const key=c.channel+'-'+(c.texture>>>24),capture=!captured.has(key);captured.add(key);
     if(capture){
       let moved=false;const start=before.game_ms;
-      const action=game.act({keys:[],duration_ms:1500},{name:'preview-'+key,when:v=>moved&&v.game_ms>=start+700});
+      const action=game.act({keys:[],duration_ms:1200},{name:'preview-'+key,when:v=>moved&&v.game_ms>=start+700});
       const hover=(async()=>{
         const deadline=Date.now()+5000;
         while((await game.observe()).paused||!(await cdp.eval('document.querySelector("ruffle-player").ruffle().isPlaying'))){assert(Date.now()<deadline,'Preview must resume');await delay(20);}
