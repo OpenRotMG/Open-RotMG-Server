@@ -55,11 +55,11 @@ export async function run(game){
     }
     throw Error('Native walking did not reach the observed target');
   }
-  async function fire(id,ms=500){
+  async function fire(id,ms=2000){
     await protect();const state=await game.inspect(),target=entity(state,id);assert(target,'Living target required');
     if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>3)await walk(target.pos,2);
     const now=(await game.observe()).game_ms;if(now>=modifier){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifier=now+60000;}
-    await game.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+    await game.act({keys:[],duration_ms:Math.min(ms,protection-now,scoutProtection-now),target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
   await protect();await game.act({keys:[],duration_ms:100});
   const attempted=new Set();let sphinx;
