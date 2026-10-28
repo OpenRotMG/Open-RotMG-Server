@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
 const base=[670,385,75,25,50,75,40,60];
-export const fixture={class:0x30e,level:20,seed:877,world:'vault',position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0xc31,0xc20,-1,-1,-1,-1,-1,-1],stats:base};
+export const fixture={class:0x30e,level:20,seed:877,world:'snake-pit',worldSeed:12351,position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0xc31,0xc20,-1,-1,-1,-1,-1,-1],stats:base};
 const bonus=(...pairs)=>{const b=Array(8).fill(0);for(const [i,n] of pairs)b[i]=n;return b;};
 const rings=[
   [0xc31,bonus([0,60],[1,60],[3,4],[6,4])],[0xc20,bonus([6,5],[7,5])],
