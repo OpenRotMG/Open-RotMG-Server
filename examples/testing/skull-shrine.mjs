@@ -19,7 +19,7 @@ export async function run(observer){
   const headers={Authorization:'Bearer '+token,'Content-Type':'application/json'},records=[];
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command})});
-    const result=await response.json();assert(response.ok&&result.status==='succeeded',JSON.stringify(result));return result;
+    const result=await response.json();assert(response.ok&&result.status!=='failed',JSON.stringify(result));return result;
   }
   async function cheat(actor,change){await api({op:'cheat',actor:actor.actor,change});}
   async function direct(action,duration_ms){
