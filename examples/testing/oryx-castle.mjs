@@ -36,8 +36,11 @@ export async function run(game){
       const m=await map(),e=m.entities.find(e=>e.id===id);if(!e)return;
       const v=await game.observe();
       const moving=[0xd78,0xd79,0xd7c].includes(e.kind);
-      if(distance(v.position,e.pos)>(moving?2:6)){await walk(e.pos,moving?1.2:4);continue;}
-      await act({keys:[],duration_ms:350,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
+      if(distance(v.position,e.pos)>6){await walk([0xd78,0xd79].includes(e.kind)?e.home:e.pos,2);continue;}
+      if(moving){
+        const lead=(distance(v.position,e.pos)/18+.15)/.05,dx=e.pos.x+e.last_step.x*lead-v.position.x,dy=e.pos.y+e.last_step.y*lead-v.position.y,x=50*(dx-dy)/Math.SQRT2,y=50*(dx+dy)/Math.SQRT2,scale=Math.max(1,Math.hypot(x,y)/270);
+        await act({keys:[],duration_ms:150,mouse:{x:300+x/scale,y:325+y/scale}});
+      }else await act({keys:[],duration_ms:350,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
     }
     throw Error('Native damage did not defeat '+id);
   }
