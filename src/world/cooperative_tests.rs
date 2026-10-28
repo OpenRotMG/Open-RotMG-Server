@@ -53,7 +53,7 @@ fn teleport_refusals_preserve_cooldown_and_success_uses_current_target_position(
             assert!(error.to_string().contains(expected), "{error:#}");
             assert_eq!(d.teleports, cooldowns);
             let w = d.worlds.get_mut(&-2).unwrap();
-            assert_eq!(w.players[&sender].pos, start);
+            assert_eq!(w.players[&sender].pos.distance(start), 0.);
             assert!(!w.players[&sender].character.lifetime.teleported);
             let q = w.players.get_mut(&target).unwrap();
             q.paused = false;
@@ -66,7 +66,7 @@ fn teleport_refusals_preserve_cooldown_and_success_uses_current_target_position(
         }
     }
     let receipt = d.teleport(sender, target, received).unwrap();
-    assert_eq!(receipt.position, destination);
+    assert_eq!(receipt.position.distance(destination), 0.);
     assert_eq!(receipt.world, -2);
     assert_eq!(d.teleports[&1], received);
     assert!(d.worlds[&-2].players[&sender].character.lifetime.teleported);
@@ -82,12 +82,13 @@ fn teleport_refusals_preserve_cooldown_and_success_uses_current_target_position(
         .teleport(sender, target, received + Duration::from_millis(9999))
         .unwrap_err();
     assert!(error.to_string().contains("Too soon"));
-    assert_eq!(d.worlds[&-2].players[&sender].pos, destination);
+    assert_eq!(d.worlds[&-2].players[&sender].pos.distance(destination), 0.);
     assert_eq!(d.teleports[&1], received);
     assert_eq!(
         d.teleport(sender, target, received + Duration::from_secs(10))
             .unwrap()
-            .position,
-        new_destination
+            .position
+            .distance(new_destination),
+        0.
     );
 }
