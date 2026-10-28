@@ -13,7 +13,10 @@ export async function run(game){
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),samples=[];
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});
-    const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));return receipt.result;
+    const receipt=await response.json();
+    if(command.op==='world_info'){assert(response.ok&&receipt.privileged===true,JSON.stringify(receipt));return receipt;}
+    if(command.op==='inspect'){assert(response.ok&&receipt.view&&receipt.diagnostic,JSON.stringify(receipt));return receipt;}
+    assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));return receipt.result;
   }
   async function snapshot(name,client=game){const state=await client.inspect();samples.push({name,state});await writeFile(join(root(),'booster-observations.json'),JSON.stringify(samples,null,2));return state;}
   await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
