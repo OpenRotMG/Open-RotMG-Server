@@ -272,6 +272,70 @@ fn selected_trajectory_modes_preserve_parity_rotation_and_return() {
 }
 
 #[test]
+fn selected_bows_keep_individual_projectiles_and_enemy_only_piercing() {
+    for (kind, min, max, speed, lifetime, count, rate) in [
+        (0xa1a, 10, 40, 160., 440., 1, 1.),
+        (0xa75, 15, 45, 160., 440., 1, 1.),
+        (0xa1b, 20, 50, 200., 375., 1, 1.),
+        (0xa76, 25, 55, 160., 440., 1, 1.),
+        (0xa77, 35, 65, 160., 440., 1, 1.),
+        (0xa1c, 45, 65, 160., 440., 1, 1.),
+        (0xa1d, 30, 50, 160., 440., 2, 1.),
+        (0xa3a, 50, 70, 150., 500., 1, 1.),
+        (0xa1e, 40, 60, 160., 440., 3, 1.),
+        (0xa8b, 40, 65, 160., 440., 3, 1.),
+        (0xa8c, 45, 65, 160., 440., 3, 1.),
+        (0xa8d, 45, 70, 160., 440., 3, 1.),
+        (0xb02, 50, 70, 160., 440., 3, 1.),
+        (0xb03, 50, 75, 160., 440., 3, 1.),
+        (0xb04, 55, 75, 160., 440., 3, 1.),
+        (0xc02, 400, 500, 140., 503., 1, 0.33),
+        (0xc10, 60, 80, 185., 420., 2, 1.25),
+        (0xc1b, 50, 70, 180., 400., 1, 2.5),
+    ] {
+        for cover in [false, true] {
+            let (mut w, id) = fixture(0x18, false);
+            let item = w.content.get(kind).unwrap();
+            let spec = &item.projectiles[&0];
+            assert_eq!(
+                (spec.min, spec.max, spec.speed, spec.lifetime),
+                (min, max, speed, lifetime)
+            );
+            assert_eq!((item.shots, item.rate, item.arc), (count, rate, 11.25));
+            assert!(item.bonuses.is_empty());
+            assert!(spec.multi_hit && !spec.armor_piercing && !spec.passes_cover);
+            let targets =
+                [10.5, 13.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+            for target in targets {
+                w.entities.get_mut(&target).unwrap().hp = 2000;
+            }
+            if cover {
+                w.spawn_entity(0x100, Pos { x: 9.5, y: 8.5 }, vec![])
+                    .unwrap();
+            }
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.shots = 1;
+            p.character.lifetime.shots = 1;
+            let mut b = shot(&w, id, kind, 0);
+            b.friendly = true;
+            b.damage = min;
+            w.bullets.push(b);
+            for _ in 0..12 {
+                w.step();
+            }
+            for target in targets {
+                assert_eq!(
+                    w.entities[&target].hp,
+                    2000 - if cover { 0 } else { min },
+                    "{kind:#x}"
+                );
+            }
+            assert!(w.bullets.iter().all(|b| !b.friendly));
+        }
+    }
+}
+
+#[test]
 fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
     for kind in [0xa00, 0xb0b, 0xa03, 0xc01, 0xc05, 0xaf4, 0xaf5, 0xb40] {
         let (mut w, id) = fixture(0x18, false);
@@ -329,6 +393,112 @@ fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
         w.shoot(id, 1000 + period, count as u8 + 1, kind, start, angle)
             .unwrap();
         assert_eq!(w.players[&id].character.shots, admitted + 1);
+    }
+}
+
+#[test]
+fn selected_staves_keep_individual_damage_cadence_waves_and_collision() {
+    // The selected client derives every pellet from XML, not a generic staff profile: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as#L909-L944
+    for (kind, low, high) in [
+        (0xa97, 10, 25),
+        (0xa98, 10, 30),
+        (0xa99, 15, 35),
+        (0xa9a, 20, 40),
+        (0xa9b, 25, 45),
+        (0xa9c, 35, 55),
+        (0xa9d, 40, 70),
+        (0xa9e, 45, 85),
+        (0xa9f, 50, 90),
+        (0xaa0, 50, 95),
+        (0xaa1, 55, 95),
+        (0xaa2, 55, 100),
+        (0xb08, 60, 100),
+        (0xb09, 60, 105),
+        (0xb0a, 65, 105),
+        (0xc03, 80, 95),
+        (0xc15, 60, 70),
+        (0xc24, 80, 100),
+    ] {
+        let (mut w, id) = fixture(0x18, false);
+        w.now = 1000;
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.class = crate::content::WIZARD;
+        p.character.items[0] = kind as i32;
+        p.character.base = [600, 200, 50, 25, 30, 50, 40, 30];
+        let item = w.content.get(kind).unwrap().clone();
+        let (count, arc, rate, period, speed, life, amplitude, frequency) = match kind {
+            0xc03 => (10, 36., 0.4, 428, 110., 364., 0.15, 2.),
+            0xc15 => (2, 0., 1.1, 155, 180., 500., 0.5, 2.),
+            0xc24 => (1, 0., 0.25, 685, 25., 3000., 1., 1.),
+            _ => (2, 0., 1., 171, 180., 475., 0.5, 2.),
+        };
+        assert_eq!(
+            (item.slot_type, item.shots, item.arc, item.rate),
+            (17, count, arc, rate)
+        );
+        let spec = &item.projectiles[&0];
+        assert_eq!((spec.min, spec.max), (low, high));
+        assert_eq!(
+            (spec.speed, spec.lifetime, spec.amplitude, spec.frequency),
+            (speed, life, amplitude, frequency)
+        );
+        assert!(!spec.multi_hit && !spec.passes_cover && !spec.armor_piercing);
+        assert!(!spec.wavy && !spec.parametric && !spec.boomerang && spec.effects.is_empty());
+        for parity in [0, 1] {
+            let offset = spec.offset(parity, 0., life / (4. * frequency));
+            assert!((offset.0 - life / (4. * frequency) * speed / 10000.).abs() < 0.0001);
+            assert!((offset.1 - if parity == 0 { amplitude } else { -amplitude }).abs() < 0.0001);
+        }
+        let start = Pos { x: 8.8, y: 8.5 };
+        for bullet in 0..count as u8 {
+            let angle = (f32::from(bullet) * arc - arc * (count - 1) as f32 / 2.).to_radians();
+            w.shoot(id, 1000, bullet + 1, kind, start, angle).unwrap();
+        }
+        assert_eq!(w.bullets.len(), count as usize);
+        assert!(
+            w.bullets
+                .iter()
+                .all(|b| (low * 3 / 2..=high * 3 / 2).contains(&b.damage))
+        );
+        assert!(
+            w.shoot(id, 1000 + period - 3, count as u8 + 1, kind, start, 0.)
+                .is_err()
+        );
+        assert_eq!(w.players[&id].character.shots, count as u64);
+        w.shoot(id, 1000 + period, count as u8 + 1, kind, start, 0.)
+            .unwrap();
+        assert_eq!(w.players[&id].character.shots, count as u64 + 1);
+        for cover in [false, true] {
+            let (mut w, id) = fixture(0x18, false);
+            let targets =
+                [9.3, 10.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+            if cover {
+                w.spawn_entity(0x100, Pos { x: 8.5, y: 8.5 }, vec![])
+                    .unwrap();
+            }
+            for target in targets {
+                w.entities.get_mut(&target).unwrap().hp = 10000;
+            }
+            let hp = targets.map(|target| w.entities[&target].hp);
+            let p = w.players.get_mut(&id).unwrap();
+            p.character.shots = 1;
+            p.character.lifetime.shots = 1;
+            let mut b = shot(&w, id, kind, 0);
+            b.id = 0;
+            b.friendly = true;
+            b.start = start;
+            b.pos = start;
+            w.bullets.push(b);
+            for _ in 0..65 {
+                w.step();
+            }
+            assert_eq!(
+                w.entities[&targets[0]].hp,
+                hp[0] - if cover { 0 } else { low }
+            );
+            assert_eq!(w.entities[&targets[1]].hp, hp[1]);
+            assert!(w.bullets.is_empty());
+        }
     }
 }
 
