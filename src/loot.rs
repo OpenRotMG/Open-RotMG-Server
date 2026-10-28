@@ -661,7 +661,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x605 | 0x606 => &[(0.04, Item(0xa22))],
         0x607 => &[(0.03, Item(0xa23))],
         0x615 => &[(0.04, Item(0xa22)), (0.03, Item(0xa23))],
-        0x61c | 0x61e | 0x63b | 0x64a..=0x64d => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
+        0x61c | 0x61e | 0x63b => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
+        // The King is an ordinary elf, not an equipment-bearing lesser god: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Highland.cs#L201-L256
+        0x64a..=0x64d | 0x64f => &[(0.03, Item(0xa22))],
         0x60a | 0x60c => &[(0.03, Item(0xa23))],
         0x61d | 0x63c | 0x63f | 0x642..=0x644 => &[(0.05, Item(0xa22)), (0.03, Item(0xa23))],
         0x616
@@ -726,16 +728,6 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.05, Tier(3, RINGS)),
             (0.03, Tier(3, ABILITIES)),
             (0.03, Item(0xa23)),
-        ],
-        0x64f => &[
-            (0.16, Tier(5, WEAPONS)),
-            (0.08, Tier(6, WEAPONS)),
-            (0.16, Tier(4, ARMOR)),
-            (0.08, Tier(5, ARMOR)),
-            (0.04, Tier(6, ARMOR)),
-            (0.05, Tier(3, RINGS)),
-            (0.03, Tier(3, ABILITIES)),
-            (0.03, Item(0xa22)),
         ],
         0x640 | 0x649 | 0x650 => &[
             (0.16, Tier(5, WEAPONS)),
@@ -1252,7 +1244,7 @@ pub fn private(kind: u16) -> bool {
             kind,
             0x679..=0x67c | 0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL
         )
-        || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
+        || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x650..=0x659
         | 0xd05 | 0x917 | crate::dungeon::snake::GUARD | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
         | crate::dungeon::jungle::BOSS | crate::dungeon::beach::BOSS
         | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
@@ -1380,6 +1372,22 @@ mod tests {
             .collect();
         assert_eq!(armor, [(4, 0.75), (5, 0.375), (6, 0.167)]);
         assert!(table(0x678).is_empty());
+    }
+
+    #[test]
+    fn night_elves_only_roll_one_public_health_potion() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in [0x64a, 0x64b, 0x64c, 0x64d, 0x64f] {
+            assert!(
+                matches!(table(kind), [(p, Pick::Item(0xa22))] if *p == 0.03),
+                "{kind:#x}"
+            );
+            assert!(period_surface(kind) && !private(kind));
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                vec![0xa22]
+            );
+        }
     }
 
     #[test]
