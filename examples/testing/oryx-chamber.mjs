@@ -7,15 +7,19 @@ export const fixture={class:0x323,level:20,seed:867,world:'oryx-chamber',positio
 export async function run(game){
   const out=process.env.QA_RESULTS_DIR,records=[];
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
+  const protectedClients=[];let until=0;
   function protectClient(g){
-    const act=g.act;let until=0;
+    const act=g.act;protectedClients.push(g);
     g.act=async(input,capture)=>{
       let remaining=input.duration_ms;
       while(remaining>0){
         const now=(await g.inspect()).view.time_ms;
         if(now>=until){
-          const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:g.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}})});
-          const result=await response.json();assert(response.ok&&result.status==='succeeded',JSON.stringify(result));until=now+60000;
+          for(const client of protectedClients){
+            const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:client.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}})});
+            const result=await response.json();assert(response.ok&&result.status==='succeeded',JSON.stringify(result));
+          }
+          until=now+60000;
         }
         const duration_ms=Math.min(remaining,until-now);remaining-=duration_ms;
         await act({...input,duration_ms},remaining?undefined:capture);
@@ -25,6 +29,8 @@ export async function run(game){
   protectClient(game);
   async function save(name,g=game){const s=await g.inspect();records.push({name,...s});await writeFile(join(out,'chamber.json'),JSON.stringify(records));return s;}
   const start=await save('prepared'),boss=start.diagnostic.entities.find(e=>e.kind===0x1740);assert(boss);
+  const observer=await game.join({...fixture,world:start.view.session.world,position:start.view.position});
+  protectClient(observer);
   await game.act({keys:[],duration_ms:2200});
   await game.act({keys:[],duration_ms:800},{name:'chamber-before',when:()=>true});
   await game.act({keys:['1'],duration_ms:200});
@@ -73,8 +79,7 @@ export async function run(game){
     }assert.fail('Native walk did not reach Cellar');
   }
   await walk(game,locked.pos);
-  const observer=await game.join({...fixture,world:defeated.view.session.world,position:locked.pos});
-  protectClient(observer);
+  await walk(observer,locked.pos);
   await observer.act({keys:[],duration_ms:100});
   const before=await save('before-unlock');
   await game.act({keys:['1'],duration_ms:900},{name:'cellar-unlock',when:v=>v.character.items[4]===-1});
