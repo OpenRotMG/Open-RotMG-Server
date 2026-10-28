@@ -20,7 +20,7 @@ export async function run(game){
   await shot('locks-before');
   game.check('three distinct owned native accounts start with empty lists',new Set([owner,target,nearInitial.view.session.account]).size===3&&lists().length===0);
   await click(745,515);await shot('locks-menu');
-  await click(590,480);await shot('locks-cancelled');
+  await click(300,300);await shot('locks-cancelled');
   game.check('leaving the Lock menu does not persist a lock',lists().length===0);
   // Six visible slots are not a saved-list cap; selected sorting is lock, distance, object ID: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/_ez.as
   await walk({x:pos.x+56,y:pos.y},peer);await shot('locks-unlocked-distant');await save('unlocked-distant');
@@ -31,7 +31,7 @@ export async function run(game){
   await shot('locks-peer-view',peer);await save('peer-after-lock',peer);
   await walk({x:pos.x+56,y:pos.y},peer);await shot('locks-locked-distant');await save('locked-distant');
   game.check('locked peer crosses the ordinary cutoff without changing the lock or living character',locked()&&Math.hypot((await peer.observe()).position.x-pos.x,(await peer.observe()).position.y-pos.y)>50&&(await peer.observe()).session.character===peerInitial.view.session.character);
-  await click(645,515);await shot('locks-unlock-menu');await click(590,480);
+  await click(645,515);await shot('locks-unlock-menu');await click(300,300);
   await walk({x:78.5,y:20.5});await walk({x:78.5,y:76.5});
   const portal=(await game.inspect()).diagnostic.entities.find(e=>e.kind===0x720);assert(portal);await walk(portal.pos);
   await click(700,575);for(let n=0;n<12&&(await game.observe()).world!=='Vault';n++)await game.act({keys:[],duration_ms:500});
