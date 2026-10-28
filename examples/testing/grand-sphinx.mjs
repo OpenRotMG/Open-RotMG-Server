@@ -57,7 +57,7 @@ export async function run(game){
   }
   async function fire(id,ms=2000){
     await protect();const state=await game.inspect(),target=entity(state,id);assert(target,'Living target required');
-    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>3)await walk(target.pos,2);
+    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>6)await walk(target.pos,5);
     const now=(await game.observe()).game_ms;if(now>=modifier){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifier=now+60000;}
     await game.act({keys:[],duration_ms:Math.min(ms,protection-now,scoutProtection-now),target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
@@ -84,7 +84,8 @@ export async function run(game){
   const reapers=initial.diagnostic.entities.filter(e=>e.kind===0xd55&&e.quest===boss.quest);
   game.check('exactly four owned Reapers accompany the sole Sphinx',reapers.length===4&&(await map()).entities.filter(e=>e.kind===0xd54).length===1);
   // Target build removes Reaper Stasis immunity: https://wikiwiki.jp/rmd/version/build123.5.1
-  const victim=reapers[0];assert(victim);
+  const distance=e=>Math.hypot(e.pos.x-initial.view.position.x,e.pos.y-initial.view.position.y);
+  const victim=reapers.slice().sort((a,b)=>distance(a)-distance(b))[0];assert(victim);
   await game.act({keys:[' '],duration_ms:150,target:{entity:victim.id,camera_angle:-Math.PI/4,fire:false}});
   const frozen=await save('reaper-stasis');
   game.check('native Mystic orb Stasises a Reaper without damaging it',entity(frozen,victim.id)?.statuses['22']&&entity(frozen,victim.id).hp===6000);
@@ -107,7 +108,7 @@ export async function run(game){
   await walk(bag.pos);await game.act({keys:[],duration_ms:700},{name:'sphinx-loot',when:()=>true});
   const before=await game.observe(),item=bag.items[0];assert(item!==-1);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
-  const picked=await save('picked');game.check('native drag commits one earned potion',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
+  const picked=await save('picked');game.check('native drag commits one earned item',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
   const portal=defeated.diagnostic.entities.find(e=>e.kind===0x72c);assert(portal,'Sphinx defeat must create Tomb portal');
   await walk(portal.pos);await game.act({keys:[],duration_ms:1000},{name:'sphinx-portal',when:()=>true});
   await game.act({keys:[],mouse:{x:700,y:580},duration_ms:300});
