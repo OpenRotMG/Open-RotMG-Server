@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 
-const out=process.env.QA_RESULTS_DIR,attackBonus=1000;
+const out=process.env.QA_RESULTS_DIR,attackBonus=100;
 const spec={class:0x307,level:20,seed:787,world:1,equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 const roots=new Set([0x668,0x67d,0x91f,0x91b,0x928,0x675,0x678,0xd56,0xd59,0xd5f,0xd50,0xd54,0xd61,0xe37]);
 const leaders=new Set([...roots,0x920,0x91c,0x92d,0x6c1,0x6c2]);
@@ -97,13 +97,13 @@ export async function run(game){
       jumps.set(client.actor,after.game_ms);await appendFile(join(out,'travel.jsonl'),JSON.stringify({actor:client.actor,anchor,position:after.position,game_ms:after.game_ms})+'\n');
     }
   }
-  async function approach(point){
+  async function approach(point,range){
     const group=[],before=await Promise.all(clients.map(c=>c.observe()));
     for(let i=0;i<clients.length;i++){
       const view=before[i],dx=point.x-view.position.x,dy=point.y-view.position.y,d=Math.hypot(dx,dy),bend=(stalled.get(clients[i].actor)??0)>0;
       const horizontal=Math.abs(dx)>=Math.abs(dy)*.2||bend&&Math.abs(dx)>.001,vertical=Math.abs(dy)>=Math.abs(dx)*.2||bend&&Math.abs(dy)>.001;
-      const keys=d<=5.5?[]:horizontal&&vertical?[dy>0?(dx>0?'s':'a'):(dx>0?'d':'w')]:horizontal?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
-      group.push({actor:clients[i].actor,input:{keys,duration_ms:d<=5.5?100:Math.max(100,Math.min(1200,Math.round((d-4.5)*800/(4+5.6*view.character.stats.speed/75))))}});
+      const keys=d<=range?[]:horizontal&&vertical?[dy>0?(dx>0?'s':'a'):(dx>0?'d':'w')]:horizontal?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
+      group.push({actor:clients[i].actor,input:{keys,duration_ms:d<=range?100:Math.max(100,Math.min(1200,Math.round((d-range+1)*800/(4+5.6*view.character.stats.speed/75))))}});
     }
     await act(game,[group]);
     const after=await Promise.all(clients.map(c=>c.observe()));
@@ -128,7 +128,8 @@ export async function run(game){
       const target=vulnerable.find(e=>e.kind===0x91d)??vulnerable.find(e=>leaders.has(e.kind))??vulnerable.find(e=>[0x929,0xd5e,0xd62].includes(e.kind));
       const anchor=target??family.find(e=>leaders.has(e.kind));
       if(!anchor){await act(game,{keys:[],duration_ms:1000});continue;}
-      if(views.some(v=>Math.hypot(v.position.x-anchor.pos.x,v.position.y-anchor.pos.y)>5.5)){await approach(anchor.pos);continue;}
+      const range=target?.kind===0xd5e?6.5:5.5;
+      if(views.some(v=>Math.hypot(v.position.x-anchor.pos.x,v.position.y-anchor.pos.y)>range)){await approach(anchor.pos,range);continue;}
       if(target){
         const duration_ms=target.kind===0xd5e?1000:1500,states=await Promise.all(clients.map(c=>c.inspect()));
         const group=states.map((s,i)=>{
