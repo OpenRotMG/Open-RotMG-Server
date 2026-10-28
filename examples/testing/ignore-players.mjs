@@ -50,7 +50,7 @@ with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
     await walk(portal.pos,peer);await peer.act({keys:[],mouse:{x:700,y:575},duration_ms:1200});
     game.check('ignored peer ordinarily enters private Vault', (await peer.observe()).world==='Vault');
     await chat(peer,'/g Hidden guild from Vault');await capture('ignore-private-guild');
-    // Build123.3 explicitly permits private-area targets: https://web.archive.org/web/20120614000000id_/http://forums.wildshadow.com/node/100145
+    // Build123.3 explicitly permits private-area targets: https://web.archive.org/web/20130605124251id_/https://forums.wildshadow.com/node/100145
     await chat(game,'/unignore '+name);game.check('unignore resolves a player in another private world',durable().lists.length===0);
     await chat(game,'/ignore '+name);game.check('ignore resolves a player in another private world',durable().lists.some(r=>r[0]===owner&&r[1]===1&&r[2]===target));
     const ownPortal=(await game.inspect()).diagnostic.entities.find(e=>e.kind===0x720);assert(ownPortal);await walk(ownPortal.pos,game);
@@ -62,11 +62,11 @@ with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
     await chat(peer,'Hidden after reconnect');await capture('ignore-reconnected');
     await chat(game,'/unignore '+name);await chat(peer,'After unignore visible');await chat(peer,'/yell After unignore yell');await chat(peer,'/g After unignore guild');await capture('ignore-after');
     const final=durable();game.check('unignore deletes durable relation without corrupting account state',final.lists.length===0&&final.integrity==='ok'&&final.foreign_keys.length===0);
-    const logs=(await readFile(join(out,'server.log'),'utf8')).replace(/\x1b\[[0-9;]*m/g,'');
-    const deliveries=logs.split('\n').filter(l=>l.includes('public chat delivered')).map(l=>{const account=l.match(/\baccount=(\d+)/),count=l.match(/\brecipients=(\d+)/);assert(account&&count,'Chat delivery log fields missing');return [Number(account[1]),Number(count[1])];});
+    const events=(await readFile(join(out,'server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
+    const deliveries=events.filter(e=>e.message==='public chat delivered').map(e=>[e.account,e.recipients]);
     game.check('actual chat delivery is suppressed only toward the ignoring recipient, including after reconnect',JSON.stringify(deliveries)===JSON.stringify([[target,2],[target,1],[target,1],[owner,2],[target,1],[target,2],[target,2]]));
-    game.check('ignore does not block reciprocal native trade and ordinary cancellation',logs.includes('native trade started')&&logs.includes('trade cancelled without inventory mutation'));
-    const guildDeliveries=logs.split('\n').filter(l=>l.includes('guild chat delivered')).map(l=>{const count=l.match(/\brecipients=(\d+)/);assert(count,'Guild delivery count missing');return Number(count[1]);});
+    game.check('ignore does not block reciprocal native trade and ordinary cancellation',events.some(e=>e.message==='native trade started')&&events.some(e=>e.message==='trade cancelled without inventory mutation'));
+    const guildDeliveries=events.filter(e=>e.message==='guild chat delivered').map(e=>e.recipients);
     game.check('native guild chat is suppressed locally and across private worlds until unignore',JSON.stringify(guildDeliveries)===JSON.stringify([2,1,1,2]));
     await writeFile(join(out,'ignore-durable.json'),JSON.stringify({final,deliveries,guildDeliveries},null,2));
   }finally{for(const c of connections)c.close();}
