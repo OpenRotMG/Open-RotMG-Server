@@ -146,6 +146,8 @@ export async function run(game){
   await walk(portal.pos);await game.act({keys:[],duration_ms:1000},{name:'sphinx-portal',when:()=>true});
   await game.act({keys:[],mouse:{x:700,y:580},duration_ms:300});
   const entered=await save('tomb-entry');game.check('earned Tomb portal admits the same living character',entered.view.map.name==='Tomb of the Ancients'&&entered.view.session.character===initial.view.session.character&&entered.view.lifecycle.alive);
+  // The client entry card advances only while native gameplay is running.
+  await idle(5000);
   await game.act({keys:['d'],duration_ms:500},{name:'tomb-journey',when:()=>true});
   const walked=await save('tomb-walk');game.check('normal native input moves inside the earned dungeon',Math.hypot(walked.view.position.x-entered.view.position.x,walked.view.position.y-entered.view.position.y)>.5);
   await game.act({keys:['Insert'],duration_ms:300});const retained=await save('returned');
