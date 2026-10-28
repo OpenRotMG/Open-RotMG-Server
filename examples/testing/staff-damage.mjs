@@ -3,15 +3,12 @@ import {join} from 'node:path';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x30e,level:20,seed:873,world:'undead-lair',worldSeed:12351,position:'spawn',equipment:[0xa97,-1,-1,-1],backpack:[0xb08,0xc03,0xc15,0xc24,-1,-1,-1,-1],stats:[600,200,50,25,30,50,40,30]};
+export const fixture={class:0x30e,level:20,seed:873,world:'undead-lair',worldSeed:12351,position:world=>{const boss=world.encounter_markers.find(e=>e.kind===0xd90);assert(boss,'Septavius marker required');return{x:boss.position.x-1,y:boss.position.y};},equipment:[0xa97,-1,-1,-1],backpack:[0xb08,0xc03,0xc15,0xc24,-1,-1,-1,-1],stats:[600,200,50,25,30,50,40,30]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const initial=await game.inspect();
-  const response=await fetch(config.origin+'/dev/map?player='+initial.diagnostic.player,{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});assert(response.ok);
-  const boss=(await response.json()).entities.find(e=>e.kind===0xd90);assert(boss);
-  const {worldSeed,...wizard}=fixture;
-  game=await game.join({...wizard,world:initial.view.session.world,position:{x:boss.pos.x-1,y:boss.pos.y}});
+  const boss=initial.diagnostic.entities.find(e=>e.kind===0xd90);assert(boss);
   let protectedUntil=0;
   async function protect(){
     const now=(await game.observe()).game_ms;if(now<protectedUntil)return;
