@@ -23,6 +23,13 @@ export async function run(game){
     game.check('empty drink slot cannot repeat '+item,(await actor.observe()).character.inventory_revision===after.character.inventory_revision);
     return {before,after};
   }
+  async function waitUntil(time){
+    for(let n=0;n<40;n++){
+      const now=(await game.observe()).game_ms;if(now>=time)return;
+      await game.act({keys:[],duration_ms:Math.max(50,Math.min(2000,time-now))});
+    }
+    throw Error('Native game clock did not reach '+time);
+  }
   const recovery=(before,after,key)=>Math.ceil((after.game_ms-before.game_ms)/1000*(key==='hp'?1+before.character.stats.vitality/8:.6+before.character.stats.wisdom/16.7))+1;
   const restored=(before,after,key,amount)=>after.character[key]-before.character[key]>=amount&&after.character[key]-before.character[key]<=amount+recovery(before,after,key);
   for(let item=0xb34;item<=0xb3d;item++){
@@ -58,16 +65,15 @@ export async function run(game){
   for(const [item,boosts,duration] of [[0xc39,{max_hp:50,dexterity:10},20],[0xc3a,{max_hp:50,max_mp:50},20],[0xc3b,{attack:10,dexterity:10},20],[0xc3c,{defense:10,vitality:10},30]]){
     result=await use(item);
     game.check('cocktail applies exactly its two selected boosts '+item,Object.entries(base).every(([key,value])=>result.after.character.stats[key]===value+(boosts[key]??0))&&Boolean(result.after.character.conditions&(1<<9)));
-    for(let n=0;n<8;n++)await game.act({keys:[],duration_ms:2000});
+    await waitUntil(result.after.game_ms+15500);
     const sober=await save('sober-'+item);
     game.check('cocktail Drunk expires before stat boosts '+item,!(sober.character.conditions&(1<<9))&&Object.entries(boosts).every(([key,amount])=>sober.character.stats[key]===base[key]+amount));
-    const extra=duration===30?6:0;
-    for(let n=0;n<extra/2;n++)await game.act({keys:[],duration_ms:2000});
-    if(extra){
+    if(duration===30){
+      await waitUntil(result.after.game_ms+23000);
       const extended=await save('extended-'+item),elapsed=extended.game_ms-result.after.game_ms;
       game.check('Lime boosts remain active beyond 20 seconds',elapsed>20000&&elapsed<30000&&Object.entries(boosts).every(([key,amount])=>extended.character.stats[key]===base[key]+amount));
     }
-    for(let n=0;n<Math.ceil((duration-16-extra)/2)+1;n++)await game.act({keys:[],duration_ms:2000});
+    await waitUntil(result.after.game_ms+duration*1000+1000);
     const expired=await save('expired-'+item);
     game.check('cocktail boosts expire without changing base stats '+item,JSON.stringify(expired.character.stats)===JSON.stringify(base));
   }
