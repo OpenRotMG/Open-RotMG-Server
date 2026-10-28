@@ -21,7 +21,7 @@ export async function run(game){
   const s=await game.inspect(),b=find(s,boss.id);if(!b)break;
   if(!rageObserved&&(b.condition&(1<<24))){await record('shield-start');await walk({x:b.pos.x-7,y:b.pos.y});await act({keys:[],duration_ms:900});for(let i=0;i<12;i++)await act({keys:[],duration_ms:1000});const chasing=await record('rage-chase');game.check('rage actually moves Oryx 2 toward the retreating native player',distance(find(chasing,boss.id).pos,b.pos)>1&&!(find(chasing,boss.id).condition&(1<<24)));rageObserved=true;continue;}
   if(distance(s.view.position,b.pos)>1){await walk(boss.id,.75);continue;}
-  await act({keys:[],duration_ms:2000,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+  await act({keys:[],duration_ms:500,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
  }
  const defeated=await record('defeated');
  game.check('ordinary native dagger damage defeats Oryx 2 and credits once',!find(defeated,boss.id)&&defeated.diagnostic.character.lifetime.oryx_kills===initial.diagnostic.character.lifetime.oryx_kills+1&&defeated.view.character.experience>initial.view.character.experience);
