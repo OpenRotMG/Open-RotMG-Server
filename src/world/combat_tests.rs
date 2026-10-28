@@ -82,14 +82,14 @@ fn native_hits_keep_effects_separate_from_hp_protection_and_consume_once() {
 
 #[test]
 fn area_damage_has_strict_radius_defense_floor_and_protection() {
-    for (flags, defense, expected) in [
-        (0, 25, 76),
-        (0, 100, 15),
-        (bit(condition::ARMORED), 25, 51),
-        (bit(condition::ARMOR_BROKEN), 25, 101),
-        (bit(condition::INVULNERABLE), 25, 0),
-        (bit(condition::INVINCIBLE), 25, 0),
-        (bit(condition::STASIS), 25, 0),
+    for (flags, amount, expected) in [
+        (0, 101, 76),
+        (0, 7, 1),
+        (bit(condition::ARMORED), 101, 51),
+        (bit(condition::ARMOR_BROKEN), 101, 101),
+        (bit(condition::INVULNERABLE), 101, 0),
+        (bit(condition::INVINCIBLE), 101, 0),
+        (bit(condition::STASIS), 101, 0),
     ] {
         let (mut w, id) = fixture(0x18, false);
         let center = Pos { x: 5.5, y: 8.5 };
@@ -105,10 +105,10 @@ fn area_damage_has_strict_radius_defense_floor_and_protection() {
                 y: center.y,
             };
             p.character.hp = 200;
-            p.character.base[3] = defense;
+            p.character.base[3] = 25;
             p.lab_conditions = flags;
             p.paused = paused;
-            w.area_damage(0x936, center, 3., 101).unwrap();
+            w.area_damage(0x936, center, 3., amount).unwrap();
             assert_eq!(
                 w.players[&id].character.hp,
                 200 - if inside { expected } else { 0 }
@@ -193,6 +193,12 @@ fn multihit_and_cover_flags_preserve_distinct_targets_and_once_only_hits() {
             w.spawn_entity(kind, Pos { x: 9.5, y: 8.5 }, vec![])
                 .unwrap();
         }
+        for target in targets {
+            w.entities.get_mut(&target).unwrap().hp = 2000;
+        }
+        let p = w.players.get_mut(&id).unwrap();
+        p.character.shots = 1;
+        p.character.lifetime.shots = 1;
         let hp = targets.map(|id| w.entities[&id].hp);
         let mut b = shot(&w, id, 0xb3f, 0);
         b.friendly = true;
