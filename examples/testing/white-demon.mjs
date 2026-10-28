@@ -43,9 +43,10 @@ export async function run(game){
     const combat=await game.inspect();
     game.check('natural White Demon activates and pursues',samples.some(s=>enemy(s)?.activated!=null&&Math.hypot(enemy(s).pos.x-root.pos.x,enemy(s).pos.y-root.pos.y)>.2));
     game.check('native selected shots travel five tiles per second for two seconds',[...shots.values()].length>=9&&[...shots.values()].every(p=>p.speed===50&&p.lifetime_ms===2000));
-    // Selected compiled reconstruction, not a paired-swipe historical claim: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Mountain.cs#L15-L24
+    // The view omits shot times; consecutive IDs from the unfired root bind selected three-shot fans, not historical paired swipes: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Mountain.cs#L15-L24
+    assert.equal(root.bullet,0);
     const volleys=new Map();
-    for(const p of shots.values()){if(!volleys.has(p.start_time_ms))volleys.set(p.start_time_ms,[]);volleys.get(p.start_time_ms).push(p.angle);}
+    for(const p of shots.values()){const volley=Math.floor((p.id-1)/3);if(!volleys.has(volley))volleys.set(volley,[]);volleys.get(volley).push(p.angle);}
     game.check('native volleys contain three shots with twenty-degree gaps',[...volleys.values()].filter(a=>a.length===3).length>=3&&[...volleys.values()].filter(a=>a.length===3).every(a=>a.sort((a,b)=>a-b).slice(1).every((v,i)=>Math.abs(v-a[i]-Math.PI/9)<.001)));
     for(let n=0;n<100&&enemy(await game.inspect());n++){
       const s=await game.inspect(),e=enemy(s),dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
