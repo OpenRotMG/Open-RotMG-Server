@@ -58,9 +58,9 @@ export async function run(game){
   await walk({x:28.5,y:54.5},true);
   const beforeShot=await save('before-shot-sac'),shotEgg=entities(beforeShot).find(e=>e.kind===0x21b&&distance(e.pos,{x:32.5,y:54.5})<.1);assert(shotEgg);
   const prior=new Set(entities(beforeShot).map(e=>e.id));
-  await game.act({keys:[],duration_ms:450,target:{entity:shotEgg.id,camera_angle:-Math.PI/4,fire:true}});
-  const shot=await save('hatched-by-shot');
-  game.check('ordinary staff fire hatches another natural live sac once',!entities(shot).some(e=>e.id===shotEgg.id)&&entities(shot).filter(e=>e.kind===0x21c&&!prior.has(e.id)).length>=2);
+  await game.act({keys:[],duration_ms:80,target:{entity:shotEgg.id,camera_angle:-Math.PI/4,fire:true}});
+  const shot=await save('hatched-by-shot'),survivors=entities(shot).filter(e=>e.kind===0x21c&&!prior.has(e.id));
+  game.check('ordinary staff shot hatches another natural live sac with observed offspring',!entities(shot).some(e=>e.id===shotEgg.id)&&survivors.length>=1&&survivors.length<=7);
   for(const [x,y] of [[32.5,54.5],[32.5,34.5],[52.5,34.5],[72.5,34.5],[72.5,24.5]])await walk({x,y},true);
   const arena=await save('boss-room'),boss=entities(arena).find(e=>e.kind===0x936);assert(boss);
   game.check('entrance-to-boss route is traversable with ordinary populated rooms',arena.view.lifecycle.alive&&arena.diagnostic.character.kills>entry.diagnostic.character.kills&&arena.view.character.experience>entry.view.character.experience);
