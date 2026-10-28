@@ -2,9 +2,8 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-const out=process.env.QA_RESULTS_DIR,mode=process.env.LICH_BRANCH;
-const branches=['Solo','SmallGroup','Mob','HugeMob'];
-let branch=mode==='Remaining'?'Mob':mode,index=branches.indexOf(branch),roots;
+const out=process.env.QA_RESULTS_DIR,branch=process.env.LICH_BRANCH;
+const index=['Solo','SmallGroup','Mob','HugeMob'].indexOf(branch);
 const spec={class:0x31d,level:20,seed:793,world:1,equipment:[0xb0b,0xb29,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 let root;
 export async function prepare(api){
@@ -13,14 +12,14 @@ export async function prepare(api){
   const events=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
   const end=events.findLastIndex(f=>f.message==='Realm simulation populated'&&f.layout===world.realm_layout);assert(end>=0);
   const start=events.slice(0,end).findLastIndex(f=>f.message==='Realm simulation populated');
-  roots=events.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&f.kind===0x91b&&f.layout===world.realm_layout);
+  const roots=events.slice(start+1,end).filter(f=>f.message==='finite named Realm quest placed'&&f.kind===0x91b&&f.layout===world.realm_layout);
   assert(roots.length>=4,'Four ordinarily placed Liches required');root=roots[index];
   await writeFile(join(out,'placement.json'),JSON.stringify({world,roots,branch}));
-  return {...spec,...(index>=2?{equipment:[0xb0b,0xb29,0xa7b,0xacc],backpack:[0xb10,0xb10,-1,-1,-1,-1,-1,-1]}:{}),position:{x:root.x,y:root.y}};
+  return {...spec,...(index>=2?{equipment:[0xb0b,0xb29,0xa7b,0xacc],backpack:[0xb10,-1,-1,-1,-1,-1,-1,-1]}:{}),position:{x:root.x,y:root.y}};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const records=[],protectedUntil=new Map();let partner,attackUntil=0;
+  const records=[],protectedUntil=new Map(),partners=[];
   async function cheat(actor,change){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:actor.actor,change}})});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
@@ -30,7 +29,7 @@ export async function run(game){
     if(now>=(protectedUntil.get(actor.actor)??0)){await cheat(actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});protectedUntil.set(actor.actor,now+60000);}
   }
   async function idle(ms){
-    while(ms>0){const actors=[game,partner].filter(Boolean);for(const actor of actors)await protect(actor);const now=(await game.observe()).game_ms,step=Math.min(ms,5000,...actors.map(actor=>protectedUntil.get(actor.actor)-now));await game.act({keys:[],duration_ms:step});ms-=step;}
+    while(ms>0){const actors=[game,...partners];for(const actor of actors)await protect(actor);const now=(await game.observe()).game_ms,step=Math.min(ms,5000,...actors.map(actor=>protectedUntil.get(actor.actor)-now));await game.act({keys:[],duration_ms:step});ms-=step;}
   }
   const entity=(state,id)=>state.diagnostic.entities.find(e=>e.id===id);
   const family=state=>state.diagnostic.entities.filter(e=>e.quest===root.entity);
@@ -52,33 +51,27 @@ export async function run(game){
     await approach(actor,id,3.5);
     return actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
-  const indices=mode==='Remaining'?[2,3]:[index];
-  for(const i of indices){
-  index=i;branch=branches[i];root=roots[i];
-  if(i!==indices[0]){await cheat(game,{kind:'teleport',position:{x:root.x,y:root.y}});await game.act({keys:[],duration_ms:100});}
   const initial=await save('idle');await protect(game);
   game.check('untouched naturally placed Lich starts vulnerable at selected HP',entity(initial,root.entity)?.hp===300000&&!(entity(initial,root.entity).condition&(1<<24)));
   await game.act({keys:['s'],duration_ms:150});
   game.check('ordinary movement works at the natural ruin',Math.hypot((await game.observe()).position.x-initial.view.position.x,(await game.observe()).position.y-initial.view.position.y)>.3);
   await approach(game,initial.view.position,.3);
-  if(index===3){partner=await game.join({...spec,seed:794,position:initial.view.position,equipment:[0xb0b,0xb29,0xa7b,0xacc],backpack:[0xb10,-1,-1,-1,-1,-1,-1,-1]});await protect(partner);}
-  if(index>0){
-    await idle(Math.max(0,attackUntil-(await game.observe()).game_ms));
-    for(const actor of [game,partner].filter(Boolean))await cheat(actor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
-    attackUntil=(await game.observe()).game_ms+60000;
+  for(let n=0;n<index-1;n++){
+    const partner=await game.join({...spec,seed:794+n,class:n===1?0x31f:spec.class,stats:n===1?[770,252,50,25,50,50,40,75]:spec.stats,position:initial.view.position,equipment:[0xb0b,n===1?0xb26:0xb29,0xa7b,0xacc],backpack:[0xb10,-1,-1,-1,-1,-1,-1,-1]});
+    partners.push(partner);await protect(partner);
   }
+  if(index>0)for(const actor of [game,...partners])await cheat(actor,{kind:'stat_modifier',index:2,amount:100,duration_ms:60000});
   for(let n=0;n<20&&entity(await game.inspect(),root.entity).stage!==1;n++)await fire(game,root.entity);
   let state=await save('admitted');
   game.check('native sword damage admits the shielded evaluation introduction',entity(state,root.entity).stage===1&&!!(entity(state,root.entity).condition&(1<<24)));
   if(index>0){
     const target={entity:root.entity,camera_angle:-Math.PI/4,fire:true};
     const sequence=index===1?[{actor:game.actor,input:{keys:[],duration_ms:2000}}]:[];
-    const opening={actor:game.actor,input:{keys:index>=2?[i===indices[0]?'1':'2',' ']:[' '],duration_ms:index>=2?1000:250,target}};
-    sequence.push(partner?[opening,{actor:partner.actor,input:{keys:['1',' '],duration_ms:1000,target}}]:opening);
+    sequence.push([game,...partners].map(actor=>({actor:actor.actor,input:{keys:index>=2?['1',' ']:[' '],duration_ms:index>=2?1000:250,target}})));
     const interval=index>=2?1000:250;
     for(let ms=0;ms<[0,700,4000,5000][index];ms+=interval){
       const input={keys:[],duration_ms:Math.min(interval,[0,700,4000,5000][index]-ms),target};
-      sequence.push(partner?[{actor:game.actor,input},{actor:partner.actor,input}]:{actor:game.actor,input});
+      sequence.push([game,...partners].map(actor=>({actor:actor.actor,input})));
     }
     await game.act(sequence);
     if(index>=2)game.check('native Dexterity effusion supplies the damage-evaluation fixture',(await game.observe()).character.stats.dexterity===88);
@@ -141,11 +134,8 @@ export async function run(game){
   game.check('native drag commits one eligible reward',picked.view.character.items[destination]===item&&picked.view.character.inventory_revision===inventory.inventory_revision+1&&entity(picked,bag.id)?.items[slot]===-1);
   await game.act({keys:[],duration_ms:350,drag:{from:{x:634+(slot%4)*44,y:528+Math.floor(slot/4)*44},to:{x:678,y:428}}});
   game.check('empty-slot drag cannot duplicate the reward',(await game.observe()).character.inventory_revision===picked.view.character.inventory_revision);
-  if(i===indices.at(-1)){
-    await game.act({keys:['Insert'],duration_ms:250});
-    const retained=await game.observe();
-    game.check('Nexus reconnect preserves the living character and every collected reward',retained.world==='Nexus'&&retained.lifecycle.alive&&retained.session.character===initial.view.session.character&&JSON.stringify(retained.character.items)===JSON.stringify(picked.view.character.items)&&retained.character.inventory_revision===picked.view.character.inventory_revision);
-  }
-  await writeFile(join(out,branch+'-branch.json'),JSON.stringify({branch,root,actual,earned,picked,retained:await game.observe()}));
-  }
+  await game.act({keys:['Insert'],duration_ms:250});
+  const retained=await game.observe();
+  game.check('Nexus reconnect preserves the living character and collected reward',retained.world==='Nexus'&&retained.lifecycle.alive&&retained.session.character===initial.view.session.character&&JSON.stringify(retained.character.items)===JSON.stringify(picked.view.character.items)&&retained.character.inventory_revision===picked.view.character.inventory_revision);
+  await writeFile(join(out,branch+'-branch.json'),JSON.stringify({branch,root,actual,earned,picked,retained}));
 }
