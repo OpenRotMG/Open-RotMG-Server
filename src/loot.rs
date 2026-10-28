@@ -1362,6 +1362,35 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
+    fn realm_sprites_keep_distinct_independent_public_rewards() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, tier, slots, chance) in [
+            (0x624, 5, WEAPONS, 0.02),
+            (0x625, 2, ABILITIES, 0.04),
+            (0x626, 6, ARMOR, 0.01),
+        ] {
+            assert!(
+                matches!(table(kind), [(p, Pick::Tier(t, s)), (q, Pick::Item(0xa23))]
+                if *p == chance && *t == tier && *s == slots && *q == 0.05)
+            );
+            assert!(period_surface(kind) && !private(kind));
+            let pool = candidates(&content, Pick::Tier(tier, slots));
+            assert!(!pool.is_empty());
+            let all = rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0));
+            assert_eq!(all.len(), pool.len() + 1);
+            assert!(pool.iter().all(|item| all.contains(item)) && all.contains(&0xa23));
+            assert!(
+                rewards(
+                    &content,
+                    kind,
+                    &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+                )
+                .is_empty()
+            );
+        }
+    }
+
+    #[test]
     fn oasis_chest_armor_keeps_period_tiers() {
         let armor: Vec<_> = chest_table(0x678)
             .into_iter()
