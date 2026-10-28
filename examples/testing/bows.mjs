@@ -63,7 +63,7 @@ export async function run(game){
     await huntress.act({keys:[],target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true},duration_ms:2300},item===0xa1e?{name:'bows-golden',when:v=>v.verification.shots>before.diagnostic.character.shots}:undefined);
     const after=await huntress.inspect();observations.push({combat:item,before,after});await save();
     game.check(`native ${item.toString(16)} damages living enemies`,after.diagnostic.entities.some(e=>{const old=before.diagnostic.entities.find(b=>b.id===e.id);return old&&e.hp<old.hp;})||after.diagnostic.character.kills>before.diagnostic.character.kills);
-    game.check(`native ${item.toString(16)} preserves mana and item`,after.view.character.mp===before.view.character.mp&&after.view.character.items[0]===item&&after.view.lifecycle.alive);
+    game.check(`native ${item.toString(16)} preserves inventory and life`,after.view.character.inventory_revision===before.view.character.inventory_revision&&after.view.character.items[0]===item&&after.view.lifecycle.alive);
   }
   const wizard=await game.join({...fixture,class:0x30e,seed:873,equipment:[-1,-1,-1,-1],backpack:[0xc02,-1,-1,-1,-1,-1,-1,-1]});
   const before=await wizard.observe();
