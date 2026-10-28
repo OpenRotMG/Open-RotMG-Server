@@ -42,12 +42,11 @@ export async function run(game){
     game.check(name+' applies its enemy condition',view.view.objects.some(e=>e.kind<0x1400&&(e.condition_mask&bit)!==0));
     if(name==='yellow')game.check('yellow causes observed enemy damage',view.diagnostic.entities.some(e=>[0x945,0x946].includes(e.kind)&&e.hp<(e.kind===0x945?1270:700)));
   }
-  const orange=await use(game,7,0x1403,'orange');
-  game.check('orange applies enemy Stasis',orange.view.objects.some(e=>(e.condition_mask&(1<<21))!==0));
-  await game.act({keys:[],duration_ms:6000});
   const beforePurple=await game.inspect();
   const purple=await use(game,8,0x1400,'purple');
   game.check('purple damages an enemy without native weapon fire',purple.diagnostic.entities.some(e=>beforePurple.diagnostic.entities.some(b=>b.id===e.id&&e.hp<b.hp&&(b.hp-e.hp)%30!==0)));
+  const orange=await use(game,7,0x1403,'orange');
+  game.check('orange applies enemy Stasis',orange.view.objects.some(e=>(e.condition_mask&(1<<21))!==0));
   await cheat(game,{kind:'vitals',hp:100,mp:100});
   const white=await use(game,9,0x1401,'white');
   game.check('white restores injured owner HP',white.view.character.hp>=125);
