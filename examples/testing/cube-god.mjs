@@ -64,10 +64,12 @@ export async function run(spectator){
   game.check('owned followers move around their encounter', [0xd5a,0xd5b,0xd5c].every(k=>trace.some((t,n)=>t.entities.some(e=>e.kind===k&&trace.slice(0,n).some(p=>p.entities.some(old=>old.id===e.id&&Math.hypot(e.pos.x-old.pos.x,e.pos.y-old.pos.y)>.2))))));
   game.check('native session sees root and every dependent attack',[0xd59,0xd5a,0xd5b,0xd5c].every(k=>trace.some(t=>t.projectiles.some(p=>t.entities.some(e=>e.kind===k&&e.id===p.owner)))));
   // Reproduce is a nearby density cap, not a per-parent lifetime budget: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/Reproduce.cs
-  const victim=family(state).find(e=>e.kind===0xd5a&&state.view.objects.some(o=>o.id===e.id));assert(victim);
-  async function approach(actor,point,range=1.5){
+  const distance=e=>Math.hypot(e.pos.x-state.view.position.x,e.pos.y-state.view.position.y);
+  const victim=family(state).filter(e=>e.kind===0xd5a&&state.view.objects.some(o=>o.id===e.id)).sort((a,b)=>distance(a)-distance(b))[0];assert(victim);
+  async function approach(actor,destination,range=1.5){
     for(let n=0;n<80;n++){
       await protect(actor.actor);await protect(spectator.actor);
+      const point=typeof destination==='number'?entity(await actor.inspect(),destination)?.pos:destination;assert(point,'Walking target must still exist');
       const view=await actor.observe(),dx=point.x-view.position.x,dy=point.y-view.position.y;if(Math.hypot(dx,dy)<range)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
@@ -75,7 +77,7 @@ export async function run(spectator){
       await actor.act({keys,duration_ms:Math.max(50,Math.min(250,Math.round(distance/(4+5.6*view.character.stats.speed/75)*1000)))});
     }throw Error('Native walk did not reach target');
   }
-  async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>2)await approach(actor,e.pos);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
+  async function fire(actor,id,ms=250){await protect(actor.actor);const s=await actor.inspect(),e=entity(s,id);assert(e);if(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)>2)await approach(actor,id);await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}
   await game.act({keys:[],duration_ms:750},{name:'cube-active',when:()=>true});
   const old=new Set(family(state).filter(e=>e.kind===0xd5a).map(e=>e.id));
   for(let n=0;n<30&&entity(await game.inspect(),victim.id);n++)await fire(game,victim.id);
@@ -91,7 +93,9 @@ export async function run(spectator){
   state=await save('defeated');game.check('native sword combat defeats the admitted Cube God',!entity(state,root));
   const after=await Promise.all([game.inspect(),partner.inspect(),spectator.inspect()]);
   game.check('both native contributors earn XP while distant spectator does not',after[0].view.character.experience>xp[0].character.experience&&after[1].view.character.experience>xp[1].character.experience&&after[2].view.character.experience===xp[2].character.experience);
-  const bags=after.slice(0,2).flatMap(s=>s.diagnostic.entities).filter(e=>e.extra_stats.some(([k,a])=>k===54&&a>=0)&&e.items?.some(i=>i!==-1));assert(bags.length,'Observed roll must provide loot; no probability inferred');
+  const log=await fields(),death=log.findIndex(f=>f.message==='enemy defeated'&&f.entity===root);assert(death>=0&&log.filter(f=>f.message==='enemy defeated'&&f.entity===root).length===1,'One logged Cube defeat required');
+  const previous=log.slice(0,death).findLastIndex(f=>f.message==='enemy defeated'),cubeBags=new Set(log.slice(previous+1,death).filter(f=>f.message==='loot bag allocated').map(f=>f.entity));
+  const bags=after.slice(0,2).flatMap(s=>s.diagnostic.entities).filter(e=>cubeBags.has(e.id)&&e.extra_stats.some(([k,a])=>k===54&&a>=0)&&e.items?.some(i=>i!==-1));assert(bags.length,'Observed Cube roll must provide loot; no probability inferred');
   const owner=[game,partner].find((a,i)=>bags.some(b=>b.extra_stats.some(([k,v])=>k===54&&v===after[i].view.session.account)));assert(owner);
   const ownerState=await owner.inspect(),bag=bags.find(b=>b.extra_stats.some(([k,v])=>k===54&&v===ownerState.view.session.account));
   await approach(owner,bag.pos,.4);await owner.act({keys:[],duration_ms:750},{name:'cube-reward',when:()=>true});
@@ -101,5 +105,5 @@ export async function run(spectator){
   game.check('native bag drag commits exactly one eligible reward',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===inventory.inventory_revision+1&&entity(picked,bag.id)?.items[0]===-1);
   await owner.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:678,y:428}}});game.check('empty bag drag cannot duplicate reward',(await owner.observe()).character.inventory_revision===picked.view.character.inventory_revision);
   await owner.act({keys:['Insert'],duration_ms:250});const retained=await owner.observe();game.check('Nexus reconnect preserves living identity and reward',retained.world==='Nexus'&&retained.lifecycle.alive&&retained.session.character===picked.view.session.character&&retained.character.items[4]===item&&retained.character.inventory_revision===picked.view.character.inventory_revision);
-  await game.act({keys:[],duration_ms:750},{name:'cube-defeated',when:()=>true});
+  await writeFile(join(out,'retained.json'),JSON.stringify(retained));
 }
