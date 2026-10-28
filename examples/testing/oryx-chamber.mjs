@@ -96,7 +96,7 @@ export async function run(game){
   }
   const a=await game.inspect(),b=await observer.inspect();
   game.check('two native clients enter the same shared Cellar',a.view.map.name==='Wine Cellar'&&b.view.map.name==='Wine Cellar'&&a.view.session.world===b.view.session.world);
-  await game.act({keys:['r'],duration_ms:1700});const returned=await save('returned');
+  await game.act({keys:['Insert'],duration_ms:1700});const returned=await save('returned');
   game.check('same living character exits to Nexus with its progress',returned.view.map.name==='Nexus'&&returned.view.lifecycle.alive&&returned.view.session.character===start.view.session.character&&returned.diagnostic.character.lifetime.oryx_kills===a.diagnostic.character.lifetime.oryx_kills);
   const report=JSON.parse(await readFile(join(out,'native/result.json'),'utf8'));
   await writeFile(join(out,'fixture-limits.json'),JSON.stringify({preparedStats:fixture.stats,preparedInvincible:true,preparedChamber:true,rejectedSlotRetryAccepted:false,earnedCastleRoute:false,origin:report.origin}));
