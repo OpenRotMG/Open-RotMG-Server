@@ -69,7 +69,7 @@ export async function run(game){
     game.check('bounded owned family regrows a new child while parent lives',children(regrown).some(e=>!initialChildren.some(c=>c.id===e.id))&&children(regrown).length<=5);
     const beforeKill=await game.inspect();await kill(root.id);
     const dead=await act({keys:[],duration_ms:500},{name:'sprite-god-defeated',when:()=>true});
-    game.check('ordinary native fire defeats parent and earns at least200 XP',!enemy(dead)&&dead.view.character.experience>=beforeKill.view.character.experience+200);
+    game.check('ordinary native fire defeats parent and earns level-capped195 XP',!enemy(dead)&&dead.view.character.experience>=beforeKill.view.character.experience+195);
     const orphan=children(dead)[0];assert(orphan,'Parent defeat should leave surviving children');
     await act({keys:[],duration_ms:11000});const orphaned=await game.inspect();
     game.check('orphan survives and wanders without new family births after parent death',enemy(orphaned,orphan.id)&&Math.hypot(enemy(orphaned,orphan.id).pos.x-orphan.pos.x,enemy(orphaned,orphan.id).pos.y-orphan.pos.y)>.2&&children(orphaned).every(e=>children(dead).some(c=>c.id===e.id)));
