@@ -76,6 +76,30 @@ fn voice(seed: u64, intent: Intent) -> Value {
     })
 }
 
+pub(super) fn constrain_finite_repertoire(payload: &Value, reply: &mut Value) -> std::result::Result<(), Failure> {
+    let invalid=||Failure::Error("invalid_market_generation_grammar");
+    let intents: Vec<Intent>=serde_json::from_value(payload["allowed_intents"].clone()).map_err(|_|invalid())?;
+    let [intent]=intents.as_slice() else { return Err(invalid()); };
+    let shapes=match intent { Intent::MarketBank=>&BANK_SHAPES, Intent::MarketThanks=>&THANKS_SHAPES, _=>return Ok(()) };
+    let voice=&payload["bot"]["voice"];
+    if voice["syntax_examples"]!=json!(shapes) { return Err(invalid()); }
+    let words=shapes.iter().map(|s| {
+        let mut word=s.to_string();
+        match voice["capitalization"].as_str() {
+            Some("lowercase")=>{}, Some("UPPERCASE")=>word.make_ascii_uppercase(),
+            Some("initial capital")=>word[..1].make_ascii_uppercase(), _=>return Err(invalid()),
+        }
+        Ok(word)
+    }).collect::<std::result::Result<Vec<_>,Failure>>()?;
+    let mut choices=Vec::new();
+    for (i,a) in words.iter().enumerate() { for (j,b) in words.iter().enumerate() { for (k,c) in words.iter().enumerate() {
+        if i!=j&&i!=k&&j!=k { choices.push(format!("{a}|{b}|{c}")); }
+    } } }
+    // Closed vocabularies constrain generation, not merely post-generation rejection.
+    reply["enum"]=json!(choices);
+    Ok(())
+}
+
 fn validated_template(template: &str, intent: Intent) -> std::result::Result<bool, Failure> {
     let remaining = template
         .replace("{give}", "")
@@ -367,6 +391,44 @@ mod tests {
                 "{intent:?}: {bad}"
             );
         }
+    }
+
+    #[test]
+    fn finite_market_reply_schema_constrains_actual_outbound_wording_without_changing_other_intents() {
+        for intent in [Intent::MarketBank,Intent::MarketThanks] {
+            for seed in [0,8,16] {
+                let payload=json!({"market_generation":true,"allowed_intents":[intent],"bot":{"voice":voice(seed,intent)}});
+                let schema=reply_schema(&payload).unwrap();
+                let choices=schema["properties"]["reply"]["enum"].as_array().unwrap();
+                assert_eq!(choices.len(),60);
+                assert_eq!(choices.iter().map(Value::to_string).collect::<BTreeSet<_>>().len(),60);
+                for choice in choices { assert!(repertoire(choice.as_str().unwrap(),intent).is_ok()); }
+                for bad in ["thx|thxvm|cheers","ty|ty|cheers","ty|cheers","ty|thx|thanks|cheers","full inv|full backpack|need room","ty|thanks|wts {give} for {want}"] {
+                    assert!(!choices.contains(&json!(bad)),"{intent:?}: {bad}");
+                }
+                assert_eq!(schema["properties"]["intent"]["enum"],json!([intent]));
+                assert_eq!(schema["properties"]["reply"]["type"],"string");
+                assert_eq!(schema["properties"]["reply"]["maxLength"],128);
+                assert_eq!(schema["required"],json!(["intent","reply"]));
+                assert_eq!(schema["additionalProperties"],false);
+                let mut malformed=payload.clone();
+                malformed["bot"]["voice"]["syntax_examples"][0]=json!("thxvm");
+                assert!(reply_schema(&malformed).is_err());
+                malformed=payload.clone();malformed["bot"]["voice"]["syntax_examples"]=json!(["ty","ty","cheers"]);
+                assert!(reply_schema(&malformed).is_err());
+                malformed=payload.clone();malformed["bot"]["voice"]["capitalization"]=json!("repair whitespace");
+                assert!(reply_schema(&malformed).is_err());
+                malformed=payload;malformed["allowed_intents"]=json!([intent,Intent::Talk]);
+                assert!(reply_schema(&malformed).is_err());
+            }
+        }
+        for intent in [Intent::MarketAdvertise,Intent::MarketCounter,Intent::MarketRefuse] {
+            let schema=reply_schema(&json!({"market_generation":true,"allowed_intents":[intent]})).unwrap();
+            assert_eq!(schema["properties"]["reply"],json!({"type":"string","maxLength":128,"description":"Three reusable templates separated by |, keeping literal {give}, {want}, @{name} slots. Never substitute items or names."}));
+        }
+        let human=reply_schema(&json!({"allowed_intents":["talk"]})).unwrap();
+        assert_eq!(human["properties"]["reply"],json!({"type":"string","maxLength":90,"description":"Short chat consistent with the selected action."}));
+        assert!(repertoire("thx|thxvm|cheers",Intent::MarketThanks).is_err(),"independent response validator stays strict");
     }
 
     #[test]
