@@ -71,8 +71,9 @@ export async function run(game){
     try{return db.prepare('SELECT count(*) AS n FROM account_lists WHERE account=? AND list_id=0 AND target=?').get(account,scout.account).n===1;}finally{db.close();}
   }
   const menu=(client,y)=>[{actor:client.actor,input:{keys:[],mouse:{x:650,y:520},duration_ms:250}},{actor:client.actor,input:{keys:[],mouse:{x:550,y},duration_ms:350}}];
-  await act(game,{keys:[],duration_ms:800});
-  for(const client of clients){await act(client,menu(client,432));game.check('native party lock persists for scout and account '+(await client.observe()).session.account,locked((await client.observe()).session.account));}
+  const menus=y=>[0,1].map(i=>clients.map(client=>menu(client,y)[i]));
+  await act(game,{keys:[],duration_ms:800});await act(game,menus(432));
+  for(const client of clients)game.check('native party lock persists for scout and account '+(await client.observe()).session.account,locked((await client.observe()).session.account));
   await writeFile(join(out,'opening.json'),JSON.stringify({original,initial,peerInitial,scout}));
   opening.blocked.length=0;opening.entities.length=0;
   await act(game,{keys:[],duration_ms:500},{name:'realm-opening',when:()=>true});await save('opening');
@@ -88,7 +89,10 @@ export async function run(game){
     for(const client of clients){
       let now=(await client.observe()).game_ms;
       while(jumps.has(client.actor)&&now-jumps.get(client.actor)<11000){await act(game,{keys:[],duration_ms:Math.min(10000,11000-now+jumps.get(client.actor))});now=(await client.observe()).game_ms;}
-      await act(client,menu(client,400));const after=await client.observe();
+    }
+    await act(game,menus(400));
+    for(const client of clients){
+      const after=await client.observe();
       assert(after.session.world===origin&&after.lifecycle.alive&&Math.hypot(after.position.x-points[0].x,after.position.y-points[0].y)<.2,'Native menu did not complete the actual scout teleport');
       jumps.set(client.actor,after.game_ms);await appendFile(join(out,'travel.jsonl'),JSON.stringify({actor:client.actor,anchor,position:after.position,game_ms:after.game_ms})+'\n');
     }
