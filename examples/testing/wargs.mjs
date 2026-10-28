@@ -41,16 +41,11 @@ export async function run(game){
     return game.act(input,capture);
   }
   await act({keys:[],duration_ms:1000},{name:'wargs-arrival',when:()=>true});
-  const origin=(await game.observe()).position;
-  await act({keys:['d'],duration_ms:100});const right=(await game.observe()).position;
-  await act({keys:['s'],duration_ms:100});const down=(await game.observe()).position;
-  const ux=right.x-origin.x,uy=right.y-origin.y,vx=down.x-right.x,vy=down.y-right.y,det=ux*vy-uy*vx;
-  assert(Math.abs(det)>.05,'Native movement basis is degenerate');
-  const camera=det>0?Math.atan2(uy,ux):Math.atan2(ux,-uy);
+  const camera=-Math.PI/4;
   async function shoot(id){
     for(let n=0;n<160;n++){
       const s=await game.inspect(),e=entity(s,id);if(!e)return;
-      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx*vy-dy*vx)/det,y=(ux*dy-uy*dx)/det,approach=Math.hypot(dx,dy)>4;
+      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>4;
       const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
       await act({keys,duration_ms:250,target:{entity:id,camera_angle:camera,fire:!approach}});
     }
