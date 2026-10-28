@@ -21,7 +21,8 @@ export async function run(game){
     const action=game.act({keys:[],duration_ms:1000});
     const input=(async()=>{
       const deadline=Date.now()+5000;
-      while((await game.observe()).paused){assert(Date.now()<deadline,'Double-click action must resume');await delay(20);}
+      while((await game.observe()).paused||!(await cdp.eval('document.querySelector("ruffle-player").ruffle().isPlaying'))){assert(Date.now()<deadline,'Double-click action must resume');await delay(20);}
+      await cdp.eval('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
       const point={x:rect.x+mouse.x,y:rect.y+mouse.y},times=[];
       await cdp.call('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
       for(let n=0;n<2;n++){
@@ -78,14 +79,15 @@ export async function run(game){
   await game.act({keys:[],duration_ms:700},{name:'inventory-after',when:()=>true});
   game.check('same living character throughout',unequipped.lifecycle.alive&&unequipped.session.character===initial.session.character);
   await double({x:634,y:428});
-  game.check('lesser ring equips for comparison',(await game.observe()).character.items[3]===0xa25);
+  game.check('lesser ring equips for comparison',(await record('comparison-equipped')).character.items[3]===0xa25);
     for(const [name,x,y] of [['unusable-sword',678,428],['ring-comparison',722,428],['untiered-spell',722,472],['three-dose-elixir',766,472]]){
       let moved=false;
       const start=(await game.observe()).game_ms;
       const action=game.act({keys:[],duration_ms:1600},{name,when:view=>moved&&view.game_ms>=start+800});
       const hover=(async()=>{
         const deadline=Date.now()+5000;
-        while((await game.observe()).paused){assert(Date.now()<deadline,'Hover action must resume');await delay(20);}
+        while((await game.observe()).paused||!(await cdp.eval('document.querySelector("ruffle-player").ruffle().isPlaying'))){assert(Date.now()<deadline,'Hover action must resume');await delay(20);}
+        await cdp.eval('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
         await cdp.call('Input.dispatchMouseEvent',{type:'mouseMoved',x:rect.x+x,y:rect.y+y});moved=true;
       })();
       const results=await Promise.allSettled([action,hover]);for(const r of results)if(r.status==='rejected')throw r.reason;
