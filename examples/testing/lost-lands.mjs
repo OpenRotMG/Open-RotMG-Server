@@ -168,7 +168,16 @@ export async function run(game){
   game.check('native damage activates Lord and summons Guardians and Knights',entity(state,lord.id).hp<69300&&[0xd52,0xd53].every(k=>family(state).some(e=>e.kind===k)));
   const samples=[];let pending,error;
   const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(s=>samples.push(s)).catch(e=>{error=e;}).finally(()=>{pending=null;});},100);
-  try{await idle(23000);}finally{clearInterval(timer);if(pending)await pending;}if(error)throw error;
+  const attackEnds=(await game.observe()).game_ms+23000;
+  try{
+    while((await game.observe()).game_ms<attackEnds){
+      const current=entity(await game.inspect(),lord.id);
+      // Contact during Vortex avoids making status coverage depend on a lucky firing angle.
+      if(current.stage===6)await walk(current.pos,.5,lord.id);
+      const remaining=attackEnds-(await game.observe()).game_ms;
+      if(remaining>0)await idle(Math.min(3000,remaining));
+    }
+  }finally{clearInterval(timer);if(pending)await pending;}if(error)throw error;
   await writeFile(join(out,'attacks.json'),JSON.stringify(samples));state=await save('protected');
   game.check('Lord uses White Beam and Bleeding Vortex projectiles',[83,35].every(speed=>samples.some(s=>s.view.projectiles.some(p=>p.owner===lord.id&&p.speed===speed))));
   game.check('Lord moves during its attack',samples.some(s=>{const e=entity(s,lord.id);return e&&Math.hypot(e.pos.x-lord.pos.x,e.pos.y-lord.pos.y)>.2;}));
