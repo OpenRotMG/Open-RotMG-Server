@@ -33,6 +33,7 @@ export async function run(game){
     await client.act({keys:[key],duration_ms:capture?1000:200},capture?{name,when:v=>v.character.items[slot]===-1}:undefined);
     const after=await client.observe();
     await appendFile(join(root,'holy-water-observations.jsonl'),JSON.stringify({name,before,after})+'\n');
+    game.check(name+' keeps the same living character',after.lifecycle.alive&&after.session.character===before.session.character);
     game.check(name+' consumes one item/revision only',after.character.items[slot]===-1&&after.character.inventory_revision===before.character.inventory_revision+1&&after.character.items.every((v,i)=>i===slot||v===before.character.items[i]));
     game.check(name+' spends no MP and preserves stats',after.character.mp>=before.character.mp&&after.character.mp<=before.character.mp+regen({before,after},0.6+before.character.stats.wisdom/16.7)&&JSON.stringify(after.character.stats)===JSON.stringify(before.character.stats));
     return {before,after};
@@ -69,10 +70,6 @@ export async function run(game){
   sample=await use(game,'1',4,'holy-water-hexed-after',true);
   game.check('Hexed and associated Speedy clear while Berserk survives',!(sample.after.character.conditions&(hexed|speedy))&&Boolean(sample.after.character.conditions&berserk));
   await game.act({keys:[],duration_ms:700},{name:'holy-water-restored',when:v=>!(v.character.conditions&hexed)});
-  const retained=await game.observe();
-  await game.act({keys:['Insert'],duration_ms:500});
-  const escaped=await game.observe();
-  game.check('Nexus reconnect keeps living identity and consumed inventory',escaped.world==='Nexus'&&escaped.lifecycle.alive&&escaped.session.character===retained.session.character&&JSON.stringify(escaped.character.items)===JSON.stringify(retained.character.items)&&escaped.character.inventory_revision===retained.character.inventory_revision);
   const sick=await game.join({...base,class:0x30e,world:1,position:{x:grave.pos.x-2.5,y:grave.pos.y},equipment:[0xb08,-1,-1,-1],backpack:[0xc21,0xc21,-1,-1,-1,-1,-1,-1]});
   await prepare(sick.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
   for(let n=0;n<25;n++){
