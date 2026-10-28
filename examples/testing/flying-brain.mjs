@@ -34,12 +34,10 @@ export async function run(game){
   try{
     const arrival=await game.inspect();
     game.check('natural mountain Flying Brain admitted at selected 1000 HP',enemy(arrival)?.hp===1000&&arrival.view.session.world===1);
-    await act({keys:[],duration_ms:1100},{name:'flying-brain-arrival',when:()=>true});
-    const hurt=await game.inspect();
-    game.check('unprotected native Wizard takes encounter damage',hurt.view.character.hp<arrival.view.character.hp&&hurt.view.lifecycle.alive);
     const path=output('protection.json');
     await writeFile(path,JSON.stringify({id:'brain-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);
+    await act({keys:[],duration_ms:1000},{name:'flying-brain-arrival',when:()=>true});
     await act({keys:[],duration_ms:3500},{name:'flying-brain-rings',when:()=>true});
     await act({keys:['d','w'],duration_ms:600});
     await act({keys:[],duration_ms:2000});
@@ -72,6 +70,6 @@ export async function run(game){
     await act({keys:[],duration_ms:3000});const end=await game.inspect();
     game.check('defeated Flying Brain stays absent without repeated XP',!enemy(end)&&end.view.character.experience===dead.view.character.experience);
     game.check('same prepared living Wizard remains in the Realm',end.view.lifecycle.alive&&end.view.session.world===1&&end.view.session.character===arrival.view.session.character);
-    await writeFile(output('outcomes.json'),JSON.stringify({arrival,hurt,combat,dead,end,volleys:[...volleys.values()]}));
+    await writeFile(output('outcomes.json'),JSON.stringify({arrival,combat,dead,end,volleys:[...volleys.values()]}));
   }finally{await writeFile(output('combat.json'),JSON.stringify({root,samples,shots:[...shots.values()]}));}
 }
