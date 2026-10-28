@@ -188,6 +188,11 @@ pub(super) async fn market(
     if !revoke_market(app, brain).await? {
         return Ok(true);
     }
+    brain
+        .mind
+        .market
+        .recover_trade_reply(&app.store, v, &app.content)
+        .await?;
     let incoming_active = if brain.mind.market.incoming.is_some() {
         incoming::incoming(app, brain, v).await?
     } else {

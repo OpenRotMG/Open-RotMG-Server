@@ -152,15 +152,12 @@ pub(crate) fn schedule(kind: u16, _hp: i32, stage: u64, choice: u8, age: u64) ->
     let mut state = 0;
     let mut at = age;
     let attacks = match kind {
-        0x678 => {
-            let mut a = fan(0, 4, 7., 1000, 10.);
-            a.offset = 1.;
-            vec![a]
-        }
+        // Prediction is not angleOffset: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Shoot.cs
+        0x678 => vec![fan(0, 4, 7., 1000, 10.).predict(1.)],
         0x679..=0x67c => {
             let mut a = fan(0, 1, 0., if kind == 0x67b { 400 } else { 1000 }, 10.);
             if matches!(kind, 0x67a | 0x67c) {
-                a.offset = 0.5;
+                a = a.predict(0.5);
             }
             vec![a]
         }
@@ -381,5 +378,34 @@ pub(crate) fn schedule(kind: u16, _hp: i32, stage: u64, choice: u8, age: u64) ->
         state,
         age: at,
         attacks,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::encounter::attacks::Prediction;
+
+    #[test]
+    fn oasis_prediction_is_not_an_angular_offset() {
+        for (kind, factor) in [
+            (0x678, 1.),
+            (0x679, 0.),
+            (0x67a, 0.5),
+            (0x67b, 0.),
+            (0x67c, 0.5),
+        ] {
+            let schedule = schedule(kind, 650, 0, 0, 0);
+            let attack = schedule.attacks[0];
+            assert_eq!(attack.offset, 0., "{kind:#x}");
+            assert!(
+                match attack.predict {
+                    Prediction::None => factor == 0.,
+                    Prediction::Lead(actual) => actual == factor,
+                    Prediction::Chance(_) => false,
+                },
+                "{kind:#x}"
+            );
+        }
     }
 }

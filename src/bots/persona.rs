@@ -33,6 +33,21 @@ pub(crate) static PERSONAS: LazyLock<Vec<Profile>> = LazyLock::new(|| {
     entries.into_iter().map(profile).collect()
 });
 
+// Registry slots are not public names; runtime binds the ordinary Store account name.
+pub(super) static GUESTS: LazyLock<Vec<Profile>> = LazyLock::new(|| {
+    (1..=16)
+        .map(|slot| {
+            let mut p = profile(Entry {
+                name: format!("guest:v1:{slot}"),
+                stars: 0,
+                role: Role::Newbie,
+            });
+            p.identity = p.name;
+            p
+        })
+        .collect()
+});
+
 fn profile(e: Entry) -> Profile {
     assert!(
         (0..=65).contains(&e.stars),

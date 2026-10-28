@@ -488,7 +488,7 @@ impl Brain {
             .iter()
             .find(|o| o.account == Some(peer.account))
             .context("invitation peer no longer visible")?;
-        let payload = serde_json::json!({"bot":{"name":self.profile.name,"world":v.map.name,"level":v.character.level,"hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"priorities":{"recovery":self.profile.recovery,"resources":self.profile.resources,"companions":self.profile.companions}},"speaker":{"name":peer.name,"level":actor.level},"allowed_intents":intents,"message":event});
+        let payload = serde_json::json!({"bot":{"name":self.mind.market.name.as_str(),"world":v.map.name,"level":v.character.level,"hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"priorities":{"recovery":self.profile.recovery,"resources":self.profile.resources,"companions":self.profile.companions}},"speaker":{"name":peer.name,"level":actor.level},"allowed_intents":intents,"message":event});
         Ok(dialogue::Request {
             speaker: actor.id,
             name: peer.name.clone(),
