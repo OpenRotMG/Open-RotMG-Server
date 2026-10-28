@@ -292,7 +292,12 @@ impl World {
         if count == 0 {
             return Ok(());
         }
-        if own + count > 32 {
+        // The shrine's two 20-skull density limits also need room for their root: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.SkullShrine.cs#L16-L17
+        let capacity = match self.entities.get(&tag) {
+            Some(root) if root.kind == 0xd56 => 41,
+            _ => 32,
+        };
+        if own + count > capacity {
             tracing::debug!(
                 quest = tag,
                 kind,
@@ -1013,6 +1018,40 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shrine_capacity_allows_both_colours_and_replacement_without_raising_other_caps() {
+        let (mut world, _) = super::super::movement_tests::fixture(0x18, false);
+        let pos = Pos { x: 8.5, y: 8.5 };
+        world.spawn_named_quest(0xd56, pos).unwrap();
+        let root = world.actors().find(|e| e.kind == 0xd56).unwrap().id;
+        for now in (500..=15000).step_by(500) {
+            world.now = now;
+            world.event_mechanics(root).unwrap();
+        }
+        for kind in [0xd57, 0xd58] {
+            assert_eq!(world.quest_members(root, &[kind]).len(), 20);
+        }
+        assert_eq!(world.quest_actors(root).count(), 41);
+        let defeated = world.quest_members(root, &[0xd57])[0];
+        world.remove_entity(defeated);
+        world.now += 500;
+        world.event_mechanics(root).unwrap();
+        assert_eq!(world.quest_members(root, &[0xd57]).len(), 20);
+        assert!(!world.entities.contains_key(&defeated));
+        assert_eq!(world.quest_actors(root).count(), 41);
+
+        world.spawn_named_quest(0xd59, pos).unwrap();
+        let cube = world.actors().find(|e| e.kind == 0xd59).unwrap().id;
+        world
+            .quest_birth((cube, pos, pos), 0xd5a, 32, 31, 5.)
+            .unwrap();
+        assert_eq!(world.quest_actors(cube).count(), 32);
+        world
+            .quest_birth((cube, pos, pos), 0xd5a, 32, 1, 5.)
+            .unwrap();
+        assert_eq!(world.quest_actors(cube).count(), 32);
+    }
 
     #[test]
     fn authored_sites_bind_finite_quests_without_repainting_or_duplicate_liches() {
