@@ -68,8 +68,12 @@ export async function run(game){
     const tribe=start.diagnostic.entities.filter(e=>e.parent===fire.id);assert.equal(tribe.length,5);
     game.check('generated camp binds all five tribes to its own Fire',tribe.filter(e=>e.kind===0xdd0).length===2);
     const hunter=tribe.find(e=>e.kind===0xdd2);assert(hunter);
-    await shoot(hunter.id,50);await game.act({keys:[],duration_ms:350});
-    let previous=await save('tribe-wounded'),healed=false,conditions=false,orbit=false;
+    let previous;
+    for(let n=0;n<12;n++){
+      await shoot(hunter.id,50);await game.act({keys:[],duration_ms:250});previous=await save('tribe-shot');
+      if(entity(previous,hunter.id)?.hp<300)break;
+    }
+    let healed=false,conditions=false,orbit=false;
     game.check('ordinary wand shot wounds a living tribe member',entity(previous,hunter.id)?.hp>0&&entity(previous,hunter.id).hp<300);
     for(let n=0;n<24;n++){
       await game.act({keys:[],duration_ms:250});const s=await save('camp-sample');

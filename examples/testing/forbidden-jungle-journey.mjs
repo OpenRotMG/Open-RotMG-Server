@@ -50,6 +50,6 @@ export async function run(game){
  game.check('empty earned bag slot cannot duplicate Pollen',(await game.observe()).character.inventory_revision===picked.view.character.inventory_revision);
  const exit=picked.diagnostic.entities.find(e=>e.kind===0x704&&e.published);assert(exit);await heal();await move(exit.pos);await capture('completion-exit');
  await game.act({keys:[],duration_ms:1000,mouse:{x:700,y:580}});await game.act({keys:[],duration_ms:2000});const final=await log('returned');
- game.check('same living character returns through completion exit with loot and one clear',final.view.world==='Realm'&&final.view.session.world===initial.view.session.world&&final.view.session.character===initial.view.session.character&&final.view.lifecycle.alive&&final.diagnostic.character.jungles===1&&final.view.character.items[4]===0xc1a);
+ game.check('same living character returns through completion exit with loot and one clear',final.view.map.name==='Realm'&&final.view.session.world===initial.view.session.world&&final.view.session.character===initial.view.session.character&&final.view.lifecycle.alive&&final.diagnostic.character.jungles===1&&final.view.character.items[4]===0xc1a);
  await capture('realm-return');
 }
