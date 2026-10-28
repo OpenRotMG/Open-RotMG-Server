@@ -4,6 +4,7 @@ import {join} from 'node:path';
 export const fixture={class:0x31e,level:20,seed:12351,world:'sprite-world',worldSeed:1,position:'spawn',equipment:[0xb0b,0xb22,0xafc,0xacd],backpack:Array(8).fill(-1),stats:[770,252,50,40,50,50,75,50]};
 export async function run(game){await verify(game,[[0xa1,-1,0],[0xa2,1,0]]);}
 export async function verify(game,directions){
+  await game.act({keys:['a','d'],duration_ms:25});
   const before=await game.observe();await game.act({keys:[],duration_ms:600});const idle=await game.observe();
   game.check('white entrance remains stationary',Math.hypot(idle.position.x-before.position.x,idle.position.y-before.position.y)<.05);
   const detail=await game.inspect(),tiles=detail.view.tiles,at=(x,y)=>tiles.find(t=>t.x===x&&t.y===y)?.ground,samples=[];
