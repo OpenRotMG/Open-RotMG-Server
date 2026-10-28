@@ -189,10 +189,12 @@ impl World {
                     self.flash_inland(id, if phase == 0 { 0xffffff00 } else { 0xffff0000 }, 1., 1.);
                 }
             }
-            0x6c5 if elapsed >= 5000 => {
+            // Prefer compiled Kithio's proximity trigger and nominal Wisp duration over Trapped's timers:
+            // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Midland.cs#L700-L737
+            0x6c5 if target.is_some_and(|p| e.pos.distance(p) < 4.4) => {
                 self.transform_fauna(id, 0x7f22)?;
             }
-            0x7f22 if elapsed >= 10000 => {
+            0x7f22 if elapsed >= 6500 => {
                 self.transform_fauna(id, 0x6c5)?;
             }
             0x623 if e.hp < 200 && e.stage != Some(1) => {
@@ -276,6 +278,18 @@ impl World {
                 },
                 8.,
             ));
+        }
+        if e.kind == 0x7f22 {
+            return Ok(
+                if elapsed % 1600 < 800 && target.is_some_and(|p| e.pos.distance(p) < 5.) {
+                    (
+                        Motion::Retreat { distance: 5. },
+                        crate::encounter::nr_speed(0.6),
+                    )
+                } else {
+                    (Motion::Wander, crate::encounter::nr_speed(0.9))
+                },
+            );
         }
         if e.kind == 0x955 {
             return Ok(self.swarm_movement(id, target, elapsed));
