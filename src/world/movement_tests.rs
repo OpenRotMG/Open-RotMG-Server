@@ -235,6 +235,68 @@ fn undead_hobbit_mage_has_separate_ring_activation_and_aimed_shot_ranges() {
 }
 
 #[test]
+fn sand_phantom_proximity_cycle_preserves_credit_without_a_death() {
+    use crate::encounter::Motion;
+    let (mut world, player) = fixture(0x18, false);
+    let pos = Pos { x: 12.5, y: 8.5 };
+    let phantom = world.spawn_entity(0x6c5, pos, vec![]).unwrap();
+    let xp = world.players[&player].character.exp;
+    let old = world.entities.get_mut(&phantom).unwrap();
+    old.hp = 17;
+    old.damage.insert(player, 50);
+    let far = Pos { x: 7.5, y: 8.5 };
+    world.fauna_mechanics(phantom, Some(far), 50000).unwrap();
+    assert_eq!(world.entities[&phantom].hp, 17);
+    world.fauna_mechanics(phantom, None, 50000).unwrap();
+    let near = Pos { x: 9.5, y: 8.5 };
+    world.fauna_mechanics(phantom, Some(near), 0).unwrap();
+    assert!(!world.entities.contains_key(&phantom));
+    let wisp = world
+        .entities
+        .values()
+        .find(|e| e.kind == 0x7f22)
+        .unwrap()
+        .id;
+    assert_eq!(world.entities[&wisp].hp, 150);
+    assert_eq!(world.entities[&wisp].damage[&player], 50);
+    for age in [0, 799, 1600] {
+        assert_eq!(
+            world.fauna_movement(wisp, Some(near), age).unwrap(),
+            (
+                Motion::Retreat { distance: 5. },
+                crate::encounter::nr_speed(0.6)
+            )
+        );
+    }
+    for (target, age) in [(Some(near), 800), (Some(far), 0), (None, 0)] {
+        assert_eq!(
+            world.fauna_movement(wisp, target, age).unwrap(),
+            (Motion::Wander, crate::encounter::nr_speed(0.9))
+        );
+    }
+    world.fauna_mechanics(wisp, None, 6499).unwrap();
+    assert!(world.entities.contains_key(&wisp));
+    world.now = 6500;
+    world.fauna_mechanics(wisp, None, 6500).unwrap();
+    assert!(!world.entities.contains_key(&wisp));
+    let returned = world.entities.values().find(|e| e.kind == 0x6c5).unwrap();
+    assert_eq!(returned.hp, 230);
+    assert_eq!(returned.damage[&player], 50);
+    assert_eq!((returned.pos.x, returned.pos.y), (pos.x, pos.y));
+    assert_eq!((returned.home.x, returned.home.y), (pos.x, pos.y));
+    assert_eq!(returned.activated, Some(6500));
+    assert_eq!(
+        world
+            .entities
+            .values()
+            .filter(|e| matches!(e.kind, 0x6c5 | 0x7f22))
+            .count(),
+        1
+    );
+    assert_eq!(world.players[&player].character.exp, xp);
+}
+
+#[test]
 fn swarm_directed_shots_use_constant_angular_prediction_and_cooldown() {
     let (mut world, player) = fixture(0x18, false);
     let target = world.players[&player].pos;
