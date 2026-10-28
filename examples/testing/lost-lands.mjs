@@ -99,20 +99,21 @@ export async function run(game){
   try{await idle(23000);}finally{clearInterval(timer);if(pending)await pending;}if(error)throw error;
   await writeFile(join(out,'attacks.json'),JSON.stringify(samples));state=await save('protected');
   game.check('Lord uses White Beam and Bleeding Vortex projectiles',[83,35].every(speed=>samples.some(s=>s.view.projectiles.some(p=>p.owner===lord.id&&p.speed===speed))));
-  game.check('Lord wanders during its attack',samples.some(s=>{const e=entity(s,lord.id);return e&&Math.hypot(e.pos.x-lord.pos.x,e.pos.y-lord.pos.y)>.2;}));
+  game.check('Lord moves during its attack',samples.some(s=>{const e=entity(s,lord.id);return e&&Math.hypot(e.pos.x-lord.pos.x,e.pos.y-lord.pos.y)>.2;}));
   game.check('eight owned protection crystals shield Lord',crystals(state).length===8&&entity(state,lord.id).stage===8&&!!(entity(state,lord.id).condition&(1<<24)));
   const hp=entity(state,lord.id).hp;await fire(lord.id,1000);state=await save('shield-rejects');
   game.check('shield rejects native sword damage',entity(state,lord.id).hp===hp);
   for(const crystal of crystals(state))for(let n=0;n<35&&entity(await game.inspect(),crystal.id);n++)await fire(crystal.id);
   await idle(500);state=await save('shield-released');
   game.check('defeating all crystals returns Lord to combat',!crystals(state).length&&entity(state,lord.id).stage!==8&&!(entity(state,lord.id).condition&(1<<24)));
+  const beforeFinalXp=state.view.character.experience;
   for(let n=0;n<300&&entity(await game.inspect(),lord.id);n++){
     state=await game.inspect();
     const crystal=crystals(state)[0];
     await fire(crystal?.id??lord.id,1000);
   }
   await idle(1000);state=await save('defeated');
-  game.check('native combat completes timed Lord defeat',!entity(state,lord.id)&&(await history()).some(f=>f.message==='timed enemy defeat'&&f.entity===lord.id));
+  game.check('native combat completes timed Lord defeat and earns XP',!entity(state,lord.id)&&state.view.character.experience>=beforeFinalXp+2100&&(await history()).some(f=>f.message==='timed enemy defeat'&&f.entity===lord.id));
   const xp=state.view.character.experience;await idle(2000);
   game.check('defeat XP is once only',(await game.observe()).character.experience===xp);
   game.check('same living prepared character survives',state.view.lifecycle.alive&&state.view.session.character===initial.view.session.character);
