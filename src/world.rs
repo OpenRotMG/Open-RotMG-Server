@@ -999,9 +999,19 @@ impl Directory {
             .map(|p| p.character.clone())
             .collect()
     }
+    pub fn human_player_count(&self) -> usize {
+        self.worlds
+            .summaries()
+            .map(|(_, w)| {
+                w.players
+                    .values()
+                    .filter(|p| p.controller == Controller::Human)
+                    .count()
+            })
+            .sum()
+    }
     pub fn health(&self, started: Instant) -> serde_json::Value {
         let worlds: Vec<_> = self.worlds.summaries().collect();
-        let players: usize = worlds.iter().map(|(_, w)| w.players.len()).sum();
         let qa_actors = worlds
             .iter()
             .flat_map(|(_, w)| w.players.values())
@@ -1014,7 +1024,7 @@ impl Directory {
             .count();
         serde_json::json!({
             "status":"development","uptime_seconds":started.elapsed().as_secs(),
-            "worlds":worlds.len(),"players":players-qa_actors-bots,"bots":bots,"qa_actors":qa_actors,
+            "worlds":worlds.len(),"players":self.human_player_count(),"bots":bots,"qa_actors":qa_actors,
             "entities":worlds.iter().map(|(_,w)|w.entities).sum::<usize>(),
             "projectiles":worlds.iter().map(|(_,w)|w.bullets).sum::<usize>(),
             "tick":self.tick,"max_tick_us":self.max_tick_us,"tick_scope":"coordinator, not world simulation",

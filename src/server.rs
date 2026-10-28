@@ -7,6 +7,8 @@ pub(crate) mod name_claims_tests;
 #[cfg(test)]
 mod password_tests;
 mod pictures;
+#[cfg(test)]
+mod realmdex_tests;
 use crate::{
     content::{Content, WIZARD},
     crypto::Keys,
@@ -575,6 +577,19 @@ async fn critical_incident(
         }))})).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, self::error(error)).into_response(),
     }
+}
+async fn realmdex_stats(State(a): State<App>) -> Response {
+    let (status, body) = match a.world.directory(|d| Ok(d.human_player_count())).await {
+        Ok(players) => (StatusCode::OK, players.to_string()),
+        Err(error) => {
+            tracing::error!(%error, "RealmDex player count unavailable");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "player count unavailable".into(),
+            )
+        }
+    };
+    (status, [("cache-control", "no-store")], body).into_response()
 }
 async fn health(State(a): State<App>) -> Response {
     let started = a.started;
@@ -3179,6 +3194,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
         ))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
+        .route("/realmdex/stats", get(realmdex_stats))
         .route("/api/bots", get(crate::bots::cctv::list))
         .route("/api/bots/{name}/socket", get(bot_view::socket))
         .route(
