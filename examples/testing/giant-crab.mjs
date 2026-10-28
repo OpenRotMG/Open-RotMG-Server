@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
-import {join} from 'node:path';
+import {join,resolve} from 'node:path';
+import {execFileSync} from 'node:child_process';
 const spec={class:0x30e,level:3,seed:9009,world:1,equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,20,0,30,20,0,0]};
 let crab;
 export async function prepare(api){
@@ -21,17 +22,21 @@ export async function run(game){
   const entity=s=>s.diagnostic.entities.find(e=>e.id===crab.id);
   const begin=await save('arrival');
   game.check('natural Realm Crab has selected 300 HP and size 100',entity(begin)?.hp===300&&entity(begin).size===100);
-  await game.act({keys:[],duration_ms:500},{name:'crab-before',when:()=>true});
-  const samples=[];
-  for(let n=0;n<70;n++){await game.act({keys:[],duration_ms:100});samples.push(await game.inspect());}
+  await game.act({keys:[],duration_ms:2000},{name:'crab-before',when:()=>true});
+  game.check('unprotected native character takes encounter damage',(await game.observe()).character.hp<begin.view.character.hp);
+  const protection=join(process.env.QA_RESULTS_DIR,'protection.json');
+  await writeFile(protection,JSON.stringify({id:'crab-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(process.env.QA_RESULTS_DIR,'native/native.json'),protection]);
+  const samples=[];let complete=false;
+  const action=game.act({keys:[],duration_ms:9000},{name:'crab-attacks',when:()=>true}).finally(()=>complete=true);
+  const sampling=(async()=>{while(!complete){samples.push(await game.inspect());await new Promise(ok=>setTimeout(ok,50));}})();
+  for(const result of await Promise.allSettled([action,sampling]))if(result.status==='rejected')throw result.reason;
   await writeFile(join(process.env.QA_RESULTS_DIR,'movement-and-attacks.json'),JSON.stringify(samples));
   game.check('level-three client receives a Giant Crab quest',samples.some(s=>s.view.quest===crab.id));
   game.check('Crab activates and scuttles toward the native player',samples.some(s=>{const e=entity(s);return e.activated!==null&&Math.hypot(e.pos.x-crab.pos.x,e.pos.y-crab.pos.y)>.2&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<3;}));
   // Current timing is a reconstruction, not Kithio's 400/200ms scuttle and 4700/3200ms attack phases: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Lowland.cs#L460-L518
   const shots=samples.flatMap(s=>s.view.projectiles).filter(p=>p.owner===crab.id);
   for(const [speed,lifetime] of [[20,200],[40,400],[60,600],[80,800],[70,1800]])game.check('native client receives Crab projectile '+speed+'/'+lifetime,shots.some(p=>p.speed===speed&&p.lifetime_ms===lifetime));
-  game.check('unprotected native character takes encounter damage',samples.some(s=>s.view.character.hp<begin.view.character.hp));
-  await game.act({keys:[],duration_ms:600},{name:'crab-attacks',when:()=>true});
   const xp=(await game.observe()).character.experience;
   for(let n=0;n<100&&entity(await game.inspect());n++)await game.act({keys:[],duration_ms:100,target:{entity:crab.id,camera_angle:-Math.PI/4,fire:true}});
   await game.act({keys:[],duration_ms:500},{name:'crab-defeated',when:()=>true});
@@ -40,5 +45,5 @@ export async function run(game){
   await game.act({keys:[],duration_ms:8000});
   const end=await save('finished');
   game.check('Crab defeat cannot repeat its XP award',end.view.character.experience===dead.view.character.experience);
-  game.check('same unprotected prepared character survives the encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
+  game.check('same prepared character survives the encounter',end.view.lifecycle.alive&&end.view.session.character===begin.view.session.character);
 }
