@@ -188,6 +188,47 @@ async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor(
     assert!(successes > 0);
 }
 
+#[tokio::test]
+async fn lair_slime_splits_leave_potion_rolls_to_terminal_forms() {
+    let (mut world, _store, owners) = reward_world().await;
+    for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
+        for seed in 0..64 {
+            for id in world.entities.keys().copied().collect::<Vec<_>>() {
+                world.remove_entity(id);
+            }
+            let id = world
+                .spawn_entity(parent, Pos { x: 3.5, y: 3.5 }, vec![])
+                .unwrap();
+            world
+                .entities
+                .get_mut(&id)
+                .unwrap()
+                .damage
+                .insert(owners[0].1, 1);
+            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            world.defeat_entity(id).unwrap();
+            assert!(!world.entities.contains_key(&id));
+            assert_eq!(world.actors().filter(|e| e.kind == child).count(), count);
+            assert!(
+                world.bag_expiry.is_empty(),
+                "intermediate {parent:#x}, seed {seed} rolled loot"
+            );
+        }
+    }
+    for kind in [0xd9d, 0xd9f] {
+        let outcomes: BTreeSet<_> = (0..256)
+            .map(|seed| {
+                crate::loot::rewards(
+                    &world.content,
+                    kind,
+                    &mut rand::rngs::StdRng::seed_from_u64(seed),
+                )
+            })
+            .collect();
+        assert_eq!(outcomes, BTreeSet::from([vec![], vec![0xa22], vec![0xa23]]));
+    }
+}
+
 #[test]
 fn septavius_stages_a_realm_exit_until_clear_commit() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
