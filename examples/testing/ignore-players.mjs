@@ -63,7 +63,7 @@ with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
     await chat(game,'/unignore '+name);await chat(peer,'After unignore visible');await chat(peer,'/yell After unignore yell');await chat(peer,'/g After unignore guild');await capture('ignore-after');
     for(const [add,label] of [[true,'ignore'],[false,'unignore']]){
       await game.act({keys:[],mouse:{x:650,y:518},duration_ms:300});await capture('ignore-menu-'+label);
-      await game.act({keys:[],mouse:{x:550,y:495},duration_ms:500});
+      await game.act({keys:[],mouse:{x:550,y:480},duration_ms:500});
       game.check('native player menu persists '+label,JSON.stringify(durable().lists)===JSON.stringify(add?[[owner,1,target]]:[]));
     }
     const final=durable();game.check('unignore deletes durable relation without corrupting account state',final.lists.length===0&&final.integrity==='ok'&&final.foreign_keys.length===0);
