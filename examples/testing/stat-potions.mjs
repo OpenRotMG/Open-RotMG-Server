@@ -35,9 +35,13 @@ export async function run(game){
   await game.act({keys:[],duration_ms:1000},{name:'stat-potions-refused',when:()=>true});
   await prepare({kind:'item',slot:4,item:0xa22});
   await prepare({kind:'item',slot:5,item:0xa23});
-  await prepare({kind:'vitals',hp:660,mp:375});
+  await prepare({kind:'vitals',hp:620,mp:335});
   await game.act({keys:[],duration_ms:500});
+  const hurt=await snapshot('before-partial-health');
+  game.check('health potion starts with a positive deficit smaller than its advertised gain',hurt.character.hp>570&&hurt.character.hp<670);
   await game.act({keys:['1'],duration_ms:1000},{name:'partial-health',when:view=>view.character.items[4]===-1});
+  const depleted=await snapshot('before-partial-mana');
+  game.check('mana potion starts with a positive deficit smaller than its advertised gain',depleted.character.mp>285&&depleted.character.mp<385);
   await game.act({keys:['2'],duration_ms:1000},{name:'partial-mana',when:view=>view.character.items[5]===-1});
   const restored=await snapshot('partially-restored');
   game.check('native restorative potions fill, but never exceed, actual maxima',restored.character.hp===670&&restored.character.mp===385&&restored.character.items[4]===-1&&restored.character.items[5]===-1);
