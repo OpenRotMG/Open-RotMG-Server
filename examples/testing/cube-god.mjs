@@ -5,13 +5,17 @@ import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 const out=process.env.QA_RESULTS_DIR;
 const spec={class:0x31d,level:20,seed:820,world:1,equipment:[0xb0b,0xb29,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,50]};
-let scout,roots;
+let scout,roots,earned,origin,token,spawn;
+const protectedUntil=new Map();
+async function api(command){const r=await fetch(origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});const v=await r.json();assert(r.ok&&v.status!=='failed',JSON.stringify(v));return ['observe','inspect','world_info'].includes(command.op)?v:v.result;}
+async function protect(actor){const now=(await api({op:'observe',actor})).game_ms;if(now>=(protectedUntil.get(actor)??0)){await api({op:'cheat',actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});protectedUntil.set(actor,now+60000);}}
+const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
 async function fields(){return (await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);}
 export async function prepare(api){
-  const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];
+  const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];spawn={x,y};
   scout=(await api({op:'spawn',spec:{...spec,guid:'cube-admission-'+randomUUID(),position:{x,y},controller:'direct',profile:null}})).result.actor;
   const state=await api({op:'inspect',actor:scout}),report=JSON.parse(await readFile(join(out,'native/result.json'),'utf8'));
-  const token=(await readFile(join(out,'native/state/control.token'),'utf8')).trim();
+  origin=report.origin;token=(await readFile(join(out,'native/state/control.token'),'utf8')).trim();
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(response.ok);
   const kinds=[0x678,0x668,0x67d,0x91b];
   roots=(await response.json()).entities.filter(e=>kinds.includes(e.kind)).map(e=>({entity:e.id,kind:e.kind,x:e.pos.x,y:e.pos.y}));
@@ -19,32 +23,31 @@ export async function prepare(api){
   await writeFile(join(out,'placement.json'),JSON.stringify({world,roots,scout}));
   return {...spec,position:'spawn'};
 }
-export async function run(spectator){
-  const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const api=async command=>{const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});const v=await r.json();assert(r.ok&&v.status!=='failed',JSON.stringify(v));return ['observe','inspect','world_info'].includes(command.op)?v:v.result;};
-  let serial=0;const driver=async command=>{const p=join(out,'command-'+serial+++'.json');await writeFile(p,JSON.stringify({id:randomUUID(),command}));return JSON.parse(execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(out,'native/native.json'),p],{maxBuffer:16*1024*1024,stdio:['ignore','pipe','pipe']}));};
-  const protectedUntil=new Map();
-  async function protect(actor){const now=(await api({op:'observe',actor})).game_ms;if(now>=(protectedUntil.get(actor)??0)){await api({op:'cheat',actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});protectedUntil.set(actor,now+60000);}}
-  const inspect=actor=>api({op:'inspect',actor});
-  const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
-  let earned;
+export async function beforeNavigate(){
+  if(earned)return;
+  const config=join(out,'direct.json');await writeFile(config,JSON.stringify({origin,state:join(out,'native/state')}));
+  let serial=0;
   for(const root of roots){
     if(earned)break;
     await api({op:'cheat',actor:scout,change:{kind:'teleport',position:{x:root.x,y:root.y}}});
     for(let n=0;n<30;n++){
-      await protect(scout);await protect(spectator.actor);
-      const state=await inspect(scout),target=state.diagnostic.entities.find(e=>(e.id===root.entity||e.quest===root.entity)&&[root.kind,0x91c].includes(e.kind));
+      await protect(scout);
+      const state=await api({op:'inspect',actor:scout}),target=state.diagnostic.entities.find(e=>(e.id===root.entity||e.quest===root.entity)&&[root.kind,0x91c].includes(e.kind));
       if(!target)break;
       await api({op:'cheat',actor:scout,change:{kind:'teleport',position:target.pos}});
-      await driver({op:'act',actor:scout,action:{command:'shoot',angle:0},duration_ms:1000});
+      const request=join(out,'command-'+serial+++'.json');await writeFile(request,JSON.stringify({id:randomUUID(),command:{op:'act',actor:scout,action:{command:'shoot',angle:0},duration_ms:1000}}));
+      execFileSync(process.execPath,[resolve('scripts/game.mjs'),config,request],{stdio:['ignore','pipe','pipe']});
     }
     earned=(await fields()).find(f=>f.message==='quest defeat summoned a Realm event'&&f.kind===0xd59);
   }
   assert(earned,'No Cube God earned within the finite qualifying-quest sample');
   await writeFile(join(out,'admission.json'),JSON.stringify(earned));
-  spectator.check('qualifying combat admits an ordinarily selected Cube God',roots.some(r=>r.entity===earned.source));
-  const spawn=(await spectator.observe()).position;
   await api({op:'cheat',actor:scout,change:{kind:'teleport',position:spawn}});
+  await api({op:'cheat',actor:scout,change:{kind:'pause',paused:true}});
+}
+export async function run(spectator){
+  spectator.check('qualifying combat admits an ordinarily selected Cube God',roots.some(r=>r.entity===earned.source));
+  await protect(spectator.actor);
   const game=await spectator.join({...spec,position:{x:earned.x,y:earned.y}}),root=earned.entity;
   await protect(game.actor);
   const snapshots=[];
@@ -85,7 +88,7 @@ export async function run(spectator){
   game.check('ordinary native helm spends mana and grants Speedy for pursuit',(await game.observe()).character.mp<mana&&((await game.observe()).character.conditions&(1<<14))!==0);
   for(let n=0;n<30&&entity(await game.inspect(),victim.id);n++)await fire(game,victim.id);
   game.check('native sword fire defeats an Overseer',!entity(await game.inspect(),victim.id));
-  const census=await fetch(config.origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
+  const census=await fetch(origin+'/dev/map?player='+(await game.inspect()).diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(census.ok);
   const old=new Set((await census.json()).entities.filter(e=>e.quest===root&&e.kind===0xd5a).map(e=>e.id));
   for(let n=0;n<15&&!family(await game.inspect()).some(e=>e.kind===0xd5a&&!old.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
   state=await save('replenished');game.check('living Cube replenishes an owned Overseer',family(state).some(e=>e.kind===0xd5a&&!old.has(e.id)));
