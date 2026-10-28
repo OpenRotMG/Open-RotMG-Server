@@ -152,6 +152,7 @@ export async function run(game){
   const beforeFinalXp=state.view.character.experience,existingBags=new Set(state.diagnostic.entities.filter(e=>e.items).map(e=>e.id));
   for(let n=0;n<300&&entity(await game.inspect(),lord.id);n++){
     state=await game.inspect();
+    if(entity(state,lord.id).stage>=9){await idle(2500);continue;}
     const crystal=crystals(state)[0];
     await fire(crystal?.id??lord.id,1000);
   }
