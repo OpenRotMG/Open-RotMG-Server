@@ -11,12 +11,14 @@ export async function prepare(api){
   const scout=await api({op:'spawn',spec:{...spec,guid:'warg-scout',position:{x,y},controller:'direct',profile:null}});
   const state=await api({op:'inspect',actor:scout.result.actor});
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
-  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(','))),candidates=[];
+  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(','))),candidates=[],placements=[];
+  const enemies=new Set(JSON.parse(execFileSync('python3',['-c',"import json,xml.etree.ElementTree as E; print(json.dumps([int(e.attrib['type'],0) for e in E.parse('data/objects.xml').getroot() if e.find('Enemy') is not None]))"],{encoding:'utf8'})));
   for(const e of map.entities.filter(e=>e.kind===0x623)){
-    const distance=Math.min(...map.entities.filter(p=>p.camp!==e.camp&&p.hp>0).map(p=>Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)));
-    if(distance<12||![-1,0,1].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)-3+dx,Math.floor(e.pos.y)+dy].join(',')))))continue;
-    candidates.push({entity:e,distance});
+    const distance=Math.min(...map.entities.filter(p=>p.camp!==e.camp&&enemies.has(p.kind)).map(p=>Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)));
+    const clear=[-1,0,1].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)-3+dx,Math.floor(e.pos.y)+dy].join(','))));
+    placements.push({id:e.id,distance,clear});if(distance>=12&&clear)candidates.push({entity:e,distance});
   }
+  await writeFile(join(root,'camp-selection.json'),JSON.stringify({world:spec.world,layout:world.realm_layout,placements}));
   candidates.sort((a,b)=>b.distance-a.distance);assert(candidates.length,'No natural Warg camp has a clear approach and twelve-tile separation from other actors');
   leader=candidates[0].entity;camp=leader.camp;
   await writeFile(join(root,'natural-family.json'),JSON.stringify({world:spec.world,layout:world.realm_layout,clearance:candidates[0].distance,members:map.entities.filter(e=>e.camp===camp)}));
