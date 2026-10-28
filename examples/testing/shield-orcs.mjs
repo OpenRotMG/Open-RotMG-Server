@@ -8,26 +8,24 @@ let queen;
 export async function prepare(api){
   const report=JSON.parse(await readFile(join(root(),'result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(root(),'state/control.token'),'utf8')).trim()};
-  for(const world of [1,2,3]){
-    const info=await api({op:'world_info',world}),[x,y]=info.spawn_points[0];
-    const scout=await api({op:'spawn',spec:{...spec,world,guid:'shield-orc-scout-'+world,position:{x,y},controller:'direct',profile:null}});
-    const state=await api({op:'inspect',actor:scout.result.actor});
-    const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
-    const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-    await writeFile(join(process.env.QA_RESULTS_DIR,'natural-map-'+world+'.json'),JSON.stringify(map));
-    for(const e of map.entities.filter(e=>e.kind===0x900)){
-      const king=map.entities.find(m=>m.camp===e.camp&&m.kind===0x901);assert(king);
-      for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
-        const position={x:Math.floor(king.pos.x)+dx+.5,y:Math.floor(king.pos.y)+dy+.5};
-        if(Math.hypot(dx,dy)<1)continue;
-        if(!blocked.has([Math.floor(position.x),Math.floor(position.y)].join(','))){
-          queen=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify({world,members:map.entities.filter(m=>m.camp===e.camp)}));
-          return {...spec,world,position};
-        }
+  const info=await api({op:'world_info',world:spec.world}),[x,y]=info.spawn_points[0];
+  const scout=await api({op:'spawn',spec:{...spec,guid:'shield-orc-scout',position:{x,y},controller:'direct',profile:null}});
+  const state=await api({op:'inspect',actor:scout.result.actor});
+  const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
+  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
+  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-map.json'),JSON.stringify(map));
+  for(const e of map.entities.filter(e=>e.kind===0x900)){
+    const king=map.entities.find(m=>m.camp===e.camp&&m.kind===0x901);assert(king);
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++){
+      const position={x:Math.floor(king.pos.x)+dx+.5,y:Math.floor(king.pos.y)+dy+.5};
+      if(Math.hypot(dx,dy)<1)continue;
+      if(!blocked.has([Math.floor(position.x),Math.floor(position.y)].join(','))){
+        queen=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify({world:spec.world,layout:info.realm_layout,members:map.entities.filter(m=>m.camp===e.camp)}));
+        return {...spec,position};
       }
     }
   }
-  throw Error('No natural Shield Orc camp with a walkable inner-orbit approach in the three Realms');
+  throw Error('Sampled natural Realm has no Shield Orc camp with a walkable inner-orbit approach');
 }
 export async function run(game){
   const samples=[],shots=new Map();let protectedUntil=0,serial=0,pollMs=100;
