@@ -41,7 +41,7 @@ export async function run(observer){
   await game.act({keys:[],duration_ms:500});
   const defeated=await save('stheno-defeated'),cleared=await map();
   game.check('ordinary native staff defeats Stheno and grants XP',!cleared.entities.some(e=>e.id===boss.id)&&defeated.view.character.experience>initial.view.character.experience);
-  const bag=cleared.entities.find(e=>e.items?.includes(0xa21)&&e.owners?.includes(defeated.view.session.account));assert(bag,'No eligible private Speed reward');
+  const bag=cleared.entities.find(e=>e.items?.includes(0xa21)&&e.bag_owners?.includes(defeated.view.session.account));assert(bag,'No eligible private Speed reward');
   const toward=(a,b)=>{const dx=b.x-a.x,dy=b.y-a.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;return [Math.abs(x)>.15&&Math.abs(x)>=Math.abs(y)*.4142?(x>0?'d':'a'):null,Math.abs(y)>.15&&Math.abs(y)>=Math.abs(x)*.4142?(y>0?'s':'w'):null].filter(Boolean);};
   async function walk(point){
     for(let n=0;n<60;n++){const v=await game.observe(),d=Math.hypot(point.x-v.position.x,point.y-v.position.y);if(d<.4)return;await game.act({keys:toward(v.position,point),duration_ms:Math.max(50,Math.min(200,Math.round(d/(4+5.6*v.character.stats.speed/75)*1000)))});}
