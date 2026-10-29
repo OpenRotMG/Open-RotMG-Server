@@ -180,7 +180,7 @@ export async function run(game){
   assert(Math.hypot((await game.observe()).position.x-refuge.x,(await game.observe()).position.y-refuge.y)<.2,'Prepared refuge required before protection boundary');
   while((await game.observe()).game_ms<until)await game.act({keys:[],duration_ms:Math.min(10000,until-(await game.observe()).game_ms)});
   await protect();combatDeadline=until;
-  await writeFile(join(out,'combat-window.json'),JSON.stringify({started_ms:until-60000,expires_ms:combatDeadline,reserve_ms:5000,qualification:'Single finite prepared encounter window; no protection-expiry renewal or survival proof.'}));
+  await writeFile(join(out,'combat-window.json'),JSON.stringify({started_ms:until-60000,expires_ms:combatDeadline,reserve_ms:5000,qualification:'Single finite prepared Realm combat/pickup window; no expiry-renewal or survival proof. Nexus reconnect is outside this timing coverage.'}));
   await at({x:admitted.x,y:admitted.y});
   await game.act({keys:[],duration_ms:500},{name:'lost-lands-waiting',when:()=>true});
   const entry=await save('entry'),lord=entity(entry,admitted.entity);assert(lord?.hp===70000&&lord.stage===0);
@@ -269,10 +269,11 @@ export async function run(game){
   game.check('native drag commits one eligible Lord item',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===inventory.inventory_revision+1&&entity(picked,bag.id)?.items[slot]===-1);
   await game.act({keys:[],duration_ms:350,drag:{from,to:{x:678,y:428}}});
   game.check('empty-slot drag cannot duplicate the Lord reward',(await game.observe()).character.inventory_revision===picked.view.character.inventory_revision);
+  const realmEnd=await game.observe();
+  game.check('prepared Realm combat and pickup finish inside one finite protection epoch',realmEnd.world==='Realm'&&['world','player','character','account'].every(k=>realmEnd.session[k]===initial.view.session[k])&&realmEnd.game_ms<combatDeadline);
   await game.act({keys:['Insert'],duration_ms:250});
   const retained=await game.observe();
   game.check('Nexus reconnect preserves the living character and Lord item',retained.world==='Nexus'&&retained.lifecycle.alive&&retained.session.character===picked.view.session.character&&JSON.stringify(retained.character.items)===JSON.stringify(picked.view.character.items)&&retained.character.inventory_revision===picked.view.character.inventory_revision);
-  game.check('prepared journey ends inside its single finite protection window',retained.game_ms<combatDeadline);
-  await writeFile(join(out,'reward.json'),JSON.stringify({bag,observer,picked,retained,combatDeadline}));
+  await writeFile(join(out,'reward.json'),JSON.stringify({bag,observer,picked,realmEnd,retained,combatDeadline}));
   }finally{connection.close();}
 }
