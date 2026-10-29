@@ -96,7 +96,11 @@ export async function run(game){
   try{
     const before=await game.observe();await game.act({keys:['d'],duration_ms:1000},{name:'recovered-gameplay',when:v=>v.game_ms>=before.game_ms+500});const after=await game.observe();
     game.check('recovered character is alive and moves in Nexus',after.lifecycle.alive&&after.world==='Nexus'&&after.position.x>before.position.x);
+    await game.act({keys:['Insert'],duration_ms:700});await game.act({keys:[],duration_ms:500});const returned=await game.observe();
+    game.check('ordinary Nexus reconnect keeps the recovered living character',returned.lifecycle.alive&&returned.world==='Nexus'&&returned.session.character===after.session.character&&returned.session.player!==after.session.player);
+    await game.act({keys:['d'],duration_ms:1000},{name:'recovered-reconnect',when:v=>v.game_ms>=returned.game_ms+500});const end=await game.observe();
+    game.check('recovered character remains playable after reconnect',end.lifecycle.alive&&end.position.x>returned.position.x);
     for(const name of checks)game.check(name,true);
-    await writeFile(join(process.env.QA_RESULTS_DIR,'recovery-checks.json'),JSON.stringify({checks,accountFixture:'email reset grant inserted in isolated state; real form and reset API, no mail sent',before,after},null,2));
+    await writeFile(join(process.env.QA_RESULTS_DIR,'recovery-checks.json'),JSON.stringify({checks,accountFixture:'email reset grant inserted in isolated state; real form and reset API, no mail sent',before,after,returned,end},null,2));
   }finally{cdp.close();}
 }
