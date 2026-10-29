@@ -110,6 +110,7 @@ pub(super) struct Plan {
     flagged: VecDeque<Event>,
     pub last_progress: u64,
     pub engaged: bool,
+    pub goal_label: Option<String>,
     rest: BTreeMap<Owner, u64>,
     checkpoint: Option<Checkpoint>,
     goal: Option<(u64, i64, u64)>,
@@ -274,7 +275,9 @@ impl Plan {
             let doing = self
                 .step
                 .as_ref()
-                .map_or("its goal".into(), |s| s.target.clone());
+                .map(|s| s.target.clone())
+                .or_else(|| self.goal_label.clone())
+                .unwrap_or_else(|| "no selected goal".into());
             return Some(json!({"kind":"no_progress","since_ms":self.last_progress,
                 "text":format!("No progress for {}m while pursuing {doing}.",minutes(self.last_progress))}));
         }
@@ -293,9 +296,14 @@ mod tests {
             ..Plan::default()
         };
         assert_eq!(plan.flag(NO_PROGRESS_MS), None);
-        assert_eq!(
-            plan.flag(NO_PROGRESS_MS + 1).unwrap()["kind"],
-            "no_progress"
+        plan.goal_label = Some("Acquire Falchion".into());
+        let stalled = plan.flag(NO_PROGRESS_MS + 1).unwrap();
+        assert_eq!(stalled["kind"], "no_progress");
+        assert!(
+            stalled["text"]
+                .as_str()
+                .unwrap()
+                .contains("Acquire Falchion")
         );
         plan.engaged = true;
         assert_eq!(

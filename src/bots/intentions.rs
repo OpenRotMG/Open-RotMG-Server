@@ -185,12 +185,12 @@ impl Intentions {
             self.end(reason);
         }
     }
-    pub(super) fn label(&self) -> Option<String> {
+    pub(super) fn label(&self, c: &Content) -> Option<String> {
         self.main.as_ref().map(|m| match &m.objective {
             Objective::Reach20 => "Reach level 20".into(),
             Objective::Speed => "Max permanent Speed".into(),
             Objective::Fame => format!("Earn {} base fame", m.target),
-            Objective::Item { .. } => format!("Acquire item {}", m.target),
+            Objective::Item { .. } => format!("Acquire {}", c.objects[&(m.target as u16)].name),
         })
     }
     pub(super) fn observe(&mut self, v: &PlayerView, c: &Content, identity: &str) -> Result<()> {
@@ -370,6 +370,7 @@ impl Intentions {
     pub(super) fn payload(
         &self,
         v: &PlayerView,
+        c: &Content,
         activity: Activity,
         step: String,
         errand: Option<&plan::Step>,
@@ -381,7 +382,7 @@ impl Intentions {
                 Objective::Fame => (v.character.fame, "base fame"),
                 Objective::Item { .. } => (i32::from(v.character.items.contains(&m.target)), "item kind"),
             };
-            (serde_json::json!({"id":m.id,"label":self.label(),"current":current,"target":m.target,"unit":unit}), m.objective.how())
+            (serde_json::json!({"id":m.id,"label":self.label(c),"current":current,"target":m.target,"unit":unit}), m.objective.how())
         });
         let necessary = errand.is_some()
             || !matches!(

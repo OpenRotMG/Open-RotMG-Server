@@ -948,7 +948,6 @@ pub(super) async fn launch(
                         if brain.blocked.get(&tile).is_none_or(|until| *until <= view.tick) {
                             brain.blocked.insert(tile, view.tick + 100);
                             tracing::warn!(player=id,tick=view.tick,x=blocked.x,y=blocked.y,"virtual held movement blocked; route excluded");
-                            brain.plan.record(plan::now(), plan::Kind::Aborted, brain.plan.owner(), "movement blocked".into());
                         }
                     }
                     if let Some(selected) = selected { ensure!(view.session.character == selected, "selected autonomous character changed"); }

@@ -573,12 +573,15 @@ impl Brain {
         {
             self.blocked.insert(tile(destination), v.tick + 100);
             tracing::warn!(player=v.session.player,tick=v.tick,goal=?self.goal,x=destination.x,y=destination.y,"autonomous route made no progress; temporarily excluded");
-            self.plan.record(
-                plan::now(),
-                plan::Kind::Aborted,
-                self.plan.owner(),
-                "movement blocked".into(),
-            );
+            // Login crowds briefly wedge bots on the Nexus spawn; only a stall elsewhere is a loop.
+            if v.map.name != "Nexus" {
+                self.plan.record(
+                    plan::now(),
+                    plan::Kind::Aborted,
+                    self.plan.owner(),
+                    "movement blocked".into(),
+                );
+            }
             self.heading = self.rng.gen_range(0.0..std::f32::consts::TAU);
             self.stationary = v.tick;
         }
@@ -619,6 +622,7 @@ impl Brain {
             .expect("observed intentions")
             .payload(
                 v,
+                content,
                 activity,
                 cctv::reason(activity, &decision, v, content),
                 self.plan.step.as_ref(),
@@ -633,7 +637,7 @@ impl Brain {
             .intentions
             .as_mut()
             .context("unmigrated account intentions")?;
-        let before = intentions.label();
+        let before = intentions.label(content);
         intentions.observe(v, content, identity)?;
         if self.plan.stalled(intentions.progress(v), now) {
             let reason = format!(
@@ -645,7 +649,8 @@ impl Brain {
                 .record(now, plan::Kind::Aborted, Some(plan::Owner::Goal), reason);
             intentions.observe(v, content, identity)?;
         }
-        let after = intentions.label();
+        let after = intentions.label(content);
+        self.plan.goal_label.clone_from(&after);
         if after != before
             && let Some(label) = after
         {
@@ -1626,7 +1631,7 @@ impl Brain {
                 let next = grid
                     .nearby(&reachable, v.position)
                     .filter(|t| {
-                        !self.blocked.contains_key(t) && self.crowd.bands.survivable(v, center(*t))
+                        !self.blocked.contains_key(t) && self.crowd.bands.explorable(v, center(*t))
                     })
                     .filter(|t| {
                         center(*t).distance(v.position) > 3.
@@ -1794,6 +1799,14 @@ impl Brain {
                             return Ok(clearing);
                         }
                         self.blocked.insert(tile(destination), v.tick + 100);
+                        if matches!(goal, Goal::Venture | Goal::Explore(..)) {
+                            self.plan.record(
+                                plan::now(),
+                                plan::Kind::Aborted,
+                                self.plan.owner(),
+                                "no route".into(),
+                            );
+                        }
                         continue;
                     }
                 },

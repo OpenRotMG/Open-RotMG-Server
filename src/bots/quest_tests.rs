@@ -476,6 +476,58 @@ fn wavelength_vault_errand_banks_before_leaving() {
 }
 
 #[test]
+fn suited_band_edge_does_not_trap_venture_and_explore() {
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.character.level = 11;
+    v.position = Pos { x: 15.5, y: 10.5 };
+    v.objects[0].kind = c
+        .objects
+        .values()
+        .find(|o| o.enemy && (5..=7).contains(&o.terrain))
+        .unwrap()
+        .kind;
+    v.objects[0].position = Pos { x: 2.5, y: 10.5 };
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.crowd.observe(&v, &c);
+    v.objects.clear();
+    brain.heading = 0.;
+    let mut goals = Vec::new();
+    for _ in 0..12 {
+        v.tick += 5;
+        v.time_ms += 250;
+        v.elapsed_ms += 250;
+        let d = brain.decide(&v, &c).unwrap();
+        v.position = d.movement.expect("the bot keeps travelling");
+        goals.push(matches!(d.goal, Goal::Venture));
+    }
+    let switches = goals.windows(2).filter(|w| w[0] != w[1]).count();
+    assert!(switches < 3, "Venture and Explore alternate: {goals:?}");
+}
+
+#[test]
+fn realm_wedge_loops_but_nexus_spawn_congestion_does_not() {
+    for (map, looping) in [("Nexus", false), ("Realm", true)] {
+        let (c, mut v) = fixture();
+        v.map.name = map.into();
+        v.quest = None;
+        v.objects.clear();
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        for _ in 0..3 {
+            brain.destination = Some(Pos { x: 20.5, y: 10.5 });
+            v.tick += 31;
+            brain.decide(&v, &c).unwrap();
+        }
+        let flag = brain.plan.flag(plan::now());
+        assert_eq!(
+            flag.as_ref().is_some_and(|f| f["kind"] == "looping"),
+            looping,
+            "{map}: {flag:?}"
+        );
+    }
+}
+
+#[test]
 fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
     let (c, mut v) = fixture();
     v.quest = None;
