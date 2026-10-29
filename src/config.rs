@@ -45,6 +45,7 @@ impl Config {
     pub fn load(args: &[String]) -> Result<(Self, bool)> {
         let mut file = None;
         let mut port = None;
+        let mut realm_seed = None;
         let mut control = false;
         let mut shore_bots = None;
         let mut bot_llm = None;
@@ -64,6 +65,15 @@ impl Config {
                     let value: u16 = value.parse().context("port must be between 1 and 65535")?;
                     ensure!(value != 0, "port must be between 1 and 65535");
                     port = Some(value);
+                }
+                "--realm-seed" => {
+                    ensure!(realm_seed.is_none(), "duplicate --realm-seed");
+                    realm_seed = Some(
+                        args.next()
+                            .context("--realm-seed requires an unsigned 64-bit integer")?
+                            .parse::<u64>()
+                            .context("--realm-seed requires an unsigned 64-bit integer")?,
+                    );
                 }
                 "--dev-control" => {
                     ensure!(!control, "duplicate --dev-control");
@@ -93,7 +103,7 @@ impl Config {
                     ));
                 }
                 _ => anyhow::bail!(
-                    "usage: openrotmg [--config FILE] [--port PORT] [--dev-control] [--shore-bots | --no-shore-bots] [--bot-llm | --no-bot-llm] [--client DIR] [--state DIR]"
+                    "usage: openrotmg [--config FILE] [--port PORT] [--dev-control] [--shore-bots | --no-shore-bots] [--bot-llm | --no-bot-llm] [--client DIR] [--state DIR] [--realm-seed SEED]"
                 ),
             }
         }
@@ -136,6 +146,9 @@ impl Config {
                 config.origin = format!("http://{}", config.bind);
                 config.bot_view_origin = Some(config.origin.clone());
             }
+        }
+        if let Some(seed) = realm_seed {
+            config.realm_seed = seed;
         }
         if let Some(enabled) = shore_bots {
             config.shore_bots = enabled;
@@ -232,6 +245,22 @@ impl Config {
 #[cfg(test)]
 mod bot_view_tests {
     use super::*;
+    #[test]
+    fn explicit_realm_seed_preserves_zero_and_rejects_invalid_arguments() {
+        for seed in [0, u64::MAX] {
+            let (config, _) = Config::load(&["--realm-seed".into(), seed.to_string()]).unwrap();
+            assert_eq!(config.realm_seed, seed);
+        }
+        for args in [
+            vec!["--realm-seed"],
+            vec!["--realm-seed", "-1"],
+            vec!["--realm-seed", "18446744073709551616"],
+            vec!["--realm-seed", "1", "--realm-seed", "2"],
+        ] {
+            assert!(Config::load(&args.into_iter().map(String::from).collect::<Vec<_>>()).is_err());
+        }
+    }
+
     #[test]
     fn bot_view_origin_is_explicit_and_local_defaults_track_the_port() {
         let (mut config, _) = Config::load(&["--port".into(), "19023".into()]).unwrap();

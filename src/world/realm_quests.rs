@@ -19,6 +19,7 @@ impl World {
             let (ground, scenery) = match site.kind {
                 0x91f => (0x46, Some(0x194)),
                 0x91b => (0xad, Some(0x160)),
+                0xdc2 => (0xc5, Some(0x1f2)),
                 0x928 | 0x67d => (0x60, Some(0x120)),
                 0x678 => (0x46, Some(0x18e)),
                 0x668 => (0xf4, None),
@@ -71,7 +72,8 @@ impl World {
                 self.realm_layout
             );
             ensure!(
-                site.chest.is_some() == matches!(site.kind, 0x668 | 0x67d | 0x678),
+                site.chest.is_some() == matches!(site.kind, 0x668 | 0x67d | 0x678 | 0xdc2)
+                    && (site.kind != 0xdc2 || site.chest == Some(site.spawn)),
                 "authored site {:#x} has incorrect chest metadata",
                 site.kind
             );
@@ -113,21 +115,23 @@ impl World {
         // Enter bosses/chests without repainting; anchors are engineered against hash-bound maps, not recovered: https://github.com/Zolmex/kithio-as3-source/tree/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/setpieces
         for (site, area) in sites.iter().zip(areas) {
             self.setpieces.push(area);
-            self.spawn_named_quest(
-                site.kind,
-                Pos {
-                    x: site.spawn[0] as f32,
-                    y: site.spawn[1] as f32,
-                },
-            )?;
-            if let Some([x, y]) = site.chest {
-                self.spawn_landmark_chests(
-                    site.kind,
-                    Pos {
-                        x: x as f32,
-                        y: y as f32,
-                    },
-                )?;
+            let pos = Pos {
+                x: site.spawn[0] as f32,
+                y: site.spawn[1] as f32,
+            };
+            if site.kind == 0xdc2 {
+                self.spawn_coil_site(pos)?;
+            } else {
+                self.spawn_named_quest(site.kind, pos)?;
+                if let Some([x, y]) = site.chest {
+                    self.spawn_landmark_chests(
+                        site.kind,
+                        Pos {
+                            x: x as f32,
+                            y: y as f32,
+                        },
+                    )?;
+                }
             }
         }
         Ok(())
@@ -1116,6 +1120,7 @@ mod tests {
                 "classic-world-01-reconstruction" => [5, 7, 8, 6],
                 "classic-world-02-reconstruction" => [1, 6, 0, 8],
                 "classic-world-03-reconstruction" => [4, 3, 0, 6],
+                "classic-world-09-reconstruction" => [0; 4],
                 "realm-fsod-1" | "realm-fsod-2" | "realm-fsod-3" => [0; 4],
                 name => panic!("unreviewed authored-site roster {name}"),
             };
@@ -1144,10 +1149,10 @@ mod tests {
             let authored_liches = sites.iter().filter(|s| s.kind == 0x91b).count();
             assert_eq!(
                 authored_liches,
-                if source.name() == "classic-world-01-reconstruction" {
-                    6
-                } else {
-                    0
+                match source.name() {
+                    "classic-world-01-reconstruction" => 6,
+                    "classic-world-09-reconstruction" => 3,
+                    _ => 0,
                 }
             );
             for site in &sites {
@@ -1165,11 +1170,20 @@ mod tests {
                 assert_eq!(*actor.quest, Some(actor.id));
                 assert_eq!(
                     actor.stage,
-                    (!matches!(site.kind, 0x678 | 0x668 | 0x67d)).then_some(0)
+                    (!matches!(site.kind, 0x678 | 0x668 | 0x67d | 0xdc2)).then_some(0)
                 );
                 assert_eq!(actor.hp, content.objects[&site.kind].hp);
                 assert!(world.non_population_ids.contains(&actor.id));
             }
+            world.populate_coil_snakes(&sites).unwrap();
+            assert_eq!(
+                world.actors().filter(|e| e.kind == 0xdc2).count(),
+                if source.name() == "classic-world-09-reconstruction" {
+                    16
+                } else {
+                    2
+                }
+            );
             world.populate_named_quests(&sites).unwrap();
             world.populate_realm_heroes(&sites).unwrap();
             assert!(world.actors().all(|e| !(0x662..=0x667).contains(&e.kind)));
@@ -1185,18 +1199,133 @@ mod tests {
             }
             for site in &sites {
                 if let Some([x, y]) = site.chest {
-                    assert!(world.entities.values().any(|e| e.kind == 0x501
-                        && e.pos.x == x as f32
-                        && e.pos.y == y as f32
-                        && e.items.iter().any(|item| *item != -1)));
+                    assert!(
+                        world.entities.values().any(|e| e.kind == 0x501
+                            && e.pos.x == x as f32
+                            && e.pos.y == y as f32
+                            && (site.kind == 0xdc2 || e.items.iter().any(|item| *item != -1))),
+                        "missing authored chest for {:#x} at {x},{y} in {}",
+                        site.kind,
+                        source.name()
+                    );
                 }
             }
             let liches = world.entities.values().filter(|e| e.kind == 0x91b).count();
-            assert!(if authored_liches > 0 {
-                liches == authored_liches
-            } else {
-                (4..7).contains(&liches)
-            });
+            assert!((authored_liches.max(4)..=authored_liches.max(6)).contains(&liches));
+        }
+    }
+
+    #[test]
+    fn world09_full_population_preserves_native_landmarks_and_lava() {
+        let path = std::path::Path::new("data");
+        let content = Arc::new(Content::load(path).unwrap());
+        let mut sources = crate::terrain::realms::sources(path).unwrap();
+        let index = sources
+            .iter()
+            .position(|s| s.name() == "classic-world-09-reconstruction")
+            .unwrap();
+        let seed = (0..256)
+            .find(|seed| {
+                rand::rngs::StdRng::seed_from_u64(*seed).gen_range(0..sources.len()) == index
+            })
+            .unwrap();
+        eprintln!("World9 native catalog-selection seed: {seed}");
+        let source = sources.swap_remove(index);
+        let sites = source.sites().unwrap();
+        let original = source.open(&content).unwrap();
+        let lava: Vec<_> = original
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.ground == 244)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(lava.len(), 426);
+        let directory =
+            Directory::configured(path, content, 85, seed, Some(seed), vec![source], 2).unwrap();
+        for id in [-3, 1] {
+            let world = &directory.worlds[&id];
+            assert_eq!(
+                world.realm_layout.as_deref(),
+                Some("classic-world-09-reconstruction")
+            );
+            assert_eq!((world.map.width, world.map.height), (2100, 2100));
+            assert_eq!(world.map.spawns.len(), 4);
+            assert_eq!(world.actors().filter(|e| e.kind == 0x91f).count(), 14);
+            assert_eq!(world.actors().filter(|e| e.kind == 0xdc2).count(), 16);
+            assert!((4..7).contains(&world.actors().filter(|e| e.kind == 0x91b).count()));
+            assert!(
+                world
+                    .actors()
+                    .filter(|e| e.population_slot.is_some())
+                    .count()
+                    > 100
+            );
+            let width = world.map.width as usize;
+            let (x, y) = world.map.spawns[0];
+            let origin = y.floor() as usize * width + x.floor() as usize;
+            let mut reachable = vec![false; world.map.cells.len()];
+            let mut pending = vec![origin];
+            reachable[origin] = true;
+            while let Some(i) = pending.pop() {
+                let (x, y) = ((i % width) as i32, (i / width) as i32);
+                for (dx, dy) in [(0, -1), (-1, 0), (1, 0), (0, 1)] {
+                    let pos = Pos {
+                        x: (x + dx) as f32 + 0.5,
+                        y: (y + dy) as f32 + 0.5,
+                    };
+                    if world.walkable(pos) {
+                        let n = pos.y as usize * width + pos.x as usize;
+                        if !reachable[n] && world.map.cells[n].ground != 244 {
+                            reachable[n] = true;
+                            pending.push(n);
+                        }
+                    }
+                }
+            }
+            for &(x, y) in &world.map.spawns {
+                assert!(reachable[y.floor() as usize * width + x.floor() as usize]);
+            }
+            for site in &sites {
+                assert!(
+                    reachable[site.spawn[1] as usize * width + site.spawn[0] as usize],
+                    "populated Realm {id} disconnected authored site {:?}",
+                    site.spawn
+                );
+            }
+            for i in &lava {
+                let (a, b) = (&original.cells[*i], &world.map.cells[*i]);
+                assert_eq!(
+                    (a.ground, a.object, &a.config, a.terrain, a.region),
+                    (b.ground, b.object, &b.config, b.terrain, b.region)
+                );
+            }
+            for site in &sites {
+                let [x, y, width, height] = site.bounds;
+                for yy in y..y + height {
+                    for xx in x..x + width {
+                        let i = (yy * world.map.width + xx) as usize;
+                        let (a, b) = (&original.cells[i], &world.map.cells[i]);
+                        assert_eq!(
+                            (a.ground, a.object, &a.config, a.terrain, a.region),
+                            (b.ground, b.object, &b.config, b.terrain, b.region)
+                        );
+                    }
+                }
+                assert!(world.walkable(Pos {
+                    x: site.spawn[0] as f32,
+                    y: site.spawn[1] as f32
+                }));
+                assert_eq!(
+                    world
+                        .actors()
+                        .filter(|e| e.kind == site.kind
+                            && e.home.x == site.spawn[0] as f32
+                            && e.home.y == site.spawn[1] as f32)
+                        .count(),
+                    1
+                );
+            }
         }
     }
 }

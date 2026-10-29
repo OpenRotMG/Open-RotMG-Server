@@ -20,6 +20,11 @@ export function nativeClientArguments({client,clientManifest}) {
   if(clientManifest!==undefined){assert(isAbsolute(clientManifest),'--client-manifest must be an absolute manifest path');return ['--client-manifest',clientManifest];}
   return [];
 }
+export function nativeRealmArguments(seed) {
+  if(seed===undefined)return [];
+  assert(Number.isSafeInteger(seed)&&seed>=0,'Case realmSeed must be a nonnegative safe integer');
+  return ['--realm-seed',String(seed)];
+}
 export function browserDiagnostic(line, closing=false) {
   const m=/^\[\d+:\d+:\d+\/\d+\.\d+:ERROR:([^\]]+):\d+\] (.*)$/.exec(line);
   // Push registration is outside this local game's protocol; retain its diagnostics without inventing game failures.
@@ -237,7 +242,7 @@ export async function runCase(scenario, options) {
     report.source={head:(await exec('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim(),dirty:Boolean((await exec('git',['status','--porcelain'],{cwd:root})).stdout.trim())};report.origin=`http://127.0.0.1:${port}`;
     await bounded('prepareBuildStart',async()=>{
       const began=performance.now();let buildStart,buildEnd,ready;
-      const args=[String(port),archive?'--state':'--test-state',state,'--no-shore-bots','--release'];if(archive)args.push('--dev-control');args.push(...clientArgs);if(options.botLlm)args.push('--bot-llm');
+      const args=[String(port),archive?'--state':'--test-state',state,'--no-shore-bots','--release'];if(archive)args.push('--dev-control');args.push(...clientArgs,...nativeRealmArguments(fixtureModule.realmSeed));if(options.botLlm)args.push('--bot-llm');
       const server=launch('server',join(root,'run.sh'),args,['ignore','pipe','pipe'],{...process.env,CARGO_TERM_COLOR:'never'});
       for(const [stream,name] of [[server.child.stdout,'server.log'],[server.child.stderr,'build.log']]){
         const fd=await log(name);let pending='';
