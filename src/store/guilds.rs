@@ -25,6 +25,9 @@ pub enum GuildAction {
     Upgrade { level: i32 },
 }
 
+#[cfg(test)]
+mod tests;
+
 pub const HALL_PRICES: [i32; 3] = [10_000, 100_000, 250_000];
 
 pub fn allowed_rank(authority: i32, old: i32, new: i32) -> bool {
