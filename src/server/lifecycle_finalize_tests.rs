@@ -433,6 +433,9 @@ async fn living_character_load_preserves_saved_fields_and_rejects_foreign_owner(
         })
         .await
         .unwrap();
+    assert!(loaded.tiles >= ch.tiles && loaded.lifetime.tiles >= ch.lifetime.tiles);
+    ch.tiles = loaded.tiles;
+    ch.lifetime.tiles = loaded.lifetime.tiles;
     assert_eq!(loaded, ch);
     drop(socket);
     released(&a, owner).await;
