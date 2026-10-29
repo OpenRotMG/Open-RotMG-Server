@@ -57,7 +57,7 @@ export async function enter(context) {
   await until(()=>replies('account/verify').some(r=>r.body==='<Account/>'),'credential authentication without email verification');
   await delay(500);await shot('registered-account');
   assert.deepEqual(await snapshot(),initial,'Registration replaced prepared progress');
-  await click(480,435);await delay(500);await shot('registered-menu');
+  await click(480,386);await delay(500);await shot('registered-menu');
   // Logout must discard credentials, not delete saved progress: selected 123.5.1 WebAccount.clear, https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
   await click(765,20);
   await until(()=>replies('char/list').some(r=>!r.body.includes(`<AccountId>${account}</AccountId>`)&&r.body.includes('<AccountId>')),'fresh logout guest');
@@ -84,7 +84,7 @@ export async function enter(context) {
   await until(()=>replies('account/verify').length>=count+4,'successful native sign-in and account view');
   assert(replies('account/verify').slice(-2).every(r=>r.body==='<Account/>'),'Correct credentials did not authenticate');
   await delay(500);await shot('signed-in-account');
-  await click(480,435);await delay(500);
+  await click(480,386);await delay(500);
   await click(400,550);await delay(800);await click(400,550);
 }
 export async function run(game) {
