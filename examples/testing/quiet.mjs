@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-export const fixture={class:0x30e,level:20,seed:935,world:'oryx-castle',position:{x:24.5,y:139.5},equipment:[0xb08,0xb24,-1,-1],backpack:[0xa23,0xc1a,0xc21,-1,-1,-1,-1,-1],stats:[670,385,75,25,50,75,40,75]};
+export const fixture={class:0x30e,level:20,seed:935,world:'oryx-castle',position:{x:24.5,y:139.5},equipment:[0xb08,0xb24,-1,-1],backpack:[0xa23,0xc1a,0xc21,-1,-1,-1,-1,-1],stats:[670,385,75,25,50,75,40,60]};
 export async function run(game){
   const root=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(root,'native/native.json'),'utf8')),samples=[];
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
