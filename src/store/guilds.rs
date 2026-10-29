@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(test)]
-mod tests;
+mod hall_tests;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Membership {
