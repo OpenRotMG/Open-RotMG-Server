@@ -16,7 +16,7 @@ export async function run(game){
   await game.act({keys:[],duration_ms:1000},{name:'quiet-applied',when:v=>!!(v.character.conditions&2)});
   const hit=await save('natural-hit');
   game.check('natural selected five-second Living Floor hit drains MP through HP protection',!!(hit.view.character.conditions&2)&&hit.view.character.mp===0&&hit.view.character.hp===initial.view.character.hp);
-  const peer=await game.join({...fixture,position:hit.view.position,backpack:[0xc1a,-1,-1,-1,-1,-1,-1,-1]});
+  const peer=await game.join({...fixture,world:hit.view.session.world,position:hit.view.position,backpack:[0xc1a,-1,-1,-1,-1,-1,-1,-1]});
   await prepare(peer,{kind:'protection',condition:'invincible',duration_ms:60000});
   await prepare(peer,{kind:'vitals',hp:670,mp:10});
   await game.act({keys:['1'],duration_ms:200});
