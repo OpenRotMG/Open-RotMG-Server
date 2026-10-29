@@ -42,16 +42,20 @@ export async function enter({account}){
   const disabled=await post('/legacy-api/account/forgotPassword',{guid:email});
   check('unconfigured email explicitly refuses rather than pretending delivery',disabled.text.includes('not configured')&&disabled.cache==='no-store');
   check('invalid email is refused',(await post('/legacy-api/account/forgotPassword',{guid:'not-email'})).text.startsWith('<Error>'));
+  const beforeXml=(await post('/legacy-api/char/list',{guid:email,password:old})).text;
   const token=randomBytes(32).toString('hex'),hash=createHash('sha256').update(token).digest('hex');
   // The selected client promises an emailed password, not this modern grant; mail issuance is tested separately: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf (§_-QA§.§_-FV§).
   await exec('python3',['-c',`import sqlite3,sys,time
 c=sqlite3.connect(sys.argv[1]);a=int(sys.argv[2]);e=sys.argv[3]
 assert c.execute('SELECT email FROM credentials WHERE account=?',(a,)).fetchone()==(e,)
 t=int(time.time());c.execute('INSERT INTO email_password_resets(account,email,hash,issued_at,expires_at) VALUES(?,?,?,?,?)',(a,e,sys.argv[4],t,t+900));c.commit()`,join(process.env.QA_RESULTS_DIR,'native/state/game.db'),String(account),email,hash]);
+  assert(process.env.RECOVERY_WEBSITE,'RECOVERY_WEBSITE must name the tested website checkout');
   const website=resolve(process.env.RECOVERY_WEBSITE),assets=new Map();
   for(const path of ['/recover/','/recover/app.js','/recover/style.css','/style.css','/backend.js']){
     assets.set(origin+path,await readFile(join(website,'public',path==='/recover/'?'recover/index.html':path.slice(1)),'utf8'));
   }
+  await writeFile(join(process.env.QA_RESULTS_DIR,'recovery-assets.json'),JSON.stringify({revision:(await exec('git',['-C',website,'rev-parse','HEAD'])).stdout.trim(),files:Object.fromEntries([...assets].map(([url,bytes])=>[new URL(url).pathname,createHash('sha256').update(bytes).digest('hex')]))},null,2));
+  check('reset refuses missing Origin',(await fetch(origin+'/api/account/recover',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token,password})})).status===403);
   let staticFailure;
   const browser=browserReceipt;
   const page=await connect({port:browser.port,target:browser.target,url:origin,helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
@@ -71,6 +75,8 @@ t=int(time.time());c.execute('INSERT INTO email_password_resets(account,email,ha
     check('one-use link replay is refused',(await post('/api/account/recover',{token,password:old},true)).status===400);
     check('old password is rejected',(await post('/legacy-api/account/verify',{guid:email,password:old})).text.startsWith('<Error>'));
     check('new password authenticates and verifies same email',(await post('/legacy-api/account/verify',{guid:email,password})).text.includes('<VerifiedEmail/>'));
+    const afterXml=(await post('/legacy-api/char/list',{guid:email,password})).text;
+    check('reset preserves account and saved character listing',afterXml.replace('<VerifiedEmail/>','')===beforeXml.replace('<VerifiedEmail/>',''));
   }finally{await page.call('Fetch.disable');page.close();}
   await cdp.call('Page.navigate',{url:origin});await until(()=>cdp.eval('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Native return');await modal();
   await shot('native-return');
