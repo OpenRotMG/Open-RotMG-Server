@@ -1315,7 +1315,7 @@ impl Directory {
                 // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
                 let beach_bum = world.rng.gen_ratio(1, 200);
                 world.populate_tomb_entry()?;
-                world.populate_coil_snakes()?;
+                world.populate_coil_snakes(&sites)?;
                 if beach_bum {
                     world.populate_beach_bum()?;
                 }

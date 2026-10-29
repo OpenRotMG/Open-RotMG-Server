@@ -162,7 +162,10 @@ def main():
     bots.add_argument("--no-shore-bots", action="store_true", help="Disable autonomous Wizards for isolated testing")
     parser.add_argument("--bot-llm", action="store_true", help="Enable Nemotron social dialogue; requires AI_GATEWAY_API_KEY")
     parser.add_argument("--release", action="store_true", help="Build optimized gameplay")
+    parser.add_argument("--realm-seed", type=int, help="Reproduce Realm layout selection and prepared populations")
     args = parser.parse_args()
+    if args.realm_seed is not None and not 0 <= args.realm_seed <= 2**64 - 1:
+        parser.error("--realm-seed must be an unsigned 64-bit integer")
     if shutil.which("cargo") is None:
         parser.error("Cargo not found. Install Rust/Cargo from https://rustup.rs/ and rerun.")
     global LOG
@@ -204,6 +207,8 @@ def main():
             if code:
                 raise RuntimeError(f'Server build exited with status {code}. See {LOG}.')
             command = [str(binary), "--client", str(client), "--port", str(args.port), "--test-state" if args.test_state is not None else "--state", str(state)]
+            if args.realm_seed is not None:
+                command.extend(["--realm-seed", str(args.realm_seed)])
             if args.dev_control:
                 command.append("--dev-control")
             if args.shore_bots:

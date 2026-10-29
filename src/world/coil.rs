@@ -2,25 +2,36 @@ use super::*;
 use crate::dungeon::jungle::{COIL, EGG, SNAKE};
 
 impl World {
-    pub(super) fn populate_coil_snakes(&mut self) -> Result<()> {
+    pub(super) fn populate_coil_snakes(
+        &mut self,
+        sites: &[crate::terrain::realms::Site],
+    ) -> Result<()> {
+        if sites.iter().any(|site| site.kind == COIL) {
+            return Ok(());
+        }
         for _ in 0..2 {
             // Match the period guide's midland ruins: https://web.archive.org/web/20120420071116id_/http://forums.wildshadow.com/wiki/realm-mad-god/great-coil-snake
             let pos = self.place_named_setpiece(COIL, &[6, 7])?;
-            let items = crate::loot::landmark_chest(&self.content, COIL, &mut self.rng)?;
-            self.spawn_entity(0x501, pos, items)?;
-            let id = self.spawn_entity(COIL, pos, vec![])?;
-            self.entities
-                .get_mut(&id)
-                .unwrap()
-                .quest
-                .set(Some(id), id, &mut self.quest_ids);
-            tracing::info!(
-                entity = id,
-                x = pos.x,
-                y = pos.y,
-                "Great Coil Snake guards a Jungle entrance temple"
-            );
+            self.spawn_coil_site(pos)?;
         }
+        Ok(())
+    }
+
+    pub(super) fn spawn_coil_site(&mut self, pos: Pos) -> Result<()> {
+        let items = crate::loot::landmark_chest(&self.content, COIL, &mut self.rng)?;
+        self.spawn_entity(0x501, pos, items)?;
+        let id = self.spawn_entity(COIL, pos, vec![])?;
+        self.entities
+            .get_mut(&id)
+            .unwrap()
+            .quest
+            .set(Some(id), id, &mut self.quest_ids);
+        tracing::info!(
+            entity = id,
+            x = pos.x,
+            y = pos.y,
+            "Great Coil Snake guards a Jungle entrance temple"
+        );
         Ok(())
     }
 

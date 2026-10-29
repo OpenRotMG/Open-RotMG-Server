@@ -105,11 +105,23 @@ impl Source {
             .iter()
             .filter(|site| site.kind == 0x91f)
             .count();
-        ensure!(
-            (17..25).contains(&groves),
-            "{} has invalid authored Grove count {groves}",
-            asset.id
-        );
+        if asset.id == WORLD09_ID {
+            // Keep the fourteen intact pictured Groves, not a clipped strip or invented extra circles.
+            ensure!(
+                groves == 14
+                    && record.sites.len() == 33
+                    && record.sites.iter().filter(|s| s.kind == 0x91b).count() == 3
+                    && record.sites.iter().filter(|s| s.kind == 0xdc2).count() == 16,
+                "{} has invalid authored encounter census",
+                asset.id
+            );
+        } else {
+            ensure!(
+                (17..25).contains(&groves),
+                "{} has invalid authored Grove count {groves}",
+                asset.id
+            );
+        }
         Ok(record.sites)
     }
     pub(crate) fn name(&self) -> &str {
