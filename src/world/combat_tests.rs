@@ -705,7 +705,7 @@ fn weak_weapon_rounding_overrides_attack_and_damaging_but_not_ability_shoot() {
                 w.now = 1000;
                 let p = w.players.get_mut(&id).unwrap();
                 p.character.class = 0x307;
-                p.character.base[2] = attack;
+                p.character.base = [700, 100, attack, 25, 50, 50, 40, 50];
                 p.character.items[0] = 0xa1a;
                 p.character.items[1] = 0xa61;
                 p.seed = 1;
