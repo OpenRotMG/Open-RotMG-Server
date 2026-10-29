@@ -388,6 +388,61 @@ async fn client_entry_rejects_debug_worlds_without_changing_saved_character() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn living_character_load_preserves_saved_fields_and_rejects_foreign_owner() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let owner = a.store.list("persist-owner".into()).await.unwrap().id;
+    let foreign = a.store.list("persist-foreign".into()).await.unwrap().id;
+    let mut ch = a
+        .store
+        .create(owner, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    ch.gain_experience(&a.content, 200, &mut rand::thread_rng())
+        .unwrap();
+    ch.hp = 17;
+    ch.mp = 23;
+    ch.tex1 = 0x05000006;
+    ch.tex2 = 0x04000006;
+    ch.lifetime.shots = 3;
+    a.store.progress(ch.clone()).await.unwrap();
+    let (port, server) = socket_server(&a).await;
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    socket
+        .send(socket_hello(&dir, "persist-foreign", -2, None))
+        .await;
+    socket.receive(wire::MAP_INFO).await;
+    socket
+        .send(Packet {
+            id: wire::LOAD,
+            body: ch.id.to_be_bytes().to_vec(),
+        })
+        .await;
+    let refusal = socket.receive_one_of(&[0, wire::CREATE_SUCCESS]).await;
+    assert_eq!(refusal.id, 0);
+    drop(socket);
+    released(&a, foreign).await;
+    assert_eq!(a.store.load(owner, ch.id).await.unwrap(), ch);
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    let player = socket_load(&mut socket, &dir, "persist-owner", ch.id).await;
+    let loaded = a
+        .world
+        .directory(move |d| {
+            let world = d.location(player)?;
+            Ok(d.worlds[&world].players[&player].character.clone())
+        })
+        .await
+        .unwrap();
+    assert_eq!(loaded, ch);
+    drop(socket);
+    released(&a, owner).await;
+    assert_eq!(a.store.load(owner, ch.id).await.unwrap(), ch);
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dropped_connection_names_its_cause_across_restarts() {
     let (dir, a) = account_actions::tests::fixture();
     a.world.clock.set_paused(true);
