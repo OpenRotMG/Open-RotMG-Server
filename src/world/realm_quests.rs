@@ -1121,6 +1121,7 @@ mod tests {
                 "classic-world-02-reconstruction" => [1, 6, 0, 8],
                 "classic-world-03-reconstruction" => [4, 3, 0, 6],
                 "classic-world-04-reconstruction" => [0, 0, 1, 0],
+                "classic-world-05-reconstruction" => [0, 0, 2, 0],
                 "classic-world-09-reconstruction" => [0; 4],
                 "realm-fsod-1" | "realm-fsod-2" | "realm-fsod-3" => [0; 4],
                 name => panic!("unreviewed authored-site roster {name}"),
@@ -1152,6 +1153,7 @@ mod tests {
                 authored_liches,
                 match source.name() {
                     "classic-world-01-reconstruction" | "classic-world-04-reconstruction" => 6,
+                    "classic-world-05-reconstruction" => 5,
                     "classic-world-09-reconstruction" => 3,
                     _ => 0,
                 }
@@ -1179,13 +1181,10 @@ mod tests {
             world.populate_coil_snakes(&sites).unwrap();
             assert_eq!(
                 world.actors().filter(|e| e.kind == 0xdc2).count(),
-                if matches!(
-                    source.name(),
-                    "classic-world-04-reconstruction" | "classic-world-09-reconstruction"
-                ) {
-                    16
-                } else {
-                    2
+                match source.name() {
+                    "classic-world-04-reconstruction" | "classic-world-09-reconstruction" => 16,
+                    "classic-world-05-reconstruction" => 22,
+                    _ => 2,
                 }
             );
             world.populate_named_quests(&sites).unwrap();
@@ -1226,6 +1225,7 @@ mod tests {
             ("classic-world-02-reconstruction", 2100, 864, 24, 2, 4..=6),
             ("classic-world-03-reconstruction", 2100, 629, 21, 2, 4..=6),
             ("classic-world-04-reconstruction", 2000, 506, 21, 16, 6..=6),
+            ("classic-world-05-reconstruction", 2100, 702, 19, 22, 5..=6),
             ("classic-world-09-reconstruction", 2100, 426, 14, 16, 4..=6),
         ] {
             let path = std::path::Path::new("data");

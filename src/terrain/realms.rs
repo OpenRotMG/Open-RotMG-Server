@@ -107,6 +107,7 @@ impl Source {
             .count();
         let census = match asset.id.as_str() {
             WORLD04_ID => Some((21, 6, 16, 1, 44)),
+            WORLD05_ID => Some((19, 5, 22, 2, 48)),
             WORLD09_ID => Some((14, 3, 16, 0, 33)),
             _ => None,
         };

@@ -174,6 +174,8 @@ pub(super) const WORLD05_ID: &str = "classic-world-05-reconstruction";
 const WORLD05_SOURCE: &str = "9f57488fdccf12fc1ad5f8970d1feec746ea4e1bbc5ed6718fee7d3d4dbd55c0";
 const WORLD05_LAVA_SUPPORT: &str =
     "4a899569757f859d8fe85b7ed06207ffa380b772ee02c87b212abc65904cd3ee";
+const WORLD05_PLAYABLE_LAVA_SUPPORT: &str =
+    "0e6a944cb1271d2c0db3792773fbb7441f80c35adbe40a10e598fb2407f850ba";
 
 pub(super) const WORLD09_ID: &str = "classic-world-09-reconstruction";
 const WORLD09_SOURCE: &str = "726aa16890f7caaa73dc642b64901e94ed4f44cb974e5001c98897f1b8a89736";
@@ -306,6 +308,14 @@ impl ScopedLava {
                 source_local_transform([2000, 2000]),
             )
         } else if world05 {
+            // Keep the earlier southern-only capability pinned independently of playable delivery.
+            let (pixels, support) = match policy["world05_lava"]["pixels"].as_u64() {
+                Some(112) => (112, WORLD05_LAVA_SUPPORT),
+                Some(702) => (702, WORLD05_PLAYABLE_LAVA_SUPPORT),
+                _ => {
+                    bail!("World5 requires the pinned112-cell or authored702-cell lava capability")
+                }
+            };
             (
                 Self {
                     world: 5,
@@ -313,8 +323,8 @@ impl ScopedLava {
                     side: 2100,
                     source_side: 2100,
                     offset: 0,
-                    pixels: 112,
-                    support: WORLD05_LAVA_SUPPORT,
+                    pixels,
+                    support,
                 },
                 WORLD05_ID,
                 WORLD05_SOURCE,
@@ -1376,12 +1386,7 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
     }
     if recipe.id == WORLD05_ID && policy.get("world05_lava").is_some() {
         keys.push("world05_lava");
-        let mut choice = lava_choice(112, WORLD05_LAVA_SUPPORT);
-        choice["cell"]["terrain"] = 0.into();
-        ensure!(
-            policy["world05_lava"] == choice,
-            "World5 requires its exact112-cell terrain0 lava capability"
-        );
+        ScopedLava::binding(recipe, &policy)?.context("World5 lava scope missing")?;
     }
     if recipe.id == WORLD09_ID && policy.get("world09_lava").is_some() {
         keys.push("world09_lava");
@@ -1712,11 +1717,48 @@ pub(crate) fn run(args: &[String]) -> Result<bool> {
 }
 
 #[test]
+fn world05_legacy_and_playable_lava_capabilities_remain_distinct() -> Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("data/realms");
+    let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, "world05.json")? else {
+        unreachable!()
+    };
+    let mut policy: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("world05/source-policy.json"))?)?;
+    let legacy: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("world05/lava-support.json"))?)?;
+    assert_eq!(legacy["pixels"], 112);
+    assert_eq!(legacy["support_sha256_le_u32"], WORLD05_LAVA_SUPPORT);
+    for (pixels, support) in [
+        (112, WORLD05_LAVA_SUPPORT),
+        (702, WORLD05_PLAYABLE_LAVA_SUPPORT),
+    ] {
+        let mut choice = lava_choice(pixels, support);
+        choice["cell"]["terrain"] = 0.into();
+        policy["world05_lava"] = choice;
+        let scope = ScopedLava::binding(&recipe, &policy)?.context("missing World5 scope")?;
+        assert_eq!(scope.pixels, pixels);
+        assert_eq!(scope.support, support);
+        assert_eq!(scope.terrain, 0);
+        policy["world05_lava"]["support_sha256_le_u32"] = "0".repeat(64).into();
+        assert!(ScopedLava::binding(&recipe, &policy).is_err());
+        policy["world05_lava"]["support_sha256_le_u32"] = support.into();
+        policy["world05_lava"]["pixels"] = (pixels + 1).into();
+        assert!(ScopedLava::binding(&recipe, &policy).is_err());
+    }
+    Ok(())
+}
+
+#[test]
 fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
     let content = Content::load(&data)?;
     let root = data.join("realms");
-    for name in ["world02.json", "world03.json", "world04.json"] {
+    for name in [
+        "world02.json",
+        "world03.json",
+        "world04.json",
+        "world05.json",
+    ] {
         let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, name)? else {
             unreachable!()
         };
