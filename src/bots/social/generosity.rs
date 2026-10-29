@@ -66,10 +66,9 @@ impl Brain {
                 .is_none_or(|o| o.until <= v.elapsed_ms)
             && !market.reserves_stock()
             && self
-                .mind
-                .intentions
-                .as_ref()
-                .is_some_and(|i| i.call_available(v));
+                .plan
+                .owner()
+                .is_none_or(|owner| owner == plan::Owner::Gift);
         Check {
             market,
             policy: Policy {

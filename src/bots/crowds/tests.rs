@@ -76,7 +76,6 @@ fn adventure(c: &Content, v: &PlayerView, b: &mut Brain) -> Decision {
         perception: combat::Perception::attend(v, &b.mind.cognition, false),
         inspecting: false,
         health: 1.,
-        danger: f32::INFINITY,
         threatened: false,
         retreat: false,
         outmatched: false,
@@ -95,7 +94,6 @@ fn adventure(c: &Content, v: &PlayerView, b: &mut Brain) -> Decision {
             journey: None,
             chat: None,
         },
-        false,
     )
     .unwrap()
 }
@@ -149,29 +147,6 @@ fn useful_loot_pause_then_visible_catchup_respects_reached_company_progress_guar
     assert!(
         catchup.journey.is_none(),
         "observed co-combat catchup walks rather than repeated teleport"
-    );
-    v.position = Pos { x: 20.5, y: 10.5 };
-    advance(&mut v, 1000);
-    b.mind
-        .intentions
-        .as_mut()
-        .unwrap()
-        .observe(&v, &c, b.profile.identity)
-        .unwrap();
-    assert!(
-        !b.mind
-            .intentions
-            .as_ref()
-            .unwrap()
-            .eligible(&v, &Goal::Follow(3), false)
-    );
-    v.objects[0].position.x = 30.5;
-    v.player_markers[0].position.x = 30.5;
-    let own = adventure(&c, &v, &mut b);
-    assert_ne!(
-        own.goal,
-        Goal::Follow(3),
-        "a higher follow score cannot erase required own progress"
     );
 }
 
@@ -448,7 +423,7 @@ fn attributed_heal_prefers_matched_account_without_level_special_follow() {
         v.character.level = level;
         assert_eq!(destination(&v, &b), Some(4));
         let grid = b.navigation_grid(&v, &c, &[]);
-        assert!(b.mind.social.decide(&v, &grid, 0., false).is_none());
+        assert!(b.mind.social.decide(&v, &grid, 0.).is_none());
     }
     b.mind.social.bind();
     v.objects[2].id = 5;
@@ -577,7 +552,7 @@ fn repeated_help_and_recognition_cannot_renew_passive_expiry_or_cooldown() {
         receive_heal(&v, &mut b);
         b.mind.social.bind();
         let grid = b.navigation_grid(&v, &c, &[]);
-        assert!(b.mind.social.decide(&v, &grid, 0., false).is_none());
+        assert!(b.mind.social.decide(&v, &grid, 0.).is_none());
         b.crowd.attend(&v, &c, &b.mind.cognition, false);
         if v.time_ms < deadline {
             assert_eq!(

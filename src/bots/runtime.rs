@@ -45,11 +45,11 @@ async fn decide_before_social(
         )?
     };
     app.cctv.decided(
-        brain.mind.market.name.as_str(),
         view,
         &decision,
         cctv::reason(brain.activity, &decision, view, &app.content),
         &brain.intent,
+        brain,
         &app.content,
     );
     let surviving = brain.activity == Activity::Survive;
@@ -533,11 +533,7 @@ async fn enter_admitted(
         brain.mind.market.recover(receipts)?;
     }
     brain.mind.future_class = Some(view.character.class);
-    let mut generation = std::collections::hash_map::DefaultHasher::new();
-    std::hash::Hash::hash(&app.started, &mut generation);
-    brain
-        .mind
-        .bind(&view, std::hash::Hasher::finish(&generation))?;
+    brain.mind.bind(&view)?;
     brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
     Ok((id, output, sender, brain))
 }
@@ -720,11 +716,6 @@ pub(super) async fn persona_character(app: &App, profile: Profile) -> Result<Cha
             profile.identity.into(),
             roster,
             vault,
-            if profile.role == persona::Role::Trader {
-                0
-            } else {
-                rand::random()
-            },
             persona::starting_stock(&profile, &app.content)?,
         )
         .await
@@ -887,7 +878,6 @@ pub(super) async fn launch(
         let mut owner = Some(owner);
         let mut shutdown = app.shutdown.subscribe();
 
-        let mut next_bank = app.world.clock.now();
         let mut pending: Option<dialogue::Pending> = None;
         let mut ready_reply: Option<(dialogue::Request, dialogue::Reply, String)> = None;
         let mut deferred_market: Option<(Packet, Arc<PlayerView>)> = None;
@@ -930,7 +920,9 @@ pub(super) async fn launch(
                         let Some(destination) = transfer.destination else { return Ok(()); };
                         admission = Some(transfer.key.clone());
                         let character_id = brain.session.2;
+                        let plan = std::mem::take(&mut brain.plan);
                         (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Collective { destination, time: transfer.key_time, key: transfer.key, character: character_id }).await?;
+                        brain.plan = plan;
                         admission = None;
                         tracing::info!(player=id,account,character=character_id,destination,"autonomous collective transfer completed");
                         continue;
@@ -992,7 +984,7 @@ pub(super) async fn launch(
                         dialogue::cancel(&mut pending);
                         ready_reply = None;
                         dialogue::end_agreement(&app, &mut brain, "character died").await;
-                        brain.mind.end(&view, "character_died_steps_invalidated");
+                        brain.mind.end("character died; old goal and steps invalidated");
                         brain.mind.market.finish("character_died_remaining_balance_unenforced");
                         brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
                         lifecycle::finalize(&app, id, CloseReason::Controller)?.wait().await?;
@@ -1007,7 +999,11 @@ pub(super) async fn launch(
                             _=shutdown.changed()=>return Ok(()),
                             _=cancel.changed()=>return Ok(()),
                         }
+                        let mut plan = std::mem::take(&mut brain.plan);
+                        plan.abort(plan::now(), "character died");
+                        plan.record(plan::now(), plan::Kind::Death, None, format!("level {} character died", view.character.level));
                         (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Replacement { previous: view.session.character }).await?;
+                        brain.plan = plan;
                         deferred_market = None;
                         continue;
                     }
@@ -1074,11 +1070,18 @@ pub(super) async fn launch(
                         stop_inputs(&app, id).await?;
                         continue;
                     }
-                    if pending.is_none() && ready_reply.is_none() && brain.mind.market.outgoing.is_none() && brain.mind.market.bargain.as_ref().is_none_or(|b|b.resolution.is_some()) && app.dialogue.as_ref().is_none_or(|service|service.automatic_available()) {
-                        let plan=app.society.lock().expect("adventure registry poisoned").next(&brain,&view,&app.content,app.dialogue.is_some());
-                        if let Some(plan)=plan {
-                            let request=brain.adventure_request(plan,&view,&app.content)?;
-                            pending=Some(dialogue::Pending::start(app.dialogue.clone(),request,profile));
+                    if pending.is_none() && ready_reply.is_none() && brain.mind.market.outgoing.is_none() && brain.mind.market.bargain.as_ref().is_none_or(|b|b.resolution.is_some()) {
+                        let speaking=app.dialogue.clone().filter(|service|service.automatic_available());
+                        let mut society=app.society.lock().expect("adventure registry poisoned");
+                        if let Some(plan)=society.next(&brain,&view,&app.content,speaking.is_some()) {
+                            if speaking.is_some() {
+                                drop(society);
+                                let request=brain.adventure_request(plan,&view,&app.content)?;
+                                pending=Some(dialogue::Pending::start(speaking,request,profile));
+                            } else {
+                                let owner=adventures::Member{account,name:brain.mind.market.name.as_str().into()};
+                                society.settle_silently(owner,plan,&view,&app.content);
+                            }
                         }
                     }
                     if pending.as_ref().is_some_and(|p| p.task.is_finished()) {
@@ -1108,9 +1111,6 @@ pub(super) async fn launch(
                     }
                     if view.lifecycle.busy { continue; }
                     if view.tick < brain.next_decision { continue; }
-                    // World clocks start at different times; banking delay belongs to this account session.
-                    let now = app.world.clock.now();
-                    brain.next_bank = view.time_ms + u64::try_from(next_bank.saturating_duration_since(now).as_millis())?;
                     let Some(mut decision) = decide_before_social(&app, &mut brain, &view).await? else {
                         if brain.activity == Activity::Survive { ready_reply = None; }
                         stop_inputs(&app, id).await?;
@@ -1144,7 +1144,7 @@ pub(super) async fn launch(
                         decision.journey = Some(Journey::Nexus);
                         decision.chat = None;
                         tracing::info!(account,name=name.as_str(),"session finished; returning to Nexus before logout");
-                        app.cctv.decided(name.as_str(), &view, &decision, "session finished; returning to Nexus before logout".into(), &serde_json::json!({"goal":null,"plan":"End this session","step":"Return to Nexus before logout","mode":"necessary","reason":"session deadline reached","resume":null}), &app.content);
+                        app.cctv.decided(&view, &decision, "session finished; returning to Nexus before logout".into(), &serde_json::json!({"goal":null,"plan":"End this session","step":"Return to Nexus before logout","mode":"necessary","reason":"session deadline reached","resume":null}), &brain, &app.content);
                     }
                     if events::shared(&view.map.name) {
                         tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,
@@ -1161,7 +1161,6 @@ pub(super) async fn launch(
                         tracing::info!(account,character=view.session.character,normal_view_sha256=%hash,session=%serde_json::to_string(&view.session)?,tick=view.tick,time_ms=view.time_ms,goal=?decision.goal,journey=?decision.journey,item=?decision.item,movement=?decision.movement,"prepared postclear final selected decision");
                         Some(hash)
                     } else { None };
-                    next_bank = now.checked_add(Duration::from_millis(brain.next_bank.saturating_sub(view.time_ms))).context("autonomous bank cooldown overflow")?;
                     public_call(&app, &mut brain, &view, &decision).await?;
                     if brain.draft.is_some() {
                         decision.movement = None; decision.aim = None; decision.item = None; decision.journey = None;
@@ -1236,7 +1235,12 @@ pub(super) async fn launch(
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
                                 lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
+                                let plan = std::mem::take(&mut brain.plan);
+                                // A Vault errand belongs to the same Nexus market visit.
+                                let visit = (matches!((view.map.name.as_str(), portal_kind), ("Nexus", Some(0x720)) | ("Vault", None))).then(|| brain.mind.market.clone());
                                 (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
+                                brain.plan = plan;
+                                if let Some(market) = visit { brain.mind.market.continue_visit(&market); }
                                 let current_character = brain.session.2;
                                 let destination = if current_character != previous { -2 } else { destination };
                                 if current_character != previous {
@@ -1252,8 +1256,6 @@ pub(super) async fn launch(
                         }
                     }
                 }
-                let view = app.world.player_view(id).await?;
-                brain.mind.reconcile(&view)?;
                 brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
                 Ok(())
             }.await;

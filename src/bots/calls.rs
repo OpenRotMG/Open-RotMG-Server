@@ -143,13 +143,8 @@ impl Brain {
         {
             return Ok(Some("ordinary_dungeon_or_world"));
         }
-        if !self
-            .mind
-            .intentions
-            .as_ref()
-            .is_some_and(|i| i.call_available(v))
-        {
-            return Ok(Some("main_progress_or_detour_budget"));
+        if !self.plan.idle() {
+            return Ok(Some("current_errand"));
         }
         if self
             .mind
@@ -290,7 +285,7 @@ impl Brain {
             Some("another_call_pending")
         } else if peer.position.distance(v.position) <= 7. {
             Some("already_near_caller")
-        } else if !crowds::survivable(v, peer.position) {
+        } else if !self.crowd.bands.survivable(v, peer.position) {
             Some("unsafe_realm_destination")
         } else {
             self.call_rejection(v, c, activity, caller)?
@@ -340,7 +335,7 @@ impl Brain {
                 && !p.equipped.is_empty()
                 && p.account == Some(o.account)
                 && p.name == o.name
-                && crowds::survivable(v, p.position)
+                && self.crowd.bands.survivable(v, p.position)
         });
         let rejection = if o.world != v.session.world
             || !live

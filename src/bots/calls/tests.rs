@@ -238,7 +238,7 @@ fn speaker_binding_uses_observed_guest_name_not_logical_profile_and_keeps_dedup(
 }
 
 #[test]
-fn calls_cannot_replace_ordinary_portal_intent_or_an_entered_dungeon_budget() {
+fn calls_cannot_replace_ordinary_portal_intent_or_the_current_errand() {
     let (c, mut v, mut b) = fixture();
     let mut portal = v.objects.remove(0);
     portal.id = 9;
@@ -251,14 +251,11 @@ fn calls_cannot_replace_ordinary_portal_intent_or_an_entered_dungeon_budget() {
         Some("ordinary_dungeon_or_world")
     );
     b.goal = Goal::Wait;
-    let i = b.mind.intentions.as_mut().unwrap();
-    i.selected(&v, &c, &Goal::Portal(9), false, None, None)
-        .unwrap();
-    v.map.name = "Snake Pit".into();
-    i.observe(&v, &c, b.profile.identity).unwrap();
-    let entered = serde_json::to_value(&b.mind.intentions).unwrap();
-    assert!(!b.mind.intentions.as_ref().unwrap().call_available(&v));
+    b.plan.start(1, plan::Owner::Bank, "Vault".into());
     pending(&mut b, &v);
-    assert_eq!(b.call_target(&v, &c).unwrap(), None);
-    assert_eq!(serde_json::to_value(&b.mind.intentions).unwrap(), entered);
+    assert_eq!(
+        b.call_target(&v, &c).unwrap(),
+        None,
+        "a call cannot replace the current errand"
+    );
 }

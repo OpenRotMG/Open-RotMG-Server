@@ -376,6 +376,41 @@ impl Society {
             }
         }
     }
+    /// Wording is presentation only: without it the outing still happens, with no canned speech.
+    pub(super) fn settle_silently(
+        &mut self,
+        owner: Member,
+        plan: Plan,
+        v: &PlayerView,
+        c: &Content,
+    ) {
+        let (purpose, peer) = match &plan {
+            Plan::Invite { peer, purpose } => (*purpose, peer.account),
+            Plan::Answer(o) => (o.purpose, o.from.account),
+        };
+        let ready = purpose.ready(v, c)
+            && v.objects
+                .iter()
+                .any(|p| p.account == Some(peer) && purpose.public_ready(p, c));
+        if let Err(error) = self.validate(owner.account, &plan, v.elapsed_ms) {
+            tracing::info!(account = owner.account, peer, %error, "silent adventure plan obsolete");
+        } else if ready || matches!(plan, Plan::Answer(_)) {
+            tracing::info!(
+                account = owner.account,
+                peer,
+                ?purpose,
+                ready,
+                "adventure plan settled without wording"
+            );
+            self.apply(
+                owner,
+                plan,
+                ready,
+                purpose.description().into(),
+                v.elapsed_ms,
+            );
+        }
+    }
     pub(super) fn remember(&mut self, account: i32, peer: i32) -> bool {
         let friends = self
             .friends

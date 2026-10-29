@@ -573,3 +573,30 @@ async fn thanks_requires_exact_receipt_but_survives_ordinary_revision_advance_un
     drop((owner, peer_owner, app));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn vault_trip_keeps_the_nexus_market_visit_until_an_outing() {
+    let (_, mut v) = crate::bots::quest_tests::fixture();
+    let mut market = Market {
+        session: Some(MarketSession {
+            anchor: (1, 1),
+            until: u64::MAX,
+            next_move: 0,
+            destination: None,
+        }),
+        session_used: true,
+        ..Market::default()
+    };
+    v.map.name = "Vault".into();
+    market.observe(&v);
+    // Every world entry reloads the durable mind, which drops the process-local visit.
+    let mut reloaded = Market::default();
+    reloaded.bind();
+    reloaded.continue_visit(&market);
+    v.map.name = "Nexus".into();
+    reloaded.observe(&v);
+    assert!(reloaded.session.is_some() && reloaded.session_used);
+    v.map.name = "Realm".into();
+    reloaded.observe(&v);
+    assert!(reloaded.session.is_none() && !reloaded.session_used);
+}

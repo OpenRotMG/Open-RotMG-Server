@@ -224,6 +224,12 @@ impl Market {
             b.peer_consent = None;
         }
     }
+    /// Each world entry reloads the durable mind; a Nexus/Vault errand keeps its visit.
+    pub(in crate::bots) fn continue_visit(&mut self, previous: &Self) {
+        self.session.clone_from(&previous.session);
+        self.session_used = previous.session_used;
+        self.vault_refreshed = previous.vault_refreshed;
+    }
     pub(in crate::bots) fn request_due(&mut self, elapsed_ms: u64) -> bool {
         if elapsed_ms < self.next_request_ms {
             return false;
@@ -244,11 +250,9 @@ impl Market {
         {
             self.outgoing = None;
         }
-        if v.map.name != "Nexus" {
-            if v.map.name != "Vault" {
-                self.preparing = false;
-                self.vault_refreshed = false;
-            }
+        // A Vault trip prepares the same visit; only an outing ends the market session.
+        if !matches!(v.map.name.as_str(), "Nexus" | "Vault") {
+            self.vault_refreshed = false;
             self.end_session(v, "left_nexus");
             self.session_used = false;
         }
@@ -884,9 +888,7 @@ impl Market {
         Ok(())
     }
     fn end_session(&mut self, v: &PlayerView, reason: &str) {
-        if reason != "left_nexus" {
-            self.preparing = false;
-        }
+        self.preparing = false;
         if let Some(s) = self.session.take() {
             tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,anchor=?s.anchor,until=s.until,reason,"market intentional session ended");
         }

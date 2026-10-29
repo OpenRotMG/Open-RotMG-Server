@@ -7,6 +7,7 @@ pub(super) use cooperation::available as cooperative_available;
 
 pub(super) struct Crowd {
     pub knows_minimap: bool,
+    pub bands: bands::Bands,
     binding: Option<[i32; 4]>,
     contacts: BTreeMap<i32, (PlayerMarker, u64)>,
     approaching: Option<(i32, i32)>,
@@ -17,6 +18,7 @@ impl Crowd {
     pub fn new(knows_minimap: bool) -> Self {
         Self {
             knows_minimap,
+            bands: bands::Bands::default(),
             binding: None,
             contacts: BTreeMap::new(),
             approaching: None,
@@ -25,6 +27,7 @@ impl Crowd {
         }
     }
     pub fn observe(&mut self, v: &PlayerView, content: &Content) {
+        self.bands.observe(v, content);
         let binding = cooperation::binding(v);
         if self.binding != Some(binding) {
             self.release(v, "session_changed");
@@ -40,8 +43,9 @@ impl Crowd {
                 .filter(|p| content.objects[&p.kind].enemy)
                 .map(|p| (p.id, p.kind)),
         );
+        let bands = &self.bands;
         self.cooperation
-            .company(v.elapsed_ms, |peer| cooperation::visible(v, peer), |_| true);
+            .company(v.elapsed_ms, |peer| visible(bands, v, peer), |_| true);
     }
     pub fn receive(&mut self, packet: &Packet, v: &PlayerView, content: &Content) -> Result<()> {
         self.cooperation.receive(
@@ -67,11 +71,10 @@ impl Crowd {
         v: &PlayerView,
         eligible: impl Fn(Pos) -> bool,
     ) -> Option<PlayerMarker> {
-        let ((id, account), position) = self.cooperation.company(
-            v.elapsed_ms,
-            |peer| cooperation::visible(v, peer),
-            eligible,
-        )?;
+        let bands = &self.bands;
+        let ((id, account), position) =
+            self.cooperation
+                .company(v.elapsed_ms, |peer| visible(bands, v, peer), eligible)?;
         let name = v
             .objects
             .iter()
@@ -151,7 +154,7 @@ impl Crowd {
                 .any(|p| p.id == peer.0 && (p.account != Some(peer.1) || p.hp <= 0))
             {
                 Some("peer_dead_or_identity_changed")
-            } else if marker.is_some_and(|p| !survivable(v, p.position)) {
+            } else if marker.is_some_and(|p| !self.bands.survivable(v, p.position)) {
                 Some("unsafe_target")
             } else if marker.is_some_and(|p| p.position.distance(v.position) > 36.) {
                 Some("separated")
@@ -275,7 +278,7 @@ impl Crowd {
             group,
             known,
             |account| can_approach(v.session.world, v.session.account, account),
-            |p| survivable(v, p) && eligible_position(p),
+            eligible_position,
         )
     }
     fn attended_destination(
@@ -330,15 +333,15 @@ pub(super) fn can_approach(world: i32, account: i32, peer: i32) -> bool {
     rank(peer) < rank(account)
 }
 
-pub(super) fn survivable(v: &PlayerView, position: Pos) -> bool {
-    let center = Pos {
-        x: v.map.width as f32 / 2.,
-        y: v.map.height as f32 / 2.,
-    };
-    let depth = position.distance(center) / (v.map.width.min(v.map.height) as f32 / 2.);
-    // Keep PR514's public Realm-depth gates for every voluntary teleport destination.
-    v.map.name != "Realm"
-        || depth >= 0.55
-        || v.character.level >= 20
-        || (depth >= 0.35 && v.character.level >= 10)
+fn visible(
+    bands: &bands::Bands,
+    v: &PlayerView,
+    peer: (i32, i32),
+) -> std::result::Result<Pos, &'static str> {
+    let p = cooperation::visible(v, peer)?;
+    if bands.survivable(v, p) {
+        Ok(p)
+    } else {
+        Err("unsafe_target")
+    }
 }

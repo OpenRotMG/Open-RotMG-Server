@@ -818,6 +818,24 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 migrated += 1;
             }
         }
+        // Retired mind fields must not survive in rows that backups re-validate field by field.
+        let minds = {
+            let mut q = migration.prepare("SELECT account,mind FROM bot_minds")?;
+            q.query_map([], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (account, raw) in minds {
+            let mind: crate::bots::pursuits::Mind = serde_json::from_str(&raw)
+                .with_context(|| format!("account {account} mind migration"))?;
+            let canonical = serde_json::to_string(&mind)?;
+            if canonical != raw {
+                migration.execute(
+                    "UPDATE bot_minds SET mind=?2 WHERE account=?1",
+                    params![account, canonical],
+                )?;
+                tracing::info!(account, "account mind canonicalized after field retirement");
+            }
+        }
         if !wallet_exists {
             let mut earned = std::collections::BTreeMap::<i32, i64>::new();
             {
@@ -1088,7 +1106,6 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         identity: String,
         roster: Vec<Character>,
         vault: Vec<[i32; 8]>,
-        pick: usize,
         starting_stock: Option<i32>,
     ) -> Result<Character> {
         ensure!(
@@ -1191,16 +1208,14 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
             }
             return Ok(character);
         }
-        // Resuming the same life preserves its main intention even when the account owns alts.
-        if let Some(previous) = mind.as_ref().and_then(|mind| mind.history.back())
-            && let Some(index) = account
-                .characters
-                .iter()
-                .position(|ch| ch.id == previous.binding[1])
-        {
-            return Ok(account.characters.swap_remove(index));
-        }
-        let index = pick % account.characters.len();
+        // A persona keeps living one life across sessions; alts are only a deterministic successor.
+        let selected = mind.as_ref().and_then(|mind| mind.character);
+        let index = account
+            .characters
+            .iter()
+            .position(|ch| Some(ch.id) == selected)
+            .or_else(|| (0..account.characters.len()).min_by_key(|i| account.characters[*i].id))
+            .context("persona account has no living character")?;
         Ok(account.characters.swap_remove(index))
     }
     pub(crate) async fn persona_name_available(&self, account: i32, name: String) -> Result<()> {

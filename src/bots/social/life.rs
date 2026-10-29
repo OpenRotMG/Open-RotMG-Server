@@ -503,7 +503,6 @@ impl Life {
         v: &PlayerView,
         grid: &Grid,
         willingness: f32,
-        banking: bool,
     ) -> Option<Decision> {
         if self.gift.is_some() {
             return Some(idle());
@@ -534,7 +533,6 @@ impl Life {
             self.remember(v, account, p.name.clone(), Interaction::Recognized, 0);
         }
         if v.map.name == "Nexus"
-            && !banking
             && let Some(p) = v
                 .objects
                 .iter()
