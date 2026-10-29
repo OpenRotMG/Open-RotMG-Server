@@ -227,6 +227,7 @@ pub(super) async fn request(
                     .await
             }
             "delete" => {
+                // Mine is a public display hint, not deletion authority: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_0G_l/_in.as#L266-L276
                 let _authentication = a.authentication.read().await;
                 let account = authenticate(&a, &form).await?;
                 let id = required(&form, "id")?
