@@ -6,7 +6,7 @@ import {join,resolve} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
-export const fixture={class:0x30e,level:20,seed:923,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:null};
+export const fixture={class:0x30e,level:20,seed:923,world:-1,position:'spawn',equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:null};
 const exec=promisify(execFile),email='recovery@example.test',old=randomBytes(16).toString('hex'),password=randomBytes(16).toString('hex');
 let cdp,browserReceipt,origin,listRequest,listDone=false,lists=0,registration,registered=false,verified=false,verifyRequest,verifyDone=false,verifies=0;
 const checks=[];
@@ -95,7 +95,7 @@ t=int(time.time());c.execute('INSERT INTO email_password_resets(account,email,ha
 export async function run(game){
   try{
     const before=await game.observe();await game.act({keys:['d'],duration_ms:1000},{name:'recovered-gameplay',when:v=>v.game_ms>=before.game_ms+500});const after=await game.observe();
-    game.check('recovered character is alive and moves in Nexus',after.lifecycle.alive&&after.world==='Nexus'&&after.position.x>before.position.x);
+    game.check('recovered character is alive and moves in the Realm',after.lifecycle.alive&&after.world!=='Nexus'&&after.position.x>before.position.x);
     await game.act({keys:['Insert'],duration_ms:700});await game.act({keys:[],duration_ms:500});const returned=await game.observe();
     game.check('ordinary Nexus reconnect keeps the recovered living character',returned.lifecycle.alive&&returned.world==='Nexus'&&returned.session.character===after.session.character&&returned.session.player!==after.session.player);
     await game.act({keys:['d'],duration_ms:1000},{name:'recovered-reconnect',when:v=>v.game_ms>=returned.game_ms+500});const end=await game.observe();
