@@ -3,7 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x31d,level:20,seed:937,world:'spider-den',worldSeed:12351,position:{x:60.5,y:34.5},equipment:[0xa00,0xa6b,-1,-1],backpack:[0xc21,-1,-1,-1,-1,-1,-1,-1],stats:[770,252,75,25,50,50,75,60]};
+export const fixture={class:0x31d,level:20,seed:937,world:'spider-den',worldSeed:12351,position:{x:60.5,y:34.5},equipment:[0xa00,0xa6b,-1,-1],backpack:[0xc21,-1,-1,-1,-1,-1,-1,-1],stats:[770,252,75,25,50,50,75,50]};
 const has=(v,n)=>Boolean(v.character.conditions&(1<<(n-1)));
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));

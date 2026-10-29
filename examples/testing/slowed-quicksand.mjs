@@ -3,7 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x31d,level:20,seed:937,world:'tomb-of-the-ancients',worldSeed:12,position:'spawn',equipment:[0xa00,-1,-1,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,60]};
+export const fixture={class:0x31d,level:20,seed:937,world:'tomb-of-the-ancients',worldSeed:12,position:'spawn',equipment:[0xa00,-1,-1,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,50]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(config.state,'control.token'),'utf8')).trim(),'Content-Type':'application/json'},records=[];
