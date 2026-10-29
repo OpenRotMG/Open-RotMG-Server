@@ -224,6 +224,20 @@ async fn incoming_full_inventory_retains_quote_for_existing_vault_preparation_no
         name: "Trader".into(),
         ..Market::default()
     };
+    market.quote = Some(
+        bounded_quote(
+            &Goods {
+                kind: DEFENSE,
+                quantity: 1,
+            },
+            &Goods {
+                kind: SPEED,
+                quantity: 8,
+            },
+            &app.content,
+        )
+        .expect("researched whole DEF/SPD terms for the capacity fixture"),
+    );
     let q = market.quote(&v, &app.content, None).unwrap().unwrap();
     assert_eq!(q[0].kind, DEFENSE);
     assert_eq!(q[1].kind, SPEED);

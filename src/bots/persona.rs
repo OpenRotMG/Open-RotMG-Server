@@ -100,7 +100,7 @@ pub(super) fn life(
     content: &Content,
     rng: &mut impl Rng,
 ) -> Result<(Vec<Character>, Vec<[i32; 8]>)> {
-    // Gear and current-life sampling must not change synthetic account history on a later rebuild.
+    // Keep synthetic account history independent of current-life gear sampling.
     let mut history = rand::rngs::StdRng::seed_from_u64(seed(p.identity));
     let mut classes: Vec<u16> = content.classes.keys().copied().collect();
     classes.shuffle(&mut history);

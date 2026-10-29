@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail, ensure};
 use roxmltree::Node;
 mod abilities;
+pub(crate) mod item_values;
 pub use abilities::Ability;
 mod consumables;
 pub use consumables::{Companion, ConsumableEffect};
@@ -215,6 +216,7 @@ pub struct Hazard {
 pub struct Content {
     pub(crate) xml_sha256: [String; 2],
     pub objects: BTreeMap<u16, Object>,
+    pub(crate) item_values: item_values::ItemValues,
     pub grounds: BTreeMap<u8, f32>,
     pub ground_names: BTreeMap<u8, String>,
     pub pushes: BTreeMap<u8, (f32, f32)>,
@@ -653,7 +655,9 @@ impl Content {
             objects.len() == 2201 && grounds.len() == 173,
             "unexpected 123.5.1 content counts"
         );
+        let item_values = item_values::ItemValues::load(&objects)?;
         let out = Self {
+            item_values,
             xml_sha256: [objects_sha256, grounds_sha256],
             objects,
             grounds,

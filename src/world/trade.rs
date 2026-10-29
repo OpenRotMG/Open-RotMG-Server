@@ -191,6 +191,55 @@ impl World {
         Ok(None)
     }
 
+    fn gift_writes(
+        &self,
+        t: &Trade,
+        side: usize,
+        kind: i32,
+        giving: bool,
+    ) -> Result<Vec<InventoryWrite>> {
+        ensure!(
+            t.deliveries == [None, None],
+            "gift belongs to a market installment"
+        );
+        let item = self.content.get(u16::try_from(kind)?)?;
+        ensure!(
+            item.class == "Equipment"
+                && !item.soulbound
+                && !item.unsupported_equipment
+                && !item.resurrects,
+            "unsafe gift item kind {kind}"
+        );
+        let donor = if giving { side } else { 1 - side };
+        ensure!(
+            t.offers[1 - donor].iter().all(|b| !b)
+                && t.offers[donor].iter().filter(|b| **b).count() == 1,
+            "gift terms changed"
+        );
+        for (slot, selected) in t.offers[donor].iter().enumerate() {
+            ensure!(
+                !*selected
+                    || (slot >= 4
+                        && t.items[donor][slot] == kind
+                        && self.tradeable(t.players[donor], slot)?),
+                "gift is not one held item of kind {kind}"
+            );
+        }
+        let inventories = exchanged_items(&t.items, &t.offers)?;
+        Ok(t.players
+            .iter()
+            .enumerate()
+            .map(|(i, player)| {
+                let ch = &self.players[player].character;
+                InventoryWrite {
+                    id: ch.id,
+                    account: ch.account,
+                    revision: ch.revision,
+                    items: inventories[i].clone(),
+                }
+            })
+            .collect())
+    }
     pub(crate) fn gift_acceptance_current(&self, acceptance: &GiftAcceptance) -> Result<bool> {
         let id = acceptance.session[1];
         let p = self
@@ -209,16 +258,30 @@ impl World {
         };
         let t = &self.trades[&key];
         let side = usize::from(t.players[1] == id);
+        let writes = match self.gift_writes(t, side, acceptance.kind, acceptance.giving) {
+            Ok(writes) => writes,
+            Err(error) => {
+                tracing::info!(transaction=%acceptance.transaction, %error, "gift acceptance terms invalidated");
+                return Ok(false);
+            }
+        };
         Ok(t.transaction == acceptance.transaction
+            && GiftAcceptance::payload_hash(
+                acceptance.kind,
+                acceptance.giving,
+                &serde_json::to_string(&writes)?,
+            ) == acceptance.writes_hash
             && t.accepted[side]
             && t.players[1 - side] == acceptance.peer_player
             && p.character.revision == acceptance.own.revision
             && self.players.get(&acceptance.peer_player).is_some_and(|q| {
                 q.character.account == acceptance.peer.account
                     && q.character.id == acceptance.peer.character
+                    && q.character.name == acceptance.peer_name
                     && q.character.revision == acceptance.peer.revision
             }))
     }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn autonomous_gift(
         &mut self,
         id: i32,
@@ -226,6 +289,7 @@ impl World {
         peer: i32,
         peer_binding: (i32, String),
         giving: bool,
+        kind: i32,
         action: TradeAction,
     ) -> Result<GiftOutcome> {
         let p = self.players.get(&id).context("gift actor missing")?;
@@ -252,7 +316,22 @@ impl World {
                 ensure!(name == peer_name, "gift request names another contact");
                 self.request_trade(id, name)?;
             }
-            TradeAction::Change { offer } => self.change_trade(id, offer)?,
+            TradeAction::Change { offer } => {
+                let key = self.trade_key(id).context("gift trade missing")?;
+                let t = &self.trades[&key];
+                ensure!(
+                    t.players.contains(&peer) && t.deliveries == [None, None],
+                    "gift trade belongs to another transaction"
+                );
+                ensure!(
+                    offer.iter().filter(|b| **b).count() == usize::from(giving)
+                        && offer.iter().enumerate().all(|(slot, b)| {
+                            !*b || (slot >= 4 && p.character.items[slot] == kind)
+                        }),
+                    "gift offer differs from bound kind/direction"
+                );
+                self.change_trade(id, offer)?;
+            }
             TradeAction::Accept { mine, theirs } => {
                 let key = self.trade_key(id).context("gift trade missing")?;
                 let t = &self.trades[&key];
@@ -261,23 +340,7 @@ impl World {
                     "gift trade belongs to another transaction"
                 );
                 let side = usize::from(t.players[1] == id);
-                let masks = if giving {
-                    [mine, theirs]
-                } else {
-                    [theirs, mine]
-                };
-                let donor = if giving { side } else { 1 - side };
-                ensure!(
-                    masks[1].iter().all(|b| !b) && masks[0].iter().filter(|b| **b).count() == 1,
-                    "gift terms changed"
-                );
-                ensure!(
-                    masks[0]
-                        .iter()
-                        .enumerate()
-                        .all(|(i, b)| !*b || (i >= 4 && t.items[donor][i] == 0xa22)),
-                    "gift is not one held health potion"
-                );
+                let writes = self.gift_writes(t, side, kind, giving)?;
                 let own = GiftParticipant {
                     account: p.character.account,
                     character: p.character.id,
@@ -288,23 +351,8 @@ impl World {
                     character: q.character.id,
                     revision: q.character.revision,
                 };
-                let inventories = exchanged_items(&t.items, &t.offers)?;
-                let writes = t
-                    .players
-                    .iter()
-                    .enumerate()
-                    .map(|(i, player)| {
-                        let ch = &self.players[player].character;
-                        InventoryWrite {
-                            id: ch.id,
-                            account: ch.account,
-                            revision: ch.revision,
-                            items: inventories[i].clone(),
-                        }
-                    })
-                    .collect::<Vec<_>>();
                 let writes_hash =
-                    GiftAcceptance::payload_hash(giving, &serde_json::to_string(&writes)?);
+                    GiftAcceptance::payload_hash(kind, giving, &serde_json::to_string(&writes)?);
                 let transaction = t.transaction.clone();
                 let plan = self.accept_trade(id, mine, theirs)?;
                 let acceptance = GiftAcceptance {
@@ -315,6 +363,7 @@ impl World {
                     peer_player: peer_id,
                     peer_name,
                     giving,
+                    kind,
                     writes_hash,
                 };
                 return Ok(GiftOutcome {
@@ -474,6 +523,9 @@ impl World {
             }
         }
         Ok(None)
+    }
+    pub(crate) fn has_active_trade(&self, id: i32) -> bool {
+        self.trade_key(id).is_some()
     }
     pub(super) fn trade_key(&self, id: i32) -> Option<i32> {
         self.trades
@@ -798,6 +850,7 @@ impl World {
 mod community_tests {
     use super::*;
     use crate::store::{InventoryWrite, Store};
+    use TradeAction::{Accept, Change, Request};
 
     impl World {}
     async fn fixture() -> (World, Store, [i32; 2], [mpsc::Receiver<Packet>; 2]) {
@@ -879,6 +932,253 @@ mod community_tests {
                 items: p.items.clone(),
             })
             .collect()
+    }
+
+    fn gift_action(
+        w: &mut World,
+        actor: i32,
+        peer: i32,
+        kind: i32,
+        giving: bool,
+        action: TradeAction,
+    ) -> Result<GiftOutcome> {
+        let session = [-2, actor, w.players[&actor].character.id];
+        let binding = (
+            w.players[&peer].character.account,
+            w.players[&peer].character.name.clone(),
+        );
+        w.autonomous_gift(actor, session, peer, binding, giving, kind, action)
+    }
+    fn gift_start(w: &mut World, actor: i32, peer: i32, kind: i32, giving: bool) {
+        w.players.get_mut(&actor).unwrap().controller = Controller::Autonomous;
+        w.updates(actor, true).unwrap();
+        w.request_trade(peer, w.players[&actor].character.name.clone())
+            .unwrap();
+        let name = w.players[&peer].character.name.clone();
+        gift_action(w, actor, peer, kind, giving, Request { name }).unwrap();
+    }
+
+    #[tokio::test]
+    async fn gift_kind_health_and_held_equipment_require_exact_committed_witness() {
+        for (kind, slot, giving) in [(0xa22, 4, true), (0xa97, 5, true), (0xa97, 5, false)] {
+            let (mut w, store, ids, _receivers) = fixture().await;
+            let [recipient, donor] = ids;
+            let (actor, peer) = if giving {
+                (donor, recipient)
+            } else {
+                (recipient, donor)
+            };
+            assert_eq!(w.players[&donor].character.items[slot], kind);
+            let item = w.content.get(kind as u16).unwrap();
+            if kind == 0xa97 {
+                assert!(
+                    w.content
+                        .get(w.players[&recipient].character.class)
+                        .unwrap()
+                        .slots[..4]
+                        .contains(&item.slot_type)
+                );
+            }
+            let gift = |w: &mut World, kind, giving, action| {
+                gift_action(w, actor, peer, kind, giving, action)
+            };
+            let before = ids.map(|id| w.players[&id].character.items.clone());
+            gift_start(&mut w, actor, peer, kind, giving);
+            let mut offered = [false; 12];
+            offered[slot] = true;
+            let (mine, theirs) = if giving {
+                (offered, [false; 12])
+            } else {
+                ([false; 12], offered)
+            };
+            gift(&mut w, kind, giving, Change { offer: mine }).unwrap();
+            w.change_trade(peer, theirs).unwrap();
+            assert!(gift(&mut w, kind, giving, Accept { mine, theirs }).is_err());
+            let key = w.trade_key(actor).unwrap();
+            w.trades.get_mut(&key).unwrap().ready = w.clock.now();
+            let outcome = gift(&mut w, kind, giving, Accept { mine, theirs }).unwrap();
+            assert!(outcome.plan.is_none());
+            let witness = outcome.acceptance.unwrap();
+            assert_eq!((witness.kind, witness.giving), (kind, giving));
+            assert!(w.gift_acceptance_current(&witness).unwrap());
+            assert!(!store.gift_committed(witness.clone()).await.unwrap());
+            let mut substitutions = Vec::new();
+            for field in 0..9 {
+                let mut bad = witness.clone();
+                match field {
+                    0 => bad.kind ^= 1,
+                    1 => bad.giving = !bad.giving,
+                    2 => bad.writes_hash[0] ^= 1,
+                    3 => bad.peer.account += 1,
+                    4 => bad.peer.character += 1,
+                    5 => bad.peer.revision += 1,
+                    6 => bad.peer_name.push('x'),
+                    7 => bad.peer_player += 100,
+                    _ => bad.transaction = "0".repeat(32),
+                }
+                assert!(!w.gift_acceptance_current(&bad).unwrap());
+                substitutions.push(bad);
+            }
+            let mut bad = witness.clone();
+            bad.session[2] += 1;
+            assert!(w.gift_acceptance_current(&bad).is_err());
+            let mut bad = witness.clone();
+            bad.own.account += 100;
+            assert!(w.gift_acceptance_current(&bad).is_err());
+            let plan = w.accept_trade(peer, theirs, mine).unwrap().unwrap();
+            assert_eq!(before, ids.map(|id| w.players[&id].character.items.clone()));
+            assert!(!store.gift_committed(witness.clone()).await.unwrap());
+            let writes = writes(&plan);
+            let revisions = store
+                .exchange_trade(plan.transaction.clone(), writes.clone(), None)
+                .await
+                .unwrap();
+            assert!(store.gift_committed(witness.clone()).await.unwrap());
+            for bad in substitutions.into_iter().take(6) {
+                assert!(store.gift_committed(bad).await.is_err());
+            }
+            assert_eq!(
+                store
+                    .exchange_trade(plan.transaction.clone(), writes, None)
+                    .await
+                    .unwrap(),
+                revisions
+            );
+            w.finish_trade(plan, Ok(revisions)).unwrap();
+            assert!(!w.gift_acceptance_current(&witness).unwrap());
+            assert!(store.gift_committed(witness.clone()).await.unwrap());
+            assert!(store.gift_committed(witness).await.unwrap());
+            assert_eq!(w.players[&donor].character.items[slot], -1);
+            assert_eq!(w.players[&recipient].character.items[5], kind);
+            assert_eq!(
+                w.players[&recipient]
+                    .character
+                    .items
+                    .iter()
+                    .filter(|k| **k == kind)
+                    .count(),
+                before[0].iter().filter(|k| **k == kind).count() + 1
+            );
+            for id in ids {
+                let ch = &w.players[&id].character;
+                let saved = store.load(ch.account, ch.id).await.unwrap();
+                assert_eq!(
+                    (saved.revision, saved.items),
+                    (ch.revision, ch.items.clone())
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn gift_kind_rejects_changed_goods_quantity_reciprocal_and_stale_acceptance() {
+        let (mut w, store, [peer, actor], _receivers) = fixture().await;
+        let empty = [false; 12];
+        let gift =
+            |w: &mut World, kind, giving, action| gift_action(w, actor, peer, kind, giving, action);
+        let accept = |w: &mut World, kind, giving, mine, theirs| {
+            gift(w, kind, giving, Accept { mine, theirs })
+        };
+        gift_start(&mut w, actor, peer, 0xa97, true);
+        let mut mine = [false; 12];
+        mine[5] = true;
+        for (kind, giving, offer) in [
+            (0xa22, true, mine),
+            (0xa97, false, mine),
+            (0xa97, true, [false; 12]),
+        ] {
+            assert!(gift(&mut w, kind, giving, Change { offer }).is_err());
+        }
+        let mut equipped = [false; 12];
+        equipped[1] = true;
+        assert!(gift(&mut w, 0xa2e, true, Change { offer: equipped }).is_err());
+        gift(&mut w, 0xa97, true, Change { offer: mine }).unwrap();
+        let key = w.trade_key(actor).unwrap();
+        w.trades.get_mut(&key).unwrap().ready = w.clock.now();
+        assert!(accept(&mut w, 0xa22, true, mine, empty).is_err());
+        assert!(accept(&mut w, 0xa97, false, mine, empty).is_err());
+        let witness = accept(&mut w, 0xa97, true, mine, empty)
+            .unwrap()
+            .acceptance
+            .unwrap();
+        let mut reciprocal = [false; 12];
+        reciprocal[4] = true;
+        w.change_trade(peer, reciprocal).unwrap();
+        assert!(!w.gift_acceptance_current(&witness).unwrap());
+        w.trades.get_mut(&key).unwrap().ready = w.clock.now();
+        assert!(accept(&mut w, 0xa97, true, mine, reciprocal).is_err());
+        w.change_trade(peer, [false; 12]).unwrap();
+        w.trades.get_mut(&key).unwrap().ready = w.clock.now();
+        assert!(accept(&mut w, 0xa97, true, mine, reciprocal).is_err());
+        let mut multiple = mine;
+        multiple[4] = true;
+        assert!(gift(&mut w, 0xa97, true, Change { offer: multiple }).is_err());
+        w.change_trade(actor, multiple).unwrap();
+        w.trades.get_mut(&key).unwrap().ready = w.clock.now();
+        assert!(accept(&mut w, 0xa97, true, multiple, empty).is_err());
+        assert!(!store.gift_committed(witness).await.unwrap());
+        assert!(w.cancel_trade(actor, "fixture complete"));
+    }
+
+    #[tokio::test]
+    async fn gift_kind_rejects_unsafe_items_and_market_installments() {
+        use crate::bots::pursuits::market::{Goods, Terms};
+        let (mut w, _store, [peer, actor], _receivers) = fixture().await;
+        let empty = [false; 12];
+        let gift =
+            |w: &mut World, kind, giving, action| gift_action(w, actor, peer, kind, giving, action);
+        let accept = |w: &mut World, kind, giving, mine, theirs| {
+            gift(w, kind, giving, Accept { mine, theirs })
+        };
+        gift_start(&mut w, actor, peer, 0xa97, true);
+        let mut mine = [false; 12];
+        mine[5] = true;
+        gift(&mut w, 0xa97, true, Change { offer: mine }).unwrap();
+        let key = w.trade_key(actor).unwrap();
+        w.trades.get_mut(&key).unwrap().ready = w.clock.now();
+        for restriction in 0..3 {
+            let content = Arc::make_mut(&mut w.content);
+            let item = content.objects.get_mut(&0xa97).unwrap();
+            item.soulbound = restriction == 0;
+            item.unsupported_equipment = restriction == 1;
+            item.resurrects = restriction == 2;
+            assert!(accept(&mut w, 0xa97, true, mine, empty).is_err());
+        }
+        Arc::make_mut(&mut w.content)
+            .objects
+            .get_mut(&0xa97)
+            .unwrap()
+            .resurrects = false;
+        let delivery = Terms {
+            version: 1,
+            accounts: [
+                w.players[&actor].character.account,
+                w.players[&peer].character.account,
+            ],
+            names: [
+                w.players[&actor].character.name.clone(),
+                w.players[&peer].character.name.clone(),
+            ],
+            goods: [
+                Goods {
+                    kind: 0xa97,
+                    quantity: 1,
+                },
+                Goods {
+                    kind: 0xa22,
+                    quantity: 1,
+                },
+            ],
+            meeting: [-2, 1, 1],
+            expires: crate::bots::pursuits::market::now() + 60,
+            batch: 1,
+        }
+        .delivery(0)
+        .unwrap();
+        w.trades.get_mut(&key).unwrap().deliveries[0] = Some(delivery.clone());
+        assert!(gift(&mut w, 0xa97, true, Change { offer: mine }).is_err());
+        assert!(accept(&mut w, 0xa97, true, mine, empty).is_err());
+        assert_eq!(w.trades[&key].deliveries[0], Some(delivery));
     }
 
     #[tokio::test]

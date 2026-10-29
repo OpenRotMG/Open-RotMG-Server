@@ -816,7 +816,12 @@ mod tests {
         let mut legacy = current.clone();
         legacy["schema"] = serde_json::json!(1);
         legacy.as_object_mut().unwrap().remove("intentions");
-        for original in [legacy, current] {
+        let mut item = current.clone();
+        item["intentions"]["main"]["target"] = serde_json::json!(2719);
+        item["intentions"]["main"]["objective"] = serde_json::json!({"item":{
+            "reason":"Current-class weapon upgrade: Staff of Horror", "revision":2
+        }});
+        for original in [legacy, current, item] {
             let decoded: crate::bots::pursuits::Mind =
                 serde_json::from_value(original.clone()).unwrap();
             decoded.validate().unwrap();

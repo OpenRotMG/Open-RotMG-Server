@@ -109,9 +109,11 @@ struct Outing {
     objective: Option<(i32, f32, f32, u64)>,
     opening: Option<(i32, u64)>,
     clear: Option<u64>,
+    exits: BTreeSet<i32>,
     pending: Option<(usize, i32, i32)>,
     loot: Vec<i32>,
     reported: bool,
+    requested: bool,
     status_reported: bool,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -195,9 +197,11 @@ impl Events {
                 objective: None,
                 opening: None,
                 clear: None,
+                exits: BTreeSet::new(),
                 pending: None,
                 loot: vec![],
                 reported: false,
+                requested: false,
                 status_reported: false,
             });
             tracing::info!(account=v.session.account,character=v.session.character,world=%v.map.name,"autonomous shared event observed");
@@ -242,17 +246,27 @@ impl Events {
         if let Some(boss) = v.objects.iter().find(|p| Some(p.kind) == boss && p.hp > 0) {
             o.boss = Some((boss.id, boss.position.x, boss.position.y));
         }
-        // Disappearance alone is not a clear: only the earned, published exit is a completion cue.
-        if o.boss.is_some()
-            && o.clear.is_none()
-            && v.objects
-                .iter()
-                .any(|p| p.usable && matches!(p.kind, 0x71d | 0x721 | 0x700 | 0x712))
-        {
-            o.clear = Some(v.time_ms);
-            tracing::info!(account=v.session.account,world=%v.map.name,"autonomous shared clear cue observed");
+        let exits = v
+            .objects
+            .iter()
+            .filter(|p| p.usable && matches!(p.kind, 0x71d | 0x721 | 0x700 | 0x712));
+        // A pre-existing exit or a still-live boss cannot witness completion.
+        for exit in exits {
+            if o.boss.is_some()
+                && o.clear.is_none()
+                && !v.objects.iter().any(|p| objective(p.kind) && p.hp > 0)
+                && !o.exits.contains(&exit.id)
+                && o.exits.len() < 16
+            {
+                o.clear = Some(v.time_ms);
+                tracing::info!(account=v.session.account,world=%v.map.name,exit=exit.id,"autonomous shared clear cue observed");
+            }
+            if o.exits.len() < 16 {
+                o.exits.insert(exit.id);
+            }
         }
     }
+
     pub(super) fn remedy<'a>(
         &self,
         v: &'a PlayerView,
@@ -330,7 +344,8 @@ impl Events {
         v: &PlayerView,
         c: &Content,
         grid: &Grid,
-        attention: usize,
+        profile: Profile,
+        allow_idle: bool,
     ) -> Result<Option<Decision>> {
         if !shared(&v.map.name) {
             return Ok(None);
@@ -416,6 +431,9 @@ impl Events {
             d.chat = Some("blue water clears the green pool");
             return Ok(Some(d));
         }
+        if !idle_safe(v, c) {
+            return Ok(None);
+        }
         if v.map.name == "Oryx's Chamber"
             && !v.objects.iter().any(|p| p.kind == 0x700 && p.usable)
             && let Some(locked) = v
@@ -470,63 +488,39 @@ impl Events {
             }
             return Ok(Some(d));
         }
+        if !allow_idle {
+            return Ok(None);
+        }
         let Some(clear) = o.clear else {
             return Ok(None);
         };
+        if o.pending.is_some() {
+            return Ok(None);
+        }
         let mut loot_waiting = false;
         for bag in v
             .objects
             .iter()
             .filter(|p| c.objects[&p.kind].class == "Container")
         {
-            loot_waiting |= progression::pickup(v, c, bag, None)?.is_some();
+            loot_waiting |= progression::pickup(v, c, bag, None, None)?.is_some();
         }
         if loot_waiting {
             return Ok(None);
         }
         let elapsed = v.time_ms.saturating_sub(clear);
-        let audience = v
-            .objects
-            .iter()
-            .any(|p| p.account.is_some() && p.hp > 0 && v.position.distance(p.position) < 12.);
-        let at_reward_site = o
-            .boss
-            .is_some_and(|(_, x, y)| v.position.distance(Pos { x, y }) < 6.);
-        let has_bag = v.objects.iter().any(|p| {
-            c.objects[&p.kind].class == "Container"
-                && o.boss
-                    .is_some_and(|(_, x, y)| p.position.distance(Pos { x, y }) < 3.)
-        });
+        let audience = audience(v);
         if !o.reported
             && audience
-            && elapsed >= 1000
-            && (!o.loot.is_empty() || at_reward_site && !has_bag)
+            && speaks(profile)
+            && elapsed >= 700 + persona::seed(profile.identity) % 1100
+            && report(o, v, c).is_some()
         {
-            d.chat = Some(if o.loot.contains(&0xa35) {
-                "got wis"
-            } else if !o.loot.is_empty() {
-                "got a drop"
-            } else {
-                "no drop here for me"
-            });
+            d.chat = report(o, v, c);
             o.reported = true;
             return Ok(Some(d));
         }
-        let inspecting = v
-            .character
-            .items
-            .iter()
-            .skip(4)
-            .any(|k| *k >= 0 && c.objects[&(*k as u16)].tier.is_some());
-        let linger = if !ready(v, c) {
-            1000
-        } else if inspecting {
-            2000 + 500 * attention as u64
-        } else if audience && !o.loot.is_empty() {
-            3500
-        } else {
-            1500
-        };
+        let linger = linger(v, c, profile);
         if elapsed < linger {
             return Ok(Some(d));
         }
@@ -543,3 +537,164 @@ impl Events {
         Ok(None)
     }
 }
+
+pub(super) fn loot_report(text: &str) -> bool {
+    matches!(text, "got wis" | "got a drop" | "no drop here for me")
+}
+fn audience(v: &PlayerView) -> bool {
+    v.objects.iter().any(|p| {
+        p.account.is_some_and(|a| a != v.session.account)
+            && p.hp > 0
+            && v.position.distance(p.position) < 12.
+    })
+}
+fn idle_safe(v: &PlayerView, c: &Content) -> bool {
+    v.lifecycle.alive
+        && !v.lifecycle.death_pending
+        && !v.lifecycle.busy
+        && !v.lifecycle.departing
+        && !v.lifecycle.quarantined
+        && matches!(v.lifecycle.output, OutputState::Live)
+        && v.projectiles.is_empty()
+        && v.tiles
+            .iter()
+            .find(|t| (t.x, t.y) == tile(v.position))
+            .is_some_and(|t| !c.hazards.contains_key(&t.ground))
+        && v.character.hp * 4 >= v.character.stats[0] * 3
+        && !v.objects.iter().any(|p| {
+            p.hp > 0
+                && (objective(p.kind)
+                    || c.objects[&p.kind].enemy && v.position.distance(p.position) < 12.)
+        })
+}
+fn speaks(profile: Profile) -> bool {
+    persona::seed(profile.identity) % 10 < profile.companions.clamp(0., 8.) as u64
+}
+fn linger(v: &PlayerView, c: &Content, profile: Profile) -> u64 {
+    if !ready(v, c) {
+        return 900;
+    }
+    let seed = persona::seed(profile.identity);
+    let inspecting = seed.is_multiple_of(2)
+        && v.character
+            .items
+            .iter()
+            .skip(4)
+            .any(|k| *k >= 0 && c.objects[&(*k as u16)].tier.is_some());
+    1200 + (seed >> 8) % 3200 + if inspecting { 1800 } else { 0 }
+}
+fn report(o: &Outing, v: &PlayerView, c: &Content) -> Option<&'static str> {
+    if o.loot.contains(&0xa35) {
+        Some("got wis")
+    } else if !o.loot.is_empty() {
+        Some("got a drop")
+    } else if o
+        .boss
+        .is_some_and(|(_, x, y)| v.position.distance(Pos { x, y }) < 6.)
+        && !v.objects.iter().any(|p| {
+            c.objects[&p.kind].class == "Container"
+                && o.boss
+                    .is_some_and(|(_, x, y)| p.position.distance(Pos { x, y }) < 3.)
+        })
+    {
+        Some("no drop here for me")
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct Speech {
+    session: (i32, i32, i32),
+    clear: u64,
+    goal: Option<(u64, i32)>,
+    pub(super) text: String,
+}
+impl Events {
+    pub(super) fn speech(
+        &mut self,
+        v: &PlayerView,
+        c: &Content,
+        profile: Profile,
+        goal: Option<(u64, i32)>,
+        chat: Option<&str>,
+    ) -> Result<Option<Speech>> {
+        let Some(o) = &mut self.outing else {
+            return Ok(None);
+        };
+        let Some(clear) = o.clear else {
+            return Ok(None);
+        };
+        let (goal, text) = if let Some(text) = chat.filter(|text| Some(*text) == report(o, v, c)) {
+            (None, text.to_owned())
+        } else if chat.is_none()
+            && !o.requested
+            && speaks(profile)
+            && persona::seed(profile.identity).is_multiple_of(4)
+            && v.time_ms.saturating_sub(clear) >= 1000
+            && let Some((id, target)) = goal
+        {
+            o.requested = true;
+            (
+                Some((id, target)),
+                format!("need {}", c.get(target as u16)?.name),
+            )
+        } else {
+            return Ok(None);
+        };
+        crate::world::chat::validate(&text)?;
+        Ok(Some(Speech {
+            session: (v.session.world, v.session.player, v.session.character),
+            clear,
+            goal,
+            text,
+        }))
+    }
+}
+impl Speech {
+    pub(super) fn valid(
+        &self,
+        events: &Events,
+        v: &PlayerView,
+        c: &Content,
+        profile: Profile,
+        goal: Option<(u64, i32)>,
+    ) -> Result<bool> {
+        let Some(o) = &events.outing else {
+            return Ok(false);
+        };
+        if self.session != (v.session.world, v.session.player, v.session.character)
+            || o.world != v.session.world
+            || o.character != v.session.character
+            || o.clear != Some(self.clear)
+            || !idle_safe(v, c)
+            || !audience(v)
+            || o.pending.is_some()
+            || v.time_ms.saturating_sub(self.clear) >= linger(v, c, profile)
+        {
+            return Ok(false);
+        }
+        for bag in v
+            .objects
+            .iter()
+            .filter(|p| c.objects[&p.kind].class == "Container")
+        {
+            if progression::pickup(v, c, bag, None, None)?.is_some() {
+                return Ok(false);
+            }
+        }
+        Ok(if let Some((_, target)) = self.goal {
+            goal == self.goal
+                && !v.character.items.contains(&target)
+                && !(v.map.name == "Vault"
+                    && v.objects
+                        .iter()
+                        .any(|p| p.kind == 0x504 && p.contents.contains(&target)))
+        } else {
+            report(o, v, c) == Some(self.text.as_str())
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;
