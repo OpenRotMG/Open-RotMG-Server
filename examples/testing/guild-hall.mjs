@@ -34,11 +34,12 @@ with sqlite3.connect(sys.argv[1]) as db:
  print(json.dumps(db.execute(sys.argv[2],json.loads(sys.argv[3])).fetchall()))`,config.state+'/game.db',sql,JSON.stringify(args)],{encoding:'utf8'}));
   async function save(label,g=game){const s=await g.inspect();records.push({label,...s});await writeFile(join(process.env.QA_RESULTS_DIR,'guild-hall.json'),JSON.stringify(records,null,2));return s;}
   async function capture(g,name){await g.act({keys:[],duration_ms:500});await g.act({keys:[],duration_ms:800},{name,when:()=>true});}
-  async function walk(g,p){for(let n=0;n<100;n++){const v=await g.observe(),dx=p.x-v.position.x,dy=p.y-v.position.y,d=Math.hypot(dx,dy);if(d<.18)return;const x=dx-dy,y=dx+dy,keys=[];if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');await g.act({keys,duration_ms:Math.min(250,Math.max(50,Math.round(d*70)))});const after=(await g.observe()).position;assert(Math.hypot(after.x-v.position.x,after.y-v.position.y)>.001,'Native hall route blocked '+JSON.stringify({target:p,actual:after}));}assert.fail('Native hall walk failed '+JSON.stringify({target:p,actual:(await g.observe()).position}));}
+  async function walk(g,p){for(let n=0;n<100;n++){const v=await g.observe(),dx=p.x-v.position.x,dy=p.y-v.position.y,d=Math.hypot(dx,dy);if(d<.18)return;const x=dx-dy,y=dx+dy,keys=[];if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');await g.act({keys,duration_ms:Math.min(250,Math.max(50,Math.round(d*70)))});}assert.fail('Native hall walk failed '+JSON.stringify({target:p,actual:(await g.observe()).position}));}
   async function portal(g,kind,world){const before=await g.observe(),e=(await g.inspect()).diagnostic.entities.find(e=>e.kind===kind);assert(e,'Portal not visible '+kind);await walk(g,e.pos);await g.act({keys:[],mouse:{x:700,y:575},duration_ms:700});for(let i=0;i<10&&(await g.observe()).session.world===before.session.world;i++)await g.act({keys:[],duration_ms:500});assert.equal((await g.observe()).world,world);}
   async function nexus(g){await g.act({keys:['Insert'],duration_ms:700});for(let i=0;i<10&&(await g.observe()).world!=='Nexus';i++)await g.act({keys:[],duration_ms:500});assert.equal((await g.observe()).world,'Nexus');}
   const peer=await game.join({...fixture,seed:917}),outsider=await game.join({...fixture,seed:918});
   const initial=await save('initial'),peerInitial=await save('peer-initial',peer);
+  await game.act({keys:[],duration_ms:1000});
   await walk(outsider,{x:76.5,y:77.5});await outsider.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
   await capture(outsider,'hall-nonmember-refused');
   game.check('nonmember portal refuses entry without reconnect',(await outsider.observe()).world==='Nexus');
