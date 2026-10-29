@@ -476,33 +476,63 @@ fn wavelength_vault_errand_banks_before_leaving() {
 }
 
 #[test]
-fn suited_band_edge_does_not_trap_venture_and_explore() {
-    let (c, mut v) = fixture();
-    v.quest = None;
-    v.character.level = 11;
-    v.position = Pos { x: 15.5, y: 10.5 };
-    v.objects[0].kind = c
-        .objects
-        .values()
-        .find(|o| o.enemy && (5..=7).contains(&o.terrain))
-        .unwrap()
-        .kind;
-    v.objects[0].position = Pos { x: 2.5, y: 10.5 };
-    let mut brain = Brain::new(ARCHETYPES[0], &v);
-    brain.crowd.observe(&v, &c);
-    v.objects.clear();
-    brain.heading = 0.;
-    let mut goals = Vec::new();
-    for _ in 0..12 {
-        v.tick += 5;
-        v.time_ms += 250;
-        v.elapsed_ms += 250;
-        let d = brain.decide(&v, &c).unwrap();
-        v.position = d.movement.expect("the bot keeps travelling");
-        goals.push(matches!(d.goal, Goal::Venture));
+fn band_edge_journeys_do_not_preempt_each_other() {
+    // Smoke runs: Venture pulled back across a region edge every other decision (Explore, then Revisit).
+    for revisit in [None, Some(Pos { x: 30.5, y: 10.5 })] {
+        let (c, mut v) = fixture();
+        v.quest = None;
+        v.character.level = 11;
+        v.position = Pos { x: 15.5, y: 10.5 };
+        v.objects[0].kind = c
+            .objects
+            .values()
+            .find(|o| o.enemy && (5..=7).contains(&o.terrain))
+            .unwrap()
+            .kind;
+        v.objects[0].position = Pos { x: 2.5, y: 10.5 };
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        brain.crowd.observe(&v, &c);
+        v.objects.clear();
+        brain.heading = 0.;
+        brain.hunting = revisit;
+        v.time_ms += 1_000_000;
+        let mut goals = Vec::new();
+        for _ in 0..12 {
+            v.tick += 5;
+            v.time_ms += 250;
+            v.elapsed_ms += 250;
+            let d = brain.decide(&v, &c).unwrap();
+            v.position = d.movement.expect("the bot keeps travelling");
+            goals.push(format!("{:?}", d.goal));
+        }
+        let kinds: Vec<_> = goals.iter().map(|g| g.split('(').next().unwrap()).collect();
+        let switches = kinds.windows(2).filter(|w| w[0] != w[1]).count();
+        assert!(switches <= 3, "journeys alternate: {goals:?}");
     }
-    let switches = goals.windows(2).filter(|w| w[0] != w[1]).count();
-    assert!(switches < 3, "Venture and Explore alternate: {goals:?}");
+}
+
+#[test]
+fn unreachable_hunt_is_travel_that_aborts_not_engagement() {
+    let (c, mut v) = fixture();
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    // The bot never gets closer, as when held movement cannot reach the quest.
+    for step in 0..12 {
+        v.tick += 5;
+        v.time_ms += 10_000;
+        v.elapsed_ms += 10_000;
+        let goal = brain.decide(&v, &c).unwrap().goal;
+        if step == 0 {
+            assert_eq!(goal, Goal::Hunt(2));
+        }
+    }
+    assert!(!brain.plan.engaged, "an out-of-range hunt is not a fight");
+    assert!(
+        brain
+            .plan
+            .events
+            .iter()
+            .any(|e| e.kind == plan::Kind::Aborted && e.reason == "travel deadline passed")
+    );
 }
 
 #[test]

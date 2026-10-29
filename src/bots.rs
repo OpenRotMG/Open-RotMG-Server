@@ -266,6 +266,9 @@ struct Brain {
     rng: rand::rngs::StdRng,
     heading: f32,
     steering: Option<(i32, f32)>,
+    /// The kept journey and its distance-proportional deadline (ms).
+    travel: Option<(Goal, u64)>,
+    last_aim: u64,
     previous: Pos,
     stationary: u64,
     destination: Option<Pos>,
@@ -336,6 +339,8 @@ impl Brain {
             rng,
             heading,
             steering: None,
+            travel: None,
+            last_aim: 0,
             previous: view.position,
             stationary: view.tick,
             destination: None,
@@ -605,8 +610,13 @@ impl Brain {
         };
         if activity != Activity::Adventure {
             self.steering = None;
+            self.travel = None;
+        }
+        if decision.aim.is_some() {
+            self.last_aim = v.time_ms;
         }
         self.set_activity(v, activity);
+        // An unreachable hunt is travel, not engagement, so it can still raise no_progress.
         self.plan.engaged = matches!(
             activity,
             Activity::Survive
@@ -614,7 +624,8 @@ impl Brain {
                 | Activity::Linger
                 | Activity::Social
                 | Activity::Busy
-        ) || matches!(decision.goal, Goal::Fight(_) | Goal::Hunt(_));
+        ) || matches!(decision.goal, Goal::Fight(_) | Goal::Hunt(_))
+            && v.time_ms.saturating_sub(self.last_aim) < 5000;
         self.intent = self
             .mind
             .intentions
@@ -1606,6 +1617,30 @@ impl Brain {
         for (score, goal, _) in &mut choices {
             *score += intentions.bonus(v, goal);
         }
+        // A chosen journey is kept: no other journey replaces it before arrival, route failure or deadline.
+        let travel = |goal: &Goal, p: Pos| match goal {
+            Goal::Venture | Goal::Revisit(..) | Goal::Explore(..) => true,
+            Goal::Survey(..) => p.distance(v.position) > 8.,
+            Goal::Hunt(_) | Goal::Fight(_) => p.distance(v.position) >= range,
+            _ => false,
+        };
+        if let Some((kept, deadline)) = self.travel.clone() {
+            let offered = choices.iter().find(|(_, g, _)| *g == kept).map(|c| c.2);
+            if v.time_ms >= deadline {
+                self.travel = None;
+                if let Some(p) = offered {
+                    self.blocked.insert(tile(p), v.tick + 100);
+                }
+                self.plan.record(
+                    plan::now(),
+                    plan::Kind::Aborted,
+                    self.plan.owner(),
+                    "travel deadline passed".into(),
+                );
+            } else if offered.is_some() || matches!(kept, Goal::Explore(..)) {
+                choices.retain(|(_, g, p)| *g == kept || !travel(g, *p));
+            }
+        }
         // Exploration's maximum score is 20; a clear higher-ranked route makes its full-map search irrelevant.
         if !choices.iter().any(|(score, goal, position)| {
             score + if *goal == self.goal { 8. } else { 0. } > 20.
@@ -1631,7 +1666,7 @@ impl Brain {
                 let next = grid
                     .nearby(&reachable, v.position)
                     .filter(|t| {
-                        !self.blocked.contains_key(t) && self.crowd.bands.explorable(v, center(*t))
+                        !self.blocked.contains_key(t) && self.crowd.bands.survivable(v, center(*t))
                     })
                     .filter(|t| {
                         center(*t).distance(v.position) > 3.
@@ -1799,7 +1834,8 @@ impl Brain {
                             return Ok(clearing);
                         }
                         self.blocked.insert(tile(destination), v.tick + 100);
-                        if matches!(goal, Goal::Venture | Goal::Explore(..)) {
+                        if travel(&goal, destination) {
+                            self.travel = None;
                             self.plan.record(
                                 plan::now(),
                                 plan::Kind::Aborted,
@@ -1891,6 +1927,13 @@ impl Brain {
                     "autonomous temporary company activity changed"
                 );
             }
+            self.travel = travel(&goal, destination).then(|| match self.travel.take() {
+                Some(kept) if kept.0 == goal => kept,
+                _ => (
+                    goal.clone(),
+                    v.time_ms + 10_000 + (destination.distance(v.position) * 1000.) as u64,
+                ),
+            });
             decision.goal = goal;
             decision.movement = movement;
             if (self.agreement.is_some()

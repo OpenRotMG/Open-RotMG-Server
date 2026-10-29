@@ -80,14 +80,6 @@ impl Bands {
         self.survivable(v, p)
             && (v.map.name != "Realm" || v.character.level >= 20 || self.known(p).is_some())
     }
-    /// Exploring from suited ground stays on it; otherwise Venture pulls the bot back across the same region edge every decision.
-    pub fn explorable(&self, v: &PlayerView, p: Pos) -> bool {
-        let suited = Some(self.limit);
-        self.survivable(v, p)
-            && (v.map.name != "Realm"
-                || self.known(v.position) != suited
-                || self.known(p) == suited)
-    }
     /// Where to farm next: back out of a band above this character, or up toward its suitable band.
     pub fn venture(&self, v: &PlayerView) -> Option<Pos> {
         let (here, goal) = (self.known(v.position), self.limit);
