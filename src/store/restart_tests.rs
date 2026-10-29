@@ -83,7 +83,7 @@ fn snapshot(path: &Path) -> Vec<String> {
     let db = Connection::open(path).unwrap();
     [
         "SELECT json_group_array(json_array(id,name,credits,character_slots,vault_mask)) FROM (SELECT * FROM accounts ORDER BY id)",
-        "SELECT json_group_array(json_array(id,account,alive,revision,items,json(stats))) FROM (SELECT * FROM characters ORDER BY id)",
+        "SELECT json_group_array(json_array(id,account,alive,revision,items,json_remove(stats,'$.created_at'))) FROM (SELECT * FROM characters ORDER BY id)",
         "SELECT json_group_array(json_array(account,chest,revision,items)) FROM (SELECT * FROM vaults ORDER BY account,chest)",
         "SELECT json_group_array(json_array(character,snapshot,receipt)) FROM (SELECT * FROM deaths ORDER BY character)",
         "SELECT json_group_array(json_array(account,balance,earned)) FROM (SELECT * FROM account_fame ORDER BY account)",
