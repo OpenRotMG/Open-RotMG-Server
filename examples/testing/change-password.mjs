@@ -11,8 +11,9 @@ let checks=[];
 export const fixture={class:0x30e,level:1,seed:925,world:-2,position:'spawn',equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:null};
 export async function enter({account,browser,signal}) {
   const pages=await (await fetch(`http://127.0.0.1:${browser.port}/json/list`,{signal})).json();
-  const responses=[];
+  const requests=[],responses=[];
   const page=await connect({...browser,url:pages.find(p=>p.id===browser.target).url,helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs'),onEvent:e=>{
+    if(e.method==='Network.requestWillBeSent'&&e.params.request.url.endsWith('/account/changePassword'))requests.push(e.params.requestId);
     if(e.method==='Network.responseReceived'&&e.params.response.url.endsWith('/account/changePassword'))responses.push(e.params.requestId);
   }});
   try {
@@ -57,15 +58,15 @@ export async function enter({account,browser,signal}) {
     check('short replacement leaves durable credential intact',credential()===initial);
     await submit('mismatched-new',old,next,'does-not-match');
     check('mismatched confirmation leaves durable credential intact',credential()===initial);
-    check('native validation prevents all three invalid requests',responses.length===0);
+    check('native validation prevents all three invalid requests',requests.length===0);
     await submit('wrong-current','wrong-local-password',next,next);
     assert.equal(responses.length,1,'Wrong-current submission must reach the server once');
     check('server rejects wrong current password without changing credential',(await page.call('Network.getResponseBody',{requestId:responses[0]})).body.startsWith('<Error>')&&credential()===initial&&(await listing(old)).startsWith('<Chars'));
     await submit('password-changed',old,next,next);
-    check('native submission commits a replacement verifier',credential()!==initial);
+    check('native submission commits a replacement verifier',requests.length===2&&responses.length===2&&(await page.call('Network.getResponseBody',{requestId:responses[1]})).body==='<Success/>'&&credential()!==initial);
     check('old password no longer authenticates and new password retains the same account',(await listing(old)).startsWith('<Error>')&&(await listing(next)).includes(`<AccountId>${account}</AccountId>`));
     await click(485,385);await click(400,550);await click(400,550);
-    await writeFile(join(out(),'password-checks.json'),JSON.stringify({account,checks,responses},null,2));
+    await writeFile(join(out(),'password-checks.json'),JSON.stringify({account,checks,requests,responses},null,2));
   } finally {page.close();}
 }
 export async function run(game) {
