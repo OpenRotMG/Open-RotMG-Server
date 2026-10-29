@@ -235,8 +235,11 @@ export async function run(game){
       const group=[],available=targets.flatMap((target,i)=>target?[i]:[]),shooters=kind===0xd5f?available:available.length?[available[step%available.length]]:[];
       // One full-length input advances both active encounters' phases within the aggregate input bound.
       for(const i of shooters){
-        const target=targets[i],duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:10000;
-        group.push({actor:clients[i].actor,input:{keys:[],duration_ms,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}}});
+        const target=targets[i],duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:10000,mp=views[i].character.mp;
+        assert(Number.isFinite(mp),'Native quiver decisions require observed current MP');
+        // Native quiver paralysis keeps mobile targets in the actual firing line.
+        const keys=!evaluations.has(target.kind)&&mp>=65?[' ']:[];
+        group.push({actor:clients[i].actor,input:{keys,duration_ms,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}}});
       }
       if(group.length)await act(game,[group]);else await act(game,{keys:[],duration_ms:10000});
   }
