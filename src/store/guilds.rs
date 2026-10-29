@@ -27,6 +27,7 @@ pub enum GuildAction {
 
 pub const HALL_PRICES: [i32; 3] = [10_000, 100_000, 250_000];
 
+// Preserve the selected client's stricter Officer matrix: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/util/_07E_.as#L61-L78
 pub fn allowed_rank(authority: i32, old: i32, new: i32) -> bool {
     [0, 10, 20, 30, 40].contains(&old)
         && [0, 10, 20, 30].contains(&new)
@@ -318,5 +319,166 @@ impl Store {
             "guild change committed"
         );
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guild_rank_matrix_matches_selected_client() {
+        let pairs = [
+            (0, vec![]),
+            (10, vec![]),
+            (20, vec![(0, 10), (10, 0)]),
+            (
+                30,
+                vec![
+                    (0, 10),
+                    (0, 20),
+                    (0, 30),
+                    (10, 0),
+                    (10, 20),
+                    (10, 30),
+                    (20, 0),
+                    (20, 10),
+                    (20, 30),
+                ],
+            ),
+            (
+                40,
+                vec![
+                    (0, 10),
+                    (0, 20),
+                    (0, 30),
+                    (10, 0),
+                    (10, 20),
+                    (10, 30),
+                    (20, 0),
+                    (20, 10),
+                    (20, 30),
+                    (30, 0),
+                    (30, 10),
+                    (30, 20),
+                ],
+            ),
+            (50, vec![]),
+        ];
+        for (authority, allowed) in pairs {
+            for old in [-1, 0, 10, 20, 30, 40, 50] {
+                for new in [-1, 0, 10, 20, 30, 40, 50] {
+                    assert_eq!(
+                        allowed_rank(authority, old, new),
+                        allowed.contains(&(old, new)),
+                        "{authority}: {old} -> {new}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn guild_rank_authority_and_founderless_state_are_durable() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let path = std::env::temp_dir().join(format!("guild-ranks-{}.db", rand::random::<u64>()));
+        let store = Store::open(&path, &content).unwrap();
+        let founder = store.list("rank-founder".into()).await.unwrap();
+        let leader = store.list("rank-leader".into()).await.unwrap();
+        let target = store.list("rank-target".into()).await.unwrap();
+        let outsider = store.list("rank-outsider".into()).await.unwrap();
+        store
+            .create_prepared_guild(vec![founder.id, leader.id, target.id], "Ranks".into())
+            .await
+            .unwrap();
+        let rank = |name: &str, rank| GuildAction::Rank {
+            name: name.into(),
+            rank,
+        };
+        store
+            .change_guild(founder.id, rank(&leader.name, 20))
+            .await
+            .unwrap();
+        assert!(
+            store
+                .change_guild(leader.id, rank(&target.name, 20))
+                .await
+                .is_err()
+        );
+        store
+            .change_guild(leader.id, rank(&target.name, 10))
+            .await
+            .unwrap();
+        for (actor, name, next) in [
+            (outsider.id, &target.name, 0),
+            (leader.id, &founder.name, 0),
+            (founder.id, &target.name, 10),
+            (founder.id, &target.name, 40),
+            (founder.id, &target.name, 19),
+        ] {
+            assert!(store.change_guild(actor, rank(name, next)).await.is_err());
+        }
+        assert_eq!(
+            store
+                .presentation(target.id)
+                .await
+                .unwrap()
+                .guild
+                .unwrap()
+                .rank,
+            10
+        );
+        store
+            .change_guild(founder.id, rank(&leader.name, 30))
+            .await
+            .unwrap();
+        store
+            .change_guild(leader.id, rank(&target.name, 30))
+            .await
+            .unwrap();
+        assert!(
+            store
+                .change_guild(leader.id, rank(&target.name, 20))
+                .await
+                .is_err()
+        );
+        assert!(
+            store
+                .change_guild(leader.id, GuildAction::Remove(target.name.clone()))
+                .await
+                .is_err()
+        );
+        store
+            .change_guild(founder.id, GuildAction::Remove(founder.name.clone()))
+            .await
+            .unwrap();
+        let reopened = Store::open(&path, &content).unwrap();
+        assert!(
+            reopened
+                .presentation(founder.id)
+                .await
+                .unwrap()
+                .guild
+                .is_none()
+        );
+        for account in [leader.id, target.id] {
+            assert_eq!(
+                reopened
+                    .presentation(account)
+                    .await
+                    .unwrap()
+                    .guild
+                    .unwrap()
+                    .rank,
+                30
+            );
+        }
+        assert_eq!(reopened.guild(leader.id).await.unwrap().name, "Ranks");
+        assert!(
+            reopened
+                .change_guild(leader.id, rank(&leader.name, 40))
+                .await
+                .is_err()
+        );
     }
 }
