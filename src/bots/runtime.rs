@@ -492,12 +492,9 @@ async fn enter_admitted(
                 position,
                 presentation,
                 admission,
+                crate::world::Controller::Autonomous,
             )?;
             bind(id)?;
-            w.players
-                .get_mut(&id)
-                .context("new autonomous player missing")?
-                .controller = crate::world::Controller::Autonomous;
             if let Some(key) = entry_key {
                 d.complete_dungeon_entry(&key, id)?;
             }
@@ -1304,7 +1301,7 @@ pub(super) async fn launch(
             };
             if let Err(error) = saved {
                 finalized = false;
-                tracing::error!(player=id,account,%error,"autonomous finalization failed; account remains fenced");
+                tracing::error!(player=id,account,%error,"autonomous finalization failed");
                 result = Err(error);
             }
         }

@@ -10,7 +10,7 @@ pub(super) struct Trade {
     items: [Vec<i32>; 2],
     offers: [[bool; 12]; 2],
     accepted: [bool; 2],
-    // The client's countdown uses getTimer(), not simulation ticks: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/ui/TradeButton.as
+    // The selected 123.5.1 client (§_-KK§) counts getTimer(), not simulation ticks: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
     ready: Instant,
     pending: bool,
 }

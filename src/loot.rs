@@ -63,10 +63,10 @@ pub(crate) fn period_surface(kind: u16) -> bool {
         kind,
         0x202 | 0x204 | 0x205 | 0x209 | 0x20d | 0x20f
             | 0x600..=0x602 | 0x604..=0x607 | 0x609 | 0x60a | 0x60c..=0x610
-            | 0x614 | 0x615 | 0x617 | 0x618 | 0x61a | 0x61c..=0x61f
+            | 0x612..=0x615 | 0x617 | 0x618 | 0x61a | 0x61c..=0x61f
             | 0x624..=0x626 | 0x629..=0x62f | 0x631..=0x633
             | 0x63b | 0x63c | 0x63e..=0x640 | 0x642..=0x645 | 0x647..=0x64d
-            | 0x64f | 0x650 | 0x669..=0x66b | 0x900..=0x902
+            | 0x64f | 0x650 | 0x65f..=0x661 | 0x669..=0x66b | 0x6c6 | 0x900..=0x902 | 0x91d | 0x91e
     )
 }
 fn table(kind: u16) -> &'static [(f64, Pick)] {
@@ -458,8 +458,29 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         // Ents drop a tincture, Saplings nothing: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.EntAncient.cs#L219-L244
         0x921 => &[(0.02, Item(0xb0c))],
         0x922 => &[],
-        0x65f..=0x661 => &[(0.02, Item(0xa23))],
-        0x91d | 0x91e | 0x929 | 0x92a | 0x92b | 0x92c | 0x924 => &[(0.03, Item(0xa23))],
+        // Distinct follower pools, not generic potions: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Lich.cs#L321-L415
+        0x65f | 0x660 => &[(0.02, Item(0xa23)), (0.02, Item(0xa32))],
+        0x661 => &[
+            (0.02, Item(0xa06)),
+            (0.02, Item(0xa9c)),
+            (0.02, Item(0xa02)),
+            (0.02, Item(0xa16)),
+        ],
+        0x91d => &[
+            (0.02, Item(0xb0f)),
+            (0.06, Item(0xaf1)),
+            (0.03, Item(0xa23)),
+        ],
+        0x91e => &[
+            (0.02, Tier(8, WEAPONS)),
+            (0.02, Item(0xa23)),
+            (0.02, Item(0xa28)),
+            (0.02, Item(0xa24)),
+            (0.06, Item(0xb0c)),
+            (0.09, Item(0xb0e)),
+            (0.04, Item(0xb0d)),
+        ],
+        0x929 | 0x92a | 0x92b | 0x92c | 0x924 => &[(0.03, Item(0xa23))],
         0x6c1 => &[(0.0001, Item(crate::endgame::INCANTATION))],
         0x920 => &[
             (0.3, Tier(6, WEAPONS)),
@@ -549,14 +570,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.03, Item(0xa22)),
             (0.05, Tier(2, RINGS)),
         ],
-        0x6c6 => &[
-            (0.1, Tier(4, WEAPONS)),
-            (0.05, Tier(3, WEAPONS)),
-            (0.1, Tier(4, ARMOR)),
-            (0.05, Tier(3, ARMOR)),
-            (0.03, Item(0xa22)),
-            (0.02, Item(0xa23)),
-        ],
+        0x6c6 => &[(0.04, Item(0xa23))],
         0x900 => &[
             (0.04, Item(0xa22)),
             (0.01, Item(0xa23)),
@@ -572,7 +586,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Item(0xa23)),
             (0.01, Tier(2, RINGS)),
         ],
-        0x612 | 0x613 => &[(0.03, Item(0xa22))],
+        0x612 | 0x613 => &[(0.04, Item(0xa22))],
         0x618 => &[(0.04, Item(0xa22))],
         0x619 => &[(0.03, Item(0xa23))],
         0x953 => &[
@@ -631,6 +645,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0xd07..=0xd0a
         | 0xda2
         | 0xda3
+        | 0xd9b
+        | 0xd9c
+        | 0xd9e
         | 0x918
         | 0x919
         | crate::dungeon::snake::BUTTON
@@ -640,7 +657,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x605 | 0x606 => &[(0.04, Item(0xa22))],
         0x607 => &[(0.03, Item(0xa23))],
         0x615 => &[(0.04, Item(0xa22)), (0.03, Item(0xa23))],
-        0x61c | 0x61e | 0x63b | 0x64a..=0x64d => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
+        0x61c | 0x61e | 0x63b => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
+        // The King is an ordinary elf, not an equipment-bearing lesser god: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Highland.cs#L201-L256
+        0x64a..=0x64d | 0x64f => &[(0.03, Item(0xa22))],
         0x60a | 0x60c => &[(0.03, Item(0xa23))],
         0x61d | 0x63c | 0x63f | 0x642..=0x644 => &[(0.05, Item(0xa22)), (0.03, Item(0xa23))],
         0x616
@@ -648,7 +667,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         | 0xd91..=0xd94
         | 0xd96
         | 0xd97
-        | 0xd9b..=0xd9f
+        | 0xd9d
+        | 0xd9f
         | 0xda4..=0xda6
         | 0xdb0..=0xdb2 => &[(0.05, Item(0xa22)), (0.03, Item(0xa23))],
         0x60d => &[
@@ -705,16 +725,6 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.05, Tier(3, RINGS)),
             (0.03, Tier(3, ABILITIES)),
             (0.03, Item(0xa23)),
-        ],
-        0x64f => &[
-            (0.16, Tier(5, WEAPONS)),
-            (0.08, Tier(6, WEAPONS)),
-            (0.16, Tier(4, ARMOR)),
-            (0.08, Tier(5, ARMOR)),
-            (0.04, Tier(6, ARMOR)),
-            (0.05, Tier(3, RINGS)),
-            (0.03, Tier(3, ABILITIES)),
-            (0.03, Item(0xa22)),
         ],
         0x640 | 0x649 | 0x650 => &[
             (0.16, Tier(5, WEAPONS)),
@@ -1130,7 +1140,7 @@ pub(crate) fn god_loot(
     contributors: &[(i32, i32)],
     rng: &mut impl Rng,
 ) -> GodLoot {
-    let required = potion_damage(kind).expect("ordinary god reward path");
+    let required = potion_damage(kind);
     assert!(!contributors.is_empty(), "god loot needs contributors");
     let mut loot = GodLoot {
         shared: Vec::new(),
@@ -1148,7 +1158,7 @@ pub(crate) fn god_loot(
         }
     }
     for &(owner, damage) in contributors {
-        if damage >= required {
+        if required.is_some_and(|required| damage >= required) {
             for &(chance, item) in bonus(kind) {
                 if rng.gen_bool(chance) {
                     loot.private.entry(owner).or_default().push(item);
@@ -1160,7 +1170,9 @@ pub(crate) fn god_loot(
 }
 
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
-    let mut items = if potion_damage(kind).is_some() {
+    // Sprite tier candidates roll independently, not as an exclusive choice: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L77-L86
+    let per_item = potion_damage(kind).is_some() || matches!(kind, 0x624..=0x626 | 0x91d | 0x91e);
+    let mut items = if per_item {
         god_equipment(content, kind, rng)
     } else if independent(kind) {
         let mut items = Vec::new();
@@ -1231,7 +1243,7 @@ pub fn private(kind: u16) -> bool {
             kind,
             0x679..=0x67c | 0xd5a | 0xd60 | 0x1705 | crate::dungeon::trench::THESSAL
         )
-        || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x64f | 0x650..=0x659
+        || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x650..=0x659
         | 0xd05 | 0x917 | crate::dungeon::snake::GUARD | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
         | crate::dungeon::jungle::BOSS | crate::dungeon::beach::BOSS
         | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
@@ -1277,7 +1289,8 @@ fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
     // Monster-page chest rates override the generic community-server pools.
     // https://web.archive.org/web/20120217151558/http://forums.wildshadow.com:80/wiki/realm-mad-god/oasis-giant
     let (weapon, armor, tier_rates, ring, ring_rates, ability_rates) = match kind {
-        0x675 | 0x678 => (5, 5, [0.75, 0.375, 0.167], 1, [0.6, 0.15], [0.3, 0.075, 0.]),
+        0x675 => (5, 5, [0.75, 0.375, 0.167], 1, [0.6, 0.15], [0.3, 0.075, 0.]),
+        0x678 => (5, 4, [0.75, 0.375, 0.167], 1, [0.6, 0.15], [0.3, 0.075, 0.]),
         0x67d => (6, 6, [0.5, 0.25, 0.125], 2, [0.2, 0.05], [0.4, 0.1, 0.025]),
         0x668 => (7, 7, [0.5, 0.25, 0.125], 2, [0.4, 0.1], [0.8, 0.2, 0.05]),
         _ => unreachable!("selected landmark chest"),
@@ -1348,12 +1361,115 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
-    fn elf_escorts_keep_their_distinct_public_potion_rolls() {
+    fn realm_sprites_keep_distinct_independent_public_rewards() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, tier, slots, chance) in [
+            (0x624, 5, WEAPONS, 0.02),
+            (0x625, 2, ABILITIES, 0.04),
+            (0x626, 6, ARMOR, 0.01),
+        ] {
+            assert!(
+                matches!(table(kind), [(p, Pick::Tier(t, s)), (q, Pick::Item(0xa23))]
+                if *p == chance && *t == tier && *s == slots && *q == 0.05)
+            );
+            assert!(period_surface(kind) && !private(kind));
+            let pool = candidates(&content, Pick::Tier(tier, slots));
+            assert!(!pool.is_empty());
+            let all = rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0));
+            assert_eq!(all.len(), pool.len() + 1);
+            assert!(pool.iter().all(|item| all.contains(item)) && all.contains(&0xa23));
+            assert!(
+                rewards(
+                    &content,
+                    kind,
+                    &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+                )
+                .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn nomad_has_one_public_four_percent_magic_potion_roll() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        assert!(matches!(table(0x6c6), [(p, Pick::Item(0xa23))] if *p == 0.04));
+        assert!(period_surface(0x6c6) && !private(0x6c6));
+        assert_eq!(
+            rewards(&content, 0x6c6, &mut rand::rngs::mock::StepRng::new(0, 0)),
+            vec![0xa23]
+        );
+        assert!(
+            rewards(
+                &content,
+                0x6c6,
+                &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn oasis_chest_armor_keeps_period_tiers() {
+        let armor: Vec<_> = chest_table(0x678)
+            .into_iter()
+            .filter_map(|(chance, pick)| match pick {
+                Pick::Tier(tier, slots) if slots == ARMOR => Some((tier, chance)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(armor, [(4, 0.75), (5, 0.375), (6, 0.167)]);
+        assert!(table(0x678).is_empty());
+    }
+
+    #[test]
+    fn shore_cubes_keep_independent_public_potions_and_pirate_cave_eligibility() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in 0x60e..=0x610 {
+            assert!(
+                matches!(table(kind), [(hp, Pick::Item(0xa22)), (mp, Pick::Item(0xa23))] if *hp == 0.04 && *mp == 0.04)
+            );
+            assert!(period_surface(kind) && !private(kind));
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                vec![0xa22, 0xa23]
+            );
+            assert!(
+                rewards(
+                    &content,
+                    kind,
+                    &mut rand::rngs::mock::StepRng::new(u64::MAX, 0)
+                )
+                .is_empty()
+            );
+            assert_eq!(crate::dungeon::portal_drop(kind), Some((0x717, 0.01)));
+        }
+    }
+
+    #[test]
+    fn night_elves_only_roll_one_public_health_potion() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for kind in [0x64a, 0x64b, 0x64c, 0x64d, 0x64f] {
+            assert!(
+                matches!(table(kind), [(p, Pick::Item(0xa22))] if *p == 0.03),
+                "{kind:#x}"
+            );
+            assert!(period_surface(kind) && !private(kind));
+            assert_eq!(
+                rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0)),
+                vec![0xa22]
+            );
+        }
+    }
+
+    #[test]
+    fn goblin_and_elf_escorts_keep_their_public_potion_rolls() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for (kind, chance, item) in [
             (0x605, 0.04, 0xa22),
             (0x606, 0.04, 0xa22),
             (0x607, 0.03, 0xa23),
+            (0x612, 0.04, 0xa22),
+            (0x613, 0.04, 0xa22),
         ] {
             assert!(matches!(table(kind), [(p, Pick::Item(id))] if *p == chance && *id == item));
             assert!(period_surface(kind) && !private(kind));
@@ -1400,12 +1516,112 @@ mod tests {
     }
 
     #[test]
+    fn lich_followers_keep_distinct_independent_public_rewards() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for (kind, expected) in [
+            (0x65f, vec![(0.02, 0xa23), (0.02, 0xa32)]),
+            (0x660, vec![(0.02, 0xa23), (0.02, 0xa32)]),
+            (
+                0x661,
+                vec![(0.02, 0xa06), (0.02, 0xa9c), (0.02, 0xa02), (0.02, 0xa16)],
+            ),
+            (0x91d, vec![(0.02, 0xb0f), (0.06, 0xaf1), (0.03, 0xa23)]),
+            (
+                0x91e,
+                vec![
+                    (0.02, 0xa23),
+                    (0.02, 0xa28),
+                    (0.02, 0xa24),
+                    (0.06, 0xb0c),
+                    (0.09, 0xb0e),
+                    (0.04, 0xb0d),
+                ],
+            ),
+        ] {
+            validate(&content, kind).unwrap();
+            let fixed: Vec<_> = table(kind)
+                .iter()
+                .filter_map(|(p, pick)| match pick {
+                    Pick::Item(item) => Some((*p, *item)),
+                    Pick::Tier(..) => None,
+                })
+                .collect();
+            assert_eq!(fixed, expected, "{kind:#x}");
+            assert!(!private(kind));
+            assert!(period_surface(kind));
+            let all = rewards(&content, kind, &mut rand::rngs::mock::StepRng::new(0, 0));
+            assert!(expected.iter().all(|(_, item)| all.contains(item)));
+            let tier_count = if kind == 0x91e {
+                candidates(&content, Pick::Tier(8, WEAPONS)).len()
+            } else {
+                0
+            };
+            assert_eq!(all.len(), expected.len() + tier_count);
+        }
+        assert!(matches!(table(0x91e).first(), Some((p, Pick::Tier(8, WEAPONS))) if *p == 0.02));
+    }
+
+    #[test]
     fn ent_follower_rewards_do_not_use_generic_potions() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         let mut rng = rand::rngs::mock::StepRng::new(0, 0);
-        let observed = [0x921, 0x922, 0x65f].map(|kind| rewards(&content, kind, &mut rng));
-        assert_eq!(observed, [vec![0xb0c], vec![], vec![0xa23]]);
+        let observed = [0x921, 0x922].map(|kind| rewards(&content, kind, &mut rng));
+        assert_eq!(observed, [vec![0xb0c], vec![]]);
+        assert!(content.objects[&0xb0c].soulbound);
+        let mut no_drop = rand::rngs::mock::StepRng::new(u64::MAX, 0);
+        assert!(
+            [0x921, 0x922]
+                .map(|kind| rewards(&content, kind, &mut no_drop))
+                .iter()
+                .all(Vec::is_empty)
+        );
         assert!(matches!(table(0x921), [(chance, Pick::Item(0xb0c))] if *chance == 0.02));
+    }
+
+    #[test]
+    fn realm_god_potion_boundaries_preserve_equipment() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        // Kithio's 18% threshold is inclusive, not the later 7.0 reward policy: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L88-L112
+        for (kind, threshold, chance, potion) in [
+            (0x651, 180, 0.01, 0xa1f),
+            (0x655, 180, 0.015, 0xa20),
+            (0x656, 270, 0.01, 0xa20),
+            (0x657, 180, 0.015, 0xa1f),
+            (0x658, 180, 0.015, 0xa20),
+            (0x659, 180, 0.015, 0xa21),
+            (0x6d8, 360, 0.025, 0xa20),
+            (0x91a, 180, 0.015, 0xa21),
+            (0x652, 360, 0.015, 0xa1f),
+        ] {
+            assert_eq!(bonus(kind), &[(chance, potion)]);
+            let owners = [(10, threshold - 1), (20, threshold), (30, threshold + 1)];
+            let loot = god_loot(
+                &content,
+                kind,
+                &owners,
+                &mut rand::rngs::mock::StepRng::new(0, 0),
+            );
+            assert!(!loot.private.contains_key(&10), "{kind:#x}");
+            for owner in [20, 30] {
+                assert_eq!(loot.private[&owner], [potion], "{kind:#x}");
+            }
+            assert_eq!(loot.shared_owners, [10, 20, 30]);
+            let expected: Vec<_> = table(kind)
+                .iter()
+                .flat_map(|(_, pick)| candidates(&content, *pick))
+                .collect();
+            assert_eq!(loot.shared, expected, "{kind:#x}");
+            assert!(!loot.shared.contains(&potion));
+            let empty = god_loot(
+                &content,
+                kind,
+                &owners,
+                &mut rand::rngs::mock::StepRng::new(u64::MAX, 0),
+            );
+            assert!(empty.shared.is_empty() && empty.private.is_empty());
+        }
+        assert_eq!(crate::dungeon::portal_drop(0x659), Some((0x71a, 0.17)));
+        assert_eq!(crate::dungeon::portal_drop(0x6d8), None);
     }
 
     #[test]

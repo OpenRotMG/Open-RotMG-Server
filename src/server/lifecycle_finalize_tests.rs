@@ -339,6 +339,113 @@ async fn lifecycle_finalize_real_socket_manual_and_resurrection_transfer_retire_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn client_entry_rejects_debug_worlds_without_changing_saved_character() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let (port, server) = socket_server(&a).await;
+    let guid = "ordinary-client-entry";
+    let account = a.store.list(guid.into()).await.unwrap().id;
+    let character = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    for mode in ["build", "editor-world", "editor-json"] {
+        let mut hello = socket_hello(&dir, guid, -2, None);
+        match mode {
+            "build" => hello.body[8] = b'0',
+            "editor-world" => hello.body[9..13].copy_from_slice(&(-6_i32).to_be_bytes()),
+            "editor-json" => {
+                let offset = hello.body.len() - 12;
+                hello.body[offset..offset + 4].copy_from_slice(&2_i32.to_be_bytes());
+                hello.body.splice(offset + 4..offset + 4, *b"{}");
+            }
+            _ => unreachable!(),
+        }
+        let mut socket = NativeSocket::connect(port, &a.origin).await;
+        socket.send(hello).await;
+        let refusal = socket.receive_one_of(&[0, wire::MAP_INFO]).await;
+        assert_eq!(refusal.id, 0, "{mode} was admitted to a world");
+        let mut reader = Reader::new(&refusal.body);
+        assert_eq!(reader.i32().unwrap(), 0);
+        assert!(!reader.utf().unwrap().is_empty());
+        reader.done().unwrap();
+        drop(socket);
+        released(&a, account).await;
+        assert_eq!(
+            a.store.load(account, character.id).await.unwrap(),
+            character
+        );
+    }
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    socket_load(&mut socket, &dir, guid, character.id).await;
+    assert_eq!(
+        a.store.load(account, character.id).await.unwrap(),
+        character
+    );
+    drop(socket);
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn living_character_load_preserves_saved_fields_and_rejects_foreign_owner() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let owner = a.store.list("persist-owner".into()).await.unwrap().id;
+    let foreign = a.store.list("persist-foreign".into()).await.unwrap().id;
+    let mut ch = a
+        .store
+        .create(owner, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    ch.gain_experience(&a.content, 200, &mut rand::thread_rng())
+        .unwrap();
+    ch.hp = 17;
+    ch.mp = 23;
+    ch.tex1 = 0x05000006;
+    ch.tex2 = 0x04000006;
+    ch.lifetime.shots = 3;
+    a.store.progress(ch.clone()).await.unwrap();
+    let (port, server) = socket_server(&a).await;
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    socket
+        .send(socket_hello(&dir, "persist-foreign", -2, None))
+        .await;
+    socket.receive(wire::MAP_INFO).await;
+    socket
+        .send(Packet {
+            id: wire::LOAD,
+            body: ch.id.to_be_bytes().to_vec(),
+        })
+        .await;
+    let refusal = socket.receive_one_of(&[0, wire::CREATE_SUCCESS]).await;
+    assert_eq!(refusal.id, 0);
+    drop(socket);
+    released(&a, foreign).await;
+    assert_eq!(a.store.load(owner, ch.id).await.unwrap(), ch);
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    let player = socket_load(&mut socket, &dir, "persist-owner", ch.id).await;
+    let loaded = a
+        .world
+        .directory(move |d| {
+            let world = d.location(player)?;
+            Ok(d.worlds[&world].players[&player].character.clone())
+        })
+        .await
+        .unwrap();
+    assert!(loaded.tiles >= ch.tiles && loaded.lifetime.tiles >= ch.lifetime.tiles);
+    ch.tiles = loaded.tiles;
+    ch.lifetime.tiles = loaded.lifetime.tiles;
+    assert_eq!(loaded, ch);
+    drop(socket);
+    released(&a, owner).await;
+    assert_eq!(a.store.load(owner, ch.id).await.unwrap(), ch);
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dropped_connection_names_its_cause_across_restarts() {
     let (dir, a) = account_actions::tests::fixture();
     a.world.clock.set_paused(true);
@@ -372,6 +479,44 @@ async fn dropped_connection_names_its_cause_across_restarts() {
     let saved = reopened.previous_drop(account);
     assert_eq!(saved["transport"]["reason"], "Output");
     assert_eq!(saved["transport"]["cause"], "input_rate_exceeded");
+    drop(socket);
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn failed_native_command_does_not_fail_shutdown() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let (port, server) = socket_server(&a).await;
+    let account = a.store.list("failed-command".into()).await.unwrap().id;
+    let ch = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    let id = socket_load(&mut socket, &dir, "failed-command", ch.id).await;
+    let pos = a
+        .world
+        .for_player(id)
+        .call(move |w| Ok(w.regress_native_ingress_for_test(id)))
+        .await
+        .unwrap();
+    let mut body = Writer::new();
+    body.i32(0).i32(1).f32(pos.x).f32(pos.y).i16(0);
+    socket
+        .send(Packet {
+            id: wire::MOVE,
+            body: body.0,
+        })
+        .await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    lifecycle::drain::prepare(&a);
+    a.shutdown.send_replace(true);
+    tokio::time::timeout(Duration::from_secs(20), lifecycle::drain::terminate(&a))
+        .await
+        .unwrap()
+        .unwrap();
     drop(socket);
     server.abort();
 }

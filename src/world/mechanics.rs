@@ -388,21 +388,7 @@ impl World {
             tracing::debug!(entity = id, kind, stage, "encounter phase entered");
             match kind {
                 0x614 if stage == 1 => {
-                    let mut out = Writer::new();
-                    out.u8(15)
-                        .i32(id)
-                        .f32(0.6)
-                        .f32(5.)
-                        .f32(0.)
-                        .f32(0.)
-                        .u32(0xff666666);
-                    for p in self
-                        .players
-                        .values()
-                        .filter(|p| p.known.contains(&id) && p.pos.distance(pos) < 20.)
-                    {
-                        send(p, wire::SHOW_EFFECT, out.0.clone());
-                    }
+                    self.npc_flash(id, 0xff484848, 0.6, 5.);
                     tracing::debug!(entity = id, "Goblin horde commanded by wounded mage");
                 }
                 0xd06 if stage % 5 == 3 => {
@@ -715,8 +701,10 @@ impl World {
         if crate::endgame::ROSTER.contains(&defeated.kind) {
             return self.finale_death(defeated);
         }
+        // The period guide retains the medium generation and excludes intermediate drops: https://web.archive.org/web/20120420155929id_/http://forums.wildshadow.com/wiki/realm-mad-god/black-slimes
         let (kind, count) = match defeated.kind {
-            0xd9b | 0xd9c => (0xd9d, 4),
+            0xd9b => (0xd9c, 4),
+            0xd9c => (0xd9d, 4),
             0xd9e => (0xd9f, 6),
             _ => return Ok(()),
         };
@@ -730,13 +718,8 @@ impl World {
                 <= 512,
             "slime split budget exhausted"
         );
-        for i in 0..count {
-            let angle = i as f32 * std::f32::consts::TAU / count as f32;
-            let pos = Pos {
-                x: defeated.pos.x + 0.2 * angle.cos(),
-                y: defeated.pos.y + 0.2 * angle.sin(),
-            };
-            self.spawn_entity(kind, pos, vec![])?;
+        for _ in 0..count {
+            self.spawn_entity(kind, defeated.pos, vec![])?;
         }
         Ok(())
     }

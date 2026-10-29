@@ -39,6 +39,7 @@ impl Directory {
         let world = self.resolve(Target::Player(id))?;
         let position = world.teleport_destination(id, target)?;
         let account = world.players[&id].character.account;
+        // The selected client's teleportTo uses 10000ms: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as
         if let Some(last) = self.teleports.get(&account) {
             ensure!(
                 received
@@ -115,6 +116,8 @@ impl World {
                 | "Abyss of Demons"
                 // Trench groups teleport to rushers: https://www.realmeye.com/wiki/ocean-trench#tips-and-strategies
                 | "Ocean Trench"
+                // Tomb parties teleport to rushers: https://web.archive.org/web/20130502034124id_/http://forums.wildshadow.com/wiki/realm-mad-god/tomb-ancients
+                | "Tomb of the Ancients"
         )
     }
 
@@ -169,7 +172,7 @@ impl World {
         Ok(q.pos)
     }
 
-    // The original server heals on a 1s cadence: White Fountain HealPlayer(5, 1000, 100).
+    // Multi-recipient healing follows this comparator, not authenticated 123.5.1 policy: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/HealPlayer.cs
     pub(super) fn fountain_heal(&mut self) {
         const RANGE: f32 = 5.;
         const AMOUNT: i32 = 100;

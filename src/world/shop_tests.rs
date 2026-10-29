@@ -1,5 +1,169 @@
 use super::*;
 
+#[tokio::test]
+async fn vault_purchase_rollback_capacity_and_death_preserve_account_storage() {
+    use crate::store::{InventoryWrite, Store};
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let path = std::env::temp_dir().join(format!("vault-{}.db", rand::random::<u64>()));
+    let store = Store::open(&path, &content).unwrap();
+    let account = store
+        .register(
+            "vault-fixture".into(),
+            "vault@example.test".into(),
+            "vault-fixture-password".into(),
+        )
+        .await
+        .unwrap();
+    let other = store
+        .register(
+            "vault-other".into(),
+            "vault-other@example.test".into(),
+            "vault-other-password".into(),
+        )
+        .await
+        .unwrap();
+    let ch = store
+        .create(account, content.get(0x30e).unwrap())
+        .await
+        .unwrap();
+    let mut world = World::new(
+        content.clone(),
+        Arc::new(Map::load(std::path::Path::new("data/vault.wmap"), &content).unwrap()),
+    )
+    .unwrap();
+    world.name = "Vault".into();
+    world.owner = Some(account);
+    world
+        .load_vaults(store.vaults(account).await.unwrap())
+        .unwrap();
+    let player = world
+        .enter_at(
+            ch.clone(),
+            None,
+            None,
+            store.presentation(account).await.unwrap(),
+        )
+        .unwrap();
+    let write = |plan: &InventoryPlan| InventoryWrite {
+        id: plan.character,
+        account: plan.account,
+        revision: plan.revision,
+        items: plan.items.clone(),
+    };
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute("UPDATE accounts SET credits=499 WHERE id=?1", [account])
+        .unwrap();
+    let seller = *world.closed_vaults.keys().next().unwrap();
+    world.players.get_mut(&player).unwrap().known.insert(seller);
+    assert!(world.buy(player, seller).is_err());
+    world.players.get_mut(&player).unwrap().pos = world.entities[&seller].pos;
+    let plan = world.buy(player, seller).unwrap();
+    let chest = plan.vault_purchase.as_ref().unwrap().chest;
+    let declined = store.purchase_vault(write(&plan), chest).await.unwrap();
+    assert!(declined.is_none());
+    world.finish_vault_purchase(plan, Ok(declined)).unwrap();
+    assert_eq!(store.presentation(account).await.unwrap().credits, 499);
+    assert_eq!(store.load(account, ch.id).await.unwrap().revision, 0);
+    assert_eq!(world.vaults.len(), 1);
+    assert!(!world.entities[&seller].reserved);
+    db.execute("UPDATE accounts SET credits=9500 WHERE id=?1", [account])
+        .unwrap();
+    for count in 2..=20 {
+        let seller = *world.closed_vaults.keys().next().unwrap();
+        world.players.get_mut(&player).unwrap().known.insert(seller);
+        world.players.get_mut(&player).unwrap().pos = world.entities[&seller].pos;
+        let plan = world.buy(player, seller).unwrap();
+        assert!(world.buy(player, seller).is_err());
+        let write = write(&plan);
+        let chest = plan.vault_purchase.as_ref().unwrap().chest;
+        if count == 2 {
+            db.execute_batch("CREATE TRIGGER reject_vault BEFORE INSERT ON vaults BEGIN SELECT RAISE(ABORT,'vault rollback fixture'); END;").unwrap();
+            assert!(store.purchase_vault(write.clone(), chest).await.is_err());
+            assert_eq!(store.presentation(account).await.unwrap().credits, 9500);
+            assert_eq!(store.vaults(account).await.unwrap().len(), 1);
+            assert_eq!(store.load(account, ch.id).await.unwrap().revision, 0);
+            db.execute_batch("DROP TRIGGER reject_vault").unwrap();
+        }
+        let receipt = store.purchase_vault(write.clone(), chest).await.unwrap();
+        assert!(store.purchase_vault(write, chest).await.is_err());
+        world.finish_vault_purchase(plan, Ok(receipt)).unwrap();
+        assert_eq!(world.vaults.len(), count);
+        assert_eq!(store.vaults(account).await.unwrap().len(), count);
+        assert_eq!(
+            store.presentation(account).await.unwrap().credits,
+            (20 - count as i32) * 500
+        );
+        assert!(!world.entities.contains_key(&seller));
+    }
+    assert!(world.closed_vaults.is_empty());
+    assert_eq!(store.load(account, ch.id).await.unwrap().revision, 19);
+    let mut chest = store.vault(account, 0).await.unwrap();
+    chest.items[7] = 0xa22;
+    let mut saved = store.load(account, ch.id).await.unwrap();
+    saved.revision = store
+        .exchange(
+            vec![InventoryWrite {
+                id: saved.id,
+                account,
+                revision: saved.revision,
+                items: saved.items.clone(),
+            }],
+            vec![chest],
+        )
+        .await
+        .unwrap()[0];
+    let before = store.vaults(account).await.unwrap();
+    saved.hp = 0;
+    saved.alive = false;
+    store
+        .death(saved, "Vault persistence fixture".into())
+        .await
+        .unwrap();
+    let replacement = store
+        .create(account, content.get(0x30e).unwrap())
+        .await
+        .unwrap();
+    assert_ne!(replacement.id, ch.id);
+    assert!(store.load(account, ch.id).await.is_err());
+    drop(world);
+    drop(store);
+    let reopened = Store::open(&path, &content).unwrap();
+    assert_eq!(
+        serde_json::to_value(reopened.vaults(account).await.unwrap()).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+    assert_eq!(reopened.vaults(other).await.unwrap()[0].items, [-1; 8]);
+    assert_eq!(reopened.vaults(other).await.unwrap().len(), 1);
+    assert_eq!(reopened.presentation(account).await.unwrap().credits, 0);
+    assert!(reopened.vault(account, 20).await.is_err());
+    assert!(
+        reopened
+            .purchase_vault(
+                InventoryWrite {
+                    id: replacement.id,
+                    account: other,
+                    revision: replacement.revision,
+                    items: replacement.items
+                },
+                1
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM deaths WHERE character=?1",
+            [ch.id],
+            |r| r.get::<_, i32>(0)
+        )
+        .unwrap(),
+        1
+    );
+    drop(reopened);
+    drop(db);
+    std::fs::remove_file(path).unwrap();
+}
+
 fn fixture(item: u16, minutes: i32, count: i32) -> World {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut map = Map {

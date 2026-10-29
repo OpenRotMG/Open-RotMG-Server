@@ -140,6 +140,7 @@ pub(super) struct Camp {
     pub start: usize,
     pub family: &'static Family,
     next: Vec<Option<u64>>,
+    births: Vec<usize>,
 }
 
 fn formation(center: Pos, size: usize) -> Vec<Pos> {
@@ -449,6 +450,7 @@ impl World {
         self.camps.push(Camp {
             start,
             family,
+            births: initials.clone(),
             next: family
                 .roles
                 .iter()
@@ -511,6 +513,11 @@ impl World {
                     from = to;
                     continue;
                 };
+                // Spawn caps lifetime births, not survivors: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Spawn.cs#L30-L70
+                if family.leader == 0x614 && self.camps[camp].births[role] >= r.maximum {
+                    from = to;
+                    continue;
+                }
                 let owner_kind = family.owner(r.kind);
                 let owner = slots
                     .clone()
@@ -561,12 +568,14 @@ impl World {
                             });
                         if let Some(pos) = pos {
                             self.place_member(camp, slot, pos)?;
+                            self.camps[camp].births[role] += 1;
                             tracing::debug!(
                                 camp,
                                 leader,
                                 role,
                                 kind = r.kind,
                                 interval,
+                                births = self.camps[camp].births[role],
                                 "family role reinforced"
                             );
                         } else {

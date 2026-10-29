@@ -1,7 +1,9 @@
-mod bot_view;
+pub(crate) mod bot_view;
 mod input;
 mod name_claims;
 
+#[cfg(test)]
+mod deletion_tests;
 #[cfg(test)]
 pub(crate) mod name_claims_tests;
 #[cfg(test)]
@@ -469,7 +471,7 @@ async fn account_request(
         Ok(id) => {
             tracing::info!(account = id, operation, "account request completed");
             if operation == "verify" {
-                // The selected 123.5.1 account dialog checks direct child presence, not a boolean value.
+                // The selected dialog checks child presence, not a boolean: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
                 match a.store.email_verified(id).await {
                     Ok(true) => "<Account><VerifiedEmail/></Account>".into(),
                     Ok(false) => "<Account/>".into(),
@@ -569,11 +571,9 @@ async fn critical_incident(
         return response;
     }
     match a.world.supervisor.latest() {
-        // The durable record also contains private account fences.
         Ok(incident) => Json(serde_json::json!({"incident":incident.map(|i| serde_json::json!({
             "id":i.id,"unix_ms":i.unix_ms,"process":i.process,"revision":i.revision,
             "component":i.component,"failure":i.failure,"location":i.location,"context":i.context,
-            "fences_preserved":i.fences_preserved,
         }))})).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, self::error(error)).into_response(),
     }
@@ -1041,6 +1041,7 @@ async fn persist_death_inner(
     killer: String,
 ) -> Result<()> {
     lifecycle::stage(Stage::Store);
+    // Only worn amulets bypass death/grave/Fame, not backpack copies: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.cs#L439-L466
     let slot = ch
         .items
         .iter()
@@ -1680,6 +1681,7 @@ async fn handle_inner(
                             prepared.map(|(_, pos)| pos),
                             presentation,
                             ticket,
+                            crate::world::Controller::Human,
                         )?;
                         bind(id)?;
                         w.sync_account_lists(id, Some(lists))?;
@@ -2181,6 +2183,11 @@ async fn reconnect(
             };
             let world = &d.worlds[&destination];
             if world.occupancy() >= world.max_players {
+                tracing::info!(
+                    player = id,
+                    destination,
+                    "portal transfer refused: destination full"
+                );
                 let message = crate::world::chat_info("Destination is full.");
                 crate::world::send(
                     &d.worlds[&d.location(id)?].players[&id],
@@ -2437,9 +2444,6 @@ async fn connection_io<S, I>(
                         if let Err(e)=result {
                             let rejected = lifecycle::rule_rejection(&e);
                             close_reason=if e.is::<ReplyQueueError>() { CloseReason::Output } else if rejected { CloseReason::Controller } else { e.downcast_ref::<CloseReason>().copied().unwrap_or(CloseReason::Internal) };
-                            if close_reason == CloseReason::Internal && let Some(owner) = &session.account {
-                                owner.failed(format!("unclassified native command failure: {e:#}"));
-                            }
                             tracing::error!(account=session.account.as_ref().map(|o|o.id),player=session.player,packet=id,error=%format_args!("{e:#}"),"game command rejected");
                             if e.is::<ReplyQueueError>() { close_reason=CloseReason::Output;break 'connection; }
                             if e.downcast_ref::<CloseReason>() == Some(&CloseReason::Protocol) {
@@ -2918,13 +2922,13 @@ async fn map(State(a): State<App>, headers: HeaderMap, Query(view): Query<MapVie
         Some(id) => a.world.for_player(id),
         None => a.world.in_world(-1),
     };
-    let result: Result<serde_json::Value> = async {
+    let result: Result<Vec<u8>> = async {
         control(&a, &headers)?;
         world.call(move |w| w.inspect_map(view.player)).await
     }
     .await;
     match result {
-        Ok(v) => Json(v).into_response(),
+        Ok(v) => ([(axum::http::header::CONTENT_TYPE, "application/json")], v).into_response(),
         Err(e) => error(e),
     }
 }
@@ -3223,6 +3227,11 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/realmdex/stats", get(realmdex_stats))
         .route("/api/bots", get(crate::bots::cctv::list))
         .route("/api/bots/{name}/socket", get(bot_view::socket))
+        .route("/api/bots/{name}/control", get(bot_view::control::socket))
+        .route(
+            "/api/bots/views/{view}/socket",
+            get(bot_view::control::data),
+        )
         .route(
             "/api/bots/{name}/perspective/{target}",
             get(bot_view::perspective::get),
@@ -3301,13 +3310,10 @@ async fn supervise_serving(
     failure: &Mutex<Option<anyhow::Error>>,
     mut stop: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
-    let (result, checkpoint_attempted) = tokio::select! {
-        mut incident = a.world.supervisor.failed() => {
+    let (result, critical) = tokio::select! {
+        incident = a.world.supervisor.failed() => {
             a.shutdown.send_replace(true);
-            let critical = format!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id);
-            let checkpoint = lifecycle::preserve_uncertain(a, &mut incident)
-                .with_context(|| format!("{critical}; account-fence checkpoint failed"));
-            (checkpoint.and(Err(anyhow::anyhow!(critical))), true)
+            (Err(anyhow::anyhow!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id)), true)
         },
         result = serving => (result.map_err(anyhow::Error::from), false),
         _ = async { let _ = stop.changed().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await; } => {
@@ -3316,10 +3322,10 @@ async fn supervise_serving(
     };
     let failure = failure.lock().expect("shutdown report poisoned").take();
     if let Some(error) = failure {
-        // Retrying a critical checkpoint could hide its failure and discard the incident diagnostic.
-        if checkpoint_attempted {
-            let critical = result.expect_err("critical termination cannot succeed");
-            return Err(error.context(format!("concurrent shutdown failure: {critical:#}")));
+        // A second incident would replace the original critical diagnostic.
+        if critical {
+            let cause = result.expect_err("critical termination cannot succeed");
+            return Err(error.context(format!("concurrent shutdown failure: {cause:#}")));
         }
         return failed_shutdown(a, error).await;
     }
@@ -3329,12 +3335,7 @@ async fn failed_shutdown(a: &App, error: anyhow::Error) -> Result<()> {
     a.world
         .supervisor
         .failure("shutdown", anyhow::anyhow!("{error:#}"));
-    let mut incident = a.world.supervisor.failed().await;
-    if let Err(checkpoint) = lifecycle::preserve_uncertain(a, &mut incident) {
-        return Err(error.context(format!(
-            "shutdown account-fence checkpoint failed: {checkpoint:#}"
-        )));
-    }
+    a.world.supervisor.failed().await;
     Err(error)
 }
 async fn shutdown_signal() -> Result<()> {

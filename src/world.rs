@@ -89,6 +89,8 @@ mod tracked;
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
 mod abyss;
+#[cfg(test)]
+mod abyss_tests;
 
 mod beach;
 mod coil;
@@ -3335,7 +3337,12 @@ impl World {
         position: Option<Pos>,
         presentation: AccountPresentation,
     ) -> Result<i32> {
-        self.enter_admitted(ch, tx, position, presentation, None)
+        let controller = if tx.is_some() {
+            Controller::Human
+        } else {
+            Controller::Qa
+        };
+        self.enter_admitted(ch, tx, position, presentation, None, controller)
     }
     pub(crate) fn reserved_slots(&self) -> usize {
         self.admissions
@@ -3350,6 +3357,7 @@ impl World {
         position: Option<Pos>,
         presentation: AccountPresentation,
         admission: Option<Vec<u8>>,
+        controller: Controller,
     ) -> Result<i32> {
         if let Some(key) = &admission {
             let reserved = self
@@ -3407,6 +3415,15 @@ impl World {
                 .context("world has no spawn cells")?;
             Pos { x, y }
         };
+        let last_move_at = if controller == Controller::Human {
+            self.clock
+                .now()
+                .checked_duration_since(self.attack_epoch)
+                .context("native entry predates world epoch")?
+                .as_millis() as u64
+        } else {
+            self.now
+        };
         let char_id = ch.id;
         if let Some(kind) = ch.pet_kind {
             self.attach_companion(id, kind, pos)?;
@@ -3426,11 +3443,7 @@ impl World {
                 presentation,
                 paused: false,
                 native_update_acked: false,
-                controller: if tx.is_none() {
-                    Controller::Qa
-                } else {
-                    Controller::Human
-                },
+                controller,
                 tx,
                 known: BTreeSet::new(),
                 tick_stats: tick_stats::Cache::default(),
@@ -3477,7 +3490,7 @@ impl World {
                 attack_count: 0,
                 attack_suppressed: None,
                 last_move: 0,
-                last_move_at: self.now,
+                last_move_at,
                 motion: ObservedMotion {
                     position: pos,
                     time: 0,
@@ -4206,6 +4219,13 @@ impl World {
                 true
             }
         })
+    }
+    #[cfg(test)]
+    pub(crate) fn regress_native_ingress_for_test(&mut self, id: i32) -> Pos {
+        let p = self.players.get_mut(&id).unwrap();
+        p.last_move_at = u64::MAX;
+        p.tick = p.tick.max(1);
+        p.pos
     }
     pub fn walkable(&self, pos: Pos) -> bool {
         let Some(c) = self.map.cell(pos.x, pos.y) else {
@@ -5391,6 +5411,8 @@ impl World {
             || snapshot.davy_lockers > p.character.davy_lockers
             || snapshot.tombs > p.character.tombs;
         let leveled = snapshot.level > p.character.level;
+        let announcement = (leveled && snapshot.level == 20)
+            .then(|| format!("{} achieved level 20", p.character.name));
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
         p.character.fame = snapshot.fame;
@@ -5434,6 +5456,11 @@ impl World {
             xp_boost = p.character.xp_boost.active,
             "progress committed"
         );
+        // Period wording, published only after durable progress: https://media.gdcvault.com/gdceurope2012/Presentations/Social%20%26%20Online%20Games%20Summit/Ethan_Levy_Social%26Online_GameDesignIs.pdf#page=54
+        if let Some(text) = announcement {
+            let recipients = self.broadcast_text("", &text);
+            tracing::info!(player = id, recipients, "level twenty announced");
+        }
         if cleared_dungeon && let Some(exit) = self.clear_exit.take() {
             if self.name == "Tomb of the Ancients" {
                 let old_exits: Vec<_> = self
@@ -5629,7 +5656,7 @@ impl World {
         self.leave(id)?;
         Ok(())
     }
-    pub fn inspect_map(&self, player: Option<i32>) -> Result<serde_json::Value> {
+    pub fn inspect_map(&self, player: Option<i32>) -> Result<Vec<u8>> {
         let account = match player {
             Some(id) => {
                 self.players
@@ -5654,9 +5681,21 @@ impl World {
             .values()
             .filter(|e| e.accessible(account))
             .collect();
-        Ok(
-            serde_json::json!({"width":self.map.width,"height":self.map.height,"blocked":blocked,"entities":entities}),
-        )
+        // A full Realm's JSON value tree dwarfs the actual map and pins allocator memory.
+        #[derive(Serialize)]
+        struct Snapshot<'a> {
+            width: i32,
+            height: i32,
+            blocked: Vec<(i32, i32)>,
+            entities: Vec<&'a Entity>,
+        }
+        serde_json::to_vec(&Snapshot {
+            width: self.map.width,
+            height: self.map.height,
+            blocked,
+            entities,
+        })
+        .context("serialize development world map")
     }
     pub fn observe(&self, id: i32) -> Result<serde_json::Value> {
         let p = self.players.get(&id).context("player missing")?;
@@ -5972,6 +6011,7 @@ impl World {
         let private = crate::loot::private(defeated.kind);
         // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
         let threshold = if defeated.kind == crate::dungeon::trench::HERMIT {
+            // The comparator's 0.01 threshold tests integer damage, not an HP fraction: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs#L106
             0
         } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
             100
@@ -6022,7 +6062,9 @@ impl World {
             // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
             return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
         }
-        if crate::loot::potion_damage(defeated.kind).is_some() {
+        if crate::loot::potion_damage(defeated.kind).is_some()
+            || matches!(defeated.kind, 0x91d | 0x91e)
+        {
             let loot =
                 crate::loot::god_loot(&self.content, defeated.kind, &eligible, &mut self.rng);
             return self.god_loot_bags(defeated.pos, loot);
@@ -6079,6 +6121,18 @@ impl World {
                     items.push(item as i32);
                 }
             }
+        }
+        // Split after existing rolls/dedup, retaining their odds/count: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L65-L70
+        if defeated.kind == 0x921
+            && let Some(shared) = drops.get_mut(&-1)
+            && let Some(index) = shared.iter().position(|item| *item == 0xb0c)
+        {
+            let item = shared.remove(index);
+            let owner = eligible
+                .choose(&mut self.rng)
+                .expect("nonempty Ent contributors")
+                .0;
+            drops.entry(owner).or_default().push(item);
         }
         let required = match defeated.kind {
             crate::dungeon::trench::HERMIT => Some([0xa34, 0xa4c]),
@@ -6382,7 +6436,8 @@ impl World {
                 0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
                 // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
                 0x617 => 12.,
-                0x61a => 10.5,
+                // Rings wake beyond aimed-shot range: https://web.archive.org/web/20120122074638id_/http://forums.wildshadow.com/wiki/realm-mad-god/undead-hobbit-mage
+                0x61a => 12.,
                 0x6d8 => 12.,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
@@ -7544,7 +7599,13 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 mod shop_tests;
 
 #[cfg(test)]
+mod combat_tests;
+#[cfg(test)]
+mod cooperative_tests;
+#[cfg(test)]
 mod movement_tests;
+#[cfg(test)]
+mod snake_tests;
 
 #[cfg(test)]
 mod death_chat_tests;
@@ -7565,7 +7626,11 @@ mod necromancer_tests;
 mod priest_tests;
 
 #[cfg(test)]
+mod chamber_tests;
+#[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod travel_tests;
 
 #[cfg(test)]
 mod knight_tests;
@@ -7577,7 +7642,13 @@ mod assassin_tests;
 mod mystic_tests;
 
 #[cfg(test)]
+mod ghost_ship_tests;
+#[cfg(test)]
+mod ocean_tests;
+#[cfg(test)]
+mod pentaract_tests;
+#[cfg(test)]
 mod quest_tests;
 
 #[cfg(test)]
-impl World {}
+mod map_tests;

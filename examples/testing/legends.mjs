@@ -6,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as wait} from 'node:timers/promises';
 
 export const fixture={class:0x30e,level:20,seed:781,world:-2,position:'spawn',
-  equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:null};
+  equipment:[0xa97,0xa2e,-1,-1],backpack:[0x1071,0x1109,-1,-1,-1,-1,-1,-1],stats:null};
 export async function run(game){
   const out=process.argv[process.argv.indexOf('--run-dir')+1];
   const config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));
@@ -21,21 +21,39 @@ export async function run(game){
   }
   const ids=xml=>[...xml.matchAll(/<FameListElem accountId="(\d+)" charId="(\d+)"/g)].map(m=>Number(m[2]));
   const initial=await list('all');game.check('living native character is absent from Legends',ids(initial).length===0);
+  const undyed=await game.inspect();
+  await game.act({keys:[],duration_ms:900},{name:'native-undyed',when:()=>true});
+  await game.act({keys:['1'],duration_ms:300});
+  await game.act({keys:['2'],duration_ms:900},{name:'native-dyed',when:view=>view.character.items[5]===-1});
+  const dyed=await game.inspect(),textures=[0x01ff0000,0x010000ff];
+  game.check('native dye use consumes both prepared vials once',dyed.view.character.items[4]===-1&&dyed.view.character.items[5]===-1&&dyed.view.character.inventory_revision===undyed.view.character.inventory_revision+2);
+  game.check('native dye use commits clothing and accessory colors',dyed.diagnostic.character.tex1===textures[0]&&dyed.diagnostic.character.tex2===textures[1]);
+  await writeFile(join(out,'native-dyes.json'),JSON.stringify({undyed,dyed,prepared:true},null,2));
   const world=(await api({op:'world',template:'ocean-trench'})).result.world;
   const info=await api({op:'world_info',world});
   const spawn=info.spawn_points[0],position={x:spawn[0],y:spawn[1]+2},victims=[];
   for(let i=0;i<21;i++){
-    const result=await api({op:'spawn',spec:{...fixture,class:i%2?0x300:0x30e,level:1,seed:781+i,world,position,equipment:i%2?[0xa14,-1,-1,-1]:fixture.equipment,guid:'legends-victim-'+i,stats:[100,100,12,0,10,15,12,12],controller:'direct',profile:null}});
+    const result=await api({op:'spawn',spec:{...fixture,class:i%2?0x300:0x30e,level:1,seed:781+i,world,position,backpack:i===0?fixture.backpack:Array(8).fill(-1),equipment:i%2?[0xa14,-1,-1,-1]:fixture.equipment,guid:'legends-victim-'+i,stats:[100,100,12,0,10,15,12,12],controller:'direct',profile:null}});
     const actor=result.result.actor,account=result.result.account;
     const before=(await api({op:'inspect',actor})).diagnostic;
     assert(before.entities.filter(e=>e.kind===0x731).every(e=>Math.hypot(e.pos.x-position.x,e.pos.y-position.y)>=1),'Victims must be outside oxygen vents');
     victims.push({actor,account,name:before.character.name});
   }
+  const dyedVictim=victims[0];
+  await Promise.all([game.act({keys:[],duration_ms:1800}), (async()=>{
+    const end=Date.now()+10000;
+    while((await game.observe()).paused){assert(Date.now()<end,'Native dye action did not resume');await wait(30);}
+    for(const slot of [4,5])await api({op:'act',actor:dyedVictim.actor,action:{command:'use',slot,x:position.x,y:position.y},duration_ms:0,pauseAfter:false});
+  })()]);
+  const applied=(await api({op:'inspect',actor:dyedVictim.actor})).diagnostic;
+  game.check('prepared direct death fixture uses the same ordinary dyes',applied.character.tex1===textures[0]&&applied.character.tex2===textures[1]&&applied.character.items[4]===-1&&applied.character.items[5]===-1);
+  await writeFile(join(out,'direct-dyes.json'),JSON.stringify(applied,null,2));
   let xml;
   for(let i=0;i<7;i++){
     await game.act({keys:[],duration_ms:9000});xml=await list('all');if(ids(xml).length===20)break;
   }
   const ranked=ids(xml);game.check('twenty committed deaths fill the native leaderboard',ranked.length===20);
+  game.check('ordinarily dyed death is visible as the first ranked row',ranked[0]===dyedVictim.actor);
   const absent=victims.filter(v=>!ranked.includes(v.actor));assert.equal(absent.length,1);
   const own=await list('all',absent[0].account,absent[0].actor);
   game.check('eligible own death below the cap is an unranked row',own.includes(`<MyFameListElem accountId="${absent[0].account}" charId="${absent[0].actor}">`));
@@ -64,11 +82,16 @@ export async function run(game){
       if(i)await click(x,85);
       const body=await response('/legacy-api/fame/list',i+1);
       game.check('native '+span+' tab loads the actual twenty death records',body.includes(`timespan="${span}"`)&&JSON.stringify(ids(body))===JSON.stringify(ranked));
+      // Selected 123.5.1 Legends rows render archived Tex1/Tex2: https://github.com/OpenRotMG/Open-RotMG-Client/blob/39acbfbf3bf545c397d6ac94f0a9430d6d660ac2/client.swf
+      const row=body.match(new RegExp(`<FameListElem accountId="${dyedVictim.account}" charId="${dyedVictim.actor}">([\\s\\S]*?)</FameListElem>`));
+      game.check('native '+span+' response retains the ordinarily dyed death appearance',row&&textures.every((t,i)=>row[1].includes(`<Tex${i+1}>${t}</Tex${i+1}>`)));
       await writeFile(join(out,'native-'+span+'.xml'),body);await capture('legends-'+span);
     }
     await click(210,135);const detail=await response('/legacy-api/char/fame',1);
-    game.check('native row selection opens the matching archived fame details',detail.includes(`<Char id="${ranked[0]}">`)&&detail.includes('<KilledBy>suffocation</KilledBy>'));
+    game.check('native row selection opens the matching archived fame details',detail.includes(`<Char id="${ranked[0]}">`)&&detail.includes('<KilledBy>suffocation</KilledBy>')&&textures.every((t,i)=>detail.includes(`<Tex${i+1}>${t}</Tex${i+1}>`)));
     await writeFile(join(out,'native-fame.xml'),detail);await capture('legends-details');
   });
-  game.check('original native character remains alive after read-only Legends checks',(await game.inspect()).view.lifecycle.alive);
+  const retained=await game.inspect();
+  game.check('original native character remains alive after read-only Legends checks',retained.view.lifecycle.alive);
+  game.check('native dye appearance survives the Legends menu checks',retained.diagnostic.character.tex1===textures[0]&&retained.diagnostic.character.tex2===textures[1]);
 }

@@ -1,4 +1,5 @@
 use super::*;
+pub(crate) mod control;
 pub(super) mod perspective;
 use crate::{
     bots::cctv::Viewer,
@@ -22,25 +23,7 @@ pub(super) async fn socket(
         Ok(cursor) => cursor,
         Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
     };
-    let Some(origin) = &a.bot_view_origin else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "bot_view_origin must be configured for native bot viewing",
-        )
-            .into_response();
-    };
-    if headers.get("origin").and_then(|v| v.to_str().ok()) != Some(origin.as_str()) {
-        return (
-            StatusCode::FORBIDDEN,
-            "native bot view origin is not approved",
-        )
-            .into_response();
-    }
-    let mut forwarded = headers.clone();
-    // The native iframe has its own origin; preserve the existing player's origin policy on every other route.
-    forwarded.remove("origin");
-    let admitted = request_ip(&a, &forwarded, peer)
-        .map_err(|e| (StatusCode::FORBIDDEN, e.to_string()))
+    let admitted = control::native_ip(&a, &headers, peer)
         .and_then(|ip| Viewer::join(&a.cctv, &name, ip, true));
     let viewer = match admitted {
         Ok(v) => v,
@@ -53,7 +36,7 @@ pub(super) async fn socket(
         .on_upgrade(move |socket| async move {
             let _viewer = viewer;
             let mut stream = Stream::new(socket, a.shutdown.subscribe());
-            let result = stream.watch(&a, &name, cursor).await;
+            let result = stream.watch(&a, &name, cursor, None).await;
             if let Err(error) = result {
                 tracing::warn!(bot=name, error=%error, "native bot view ended with error");
                 let reason = error.to_string().chars().take(110).collect::<String>();
@@ -139,6 +122,83 @@ fn attachment_transition_uses_normal_native_reconnect_packet() {
     }
 }
 
+async fn view_changed(changes: &mut Option<tokio::sync::watch::Receiver<()>>) {
+    match changes {
+        Some(changes) => {
+            let _ = changes.changed().await;
+        }
+        None => std::future::pending().await,
+    }
+}
+
+enum VisualEvent {
+    Cursor,
+    Input(Result<Option<Packet>>),
+    Packet(std::result::Result<Packet, tokio::sync::broadcast::error::RecvError>),
+}
+
+async fn next_visual(
+    input: impl std::future::Future<Output = Result<Option<Packet>>>,
+    receiver: &mut tokio::sync::broadcast::Receiver<Packet>,
+    ticks: &mut tokio::time::Interval,
+    cursor: bool,
+) -> VisualEvent {
+    tokio::select! {
+        _ = ticks.tick(), if cursor => VisualEvent::Cursor,
+        input = input => VisualEvent::Input(input),
+        packet = receiver.recv() => VisualEvent::Packet(packet),
+    }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn slow_cursor_does_not_starve_queued_native_packets_or_close() {
+    let (sender, mut receiver) = tokio::sync::broadcast::channel(4);
+    for _ in 0..4 {
+        sender
+            .send(Packet {
+                id: wire::NEW_TICK,
+                body: vec![],
+            })
+            .unwrap_or_else(|_| panic!("native receiver missing"));
+    }
+    let mut ticks = tokio::time::interval(Duration::from_millis(50));
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    ticks.tick().await;
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    let mut received = 0;
+    let mut closed = false;
+    for _ in 0..64 {
+        match next_visual(
+            async {
+                if received == 4 {
+                    Ok(None)
+                } else {
+                    std::future::pending().await
+                }
+            },
+            &mut receiver,
+            &mut ticks,
+            true,
+        )
+        .await
+        {
+            VisualEvent::Cursor => tokio::time::sleep(Duration::from_millis(60)).await,
+            VisualEvent::Packet(Ok(packet)) => {
+                assert_eq!(packet.id, wire::NEW_TICK);
+                received += 1;
+            }
+            VisualEvent::Input(Ok(None)) => {
+                closed = true;
+                break;
+            }
+            _ => panic!("unexpected native view event"),
+        }
+    }
+    assert_eq!(received, 4, "cursor sampling starved native ticks");
+    assert!(closed, "cursor sampling starved socket close");
+}
+
 struct Stream {
     socket: WebSocket,
     codec: Codec,
@@ -192,36 +252,89 @@ impl Stream {
             }
         }
     }
-    async fn attach(a: &App, name: &str) -> Result<Attachment> {
-        tokio::time::timeout(Duration::from_secs(10), async {
+    async fn attach(a: &App, name: &str) -> Result<Option<Attachment>> {
+        let mut absent = false;
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
+                absent = false;
                 if let Some((player, account)) = a.cctv.binding(name)
                     && let Some(attached) = a.world.spectate(player, account).await?
                 {
                     return Ok::<_, anyhow::Error>(attached);
                 }
+                absent = true;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
-        .await
-        .context("bot has no living session; it may be replacing a dead character or offline")?
+        .await;
+        match result {
+            Ok(attached) => attached.map(Some),
+            Err(_) if absent => Ok(None),
+            Err(_) => bail!("bot attachment world lookup timed out"),
+        }
     }
-    async fn watch(&mut self, a: &App, name: &str, cursor: u8) -> Result<()> {
-        let hello = tokio::time::timeout(Duration::from_secs(10), self.input())
-            .await??
-            .context("viewer closed before HELLO")?;
+    async fn bootstrap(
+        &mut self,
+        a: &App,
+        name: &str,
+        changes: &mut Option<tokio::sync::watch::Receiver<()>>,
+        lease: Option<&control::Lease>,
+    ) -> Result<Option<(Attachment, Projection)>> {
+        let mut stop = self.shutdown.clone();
+        let hello = tokio::select! {
+            biased;
+            _ = async { let _ = stop.wait_for(|stop| *stop).await; } => return Ok(None),
+            _ = view_changed(changes) => return Ok(None),
+            result = tokio::time::timeout(Duration::from_secs(10), self.input()) => result??.context("viewer closed before HELLO")?,
+        };
         ensure!(
             hello.id == wire::HELLO && Reader::new(&hello.body).utf()? == "123.5.1",
             "native bot viewer requires a 123.5.1 HELLO"
         );
-        let mut attached = tokio::select! {
-            _ = async { let _ = self.shutdown.wait_for(|stop| *stop).await; } => bail!("server is stopping"),
+        let attached = tokio::select! {
+            biased;
+            _ = async { let _ = stop.wait_for(|stop| *stop).await; } => return Ok(None),
+            _ = view_changed(changes) => return Ok(None),
             result = Self::attach(a,name) => result?,
         };
-        self.output(wire::MAP_INFO, attached.map).await?;
-        let entry = tokio::time::timeout(Duration::from_secs(10), self.input())
-            .await??
-            .context("viewer closed before LOAD")?;
+        let mut attached = match attached {
+            Some(attached) => attached,
+            None => {
+                let lease = lease.context(
+                    "bot has no living session; it may be replacing a dead character or offline",
+                )?;
+                if !lease.unavailable() {
+                    return Ok(None);
+                }
+                let mut poll = tokio::time::interval(Duration::from_secs(1));
+                poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = async { let _ = stop.wait_for(|stop| *stop).await; } => return Ok(None),
+                        _ = view_changed(changes) => return Ok(None),
+                        packet = self.input() => {
+                            packet?.context("viewer closed while source unavailable")?;
+                            self.ignored += 1;
+                        },
+                        _ = poll.tick() => {
+                            if let Some((player, account)) = a.cctv.binding(name)
+                                && let Some(attached) = tokio::time::timeout(Duration::from_secs(2), a.world.spectate(player, account))
+                                    .await.context("bot source availability lookup timed out")??
+                            { break attached; }
+                        }
+                    }
+                }
+            }
+        };
+        self.output(wire::MAP_INFO, std::mem::take(&mut attached.map))
+            .await?;
+        let entry = tokio::select! {
+            biased;
+            _ = async { let _ = stop.wait_for(|stop| *stop).await; } => return Ok(None),
+            _ = view_changed(changes) => return Ok(None),
+            result = tokio::time::timeout(Duration::from_secs(10), self.input()) => result??.context("viewer closed before LOAD")?,
+        };
         ensure!(
             matches!(entry.id, wire::LOAD | wire::CREATE),
             "native bot viewer requires LOAD after MAP_INFO"
@@ -230,7 +343,12 @@ impl Stream {
         own.i32(attached.player).i32(attached.character);
         self.output(wire::CREATE_SUCCESS, own.0).await?;
         let mut projection = Projection::new(attached.player);
-        for packet in attached.snapshot {
+        for packet in std::mem::take(&mut attached.snapshot) {
+            if let Some(changes) = changes
+                && changes.has_changed()?
+            {
+                return Ok(None);
+            }
             let packet = projection
                 .packet(packet, &a.content)?
                 .context("snapshot packet was not visual")?;
@@ -242,25 +360,73 @@ impl Stream {
             character = attached.character,
             "native bot viewer attached"
         );
+        Ok(Some((attached, projection)))
+    }
+    async fn transition(&mut self, lease: &mut Option<&mut control::Lease>) -> Result<()> {
+        if let Some(lease) = lease {
+            lease.release();
+            if lease.closed() {
+                return Ok(());
+            }
+        }
+        self.reconnect().await
+    }
+    async fn watch(
+        &mut self,
+        a: &App,
+        name: &str,
+        cursor: u8,
+        mut lease: Option<&mut control::Lease>,
+    ) -> Result<()> {
+        let mut changes = lease.as_ref().map(|lease| lease.changed.clone());
+        let bootstrap = self
+            .bootstrap(a, name, &mut changes, lease.as_deref())
+            .await?;
+        let Some((mut attached, mut projection)) = bootstrap else {
+            if *self.shutdown.borrow() {
+                return Ok(());
+            }
+            return self.transition(&mut lease).await;
+        };
+        if let Some(current) = &lease
+            && !current.attached(a, &attached)
+        {
+            return self.transition(&mut lease).await;
+        }
         let mut last_cursor_tick = None;
         let mut stop = self.shutdown.clone();
         let mut cursor_ticks = tokio::time::interval(Duration::from_millis(50));
         cursor_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
+                biased;
                 _ = async { let _ = stop.wait_for(|stop| *stop).await; } => break,
-                _ = cursor_ticks.tick(), if cursor != 0 => {
+                _ = view_changed(&mut changes) => {
+                    self.transition(&mut lease).await?;
+                    break;
+                },
+                event = next_visual(self.input(), &mut attached.receiver, &mut cursor_ticks, cursor != 0) => match event {
+                VisualEvent::Cursor => {
                     if attachment_changed(a.cctv.binding(name), attached.player, attached.account) {
-                        self.reconnect().await?;
+                        self.transition(&mut lease).await?;
                         break;
                     }
-                    if let Some(packets) = a.world.spectator_inputs(attached.world, attached.player, attached.account, attached.character, cursor).await?
+                    let packets = tokio::select! {
+                        biased;
+                        _ = async { let _ = stop.wait_for(|stop| *stop).await; } => break,
+                        _ = view_changed(&mut changes) => {
+                            self.transition(&mut lease).await?;
+                            break;
+                        },
+                        result = a.world.spectator_inputs(attached.world, attached.player, attached.account, attached.character, cursor) => result?,
+                    };
+                    if let Some(packets) = packets
                         && crate::world::spectator::advance_cursor(&mut last_cursor_tick, &packets[0])?
                     {
                         for packet in packets { self.output(packet.id, packet.body).await?; }
                     }
                 },
-                packet = self.input() => {
+                VisualEvent::Input(packet) => {
                     let Some(packet)=packet? else { break; };
                     // The recovered engine still reports collision/ACK packets; none belong to a gameplay session here.
                     if !matches!(packet.id, wire::MOVE | wire::UPDATE_ACK | wire::PONG | 14 | 24) {
@@ -268,13 +434,14 @@ impl Stream {
                         if self.ignored==1 { tracing::info!(bot=name, packet=packet.id, "read-only bot viewer input ignored"); }
                     }
                 },
-                packet = attached.receiver.recv() => match packet {
+                VisualEvent::Packet(packet) => match packet {
                     Ok(packet) => if let Some(packet)=projection.packet(packet,&a.content)? { self.output(packet.id,packet.body).await?; },
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        self.reconnect().await?;
+                        self.transition(&mut lease).await?;
                         break;
                     },
                     Err(error) => return Err(error).context("native bot view overflowed; reconnect for a fresh snapshot"),
+                }
                 }
             }
         }

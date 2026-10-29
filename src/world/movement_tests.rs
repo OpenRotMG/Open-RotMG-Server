@@ -1,7 +1,7 @@
 use super::*;
 use std::time::Duration;
 
-fn fixture(ground: u8, wall: bool) -> (World, i32) {
+pub(super) fn fixture(ground: u8, wall: bool) -> (World, i32) {
     fixture_map(ground, wall.then_some((9, 8)), 32)
 }
 
@@ -60,6 +60,124 @@ fn native(
 }
 
 #[test]
+fn lair_slime_children_start_on_the_defeated_parents_floor() {
+    for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
+        let (mut world, _) = fixture(0x18, true);
+        world.encounter = true;
+        let pos = Pos { x: 8.9, y: 8.5 };
+        assert!(world.walkable(pos));
+        let id = world.spawn_entity(parent, pos, vec![]).unwrap();
+        world.defeat_entity(id).unwrap();
+        let children: Vec<_> = world.actors().filter(|e| e.kind == child).collect();
+        assert_eq!(children.len(), count);
+        assert!(
+            children
+                .iter()
+                .all(|e| e.pos.x == pos.x && e.pos.y == pos.y && world.walkable(e.pos))
+        );
+    }
+}
+
+#[test]
+fn lair_traps_retire_after_one_volley_and_late_joins_keep_owned_escorts() {
+    for kind in [0xda2, 0xda3] {
+        let (mut world, _) = fixture(0x18, false);
+        world.encounter = true;
+        let trap = world
+            .spawn_entity(kind, Pos { x: 10.5, y: 8.5 }, vec![])
+            .unwrap();
+        world.npc_step();
+        let volley = world.bullets.iter().filter(|b| b.owner == trap).count();
+        assert!(volley > 0);
+        assert_eq!(*world.entities[&trap].expires, Some(world.now + 50));
+        world.step();
+        assert!(!world.entities.contains_key(&trap));
+        assert_eq!(
+            world.bullets.iter().filter(|b| b.owner == trap).count(),
+            volley
+        );
+    }
+    let (mut world, _) = fixture(0x18, false);
+    world.encounter = true;
+    let boss = world
+        .spawn_entity(0xd90, Pos { x: 14.5, y: 8.5 }, vec![])
+        .unwrap();
+    world.npc_step();
+    let activated = world.entities[&boss].activated;
+    assert!(activated.is_some());
+    assert_eq!(world.actors().filter(|e| e.parent == Some(boss)).count(), 9);
+    world.now += 42000;
+    world
+        .encounter_mechanics(boss, Some(Pos { x: 8.5, y: 8.5 }), 42000)
+        .unwrap();
+    let escorts: Vec<_> = world
+        .actors()
+        .filter(|e| e.parent == Some(boss))
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(escorts.len(), 15);
+    let mut character =
+        Character::fresh(world.content.get(crate::content::WIZARD).unwrap()).unwrap();
+    character.id = 2;
+    character.account = 2;
+    world.enter(character, None).unwrap();
+    world.npc_step();
+    assert_eq!(world.entities[&boss].activated, activated);
+    assert_eq!(world.entities[&boss].stage, Some(3));
+    assert_eq!(
+        world
+            .actors()
+            .filter(|e| e.parent == Some(boss))
+            .map(|e| e.id)
+            .collect::<Vec<_>>(),
+        escorts
+    );
+    world.remove_entity(boss);
+    world.step();
+    assert!(escorts.iter().all(|id| !world.entities.contains_key(id)));
+}
+
+#[test]
+fn native_entry_uses_ingress_time_and_keeps_monotonic_moves() {
+    let (mut world, id) = fixture(0x18, false);
+    let character = world.players.remove(&id).unwrap().character;
+    world.clock.set_paused(true);
+    world.attack_epoch = world.clock.now() - Duration::from_millis(1000);
+    world.now = 1050;
+    let (packets, _packets) = mpsc::channel(128);
+    let (lost, _lost) = watch::channel(None);
+    let id = world
+        .enter(character, Some(Output { packets, lost }))
+        .unwrap();
+    assert_eq!(world.players[&id].last_move_at, 1000);
+    assert_eq!(
+        native(&mut world, id, 8.5, 8.5, 10, 1001).unwrap(),
+        NativeInput::Applied
+    );
+    assert!(
+        native(&mut world, id, 8.5, 8.5, 11, 1000)
+            .unwrap_err()
+            .to_string()
+            .contains("native ingress clock regressed")
+    );
+    let player = world.players.remove(&id).unwrap();
+    let id = world
+        .enter_admitted(
+            player.character,
+            player.tx,
+            None,
+            player.presentation,
+            None,
+            Controller::Autonomous,
+        )
+        .unwrap();
+    assert_eq!(world.players[&id].last_move_at, 1050);
+    let character = world.players.remove(&id).unwrap().character;
+    let id = world.enter(character, None).unwrap();
+    assert_eq!(world.players[&id].last_move_at, 1050);
+}
+
+#[test]
 fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
     let (mut world, player) = fixture(0x18, false);
     world.encounter = true;
@@ -81,6 +199,219 @@ fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
             assert!((angle.to_degrees() - (i as f32 * 24. + index as f32 * 8.)).abs() < 0.001);
         }
     }
+}
+
+#[test]
+fn goblin_attacks_keep_independent_channels_and_phase_prediction() {
+    use crate::encounter::attacks::Prediction;
+    for (hp, stage, intervals, prediction) in [
+        (280, 0, [1050, 1350], 0.35),
+        (182, 0, [1050, 1350], 0.35),
+        (181, 1, [1050, 1050], 0.25),
+    ] {
+        assert_eq!(crate::encounter::stage(0x614, hp, 0), stage);
+        let schedule = crate::encounter::attacks::schedule(0x614, hp, 0).unwrap();
+        assert_eq!(schedule.state, stage);
+        for (attack, interval) in schedule.attacks.iter().zip(intervals) {
+            assert_eq!(attack.interval, Some(interval));
+            assert_eq!(attack.range, 8.);
+            assert!(matches!(attack.predict, Prediction::Lead(p) if p == prediction));
+        }
+    }
+    let (mut world, player) = fixture(0x18, false);
+    let target = world.players[&player].pos;
+    let previous = Pos {
+        x: target.x,
+        y: target.y - 0.5,
+    };
+    world
+        .players
+        .get_mut(&player)
+        .unwrap()
+        .white_demon_aim_history = [previous, target];
+    let pos = Pos {
+        x: target.x - 4.,
+        y: target.y,
+    };
+    let mage = world.spawn_entity(0x614, pos, vec![]).unwrap();
+    for (hp, factor) in [(280, 0.35), (181, 0.25)] {
+        let schedule = crate::encounter::attacks::schedule(0x614, hp, 0).unwrap();
+        let shots = world
+            .scheduled_attacks(mage, Some(target), &schedule)
+            .unwrap();
+        assert_eq!(shots.len(), 2);
+        for (index, angle) in shots {
+            let expected = -(previous.y - pos.y).atan2(previous.x - pos.x) / 0.1
+                * (world.content.objects[&0x614].projectiles[&index].speed / 100.)
+                * factor;
+            assert!((angle - expected).abs() < 0.00001);
+        }
+    }
+    for (age, count) in [(0, 2), (1050, 1), (1350, 1), (2100, 1)] {
+        assert_eq!(
+            crate::encounter::phased_attacks(0x614, 280, 0., age).len(),
+            count
+        );
+    }
+}
+
+#[test]
+fn goblin_birth_budget_survives_escort_deaths_and_parent_loss() {
+    let (mut world, player) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 10;
+    }
+    world.population_regions[10].limit = 100;
+    let family = super::population::FAMILIES
+        .iter()
+        .find(|f| f.leader == 0x614)
+        .unwrap();
+    let center = Pos { x: 16.5, y: 8.5 };
+    let positions = world.family_layout(center, family, &[]).unwrap();
+    world.place_camp(family, positions).unwrap();
+    let mage = world.camp_members(0).find(|e| e.kind == 0x614).unwrap().id;
+    let mut born: BTreeSet<_> = world.camp_members(0).map(|e| e.id).collect();
+    for turn in 1..=6 {
+        for kind in [0x612, 0x613] {
+            let victim = world.camp_members(0).find(|e| e.kind == kind).unwrap().id;
+            world.remove_entity(victim);
+        }
+        world.now = turn * 12000;
+        world.repopulate_families().unwrap();
+        born.extend(world.camp_members(0).map(|e| e.id));
+    }
+    assert_eq!(
+        born.len(),
+        15,
+        "Mage plus seven lifetime births of each escort"
+    );
+    assert_eq!(crate::encounter::stage(0x614, 182, 0), 0);
+    let escort = world.camp_members(0).find(|e| e.kind == 0x612).unwrap().id;
+    assert!(matches!(
+        world
+            .family_movement(escort, Some(world.players[&player].pos), 0)
+            .unwrap()
+            .0,
+        crate::encounter::Motion::Protect { .. } | crate::encounter::Motion::Wander
+    ));
+    assert!(matches!(
+        world
+            .family_movement(escort, Some(world.players[&player].pos), 1200)
+            .unwrap()
+            .0,
+        crate::encounter::Motion::Orbit { radius: 7., .. }
+    ));
+    world.entities.get_mut(&mage).unwrap().hp = 181;
+    assert!(matches!(
+        world
+            .family_movement(escort, Some(world.players[&player].pos), 1200)
+            .unwrap()
+            .0,
+        crate::encounter::Motion::Chase { stop: 1.5, .. }
+    ));
+    world.remove_entity(mage);
+    let survivors: BTreeSet<_> = world.camp_members(0).map(|e| e.id).collect();
+    world.now += 12000;
+    world.repopulate_families().unwrap();
+    assert_eq!(
+        world.camp_members(0).map(|e| e.id).collect::<BTreeSet<_>>(),
+        survivors
+    );
+}
+
+#[test]
+fn undead_hobbit_mage_has_separate_ring_activation_and_aimed_shot_ranges() {
+    let (mut world, player) = fixture(0x18, false);
+    world.encounter = true;
+    let mage = world
+        .spawn_entity(0x61a, Pos { x: 20.5, y: 8.5 }, vec![])
+        .unwrap();
+    world.npc_step();
+    assert!(world.entities[&mage].activated.is_none());
+    for (age, distance, aimed) in [(0, 11., false), (1000, 9., true), (2000, 11., false)] {
+        world.now = age;
+        let pos = world.entities[&mage].pos;
+        let target = Pos {
+            x: pos.x - distance,
+            y: pos.y,
+        };
+        let schedule = crate::encounter::attacks::schedule(0x61a, 270, age).unwrap();
+        let shots = world
+            .scheduled_attacks(mage, Some(target), &schedule)
+            .unwrap();
+        assert_eq!(
+            shots.iter().filter(|(p, _)| *p == 3).count(),
+            usize::from(aimed)
+        );
+        if age == 0 {
+            assert_eq!(shots.iter().filter(|(p, _)| *p == 0).count(), 15);
+        }
+    }
+    world.players.get_mut(&player).unwrap().pos.x = 9.;
+    world.npc_step();
+    assert!(world.entities[&mage].activated.is_some());
+}
+
+#[test]
+fn sand_phantom_proximity_cycle_preserves_credit_without_a_death() {
+    use crate::encounter::Motion;
+    let (mut world, player) = fixture(0x18, false);
+    let pos = Pos { x: 12.5, y: 8.5 };
+    let phantom = world.spawn_entity(0x6c5, pos, vec![]).unwrap();
+    let xp = world.players[&player].character.exp;
+    let old = world.entities.get_mut(&phantom).unwrap();
+    old.hp = 17;
+    old.damage.insert(player, 50);
+    let far = Pos { x: 7.5, y: 8.5 };
+    world.fauna_mechanics(phantom, Some(far), 50000).unwrap();
+    assert_eq!(world.entities[&phantom].hp, 17);
+    world.fauna_mechanics(phantom, None, 50000).unwrap();
+    let near = Pos { x: 9.5, y: 8.5 };
+    world.fauna_mechanics(phantom, Some(near), 0).unwrap();
+    assert!(!world.entities.contains_key(&phantom));
+    let wisp = world
+        .entities
+        .values()
+        .find(|e| e.kind == 0x7f22)
+        .unwrap()
+        .id;
+    assert_eq!(world.entities[&wisp].hp, 150);
+    assert_eq!(world.entities[&wisp].damage[&player], 50);
+    for age in [0, 799, 1600] {
+        assert_eq!(
+            world.fauna_movement(wisp, Some(near), age).unwrap(),
+            (
+                Motion::Retreat { distance: 5. },
+                crate::encounter::nr_speed(0.6)
+            )
+        );
+    }
+    for (target, age) in [(Some(near), 800), (Some(far), 0), (None, 0)] {
+        assert_eq!(
+            world.fauna_movement(wisp, target, age).unwrap(),
+            (Motion::Wander, crate::encounter::nr_speed(0.9))
+        );
+    }
+    world.fauna_mechanics(wisp, None, 6499).unwrap();
+    assert!(world.entities.contains_key(&wisp));
+    world.now = 6500;
+    world.fauna_mechanics(wisp, None, 6500).unwrap();
+    assert!(!world.entities.contains_key(&wisp));
+    let returned = world.entities.values().find(|e| e.kind == 0x6c5).unwrap();
+    assert_eq!(returned.hp, 230);
+    assert_eq!(returned.damage[&player], 50);
+    assert_eq!((returned.pos.x, returned.pos.y), (pos.x, pos.y));
+    assert_eq!((returned.home.x, returned.home.y), (pos.x, pos.y));
+    assert_eq!(returned.activated, Some(6500));
+    assert_eq!(
+        world
+            .entities
+            .values()
+            .filter(|e| matches!(e.kind, 0x6c5 | 0x7f22))
+            .count(),
+        1
+    );
+    assert_eq!(world.players[&player].character.exp, xp);
 }
 
 #[test]
@@ -194,6 +525,7 @@ fn ocean_trench_advertises_player_teleports_without_enabling_restricted_worlds()
     let (mut world, _) = fixture(0x18, false);
     for (name, allowed) in [
         ("Ocean Trench", true),
+        ("Tomb of the Ancients", true),
         ("Vault", false),
         ("Tutorial", false),
     ] {
@@ -275,6 +607,51 @@ fn native_shots_trust_client_placement_without_moving_the_player() {
                 .bullets
                 .iter()
                 .all(|b| b.owner == id && b.start.x == start.x && b.start.y == start.y)
+        );
+    }
+}
+
+#[test]
+fn slowed_overrides_speed_and_speedy_until_expiry_but_not_paralysis() {
+    for speed in [0, 50, 75] {
+        let (mut world, id) = fixture(0x18, false);
+        world.now = 1000;
+        world.players.get_mut(&id).unwrap().character.base[4] = speed;
+        world
+            .apply_condition(id, crate::condition::SPEEDY, 6000)
+            .unwrap();
+        world
+            .apply_condition(id, crate::condition::SLOWED, 3000)
+            .unwrap();
+        world.now = 2000;
+        world
+            .apply_condition(id, crate::condition::SLOWED, 500)
+            .unwrap();
+        assert_eq!(
+            world.players[&id].statuses[&crate::condition::SLOWED],
+            (2000, 4000)
+        );
+        for now in [2000, 3999] {
+            assert_eq!(
+                world.players[&id].speed(&world.content, now).unwrap(),
+                0.004
+            );
+        }
+        world
+            .apply_condition(id, crate::condition::PARALYZED, 1000)
+            .unwrap();
+        assert_eq!(world.players[&id].speed(&world.content, 2999).unwrap(), 0.);
+        assert_eq!(
+            world.players[&id].speed(&world.content, 3000).unwrap(),
+            0.004
+        );
+        let normal = 0.004 + 0.0056 * speed as f32 / 75.;
+        assert!(
+            (world.players[&id].speed(&world.content, 4000).unwrap() - normal * 1.5).abs()
+                < 0.000001
+        );
+        assert!(
+            (world.players[&id].speed(&world.content, 7000).unwrap() - normal).abs() < 0.000001
         );
     }
 }

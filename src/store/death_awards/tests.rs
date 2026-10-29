@@ -38,6 +38,92 @@ fn fatal(ch: &mut Character, fame: i32) {
 }
 
 #[tokio::test]
+async fn heavy_armor_fame_counts_only_equipped_selected_bonuses() {
+    let (_, content, _, mut ch) = setup().await;
+    let armor = [
+        (0xa7b, 0),
+        (0xa0f, 0),
+        (0xa7c, 0),
+        (0xa7d, 0),
+        (0xa10, 0),
+        (0xa11, 0),
+        (0xadf, 0),
+        (0xa12, 1),
+        (0xa13, 1),
+        (0xa91, 2),
+        (0xa92, 3),
+        (0xa93, 4),
+        (0xafc, 4),
+        (0xafd, 5),
+        (0xafe, 6),
+    ];
+    for class in [0x31d, 0x31e, 0x31f] {
+        ch.class = class;
+        ch.base = content.classes[&class].caps;
+        ch.items.fill(-1);
+        ch.fame = 1234;
+        for (item, percent) in armor {
+            ch.items[2] = item;
+            assert_eq!(equipment_percent(&ch, &content).unwrap(), percent);
+            let receipt =
+                evaluate(&ch, &ch.lifetime, history(), &content, empty_balances()).unwrap();
+            let bonus = receipt
+                .rows
+                .iter()
+                .find(|row| row.kind == BonusKind::WellEquipped);
+            assert_eq!(
+                bonus.map(|row| row.amount),
+                (percent > 0).then_some((1234 * percent / 100) as i32)
+            );
+            ch.items.swap(2, 4);
+            assert_eq!(equipment_percent(&ch, &content).unwrap(), 0);
+            ch.items[4] = -1;
+        }
+    }
+    ch.class = WIZARD;
+    ch.base = content.classes[&WIZARD].caps;
+    ch.items[2] = 0xafc;
+    assert!(equipment_percent(&ch, &content).is_err());
+}
+
+#[tokio::test]
+async fn robes_keep_caps_separate_and_only_equipped_fame_counts() {
+    let (_, content, _, mut ch) = setup().await;
+    ch.base = content.classes[&WIZARD].caps;
+    let base = ch.base;
+    for (kind, fame) in [
+        (0xa5c, 0),
+        (0xa7e, 0),
+        (0xa5d, 0),
+        (0xa7f, 0),
+        (0xa80, 0),
+        (0xa5e, 0),
+        (0xa5f, 0),
+        (0xadc, 1),
+        (0xa60, 1),
+        (0xa94, 2),
+        (0xa95, 3),
+        (0xa96, 4),
+        (0xb05, 4),
+        (0xb06, 5),
+        (0xb07, 6),
+        (0xc14, 2),
+        (0xc1f, 3),
+        (0xc32, 5),
+    ] {
+        ch.items.fill(-1);
+        ch.items[2] = kind;
+        let effective = ch.effective(&content).unwrap();
+        assert_eq!(equipment_percent(&ch, &content).unwrap(), fame);
+        assert_eq!(ch.base, base);
+        assert!(effective[1] > base[1] || effective[3] > base[3]);
+        ch.items.swap(2, 4);
+        assert_eq!(ch.effective(&content).unwrap(), base);
+        assert_eq!(equipment_percent(&ch, &content).unwrap(), 0);
+    }
+}
+
+#[tokio::test]
 async fn class_stars_retain_live_deleted_and_committed_death_bests_not_wallets() {
     let (path, content, store, mut ch) = setup().await;
     ch.level = 20;
@@ -206,6 +292,141 @@ async fn equipment_death_atomic_wallet_guild_rollback_and_concurrent_retry() {
         1
     );
     assert!(store.load(ch.account, ch.id).await.is_err());
+}
+
+#[tokio::test]
+async fn every_selected_ring_pays_only_its_equipped_fame_once() {
+    let (path, content, store, mut ch) = setup().await;
+    let rings: Vec<_> = content
+        .objects
+        .values()
+        .filter(|o| o.slot_type == 9 && !o.resurrects)
+        .collect();
+    assert_eq!(rings.len(), 56);
+    for ring in rings {
+        let percent = match ring.kind {
+            0xba0..=0xba2 => 5,
+            0xc13 | 0xc31 => 4,
+            0xc20 | 0xc2d | 0xc3e => 3,
+            0xc27 | 0xc3f => 2,
+            0xc40 => 1,
+            _ => ring.tier.map_or(0, |t| u64::from(t - 1)),
+        };
+        ch.items.fill(-1);
+        ch.items[4] = i32::from(ring.kind);
+        assert_eq!(
+            equipment_percent(&ch, &content).unwrap(),
+            0,
+            "{} in backpack",
+            ring.name
+        );
+        ch.items[4] = -1;
+        ch.items[3] = i32::from(ring.kind);
+        assert_eq!(
+            equipment_percent(&ch, &content).unwrap(),
+            percent,
+            "{} equipped",
+            ring.name
+        );
+        let items = ch.items.clone();
+        equip(&store, &mut ch, items).await;
+        assert_eq!(store.load(ch.account, ch.id).await.unwrap().items, ch.items);
+        fatal(&mut ch, 1000);
+        store
+            .death(ch.clone(), "ring fixture".into())
+            .await
+            .unwrap();
+        let db = Connection::open(&path).unwrap();
+        let raw: String = db
+            .query_row(
+                "SELECT receipt FROM deaths WHERE character=?1",
+                [ch.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let receipt = decode_receipt(&raw).unwrap();
+        assert_eq!(
+            receipt
+                .rows
+                .iter()
+                .filter(|r| r.kind == BonusKind::WellEquipped)
+                .map(|r| r.amount)
+                .sum::<i32>(),
+            percent as i32 * 10,
+            "{} death bonus",
+            ring.name
+        );
+        let wallet = store.presentation(ch.account).await.unwrap().fame;
+        assert!(store.death(ch.clone(), "duplicate".into()).await.is_err());
+        assert_eq!(store.presentation(ch.account).await.unwrap().fame, wallet);
+        ch = store
+            .create(ch.account, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+    }
+}
+
+#[test]
+fn leather_armor_selected_bonuses_caps_eligibility_and_fame() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let collectible = crate::loot::collectibles(&content);
+    let roster = [
+        (0xa78, 5, 0, 0, 0, 0),
+        (0xa0d, 6, 0, 0, 0, 0),
+        (0xa79, 7, 0, 0, 0, 0),
+        (0xa7a, 8, 0, 2, 0, 0),
+        (0xad0, 9, 0, 2, 0, 0),
+        (0xad1, 10, 0, 2, 0, 0),
+        (0xad2, 12, 0, 2, 0, 0),
+        (0xa0e, 13, 0, 3, 0, 0),
+        (0xad3, 14, 0, 3, 0, 1),
+        (0xa8e, 15, 0, 4, 0, 2),
+        (0xa8f, 16, 0, 4, 0, 3),
+        (0xa90, 17, 0, 4, 0, 4),
+        (0xaf9, 17, 0, 5, 0, 4),
+        (0xafa, 18, 0, 5, 0, 5),
+        (0xafb, 19, 0, 5, 0, 6),
+        (0xa3e, 11, 3, 3, 0, 1),
+        (0xc18, 16, 3, 4, 0, 5),
+        (0xc28, 14, 3, 3, 3, 2),
+    ];
+    for (item, defense, speed, dexterity, attack, percent) in roster {
+        assert_eq!(collectible.contains(&item), !matches!(item, 0xafa | 0xafb));
+        for (&kind, class) in &content.classes {
+            let mut ch = Character::fresh(content.get(kind).unwrap()).unwrap();
+            ch.base = class.caps;
+            ch.fame = 199;
+            ch.items.fill(-1);
+            ch.items[2] = i32::from(item);
+            let allowed = matches!(kind, 0x300 | 0x307 | 0x320 | 0x322 | 0x324);
+            assert_eq!(ch.effective(&content).is_ok(), allowed, "{kind:x}/{item:x}");
+            if !allowed {
+                continue;
+            }
+            let mut expected = ch.base;
+            for (index, amount) in [(2, attack), (3, defense), (4, speed), (5, dexterity)] {
+                expected[index] += amount;
+            }
+            assert_eq!(ch.effective(&content).unwrap(), expected);
+            assert_eq!(equipment_percent(&ch, &content).unwrap(), percent);
+            let receipt =
+                evaluate(&ch, &ch.lifetime, history(), &content, empty_balances()).unwrap();
+            assert_eq!(
+                receipt
+                    .rows
+                    .iter()
+                    .find(|r| r.kind == BonusKind::WellEquipped)
+                    .map_or(0, |r| r.amount),
+                199 * percent as i32 / 100
+            );
+            ch.items[2] = -1;
+            ch.items[4] = i32::from(item);
+            assert_eq!(ch.effective(&content).unwrap(), ch.base);
+            assert_eq!(equipment_percent(&ch, &content).unwrap(), 0);
+            ch.base[3] += 1;
+            assert!(ch.effective(&content).is_err());
+        }
+    }
 }
 
 fn history() -> DeathHistory {

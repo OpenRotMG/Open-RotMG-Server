@@ -25,14 +25,14 @@ impl World {
                 "Stheno timed phase entered"
             );
         }
-        self.spawn_children(id, PET, 4, 10.)?;
+        self.spawn_children(id, PET, 4, crate::dungeon::snake::PET_RADIUS)?;
         // Orbit's angle must follow actual position and the motor's speed: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/Orbit.cs#L68-L86
         for pet_id in &self.actor_ids {
             let pet = &self.entities[pet_id];
             if pet.kind == PET && pet.parent == Some(id) && pet.orbit.is_none() {
                 self.entities.get_mut(pet_id).unwrap().orbit = Some(realm_events::Orbit {
                     speed: crate::encounter::nr_speed(7.5),
-                    radius: 10.,
+                    radius: crate::dungeon::snake::PET_RADIUS,
                     direction: 1.,
                 });
             }

@@ -165,7 +165,6 @@ async fn drain_waits_for_accepted_bot_reentry_after_source_save() {
         .unwrap()
         .unwrap();
     assert!(lifecycle::state(&app, account).is_none());
-    assert!(!app.world.supervisor.account_fenced(account).unwrap());
     let expected = expected.unwrap();
     assert!(expected.lifetime.tiles >= saved.lifetime.tiles);
     assert_eq!(app.store.load(account, character).await.unwrap(), expected);
