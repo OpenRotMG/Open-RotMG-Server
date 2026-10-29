@@ -98,9 +98,19 @@ export async function run(game){
     })();
     for(const r of await Promise.allSettled([action,firing]))if(r.status==='rejected')throw r.reason;
   }
+  async function aimState(id){
+    const s=await game.inspect(),target=entity(s,id),shots=s.diagnostic.own_projectiles;
+    // Let already-fired sword bolts resolve before rebinding a crystal they can finish.
+    const ceiling=275*(.5+(spec.stats[2]+100)/50)*1.5;
+    if(target?.kind===0xd51&&shots.length&&target.hp<=shots.length*ceiling){
+      const wait=Math.max(...shots.map(p=>p.born+400))-s.view.time_ms;assert(wait>0&&wait<=400,'Pending sword lifetime must fit the selected 350ms projectile plus one tick');
+      await idle(wait);return game.inspect();
+    }
+    return s;
+  }
   async function walk(point,range=1.5,follow=null){
     for(let n=0;n<30;n++){
-      await protect();const s=await game.inspect(),v=s.view;
+      await protect();const s=await aimState(follow),v=s.view;
       if(follow!==null){const target=entity(s,follow);if(!target){assert((await history()).some(f=>['enemy defeated','timed enemy defeat'].includes(f.message)&&f.entity===follow),'Chased target vanished without defeat');return;}if(target.kind===0xd50&&target.stage>=9)return;point=target.pos;}
       if(Math.hypot(point.x-v.position.x,point.y-v.position.y)<range)return;
       const key=(x,y)=>x+','+y,cell=p=>key(Math.floor(p.x),Math.floor(p.y));
@@ -123,7 +133,8 @@ export async function run(game){
     throw Error('Native walk did not reach target '+JSON.stringify({point,range,position:(await game.observe()).position}));
   }
   async function fire(id,ms=500){
-    await protect();const state=await game.inspect(),target=entity(state,id);assert(target,'Living target required');
+    await protect();const state=await aimState(id),target=entity(state,id);
+    if(!target){assert((await history()).some(f=>f.message==='enemy defeated'&&f.entity===id),'Target vanished without combat defeat');return;}
     if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2){await walk(target.pos,1.5,id);if(!entity(await game.inspect(),id))return;}
     const current=entity(await game.inspect(),id);if(current?.kind===0xd50&&current.stage>=9){await save('dying');await idle(2500);return;}
     const now=(await game.observe()).game_ms;if(now>=modifiedUntil){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifiedUntil=now+60000;}
