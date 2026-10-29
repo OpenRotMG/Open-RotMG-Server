@@ -193,6 +193,42 @@ fn recovery_rates_and_condition_matrix() {
 }
 
 #[test]
+fn quiet_reapplication_preserves_longer_deadline_and_is_target_local() {
+    let (mut w, id) = fixture();
+    let mut ch = w.players[&id].character.clone();
+    ch.id = 2;
+    ch.account = 2;
+    let peer = w.enter(ch, None).unwrap();
+    w.players.get_mut(&id).unwrap().mp_fraction = 0.9;
+    w.apply_condition(id, QUIET, 1000).unwrap();
+    assert_eq!(w.players[&id].character.mp, 0);
+    assert_eq!(w.players[&id].mp_fraction, 0.);
+    assert_eq!(w.players[&peer].character.mp, 100);
+    steps(&mut w, 4);
+    w.apply_condition(id, QUIET, 100).unwrap();
+    assert_eq!(w.players[&id].statuses[&QUIET], (200, 1000));
+    w.apply_condition(id, QUIET, 2000).unwrap();
+    assert_eq!(w.players[&id].statuses[&QUIET], (200, 2200));
+    steps(&mut w, 39);
+    assert_eq!(w.now, 2150);
+    assert_ne!(
+        w.players[&id].conditions(w.now) & crate::condition::bit(QUIET),
+        0
+    );
+    assert_eq!(w.players[&id].character.mp, 0);
+    steps(&mut w, 1);
+    assert_eq!(
+        w.players[&id].conditions(w.now) & crate::condition::bit(QUIET),
+        0
+    );
+    assert!(w.players[&id].mp_fraction > 0.);
+    steps(&mut w, 20);
+    assert!(w.players[&id].character.mp > 0);
+    assert!(w.players[&id].statuses.is_empty());
+    assert!(w.players[&peer].statuses.is_empty());
+}
+
+#[test]
 fn recovery_fraction_pause_block_and_cap_boundaries() {
     let (mut w, id) = fixture();
     let p = w.players.get_mut(&id).unwrap();
