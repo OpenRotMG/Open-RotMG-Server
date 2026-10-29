@@ -5,12 +5,13 @@ const SAFE_ID: u64 = 9_007_199_254_740_991;
 const DETOUR_MS: u64 = 90_000;
 const MAIN_MS: u64 = 60_000;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Objective {
     Reach20,
     Speed,
     Fame,
+    Item { reason: String, revision: i32 },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Main {
@@ -113,6 +114,59 @@ fn count(v: &PlayerView, item: i32) -> usize {
         .filter(|k| **k == item)
         .count()
 }
+fn item_upgrade(v: &PlayerView, c: &Content, identity: &str) -> Result<Option<(i32, String)>> {
+    let class = c.get(v.character.class)?;
+    let preferred = (persona::seed(identity) / 3 % 4) as usize;
+    let mut best: Option<((usize, u64, i32), String)> = None;
+    for kind in c.item_values.kinds() {
+        let Ok(price) = c.item_values.quote_range(kind) else {
+            continue;
+        };
+        if v.character.items.contains(&kind)
+            || v.map.name == "Vault"
+                && v.objects
+                    .iter()
+                    .any(|o| o.kind == 0x504 && o.contents.contains(&kind))
+            || progression::priority(v, c, kind, false, None)? != 140
+        {
+            continue;
+        }
+        let item = c.get(kind as u16)?;
+        let Some(slot) = class
+            .slots
+            .iter()
+            .take(4)
+            .position(|s| *s == item.slot_type)
+        else {
+            continue;
+        };
+        let quality = progression::quality(v, c, kind)?;
+        let mut improves = true;
+        for held in v.character.items.iter().filter(|k| **k >= 0) {
+            if c.get(*held as u16)?.slot_type == item.slot_type
+                && progression::quality(v, c, *held)? >= quality
+            {
+                improves = false;
+                break;
+            }
+        }
+        if !improves {
+            continue;
+        }
+        // Prefer a lower-priced next upgrade, not the catalog's strongest item for every life.
+        let rank = ((slot + 4 - preferred) % 4, price.max, kind);
+        if best.as_ref().is_none_or(|(old, _)| rank < *old) {
+            best = Some((
+                rank,
+                format!(
+                    "Current-class slot {slot} upgrade: {}; improves on own equipped and carried gear",
+                    item.name
+                ),
+            ));
+        }
+    }
+    Ok(best.map(|((_, _, kind), reason)| (kind, reason)))
+}
 impl Intentions {
     pub(super) fn validate(&self) -> Result<()> {
         ensure!(
@@ -133,10 +187,15 @@ impl Intentions {
                 m.id > 0
                     && m.id < self.next_id
                     && m.character > 0
-                    && match m.objective {
+                    && match &m.objective {
                         Objective::Reach20 => m.target == 20,
                         Objective::Speed => (1..=255).contains(&m.target),
                         Objective::Fame => m.target > 0 && m.target % 200 == 0,
+                        Objective::Item { reason, revision } =>
+                            (0..=65535).contains(&m.target)
+                                && !reason.is_empty()
+                                && reason.len() <= 256
+                                && *revision >= 0,
                     },
                 "invalid character main goal"
             );
@@ -203,6 +262,15 @@ impl Intentions {
         }
     }
     pub(super) fn end(&mut self, reason: &str) {
+        if let Some(m) = &self.main {
+            tracing::info!(
+                goal = m.id,
+                character = m.character,
+                target = m.target,
+                reason,
+                "autonomous main goal ended"
+            );
+        }
         self.main = None;
         self.detour = None;
         self.main_remaining_ms = 0;
@@ -210,6 +278,19 @@ impl Intentions {
         self.return_to_main = false;
         self.transition = reason.into();
         self.progressing = false;
+    }
+    fn release_main(&mut self, reason: &str) {
+        // Completing or aborting a goal cannot erase an entered dungeon's exit budget.
+        let excursion = self.detour.take().filter(|detour| {
+            matches!(
+                detour.opportunity,
+                Opportunity::Dungeon { entered: true, .. }
+            )
+        });
+        let returning = self.return_to_main;
+        self.end(reason);
+        self.detour = excursion;
+        self.return_to_main = returning;
     }
     fn finish_detour(&mut self, v: &PlayerView, reason: &str) {
         self.detour = None;
@@ -224,7 +305,7 @@ impl Intentions {
             "autonomous optional detour ended; resuming main goal"
         );
     }
-    pub(super) fn observe(&mut self, v: &PlayerView, c: &Content) -> Result<()> {
+    pub(super) fn observe(&mut self, v: &PlayerView, c: &Content, identity: &str) -> Result<()> {
         let elapsed = match self.observed.replace(v.elapsed_ms) {
             Some(last) => v
                 .elapsed_ms
@@ -316,31 +397,79 @@ impl Intentions {
         if v.lifecycle.busy || v.lifecycle.departing || v.lifecycle.quarantined {
             return Ok(());
         }
-        if self.main.as_ref().is_some_and(|m| match m.objective {
-            Objective::Reach20 => v.character.level >= m.target,
-            Objective::Speed => v.character.base_stats[4] >= m.target,
-            Objective::Fame => v.character.fame >= m.target,
-        }) {
+        if let Some(Main {
+            objective: Objective::Item { revision, .. },
+            target,
+            ..
+        }) = &self.main
+        {
+            c.item_values.quote_range(*target).map_err(|reason| {
+                anyhow::anyhow!("saved item goal {target} ineligible: {reason}")
+            })?;
+            ensure!(
+                v.character.inventory_revision >= *revision,
+                "item goal holdings revision regressed"
+            );
+        }
+        let completed = self
+            .main
+            .as_ref()
+            .filter(|m| match &m.objective {
+                Objective::Reach20 => v.character.level >= m.target,
+                Objective::Speed => v.character.base_stats[4] >= m.target,
+                Objective::Fame => v.character.fame >= m.target,
+                Objective::Item { revision, .. } => {
+                    v.character.inventory_revision > *revision
+                        && v.character.items.contains(&m.target)
+                }
+            })
+            .map(|m| (m.id, m.target));
+        let mut aborted_item = false;
+        if let Some((id, target)) = completed {
             tracing::info!(
                 character = v.session.character,
-                goal = self.main.as_ref().map(|m| m.id),
-                "autonomous main goal completed by observed character progress"
+                goal = id,
+                target,
+                objective = ?self.main.as_ref().map(|m| &m.objective),
+                "autonomous main goal completed by committed own character observation"
             );
-            // Progress can finish a milestone mid-dungeon; it cannot erase that excursion's exit budget.
-            let excursion = self.detour.take().filter(|detour| {
-                matches!(
-                    detour.opportunity,
-                    Opportunity::Dungeon { entered: true, .. }
-                )
-            });
-            let returning = self.return_to_main;
-            self.end("main goal completed by observed character progress");
-            self.detour = excursion;
-            self.return_to_main = returning;
+            self.release_main("main goal completed by observed character progress");
+        } else if let Some(target) = self.item_target()
+            && !v.character.items.contains(&target)
+        {
+            let item = c.get(target as u16)?;
+            let target_quality = progression::quality(v, c, target)?;
+            let mut obsolete = progression::priority(v, c, target, false, None)? != 140;
+            for held in v.character.items.iter().filter(|k| **k >= 0) {
+                if c.get(*held as u16)?.slot_type == item.slot_type
+                    && progression::quality(v, c, *held)? >= target_quality
+                {
+                    obsolete = true;
+                }
+            }
+            if obsolete {
+                self.release_main("item goal aborted: no longer improves current own gear");
+                aborted_item = true;
+            }
         }
         if self.main.is_none() {
             let cap = c.classes[&v.character.class].caps[4];
-            let (objective, target) = if v.character.level < 20 {
+            let seeks_item = persona::seed(identity).is_multiple_of(3);
+            let upgrade = if seeks_item {
+                item_upgrade(v, c, identity)?
+            } else {
+                None
+            };
+            let no_upgrade = seeks_item && upgrade.is_none();
+            let (objective, target) = if let Some((kind, reason)) = upgrade {
+                (
+                    Objective::Item {
+                        reason,
+                        revision: v.character.inventory_revision,
+                    },
+                    kind,
+                )
+            } else if v.character.level < 20 {
                 (Objective::Reach20, 20)
             } else if v.character.base_stats[4] < cap {
                 (Objective::Speed, cap)
@@ -358,21 +487,36 @@ impl Intentions {
             let id = self.next_id;
             ensure!(id < SAFE_ID, "main goal identity exhausted");
             self.next_id += 1;
+            tracing::info!(
+                character = v.session.character,
+                goal = id,
+                ?objective,
+                target,
+                no_upgrade,
+                "autonomous main goal selected"
+            );
             self.main = Some(Main {
                 id,
                 character: v.session.character,
                 objective,
                 target,
             });
-            self.transition = "main goal selected from own character progression".into();
+            self.transition = if no_upgrade {
+                "no eligible missing researched upgrade; selected character progression"
+            } else {
+                "main goal selected from own character progression"
+            }
+            .into();
             self.checkpoint = progress(v);
-            tracing::info!(
-                character = v.session.character,
-                goal = id,
-                ?objective,
-                target,
-                "autonomous main goal selected"
+        }
+        if let Some((id, target)) = completed {
+            self.transition = format!(
+                "goal {id} target {target} completed by committed own observation; next goal selected"
             );
+        }
+        if aborted_item {
+            self.transition =
+                "item goal aborted: no longer improves current own gear; selected next goal".into();
         }
         if let Some(m) = &self.main {
             ensure!(
@@ -386,17 +530,23 @@ impl Intentions {
     fn available(&self, v: &PlayerView) -> bool {
         self.main_remaining_ms == 0
             && (!self.needs_progress
-                || self.main.as_ref().is_some_and(|main| match main.objective {
-                    Objective::Reach20 => v.character.experience > self.checkpoint[0],
-                    Objective::Speed => v.character.base_stats[4] > self.checkpoint[1],
-                    Objective::Fame => v.character.fame > self.checkpoint[2],
-                }))
+                || self
+                    .main
+                    .as_ref()
+                    .is_some_and(|main| match &main.objective {
+                        Objective::Reach20 | Objective::Item { .. } => {
+                            v.character.experience > self.checkpoint[0]
+                        }
+                        Objective::Speed => v.character.base_stats[4] > self.checkpoint[1],
+                        Objective::Fame => v.character.fame > self.checkpoint[2],
+                    }))
     }
     fn optional(&self, v: &PlayerView, goal: &Goal, committed: bool) -> bool {
         if committed {
             return false;
         }
         match goal {
+            Goal::Loot(id) if self.target_loot(v, *id) => false,
             Goal::Loot(id) => v.objects.iter().find(|o| o.id == *id).is_some_and(|o| {
                 !o.contents
                     .iter()
@@ -421,6 +571,25 @@ impl Intentions {
             _ => false,
         }
     }
+    pub(crate) fn item_target(&self) -> Option<i32> {
+        self.main
+            .as_ref()
+            .filter(|m| matches!(m.objective, Objective::Item { .. }))
+            .map(|m| m.target)
+    }
+    pub(super) fn item_goal(&self) -> Option<(u64, i32)> {
+        self.main
+            .as_ref()
+            .filter(|m| matches!(m.objective, Objective::Item { .. }))
+            .map(|m| (m.id, m.target))
+    }
+    fn target_loot(&self, v: &PlayerView, object: i32) -> bool {
+        self.item_target().is_some_and(|item| {
+            v.objects
+                .iter()
+                .any(|o| o.id == object && o.contents.contains(&item))
+        })
+    }
     pub(super) fn speed(&self) -> bool {
         self.main
             .as_ref()
@@ -442,6 +611,10 @@ impl Intentions {
                 _ => false,
             })
     }
+    pub(super) fn call_available(&self, v: &PlayerView) -> bool {
+        // A relocation is not dungeon entry or progress, and cannot erase an existing excursion.
+        self.main.is_some() && self.detour.is_none() && !self.return_to_main && self.available(v)
+    }
     pub(super) fn eligible(&self, v: &PlayerView, goal: &Goal, committed: bool) -> bool {
         !self.optional(v, goal, committed)
             || self.matches(goal)
@@ -450,6 +623,11 @@ impl Intentions {
     pub(super) fn bonus(&self, v: &PlayerView, goal: &Goal) -> f32 {
         let retained = if self.matches(goal) { 8. } else { 0. };
         retained
+            + if matches!(goal, Goal::Loot(id) if self.target_loot(v, *id)) {
+                30.
+            } else {
+                0.
+            }
             + if self.speed() {
                 match goal {
                     Goal::Portal(id)
@@ -482,6 +660,7 @@ impl Intentions {
         goal: &Goal,
         committed: bool,
         future: Option<u16>,
+        market: Option<&pursuits::market::Market>,
     ) -> Result<()> {
         if self.detour.is_none() && self.optional(v, goal, committed) {
             ensure!(
@@ -495,7 +674,8 @@ impl Intentions {
                         .iter()
                         .find(|o| o.id == *id)
                         .context("optional bag missing")?;
-                    let Some(Action::Swap { from, .. }) = progression::pickup(v, c, bag, future)?
+                    let Some(Action::Swap { from, .. }) =
+                        progression::pickup(v, c, bag, future, market)?
                     else {
                         anyhow::bail!("optional bag has no collectible item");
                     };
@@ -549,12 +729,13 @@ impl Intentions {
         committed: bool,
     ) -> serde_json::Value {
         let (goal, plan) = self.main.as_ref().map_or((serde_json::Value::Null, "No character goal selected"), |m| {
-            let (label, current, unit, plan) = match m.objective {
+            let (label, current, unit, plan) = match &m.objective {
                 Objective::Reach20 => ("Reach level 20".into(), v.character.level, "level", "Gain shared XP in suitable fights and Pirate Caves"),
                 Objective::Speed => ("Max permanent Speed".into(), v.character.base_stats[4], "Speed", "Farm Snake Pit and consume Speed potions toward the class cap"),
                 Objective::Fame => (format!("Earn {} base fame", m.target), v.character.fame, "base fame", "Gain ordinary XP from suitable fights"),
+                Objective::Item { reason, .. } => (format!("Acquire item {}", m.target), i32::from(v.character.items.contains(&m.target)), "item kind", reason.as_str()),
             };
-            (serde_json::json!({"id":m.id,"label":label,"current":current,"target":m.target,"unit":unit}), plan)
+            (serde_json::json!({"id":m.id,"label":label,"current":current,"target":m.target,"unit":unit,"reason":plan,"state":"pursuing"}), plan)
         });
         let optional = self.matches(&d.goal);
         let necessary = committed
@@ -603,7 +784,7 @@ impl Intentions {
             "progress"
         };
         self.progressing = mode == "progress";
-        serde_json::json!({"goal":goal,"plan":plan,"step":step,"mode":mode,
+        serde_json::json!({"goal":goal,"plan":plan,"step":step,"mode":mode,"transition":self.transition,
             "reason":reason,
             "resume":if mode == "progress" { None } else { Some(plan) }})
     }

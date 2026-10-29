@@ -672,6 +672,11 @@ pub struct Bullet {
     pub hit_enemy: bool,
 }
 impl Player {
+    #[cfg(test)]
+    pub(crate) fn ability_ready_ms(&self) -> u64 {
+        self.ability_ready_ms
+    }
+
     pub(crate) fn conditions(&self, now: u64) -> i32 {
         self.lab_conditions | crate::condition::mask(&self.statuses, now)
     }

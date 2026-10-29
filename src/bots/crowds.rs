@@ -1,10 +1,13 @@
 use super::*;
 use crate::world::view::PlayerMarker;
 mod cooperation;
+#[cfg(test)]
+mod tests;
 pub(super) use cooperation::available as cooperative_available;
 
 pub(super) struct Crowd {
     pub knows_minimap: bool,
+    binding: Option<[i32; 4]>,
     contacts: BTreeMap<i32, (PlayerMarker, u64)>,
     approaching: Option<(i32, i32)>,
     company: BTreeMap<(i32, i32), (u64, bool)>,
@@ -14,6 +17,7 @@ impl Crowd {
     pub fn new(knows_minimap: bool) -> Self {
         Self {
             knows_minimap,
+            binding: None,
             contacts: BTreeMap::new(),
             approaching: None,
             company: BTreeMap::new(),
@@ -21,6 +25,13 @@ impl Crowd {
         }
     }
     pub fn observe(&mut self, v: &PlayerView, content: &Content) {
+        let binding = cooperation::binding(v);
+        if self.binding != Some(binding) {
+            self.release(v, "session_changed");
+            self.contacts.clear();
+            self.company.clear();
+            self.binding = Some(binding);
+        }
         self.cooperation.observe(
             cooperation::binding(v),
             v.elapsed_ms,
@@ -75,6 +86,23 @@ impl Crowd {
             name,
         })
     }
+    pub fn release(&mut self, v: &PlayerView, reason: &'static str) {
+        self.cooperation.release(v.elapsed_ms, reason);
+        self.approaching = None;
+        for (peer, (until, active)) in &mut self.company {
+            if *active {
+                *active = false;
+                *until = v.time_ms + 30_000;
+                tracing::info!(
+                    account = v.session.account,
+                    target = peer.0,
+                    peer = peer.1,
+                    reason,
+                    "autonomous crowd company released"
+                );
+            }
+        }
+    }
     pub fn len(&self) -> usize {
         self.contacts.len()
     }
@@ -102,11 +130,6 @@ impl Crowd {
         cognition: &pursuits::Cognition,
         inspecting: bool,
     ) {
-        let published = |(id, account): &(i32, i32)| {
-            v.player_markers
-                .iter()
-                .any(|p| p.id == *id && p.account == *account)
-        };
         self.company
             .retain(|_, (until, active)| *active || v.time_ms < *until);
         for (peer, (until, active)) in &mut self.company {
@@ -116,8 +139,20 @@ impl Crowd {
             let marker = v.player_markers.iter().find(|p| (p.id, p.account) == *peer);
             let reason = if v.time_ms >= *until {
                 Some("company_window_ended")
-            } else if marker.is_none() {
+            } else if marker.is_none()
+                && self.contacts.get(&peer.0).is_none_or(|(p, seen)| {
+                    p.account != peer.1 || v.time_ms.saturating_sub(*seen) >= 6000
+                })
+            {
                 Some("lost_public_marker")
+            } else if v
+                .objects
+                .iter()
+                .any(|p| p.id == peer.0 && (p.account != Some(peer.1) || p.hp <= 0))
+            {
+                Some("peer_dead_or_identity_changed")
+            } else if marker.is_some_and(|p| !survivable(v, p.position)) {
+                Some("unsafe_target")
             } else if marker.is_some_and(|p| p.position.distance(v.position) > 36.) {
                 Some("separated")
             } else {
@@ -135,14 +170,14 @@ impl Crowd {
                 );
             }
         }
-        if self.approaching.is_some_and(|peer| {
-            !published(&peer) || self.company.get(&peer).is_none_or(|(_, active)| !*active)
-        }) {
+        if self
+            .approaching
+            .is_some_and(|peer| self.company.get(&peer).is_none_or(|(_, active)| !*active))
+        {
             self.approaching = None;
         }
-        self.contacts.retain(|id, (_, seen)| {
-            v.time_ms.saturating_sub(*seen) < 6000 && v.player_markers.iter().any(|p| p.id == *id)
-        });
+        self.contacts
+            .retain(|_, (_, seen)| v.time_ms.saturating_sub(*seen) < 6000);
         let occupied = v
             .objects
             .iter()
@@ -154,6 +189,12 @@ impl Crowd {
             .player_markers
             .iter()
             .filter(|p| self.knows_minimap || v.objects.iter().any(|o| o.id == p.id))
+            .filter(|p| {
+                v.objects
+                    .iter()
+                    .find(|o| o.id == p.id)
+                    .is_none_or(|o| o.account == Some(p.account) && o.hp > 0)
+            })
             .collect();
         cues.sort_by(|a, b| {
             a.position
@@ -189,8 +230,8 @@ impl Crowd {
                     target = cue.id,
                     peer = cue.account,
                     distance = reached.position.distance(v.position),
-                    reason = "approach_arrived_shared_xp",
-                    "autonomous crowd company joined"
+                    reason = "approach_arrived",
+                    "autonomous crowd approach arrived"
                 );
                 self.approaching = None;
             }
@@ -206,36 +247,50 @@ impl Crowd {
             return None;
         }
         // Rushers shorten the existing dungeon quest: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
-        self.attended_destination(v.time_ms, v.position, v.session.account, group, |p| {
-            p.distance(v.position) > 24.
-                && p.distance(objective) + 16. < v.position.distance(objective)
-        })
+        self.attended_destination(
+            v,
+            group,
+            |_| false,
+            |_| true,
+            |p| {
+                p.distance(v.position) > 24.
+                    && p.distance(objective) + 16. < v.position.distance(objective)
+            },
+        )
     }
     pub fn destination<'a>(
         &'a self,
         v: &PlayerView,
         group: Option<&adventures::Adventure>,
+        known: impl Fn(i32) -> bool,
         eligible_position: impl Fn(Pos) -> bool,
     ) -> Option<&'a PlayerMarker> {
-        if !matches!(v.map.name.as_str(), "Realm" | "Pirate Cave" | "Snake Pit") {
+        if !matches!(v.map.name.as_str(), "Realm" | "Pirate Cave" | "Snake Pit")
+            || !self.cooperation.passive_available(v.elapsed_ms)
+        {
             return None;
         }
-        self.attended_destination(v.time_ms, v.position, v.session.account, group, |p| {
-            survivable(v, p) && eligible_position(p)
-        })
+        self.attended_destination(
+            v,
+            group,
+            known,
+            |account| can_approach(v.session.world, v.session.account, account),
+            |p| survivable(v, p) && eligible_position(p),
+        )
     }
     fn attended_destination(
         &self,
-        time_ms: u64,
-        position: Pos,
-        account: i32,
+        v: &PlayerView,
         group: Option<&adventures::Adventure>,
+        known: impl Fn(i32) -> bool,
+        eligible: impl Fn(i32) -> bool,
         eligible_position: impl Fn(Pos) -> bool,
     ) -> Option<&PlayerMarker> {
         self.contacts
             .values()
             .filter(|(p, seen)| {
-                *seen == time_ms
+                *seen == v.time_ms
+                    && eligible(p.account)
                     && eligible_position(p.position)
                     && (self.company.len() < 4 || self.company.contains_key(&(p.id, p.account)))
                     && self
@@ -249,10 +304,12 @@ impl Crowd {
                     let shared = group.is_some_and(|g| {
                         !g.finished && g.members.iter().any(|m| m.account == p.account)
                     }) || self.contacts.values().any(|(q, seen)| {
-                        *seen == time_ms && q.id != p.id && q.position.distance(p.position) < 14.
+                        *seen == v.time_ms && q.id != p.id && q.position.distance(p.position) < 14.
                     });
-                    p.position.distance(position) - if shared { 8. } else { 0. }
-                        + ((p.account as u32 ^ account as u32).wrapping_mul(2654435761) % 9) as f32
+                    p.position.distance(v.position) - if shared { 8. } else { 0. }
+                        + ((p.account as u32 ^ v.session.account as u32).wrapping_mul(2654435761)
+                            % 9) as f32
+                        - if known(p.account) { 3. } else { 0. }
                 };
                 // Small score changes do not justify abandoning company already being approached.
                 let approaching = |p: &PlayerMarker| {
@@ -265,6 +322,12 @@ impl Crowd {
             })
             .map(|(p, _)| p)
     }
+}
+
+pub(super) fn can_approach(world: i32, account: i32, peer: i32) -> bool {
+    // A shared world rank prevents cycles without making account age a lifetime leadership rule.
+    let rank = |account| (persona::seed(&format!("{world}:{account}")), account);
+    rank(peer) < rank(account)
 }
 
 pub(super) fn survivable(v: &PlayerView, position: Pos) -> bool {

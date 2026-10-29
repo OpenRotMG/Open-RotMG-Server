@@ -285,7 +285,15 @@ pub(super) fn reason(
         (None, Goal::Fight(id)) => format!("fighting {}", named(id)),
         (None, Goal::Hunt(id)) => format!("hunting quest {}", named(id)),
         (None, Goal::Venture) => "heading inland for tougher enemies".into(),
-        (None, Goal::Bank(_)) => "storing loot in the vault".into(),
+        (None, Goal::Bank(id)) => match &d.item {
+            Some(Action::Swap { from, .. }) if from.object == *id => {
+                "withdrawing observed goods from own Vault".into()
+            }
+            Some(Action::Swap { to, .. }) if to.object == *id => {
+                "depositing observed goods in own Vault".into()
+            }
+            _ => "walking to own Vault chest".into(),
+        },
         (None, Goal::Break(id)) => format!("breaking {}", named(id)),
         (None, Goal::Loot(id)) => format!("looting {}", named(id)),
         (None, Goal::Follow(id)) => format!("following {}", named(id)),

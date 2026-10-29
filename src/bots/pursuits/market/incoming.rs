@@ -94,6 +94,18 @@ impl Market {
         let Some(q) = g.quote.clone() else {
             return Ok(Some(TradeAction::Cancel));
         };
+        if !fair(&q, c) {
+            tracing::info!(
+                account = v.session.account,
+                peer = g.account,
+                ?q,
+                give_value = ?c.item_values.get(q[0].kind),
+                want_value = ?c.item_values.get(q[1].kind),
+                reason = "outside_shared_value_policy",
+                "market incoming exchange refused"
+            );
+            return Ok(Some(TradeAction::Cancel));
+        }
         if self.spare(v, c, future, q[0].kind)? < q[0].quantity {
             return Ok(Some(TradeAction::Cancel));
         }

@@ -249,6 +249,7 @@ struct Brain {
     draft: Option<composer::Draft>,
     clipboard: String,
     call_goal: Option<Goal>,
+    aftermath: Option<events::Speech>,
     market_words: Option<(pursuits::market::Message, String)>,
     profile: Profile,
     activity: Activity,
@@ -316,6 +317,7 @@ impl Brain {
             draft: None,
             clipboard: String::new(),
             call_goal: None,
+            aftermath: None,
             market_words: None,
             profile,
             activity: Activity::Busy,
@@ -593,7 +595,17 @@ impl Brain {
             .intentions
             .as_mut()
             .context("unmigrated account intentions")?
-            .observe(v, content)?;
+            .observe(v, content, self.profile.identity)?;
+        self.mind.market.observe_goal(
+            v,
+            content,
+            self.mind.future_class,
+            self.mind
+                .intentions
+                .as_ref()
+                .expect("observed intentions")
+                .item_target(),
+        )?;
         let (activity, decision) = if v.lifecycle.busy {
             (Activity::Busy, decision)
         } else {
@@ -616,6 +628,9 @@ impl Brain {
                 cctv::reason(activity, &decision, v, content),
                 committed,
             );
+        self.intent["public_call"] = serde_json::json!(self.calls.last);
+        self.intent["acquisition"] = serde_json::json!({"resources":self.mind.market.resource_payload(),
+            "step":cctv::reason(activity, &decision, v, content),"selected_action":&decision.item});
         Ok(decision)
     }
     fn set_activity(&mut self, v: &PlayerView, activity: Activity) {
@@ -782,7 +797,11 @@ impl Brain {
             remedy,
         };
         if self.reflex(v, content, &s, &mut decision)? {
+            self.crowd.release(v, "safety");
             return Ok((Activity::Survive, decision));
+        }
+        if self.committed(v) {
+            self.crowd.release(v, "explicit_commitment");
         }
         // Reflexes can escape a deal, but only durable receipts can settle it.
         if reserved {
@@ -811,10 +830,15 @@ impl Brain {
         if (equipping && s.remedy.is_none()) || (v.map.name == "Vault" && s.inspecting) {
             return Ok((Activity::Equip, decision));
         }
-        if let Some(mut market) =
-            self.mind
-                .market
-                .decide(v, content, self.mind.future_class, &s.grid, &mut self.rng)?
+        if (matches!(v.map.name.as_str(), "Nexus" | "Vault")
+            || peaceful(&s.enemies, v.position) && !self.committed(v))
+            && let Some(mut market) = self.mind.market.decide(
+                v,
+                content,
+                self.mind.future_class,
+                &s.grid,
+                &mut self.rng,
+            )?
         {
             if market.item.is_none() {
                 market.item = decision.item;
@@ -824,10 +848,11 @@ impl Brain {
         if let Some(project) = self.mind.supply(v, content, &s.grid)? {
             return Ok((Activity::Supply, project));
         }
+        let allow_idle = !self.committed(v) && decision.item.is_none();
         if let Some(mut event) =
             self.mind
                 .events
-                .decide(v, content, &s.grid, self.mind.cognition.attention)?
+                .decide(v, content, &s.grid, self.profile, allow_idle)?
         {
             if decision.item.is_some() {
                 event.item = decision.item;
@@ -839,7 +864,8 @@ impl Brain {
             && s.nearest
                 .is_none_or(|e| e.position.distance(v.position) > 5.)
         {
-            decision.item = progression::consume(v, content)?;
+            decision.item =
+                progression::consume(v, content, &self.mind.market, self.mind.future_class)?;
             if decision.item.is_some() {
                 return Ok((Activity::Consume, decision));
             }
@@ -891,7 +917,14 @@ impl Brain {
                     .intentions
                     .as_mut()
                     .expect("observed intentions")
-                    .selected(v, content, &social.goal, committed, self.mind.future_class)?;
+                    .selected(
+                        v,
+                        content,
+                        &social.goal,
+                        committed,
+                        self.mind.future_class,
+                        Some(&self.mind.market),
+                    )?;
                 return Ok((Activity::Social, social));
             }
         }
@@ -953,6 +986,9 @@ impl Brain {
             decision.goal = Goal::Follow(target);
             decision.journey = Some(Journey::Regroup(target));
             return Ok((Activity::Call, decision));
+        }
+        if decision.item.is_none() && !banking && self.equipment_opportunity(v, content)? {
+            return Ok((Activity::Social, decision));
         }
         Ok((
             Activity::Adventure,
@@ -1283,7 +1319,15 @@ impl Brain {
                 .iter()
                 .filter(|o| content.objects[&o.kind].class == "Container")
             {
-                if progression::pickup(v, content, bag, self.mind.future_class)?.is_some() {
+                if progression::pickup(
+                    v,
+                    content,
+                    bag,
+                    self.mind.future_class,
+                    Some(&self.mind.market),
+                )?
+                .is_some()
+                {
                     // A distant objective must not outrank replenishing an exhausted ability.
                     let replenishing = needs_mana
                         && peaceful(enemies, v.position)
@@ -1419,12 +1463,12 @@ impl Brain {
         let recent_company = self
             .crowd
             .cooperator(v, |position| !self.blocked.contains_key(&tile(position)));
-        let cooperative_goal = if self.agreement.is_none()
-            && self.companion.is_none()
+        let cooperative_goal = if !committed
             && crowds::cooperative_available(&choices, v.position, range, |position| {
                 !self.blocked.contains_key(&tile(position))
             })
             && let Some(peer) = &recent_company
+            && crowds::can_approach(v.session.world, v.session.account, peer.account)
             && peer.position.distance(v.position) > 7.
         {
             choices.push((
@@ -1436,8 +1480,7 @@ impl Brain {
         } else {
             None
         };
-        if self.agreement.is_none()
-            && self.companion.is_none()
+        if !committed
             && recent_company.is_none()
             && !choices
                 .iter()
@@ -1445,9 +1488,12 @@ impl Brain {
             && crowds::cooperative_available(&choices, v.position, range, |position| {
                 !self.blocked.contains_key(&tile(position))
             })
-            && let Some(marker) = self.crowd.destination(v, self.group.as_ref(), |position| {
-                !self.blocked.contains_key(&tile(position))
-            })
+            && let Some(marker) = self.crowd.destination(
+                v,
+                self.group.as_ref(),
+                |account| self.mind.social.known(account),
+                |position| !self.blocked.contains_key(&tile(position)),
+            )
         {
             let distance = marker.position.distance(v.position);
             if distance > 7. {
@@ -1478,6 +1524,7 @@ impl Brain {
                             &Goal::Follow(marker.id),
                             committed,
                             self.mind.future_class,
+                            Some(&self.mind.market),
                         )?;
                     self.next_teleport = v.time_ms + 10000;
                     decision.goal = Goal::Follow(marker.id);
@@ -1486,7 +1533,7 @@ impl Brain {
                         account = v.session.account,
                         target = marker.id,
                         world = v.session.world,
-                        reason = "seek_shared_xp",
+                        reason = "seek_nearby_activity",
                         "autonomous attended crowd travel"
                     );
                     let peer = marker.id;
@@ -1660,8 +1707,14 @@ impl Brain {
                         .context("selected bag missing")?;
                     if decision.item.is_none() {
                         decision.item = Some(
-                            progression::pickup(v, content, bag, self.mind.future_class)?
-                                .context("selected bag has no collectable item")?,
+                            progression::pickup(
+                                v,
+                                content,
+                                bag,
+                                self.mind.future_class,
+                                Some(&self.mind.market),
+                            )?
+                            .context("selected bag has no collectable item")?,
                         );
                     }
                     if let Some(action) = &decision.item {
@@ -1751,8 +1804,7 @@ impl Brain {
                 decision.journey = Some(Journey::Regroup(id));
                 self.next_teleport = v.time_ms + 10000;
             }
-            if self.agreement.is_none()
-                && self.companion.is_none()
+            if !committed
                 && let Goal::Follow(id) = goal
                 && cooperative_goal != Some(id)
             {
@@ -1761,20 +1813,44 @@ impl Brain {
                         account = v.session.account,
                         target = id,
                         reason = if self.crowd.keeping_company(id) {
-                            "keep_shared_xp_company"
+                            "continue_temporary_outing"
                         } else {
-                            "seek_shared_xp"
+                            "seek_nearby_activity"
                         },
                         "autonomous crowd approach selected"
                     );
                 }
                 self.crowd.approach_selected(id);
             }
+            if self.goal != goal
+                && let Some(peer) = &recent_company
+                && (matches!(goal, Goal::Loot(_))
+                    || cooperative_goal == Some(peer.id) && goal == Goal::Follow(peer.id))
+            {
+                tracing::info!(
+                    account = v.session.account,
+                    target = peer.id,
+                    peer = peer.account,
+                    reason = if matches!(goal, Goal::Loot(_)) {
+                        "useful_loot_pause"
+                    } else {
+                        "visible_catch_up"
+                    },
+                    "autonomous temporary company activity changed"
+                );
+            }
             self.mind
                 .intentions
                 .as_mut()
                 .expect("observed intentions")
-                .selected(v, content, &goal, committed, self.mind.future_class)?;
+                .selected(
+                    v,
+                    content,
+                    &goal,
+                    committed,
+                    self.mind.future_class,
+                    Some(&self.mind.market),
+                )?;
             decision.goal = goal;
             decision.movement = movement;
             if (self.agreement.is_some()
