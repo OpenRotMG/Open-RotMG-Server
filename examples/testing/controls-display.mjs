@@ -2,18 +2,22 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
+import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
 
 const out=()=>join(process.env.QA_RESULTS_DIR,'native');
-let c;
+let c,api;
 export const fixture={class:0x30e,level:20,seed:931,world:-2,position:{x:109.5,y:42.5},equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:null};
-export async function enter({browser,signal}){
+export async function enter({browser,signal,actor}){
   const {origin}=JSON.parse(await readFile(join(out(),'result.json'),'utf8'));
+  const token=(await readFile(join(out(),'state/control.token'),'utf8')).trim();
+  api=async command=>{const r=await fetch(origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok&&s.status==='succeeded',JSON.stringify(s));return s.result;};
   c=await connect({...browser,url:origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
   signal.addEventListener('abort',()=>c.close(),{once:true});
   await c.call('Emulation.setFocusEmulationEnabled',{enabled:true});
   await c.eval('(()=>{const m=document.querySelector("ruffle-player").shadowRoot.querySelector("#hardware-acceleration-modal");if(m&&!m.classList.contains("hidden"))m.querySelector(".close-modal").click();})()');
-  for(let i=0;i<2;i++){await click(400,550);await c.eval('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');}
+  const deadline=Date.now()+30000;
+  while((await api({op:'native_state',actors:[actor]})).actors[0].stage!=='ready'){assert(Date.now()<deadline,'Normal menu did not load the owned character');await click(400,550);await delay(250);}
 }
 async function click(x,y){
   const r=await c.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};})()');
@@ -35,6 +39,7 @@ export async function run(game){
   const shot=name=>game.act({keys:[],duration_ms:700},{name,when:()=>true});
   const button=(label,x,y)=>ui(label,()=>click(x,y));
   const key=async key=>game.act({keys:[key],duration_ms:250});
+  const press=async(key,code,windowsVirtualKeyCode)=>{const p={key,code,windowsVirtualKeyCode};try{await c.call('Input.dispatchKeyEvent',{type:'keyDown',...p});}finally{await c.call('Input.dispatchKeyEvent',{type:'keyUp',...p});}};
   const before=await game.inspect();
   await shot('default-display');await save('default');
   await key('o');await shot('controls-default');
@@ -47,8 +52,8 @@ export async function run(game){
   await shot('graphics-changed');
   await button('chat-tab',255,83);await button('filter-off',35,225);await shot('chat-changed');
   await key('o');await shot('offset-zero-display');
-  await key('-');await key('-');await shot('minimap-zoom-out');
-  await key('=');await shot('minimap-zoom-in');
+  await ui('zoom-out',async()=>{await press('-','Minus',189);await press('-','Minus',189);});await shot('minimap-zoom-out');
+  await ui('zoom-in',()=>press('=','Equal',187));await shot('minimap-zoom-in');
   const start=await game.inspect();
   await game.act({keys:['d'],duration_ms:600});
   const moved=await game.inspect();
@@ -60,6 +65,16 @@ export async function run(game){
   const after=await game.inspect();
   game.check('ordinary Nexus reconnect preserves living identity and inventory',after.view.map.name==='Nexus'&&after.view.lifecycle.alive&&after.view.session.account===before.view.session.account&&after.view.session.character===before.view.session.character&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&after.view.character.inventory_revision===before.view.character.inventory_revision);
   await key('o');await button('graphics-after-reconnect',365,83);await shot('graphics-after-reconnect');
+  await key('o');await save('before-reload');
+  const previous=await c.eval('performance.timeOrigin'),deadline=Date.now()+30000;
+  await c.call('Page.reload');
+  while(!await c.eval('performance.timeOrigin!=='+previous+'&&document.querySelector("ruffle-player")?.ruffle().isPlaying===true')){assert(Date.now()<deadline,'Fresh Ruffle did not start');await delay(50);}
+  await c.eval('(()=>{const m=document.querySelector("ruffle-player").shadowRoot.querySelector("#hardware-acceleration-modal");if(m&&!m.classList.contains("hidden"))m.querySelector(".close-modal").click();})()');
+  while((await api({op:'native_state',actors:[game.actor]})).actors[0].stage!=='ready'){assert(Date.now()<deadline,'Same-profile reload did not load the owned character');await click(400,550);await delay(250);}
+  await game.act({keys:[],duration_ms:700});
+  const reloaded=await game.inspect();
+  game.check('same-profile reload retains the same living account character and inventory',reloaded.view.lifecycle.alive&&reloaded.view.session.account===before.view.session.account&&reloaded.view.session.character===before.view.session.character&&JSON.stringify(reloaded.view.character.items)===JSON.stringify(before.view.character.items));
+  await key('o');await button('graphics-after-reload',365,83);await shot('graphics-after-reload');
   await key('o');await save('final');
   game.check('same owned native actor remains bound',config.native[0].actor===game.actor);
 }
