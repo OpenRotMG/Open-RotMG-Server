@@ -9,13 +9,15 @@ export {fixture} from './client-entry.mjs';
 const checks=[];
 export async function enter({browser,signal}){
   const out=process.env.QA_RESULTS_DIR,{origin}=JSON.parse(await readFile(join(out,'native/result.json'),'utf8'));
-  const traffic=[],pending=new Map();let cdp;
+  const traffic=[],pending=new Map(),accountRequests=new Set();let cdp,accountLoads=0,readyLoads=0;
   const check=(name,ok)=>{assert(ok,name);checks.push(name);};
   const wait=async(fn,label)=>{for(let i=0;i<300;i++){signal.throwIfAborted();const value=await fn();if(value)return value;await delay(100,undefined,{signal});}throw Error(label);};
   cdp=await connect({...browser,url:origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs'),onEvent:e=>{
+    if(e.method==='Network.requestWillBeSent'&&e.params.request.url===origin+'/legacy-api/char/list')accountRequests.add(e.params.requestId);
+    if(e.method==='Network.loadingFinished'&&accountRequests.has(e.params.requestId))accountLoads++;
     if(e.method==='Network.requestWillBeSent'&&e.params.request.url.startsWith(origin+'/legacy-api/picture/')){
       const r={id:e.params.requestId,url:e.params.request.url};traffic.push(r);pending.set(r.id,r);
-      cdp.call('Network.getRequestPostData',{requestId:r.id}).then(v=>{assert(!v.base64Encoded);r.form=v.postData;}).catch(e=>r.error=String(e));
+      cdp.call('Network.getRequestPostData',{requestId:r.id}).then(v=>r.form=Buffer.from(v.postData,v.base64Encoded?'base64':'utf8').toString('utf8')).catch(e=>r.error=String(e));
     }
     const r=pending.get(e.params?.requestId);
     if(r&&e.method==='Network.responseReceived')r.status=e.params.response.status;
@@ -29,7 +31,8 @@ export async function enter({browser,signal}){
   const key=async(key)=>{const p={key,code:'Key'+key.toUpperCase(),windowsVirtualKeyCode:key.toUpperCase().charCodeAt(0)};await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',...p});await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',...p});await frames();};
   const capture=async(name)=>writeFile(join(out,name+'.png'),Buffer.from((await cdp.call('Page.captureScreenshot',{format:'png'})).data,'base64'));
   const ready=async()=>{
-    await wait(()=>cdp.eval('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Ruffle not playing');
+    await wait(()=>accountLoads>readyLoads,'Native account refresh did not finish');readyLoads=accountLoads;
+    await wait(()=>cdp.eval('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Ruffle not playing');await frames();
     await cdp.eval('(()=>{const p=document.querySelector("ruffle-player"),m=p.shadowRoot.querySelector("#hardware-acceleration-modal");if(m&&!m.classList.contains("hidden"))m.querySelector(".close-modal").click();p.focus();})()');
     rect=await cdp.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};})()');assert(rect.width===800&&rect.height===600);
   };
