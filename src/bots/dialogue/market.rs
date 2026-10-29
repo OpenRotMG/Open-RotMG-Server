@@ -290,7 +290,7 @@ impl Service {
                 None => return Ok(None),
             }
         }
-        if !self.automatic_available() {
+        if !self.automatic_ready(true) {
             return Ok(None);
         }
         ensure!(
