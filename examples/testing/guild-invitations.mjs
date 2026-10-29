@@ -67,7 +67,7 @@ export async function run(game){
   const button=(player,index,label,x,y)=>ui(player,index,label,c=>click(c,x,y));
   const capture=(player,name)=>player.act({keys:[],duration_ms:700},{name,when:()=>true});
   const members=()=>db('SELECT a.name,g.name,m.rank FROM guild_members m JOIN accounts a ON a.id=m.account JOIN guilds g ON g.id=m.guild ORDER BY a.id');
-  async function refreshRegister(player){await player.act({keys:['s'],duration_ms:450});await player.act({keys:['w'],duration_ms:450});}
+  async function refreshRegister(player){await walk(player,109.5,44.5);await walk(player,109.5,41.5);}
   async function walk(player,x,y){
     for(let i=0;i<80;i++){
       const p=(await player.observe()).position,dx=x-p.x,dy=y-p.y,d=Math.hypot(dx,dy);if(d<.8)return;
