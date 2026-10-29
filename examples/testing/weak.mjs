@@ -39,7 +39,9 @@ export async function run(game){
   await game.act({keys:[],duration_ms:800,target},{name:'weak-damaging',when:v=>(v.character.conditions&(weak|(1<<18)))===(weak|(1<<18))});
   const damagingShots=(await shots()).slice(offset);
   game.check('Weak overrides native allied Damaging',damagingShots.length>0&&damagingShots.every(s=>s.damage>=5&&s.damage<=19));
-  const beforeAbility=await save('weak-damaging');
+  await game.act({keys:['a','w'],duration_ms:550});
+  const beforeAbility=await save('weak-damaging'),near=beforeAbility.diagnostic.entities.find(e=>e.id===boss.id).pos;
+  game.check('ordinary native movement closes quiver range',Math.hypot(near.x-beforeAbility.view.position.x,near.y-beforeAbility.view.position.y)<2.5);
   offset=(await shots()).length;
   const mana=beforeAbility.view.character.mp;
   await game.act({keys:[' '],duration_ms:300,target:{...target,fire:false}},{name:'weak-quiver',when:v=>Boolean(v.character.conditions&weak)&&v.character.mp<mana});
