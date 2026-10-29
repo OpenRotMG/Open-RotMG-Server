@@ -5399,6 +5399,8 @@ impl World {
             || snapshot.davy_lockers > p.character.davy_lockers
             || snapshot.tombs > p.character.tombs;
         let leveled = snapshot.level > p.character.level;
+        let announcement = (leveled && snapshot.level == 20)
+            .then(|| format!("{} achieved level 20", p.character.name));
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
         p.character.fame = snapshot.fame;
@@ -5442,6 +5444,11 @@ impl World {
             xp_boost = p.character.xp_boost.active,
             "progress committed"
         );
+        // Period wording, published only after durable progress: https://media.gdcvault.com/gdceurope2012/Presentations/Social%20%26%20Online%20Games%20Summit/Ethan_Levy_Social%26Online_GameDesignIs.pdf#page=54
+        if let Some(text) = announcement {
+            let recipients = self.broadcast_text("", &text);
+            tracing::info!(player = id, recipients, "level twenty announced");
+        }
         if cleared_dungeon && let Some(exit) = self.clear_exit.take() {
             if self.name == "Tomb of the Ancients" {
                 let old_exits: Vec<_> = self

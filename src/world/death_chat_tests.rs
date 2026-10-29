@@ -122,6 +122,67 @@ async fn gravestones_follow_all_eleven_tiers_after_committed_death() {
 }
 
 #[tokio::test]
+async fn level_twenty_chat_follows_committed_transition_once() {
+    for (level, fail) in [(1, false), (19, false), (20, false), (19, true)] {
+        let (mut world, store, [player, _], inboxes) = fixture().await;
+        let [mut own, mut witness]: [_; 2] = inboxes.try_into().unwrap();
+        let p = world.players.get_mut(&player).unwrap();
+        p.character.level = level;
+        p.character.exp = if level < 20 {
+            crate::store::level_start(level + 1).unwrap() - 1
+        } else {
+            crate::store::level_start(20).unwrap()
+        };
+        store.progress(p.character.clone()).await.unwrap();
+        p.queue_experience(1, None, false).unwrap();
+        let (_, snapshot) = world
+            .pending_progress_where(|_, _| true)
+            .into_iter()
+            .find(|(id, _)| *id == player)
+            .unwrap();
+        assert!(messages(&mut witness).is_empty());
+        if fail {
+            assert!(
+                world
+                    .committed::<()>(player, Err(anyhow::anyhow!("injected progress failure")))
+                    .is_err()
+            );
+            assert!(messages(&mut witness).is_empty());
+            assert_eq!(
+                store
+                    .load(snapshot.account, snapshot.id)
+                    .await
+                    .unwrap()
+                    .level,
+                19
+            );
+            continue;
+        }
+        world
+            .committed(player, store.progress(snapshot.clone()).await)
+            .unwrap();
+        assert_eq!(
+            store
+                .load(snapshot.account, snapshot.id)
+                .await
+                .unwrap()
+                .level,
+            snapshot.level
+        );
+        world.finish_progress(player, snapshot.clone()).unwrap();
+        let expected = if level == 19 {
+            vec!["Victim achieved level 20"]
+        } else {
+            vec![]
+        };
+        assert_eq!(messages(&mut own), expected);
+        assert_eq!(messages(&mut witness), expected);
+        assert!(world.finish_progress(player, snapshot).is_err());
+        assert!(messages(&mut witness).is_empty());
+    }
+}
+
+#[tokio::test]
 async fn death_chat_is_world_wide_once_and_only_after_successful_persistence() {
     for fail in [false, true] {
         let (mut world, store, [victim, witness], inboxes) = fixture().await;

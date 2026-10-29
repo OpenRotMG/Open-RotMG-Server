@@ -469,7 +469,7 @@ async fn account_request(
         Ok(id) => {
             tracing::info!(account = id, operation, "account request completed");
             if operation == "verify" {
-                // The selected 123.5.1 account dialog checks direct child presence, not a boolean value.
+                // The selected dialog checks child presence, not a boolean: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
                 match a.store.email_verified(id).await {
                     Ok(true) => "<Account><VerifiedEmail/></Account>".into(),
                     Ok(false) => "<Account/>".into(),
