@@ -94,8 +94,6 @@ async fn fatal_world_and_persistence_workers_stop_real_server_and_preserve_incid
                 "failed"
             }
         );
-        assert!(incident.fences_preserved);
-        assert!(incident.fenced_accounts.is_empty());
         assert!(
             crate::supervision::Supervisor::recovered(dir.join("incident.json"), &app.store)
                 .is_ok()
@@ -105,7 +103,7 @@ async fn fatal_world_and_persistence_workers_stop_real_server_and_preserve_incid
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn failed_shutdown_drain_releases_fences_only_after_recovery() {
+async fn failed_shutdown_drain_records_incident_and_restart_admits_the_account() {
     let (dir, app) = fixture();
     let (_owner, player, mut character) = avatar(&app, "held-shutdown").await;
     let account = character.account;
@@ -142,27 +140,15 @@ async fn failed_shutdown_drain_releases_fences_only_after_recovery() {
     let incident = app.world.supervisor.latest().unwrap().unwrap();
     assert_eq!(incident.component, "shutdown");
     assert_eq!(incident.failure, "failed");
-    assert!(incident.fences_preserved);
-    assert_eq!(incident.fenced_accounts, vec![account]);
-    assert!(app.world.supervisor.check_account(account).is_err());
     release_sql.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(5), completion)
         .await
         .unwrap()
         .unwrap()
         .unwrap();
-    assert!(app.world.supervisor.check_account(account).is_err());
     let store = crate::store::Store::open(&dir.join("game.db"), &app.content).unwrap();
     let restarted =
         crate::supervision::Supervisor::recovered(dir.join("incident.json"), &store).unwrap();
-    assert!(restarted.check_account(account).is_ok());
-    assert!(
-        restarted
-            .latest()
-            .unwrap()
-            .unwrap()
-            .fenced_accounts
-            .is_empty()
-    );
+    assert!(restarted.ensure_running().is_ok());
     std::fs::remove_dir_all(dir).unwrap();
 }

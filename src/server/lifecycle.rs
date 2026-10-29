@@ -251,7 +251,6 @@ fn finish(owners: &mut BTreeMap<i32, Claim>, id: i32) {
     if !claim.owner_present
         && !claim.pending
         && claim.avatar.is_none()
-        && claim.failure.is_none()
         && claim.control.as_ref().is_none_or(|control| {
             !control.autonomous || matches!(*control.done.borrow(), Some(Ok(())))
         })
@@ -567,7 +566,7 @@ impl App {
     pub(crate) fn try_claim(&self, id: i32) -> Result<Option<Owner>> {
         let _admission = drain::admission(self)?;
         let mut owners = self.owners.lock().expect("ownership registry poisoned");
-        self.world.supervisor.check_account(id)?;
+        self.world.supervisor.ensure_running()?;
         if owners.len() >= self.max_players {
             return Ok(None);
         }
@@ -608,7 +607,7 @@ impl App {
         Ok(owner)
     }
     pub(crate) async fn stop_persona(&self, account: i32) -> Result<()> {
-        self.world.supervisor.check_account(account)?;
+        self.world.supervisor.ensure_running()?;
         let control = {
             let mut owners = self.owners.lock().expect("ownership registry poisoned");
             match owners.get_mut(&account) {
@@ -644,7 +643,7 @@ impl App {
             }
         };
         wait_control(control).await?;
-        self.world.supervisor.check_account(account)?;
+        self.world.supervisor.ensure_running()?;
         Ok(())
     }
     pub(super) async fn kick(&self, account: i32) -> Result<bool> {
@@ -1106,33 +1105,6 @@ impl std::fmt::Display for Fenced {
     }
 }
 impl std::error::Error for Fenced {}
-
-pub(super) fn preserve_uncertain(
-    a: &App,
-    incident: &mut crate::supervision::Incident,
-) -> Result<()> {
-    let owners = a.owners.lock().map_err(|_| {
-        anyhow::anyhow!("ownership registry poisoned; restart checkpoint incomplete")
-    })?;
-    let accounts: Vec<_> = owners
-        .iter()
-        .filter(|(_, claim)| {
-            claim.pending
-                || claim.failure.is_some()
-                || claim.control.as_ref().is_some_and(|control| {
-                    control.autonomous && !matches!(*control.done.borrow(), Some(Ok(())))
-                })
-                || claim
-                    .finalization
-                    .as_ref()
-                    .is_some_and(|f| !matches!(*f.done.borrow(), Some(Ok(()))))
-        })
-        .map(|(id, _)| *id)
-        .collect();
-    a.world.supervisor.preserve_accounts(incident, &accounts)?;
-    tracing::error!(accounts=accounts.len(), incident=%incident.id, "uncertain account fences preserved before restart");
-    Ok(())
-}
 
 fn reserve(a: &App, expected: &[(i32, Arc<()>)], operation: &'static str) -> Result<Operation> {
     let mut owners = a.owners.lock().expect("ownership registry poisoned");

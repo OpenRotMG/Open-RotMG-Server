@@ -571,11 +571,9 @@ async fn critical_incident(
         return response;
     }
     match a.world.supervisor.latest() {
-        // The durable record also contains private account fences.
         Ok(incident) => Json(serde_json::json!({"incident":incident.map(|i| serde_json::json!({
             "id":i.id,"unix_ms":i.unix_ms,"process":i.process,"revision":i.revision,
             "component":i.component,"failure":i.failure,"location":i.location,"context":i.context,
-            "fences_preserved":i.fences_preserved,
         }))})).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, self::error(error)).into_response(),
     }
@@ -3286,13 +3284,10 @@ async fn supervise_serving(
     failure: &Mutex<Option<anyhow::Error>>,
     mut stop: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
-    let (result, checkpoint_attempted) = tokio::select! {
-        mut incident = a.world.supervisor.failed() => {
+    let (result, critical) = tokio::select! {
+        incident = a.world.supervisor.failed() => {
             a.shutdown.send_replace(true);
-            let critical = format!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id);
-            let checkpoint = lifecycle::preserve_uncertain(a, &mut incident)
-                .with_context(|| format!("{critical}; account-fence checkpoint failed"));
-            (checkpoint.and(Err(anyhow::anyhow!(critical))), true)
+            (Err(anyhow::anyhow!("critical {} worker {}; incident={}", incident.component, incident.failure, incident.id)), true)
         },
         result = serving => (result.map_err(anyhow::Error::from), false),
         _ = async { let _ = stop.changed().await; tokio::time::sleep(std::time::Duration::from_secs(1)).await; } => {
@@ -3301,10 +3296,10 @@ async fn supervise_serving(
     };
     let failure = failure.lock().expect("shutdown report poisoned").take();
     if let Some(error) = failure {
-        // Retrying a critical checkpoint could hide its failure and discard the incident diagnostic.
-        if checkpoint_attempted {
-            let critical = result.expect_err("critical termination cannot succeed");
-            return Err(error.context(format!("concurrent shutdown failure: {critical:#}")));
+        // A second incident would replace the original critical diagnostic.
+        if critical {
+            let cause = result.expect_err("critical termination cannot succeed");
+            return Err(error.context(format!("concurrent shutdown failure: {cause:#}")));
         }
         return failed_shutdown(a, error).await;
     }
@@ -3314,12 +3309,7 @@ async fn failed_shutdown(a: &App, error: anyhow::Error) -> Result<()> {
     a.world
         .supervisor
         .failure("shutdown", anyhow::anyhow!("{error:#}"));
-    let mut incident = a.world.supervisor.failed().await;
-    if let Err(checkpoint) = lifecycle::preserve_uncertain(a, &mut incident) {
-        return Err(error.context(format!(
-            "shutdown account-fence checkpoint failed: {checkpoint:#}"
-        )));
-    }
+    a.world.supervisor.failed().await;
     Err(error)
 }
 async fn shutdown_signal() -> Result<()> {
