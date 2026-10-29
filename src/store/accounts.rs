@@ -47,6 +47,7 @@ pub(super) fn password(value: &str) -> Result<()> {
     );
     Ok(())
 }
+// Do not infer a server TTL from local identity loss: 123.5.1 retains a GUID, not an expiry policy: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
 fn guest(db: &Connection, guid: &str, create: bool, authentication: bool) -> Result<i32> {
     let rejected = |reason: &'static str| -> anyhow::Error {
         if authentication {
