@@ -10,6 +10,7 @@ const root=()=>process.env.QA_RESULTS_DIR;
 export async function beforeNavigate({browser,signal}){
   cdp=await connect({...browser,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
   signal.addEventListener('abort',()=>cdp.close(),{once:true});
+  await cdp.call('Page.enable');
   await cdp.call('Page.addScriptToEvaluateOnNewDocument',{source:`(${networkFaults.toString()})()`});
 }
 function networkFaults(){
@@ -43,7 +44,9 @@ export async function run(game){
   const initial=await save('tutorial');
   await game.act({keys:[],duration_ms:1000},{name:'tutorial-before',when:v=>v.world==='Tutorial'&&v.game_ms>=initial.game_ms+300});
   try{
-    assert(await cdp.eval('Array.isArray(window.reconnectQA)&&window.reconnectQA.length===1'),'Expected one instrumented initial game socket');
+    const initialSockets=await cdp.eval('({installed:Object.hasOwn(window,"reconnectQA"),sockets:window.reconnectQA})');
+    await writeFile(join(root(),'initial-sockets.json'),JSON.stringify(initialSockets,null,2));
+    assert(initialSockets.installed&&initialSockets.sockets.length===1,JSON.stringify(initialSockets));
     const action=game.act({keys:['Insert'],duration_ms:3500});
     const capture=(async()=>{
       const deadline=Date.now()+10000;
