@@ -29,7 +29,7 @@ export async function prepare(api){
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const records=[];let until=0,modifiedUntil=0,scoutUntil=0,scoutModifier=0,lastTeleport=-10000,companion,companionUntil=0,peerModifier=0,cooperate=false;
+  const records=[];let until=0,modifiedUntil=0,scoutUntil=0,scoutModifier=0,lastTeleport=-10000,companion,companionUntil=0,peerModifier=0,cooperate=false,abilitySeen=false;
   const browser=config.native.find(n=>n.actor===game.actor),connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
@@ -116,7 +116,7 @@ export async function run(game){
       const [tx,ty]=next.split(',').map(Number),waypoint=next===goal?point:{x:tx+.5,y:ty+.5};
       const dx=waypoint.x-v.position.x,dy=waypoint.y-v.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
-      const distance=Math.hypot(dx,dy),speed=(4+5.6*v.character.stats[4]/75)*((v.character.conditions&8)?0.5:1);
+      const distance=Math.hypot(dx,dy),speed=(v.character.conditions&8)?4:(4+5.6*v.character.stats[4]/75)*((v.character.conditions&16384)?1.5:1);
       assert(Number.isFinite(speed)&&speed>0,'Observed movement speed must be finite and positive');
       await game.act({keys,duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000)))});
     }
@@ -127,11 +127,13 @@ export async function run(game){
     if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2){await walk(target.pos,1.5,id);if(!entity(await game.inspect(),id))return;}
     const current=entity(await game.inspect(),id);if(current?.kind===0xd50&&current.stage>=9){await save('dying');await idle(2500);return;}
     const now=(await game.observe()).game_ms;if(now>=modifiedUntil){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifiedUntil=now+60000;}
-    const input={keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}};
+    const input={keys:[' '],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}};
     if(cooperate&&target.kind===0xd50){
       if(now>=peerModifier){await api({op:'cheat',actor:companion.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});peerModifier=now+60000;}
       await game.act([[{actor:game.actor,input},{actor:companion.actor,input}]]);
     }else await game.act(input);
+    const flags=(await game.observe()).character.conditions;
+    abilitySeen||=!!(flags&524288)&&!!(flags&16384);
   }
   const initial=await save('before-admission');
   game.check('startup reserves one Lord outside active indexes',reserved.length===1);
@@ -164,6 +166,7 @@ export async function run(game){
   for(let n=0;n<8&&(entity(await game.inspect(),lord.id).damage[initial.view.session.character]??0)<=700;n++)await fire(lord.id,500);
   await idle(4000);
   let state=await save('activated');
+  game.check('native helm spends MP and applies Berserk and Speedy',abilitySeen&&state.view.character.mp<initial.view.character.mp);
   const family=s=>s.diagnostic.entities.filter(e=>e.quest===lord.id),crystals=s=>family(s).filter(e=>e.kind===0xd51);
   game.check('native damage activates Lord and summons Guardians and Knights',entity(state,lord.id).hp<69300&&[0xd52,0xd53].every(k=>family(state).some(e=>e.kind===k)));
   const samples=[];let pending,error;
