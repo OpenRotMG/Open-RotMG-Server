@@ -39,8 +39,7 @@ export async function run(game){
   // Slowed returns before Speedy, but still multiplies terrain: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as
   const slow=await measure('slowed-overrides-speedy',4);
   game.check('Slowed remains active throughout measured movement',has(slow,4)&&has(slow,15));
-  const boosted=[...fixture.stats];boosted[4]=70;
-  await prepare({kind:'stats',values:boosted});await game.act({keys:[],duration_ms:150});
+  await prepare({kind:'stat_modifier',index:4,amount:20,duration_ms:60000});await game.act({keys:[],duration_ms:150});
   const stat=await measure('slowed-overrides-speed-stat',4);
   game.check('prepared Speed change does not remove either condition',has(stat,4)&&has(stat,15));
   await game.act({keys:['1'],duration_ms:250});

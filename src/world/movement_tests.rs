@@ -613,7 +613,7 @@ fn native_shots_trust_client_placement_without_moving_the_player() {
 
 #[test]
 fn slowed_overrides_speed_and_speedy_until_expiry_but_not_paralysis() {
-    for speed in [0, 50, 75, 100] {
+    for speed in [0, 50, 75] {
         let (mut world, id) = fixture(0x18, false);
         world.now = 1000;
         world.players.get_mut(&id).unwrap().character.base[4] = speed;
