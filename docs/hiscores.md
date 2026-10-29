@@ -12,7 +12,7 @@ Discord `/kick` resolves only the actual caller's linked, registered account. It
 
 ## Password recovery
 
-Native **Forgot password** emails private 15-minute, single-use reset links when configured; acknowledgements confirm neither account existence nor delivery. Linked accounts also have Discord `/recover`. Enter the new password only on the website. In-game `/discord norecovery` revokes recovery and outstanding grants; `/link` can enable it again. Protect the linked Discord account: it can reset the game password.
+Native **Forgot password** emails private 15-minute, single-use reset links when configured; acknowledgements confirm neither account existence nor delivery. Linked accounts also have Discord `/recover`. Enter the new password only on the website. In-game `/discord norecovery` revokes Discord recovery and its outstanding grants; `/link` can enable it again. Protect the linked Discord account: it can reset the game password.
 
 Reset links use a 256-bit fragment token, erased from browser history on load; only its SHA-256 hash is stored. No token is sent in request URLs or logged. Only the latest link is valid, with one issuance/minute/account. Password validation and Argon2 hashing match native registration. Reset fences authentication through session ownership claims, saves/disconnects the active session, then atomically replaces the verifier and consumes reset secrets. Failed save, expired grant or revoked permission cannot change the password. Email tokens bind to the registered address; successful reset verifies it. No unlinking, moderation or guest/name recovery is provided.
 
