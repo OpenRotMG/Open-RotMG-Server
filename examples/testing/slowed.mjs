@@ -53,7 +53,7 @@ export async function run(game){
   game.check('Slowed and Speedy expire without cure away from new hits',!has(expired,4)&&!has(expired,15));
   await measure('expired-normal-floor',4+5.6*70/75);
   await web();
-  await game.act({keys:['r'],duration_ms:500});
+  await game.act({keys:['Insert'],duration_ms:500});
   for(let n=0;n<8&&(await game.observe()).world!=='Nexus';n++)await game.act({keys:[],duration_ms:500});
   const nexus=await save('nexus');
   game.check('ordinary Nexus escape clears transient Slowed on the same living character',nexus.map.name==='Nexus'&&!has(nexus,4)&&nexus.lifecycle.alive&&nexus.session.character===initial.session.character);
