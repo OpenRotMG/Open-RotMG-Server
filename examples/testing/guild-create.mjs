@@ -52,9 +52,9 @@ export async function run(game) {
     records.push({label,members:await members(),wallets:await Promise.all(accounts.map(wallet)),states:await Promise.all([game.inspect(),peer.inspect()])});
     await writeFile(join(root,'guild-create.json'),JSON.stringify({fixtureLimits:'Prepared personal Fame wallets (3000/0) and living class Fame20; no earned-progression, capacity50 or historical-normalization acceptance.',records},null,2));
   }
-  async function ui(player,index,name,work) {
+  async function ui(player,index,name,work,capture=true) {
     const c=clients[index],log=join(root,'controller.stderr'),offset=(await readFile(log,'utf8')).length;let finished=false;
-    const action=player.act({keys:[],duration_ms:5000},{name,when:()=>finished});
+    const action=player.act({keys:[],duration_ms:5000},capture?{name,when:()=>finished}:undefined);
     const input=(async()=>{
       const deadline=Date.now()+10000;
       while(true) {
@@ -68,7 +68,7 @@ export async function run(game) {
     await record(name);
   }
   async function chat(player,index,text) {
-    await ui(player,index,'command-'+records.length,async c=>{await key(c,'Enter','Enter',13);await c.call('Input.insertText',{text});await key(c,'Enter','Enter',13);});
+    await ui(player,index,'command-'+records.length,async c=>{await key(c,'Enter','Enter',13);await c.call('Input.insertText',{text});await key(c,'Enter','Enter',13);},false);
   }
   async function walk(player,x,y) {
     const start=await player.observe(),response=await fetch(config.origin+'/dev/map?player='+start.session.player,{headers});assert(response.ok,'Owned test map read: '+response.status);
@@ -156,6 +156,7 @@ export async function run(game) {
   await rejected('You have not been invited to that guild.');
   game.check('joining without an invitation refuses',(await members()).length===1);
   await chat(game,0,'/invite GuildGuest');
+  await ui(peer,1,'guild-invitation',async()=>{});
   await ui(peer,1,'invitation-rejected',c=>click(c,650,580));
   game.check('rejecting the native invite does not join or spend Fame',(await members()).length===1&&JSON.stringify(await wallet(accounts[1]))==='[[0,0]]');
   await chat(game,0,'/invite GuildGuest');
@@ -173,7 +174,7 @@ export async function run(game) {
     game.check('ordinary reconnect preserves living account and character '+index,s.world==='Nexus'&&s.lifecycle.alive&&s.session.account===initial[index].session.account&&s.session.character===initial[index].session.character);
   }
   game.check('reconnect preserves both memberships and exact wallets',(await members()).length===2&&JSON.stringify(await Promise.all(accounts.map(wallet)))==='[[[2000,3000]],[[0,0]]]');
-  await chat(peer,1,'/g Joined and reconnected');
+  await game.act({keys:[],duration_ms:5000});
   await ui(game,0,'guild-reconnected-founder',async()=>{});await ui(peer,1,'guild-reconnected-initiate',async()=>{});
   await record('final');
 }
