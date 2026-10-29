@@ -9,6 +9,7 @@ import {connect} from '../../scripts/record-demo.mjs';
 
 const out=()=>join(process.env.QA_RESULTS_DIR,'native');
 let c,api,entered=0;
+const actors=[];
 const exec=promisify(execFile);
 async function db(sql,params=[]){const {stdout}=await exec('python3',['-c','import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); r=c.execute(sys.argv[2],json.loads(sys.argv[3])); rows=r.fetchall(); c.commit(); print(json.dumps(rows))',join(out(),'state/game.db'),sql,JSON.stringify(params)]);return JSON.parse(stdout);}
 export const fixture={class:0x30e,level:20,seed:931,world:-2,position:{x:109.5,y:42.5},equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:null};
@@ -16,7 +17,7 @@ export async function enter({browser,signal,actor,account}){
   const {origin}=JSON.parse(await readFile(join(out(),'result.json'),'utf8'));
   const token=(await readFile(join(out(),'state/control.token'),'utf8')).trim();
   api=async command=>{const r=await fetch(origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok,JSON.stringify(s));if(command.op==='native_state'){assert(Array.isArray(s.actors)&&typeof s.runtime==='string',JSON.stringify(s));return s;}assert(s.status==='succeeded',JSON.stringify(s));return s.result;};
-  const name=['PrefsAlpha','PrefsBeta'][entered++];assert(name,'Only two owned starting accounts');
+  const name=['PrefsAlpha','PrefsBeta'][entered++];assert(name,'Only two owned starting accounts');actors.push(actor);
   await db('UPDATE accounts SET name=? WHERE id=?',[name,account]);
   await db("UPDATE characters SET stats=json_set(stats,'$.fame',20) WHERE account=?",[account]);
   c=await connect({...browser,url:origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
@@ -24,7 +25,7 @@ export async function enter({browser,signal,actor,account}){
   await c.call('Emulation.setFocusEmulationEnabled',{enabled:true});
   await c.eval('(()=>{const m=document.querySelector("ruffle-player").shadowRoot.querySelector("#hardware-acceleration-modal");if(m&&!m.classList.contains("hidden"))m.querySelector(".close-modal").click();})()');
   const deadline=Date.now()+30000;
-  while((await api({op:'native_state',actors:[actor]})).actors[0].stage!=='ready'){assert(Date.now()<deadline,'Normal menu did not load the owned character');await click(400,550);await delay(250);}
+  while((await api({op:'native_state',actors})).actors.find(a=>a.actor===actor).stage!=='ready'){assert(Date.now()<deadline,'Normal menu did not load the owned character');await click(400,550);await delay(250);}
 }
 async function click(x,y){
   const r=await c.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};})()');
