@@ -4,8 +4,8 @@ use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
 use super::prepare::{
-    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD05_ID, WORLD09_ID, WORLD11_ID, bounded_read,
-    read_recipe, safe_path, valid_hash, valid_id,
+    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD04_ID, WORLD05_ID, WORLD09_ID, WORLD11_ID,
+    bounded_read, read_recipe, safe_path, valid_hash, valid_id,
 };
 use serde::Deserialize;
 
@@ -42,7 +42,7 @@ impl Asset {
             ensure!(
                 !matches!(
                     self.id.as_str(),
-                    WORLD02_ID | WORLD03_ID | WORLD05_ID | WORLD09_ID | WORLD11_ID
+                    WORLD02_ID | WORLD03_ID | WORLD04_ID | WORLD05_ID | WORLD09_ID | WORLD11_ID
                 ) || !map.cells.iter().any(|c| c.ground == 244),
                 "{} requires its source-exact lava capability {phase}",
                 self.contract
@@ -105,13 +105,19 @@ impl Source {
             .iter()
             .filter(|site| site.kind == 0x91f)
             .count();
-        if asset.id == WORLD09_ID {
-            // Keep the fourteen intact pictured Groves, not a clipped strip or invented extra circles.
+        let census = match asset.id.as_str() {
+            WORLD04_ID => Some((21, 6, 16, 1, 44)),
+            WORLD09_ID => Some((14, 3, 16, 0, 33)),
+            _ => None,
+        };
+        if let Some((ents, liches, coils, oases, total)) = census {
+            // Clipped fragments remain scenery instead of inflating the complete-landmark census.
             ensure!(
-                groves == 14
-                    && record.sites.len() == 33
-                    && record.sites.iter().filter(|s| s.kind == 0x91b).count() == 3
-                    && record.sites.iter().filter(|s| s.kind == 0xdc2).count() == 16,
+                groves == ents
+                    && record.sites.len() == total
+                    && record.sites.iter().filter(|s| s.kind == 0x91b).count() == liches
+                    && record.sites.iter().filter(|s| s.kind == 0xdc2).count() == coils
+                    && record.sites.iter().filter(|s| s.kind == 0x678).count() == oases,
                 "{} has invalid authored encounter census",
                 asset.id
             );
@@ -217,7 +223,10 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                         sha256,
                     } => {
                         ensure!(
-                            !matches!(id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID),
+                            !matches!(
+                                id.as_str(),
+                                WORLD04_ID | WORLD05_ID | WORLD09_ID | WORLD11_ID
+                            ),
                             "{id} requires its reviewed source recipe"
                         );
                         let contract = format!("{id} fsod baseline");

@@ -1120,6 +1120,7 @@ mod tests {
                 "classic-world-01-reconstruction" => [5, 7, 8, 6],
                 "classic-world-02-reconstruction" => [1, 6, 0, 8],
                 "classic-world-03-reconstruction" => [4, 3, 0, 6],
+                "classic-world-04-reconstruction" => [0, 0, 1, 0],
                 "classic-world-09-reconstruction" => [0; 4],
                 "realm-fsod-1" | "realm-fsod-2" | "realm-fsod-3" => [0; 4],
                 name => panic!("unreviewed authored-site roster {name}"),
@@ -1150,7 +1151,7 @@ mod tests {
             assert_eq!(
                 authored_liches,
                 match source.name() {
-                    "classic-world-01-reconstruction" => 6,
+                    "classic-world-01-reconstruction" | "classic-world-04-reconstruction" => 6,
                     "classic-world-09-reconstruction" => 3,
                     _ => 0,
                 }
@@ -1178,7 +1179,10 @@ mod tests {
             world.populate_coil_snakes(&sites).unwrap();
             assert_eq!(
                 world.actors().filter(|e| e.kind == 0xdc2).count(),
-                if source.name() == "classic-world-09-reconstruction" {
+                if matches!(
+                    source.name(),
+                    "classic-world-04-reconstruction" | "classic-world-09-reconstruction"
+                ) {
                     16
                 } else {
                     2
@@ -1217,11 +1221,12 @@ mod tests {
 
     #[test]
     fn full_population_preserves_classic_landmarks_lava_and_routes() {
-        for (name, lava_count, groves, coils, liches) in [
-            ("classic-world-01-reconstruction", 703, 19, 2, 6..=6),
-            ("classic-world-02-reconstruction", 864, 24, 2, 4..=6),
-            ("classic-world-03-reconstruction", 629, 21, 2, 4..=6),
-            ("classic-world-09-reconstruction", 426, 14, 16, 4..=6),
+        for (name, side, lava_count, groves, coils, liches) in [
+            ("classic-world-01-reconstruction", 2100, 703, 19, 2, 6..=6),
+            ("classic-world-02-reconstruction", 2100, 864, 24, 2, 4..=6),
+            ("classic-world-03-reconstruction", 2100, 629, 21, 2, 4..=6),
+            ("classic-world-04-reconstruction", 2000, 506, 21, 16, 6..=6),
+            ("classic-world-09-reconstruction", 2100, 426, 14, 16, 4..=6),
         ] {
             let path = std::path::Path::new("data");
             let content = Arc::new(Content::load(path).unwrap());
@@ -1250,7 +1255,7 @@ mod tests {
             for id in [-3, 1] {
                 let world = &directory.worlds[&id];
                 assert_eq!(world.realm_layout.as_deref(), Some(name));
-                assert_eq!((world.map.width, world.map.height), (2100, 2100));
+                assert_eq!((world.map.width, world.map.height), (side, side));
                 assert_eq!(world.map.spawns.len(), 4);
                 assert_eq!(world.actors().filter(|e| e.kind == 0x91f).count(), groves);
                 assert_eq!(world.actors().filter(|e| e.kind == 0xdc2).count(), coils);
@@ -1314,7 +1319,8 @@ mod tests {
                     let (a, b) = (&original.cells[*i], &world.map.cells[*i]);
                     assert_eq!(
                         (a.ground, a.object, &a.config, a.terrain, a.region),
-                        (b.ground, b.object, &b.config, b.terrain, b.region)
+                        (b.ground, b.object, &b.config, b.terrain, b.region),
+                        "{name} Realm {id} changed lava cell {i}"
                     );
                 }
                 for site in &sites {
@@ -1325,7 +1331,8 @@ mod tests {
                             let (a, b) = (&original.cells[i], &world.map.cells[i]);
                             assert_eq!(
                                 (a.ground, a.object, &a.config, a.terrain, a.region),
-                                (b.ground, b.object, &b.config, b.terrain, b.region)
+                                (b.ground, b.object, &b.config, b.terrain, b.region),
+                                "{name} Realm {id} changed landmark cell {xx},{yy}"
                             );
                         }
                     }
