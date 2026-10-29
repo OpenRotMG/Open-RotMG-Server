@@ -20,11 +20,7 @@ const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 10] = [
         "d0a544f4943991aa1265b7ebdfecb3a846215f297c1317ffb718ddd89e8d92bc",
         2000,
     ),
-    (
-        "classic-world-10-reconstruction",
-        "d7f3b0d274f4f6b0cf6093a336b8adbfaf322e9ce6d07c970b3219a8d24afd48",
-        2000,
-    ),
+    (WORLD10_ID, WORLD10_SOURCE, 2000),
     (
         "classic-world-13-reconstruction",
         "15cb5c88982275f3e72d4dc0bc9fb940177662013cacd6b76c1b95aeca46ecd1",
@@ -77,7 +73,11 @@ fn source_local_transform(dimensions: [usize; 2]) -> serde_json::Value {
 
 impl ReviewedRecipe {
     fn strict_source(&self) -> bool {
-        self.schema == 4 || matches!(self.id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID)
+        self.schema == 4
+            || matches!(
+                self.id.as_str(),
+                WORLD05_ID | WORLD09_ID | WORLD10_ID | WORLD11_ID
+            )
     }
     fn dimensions(&self) -> Result<[usize; 2]> {
         let source = SOURCE_LOCAL_IDENTITIES
@@ -182,6 +182,11 @@ const WORLD09_SOURCE: &str = "726aa16890f7caaa73dc642b64901e94ed4f44cb974e5001c9
 const WORLD09_LAVA_SUPPORT: &str =
     "e1c603f40768fb8d49b945863f65d565bc944b5d2b68080cfa28ac45e0bab257";
 
+pub(super) const WORLD10_ID: &str = "classic-world-10-reconstruction";
+const WORLD10_SOURCE: &str = "d7f3b0d274f4f6b0cf6093a336b8adbfaf322e9ce6d07c970b3219a8d24afd48";
+const WORLD10_LAVA_SUPPORT: &str =
+    "b68a73b06383ce9fdf56850416cf20311f93110794a12d36fd7a34839b8eec28";
+
 pub(super) const WORLD11_ID: &str = "classic-world-11-reconstruction";
 const WORLD11_SOURCE: &str = "3d3b93937ca405b4f9ce1e28d11694d2f92654acd6a4b7a11cea6f65976bcb20";
 const WORLD11_LAVA_SUPPORT: &str =
@@ -235,6 +240,7 @@ impl ScopedLava {
         let world04 = policy.get("world04_lava").is_some();
         let world05 = policy.get("world05_lava").is_some();
         let world09 = policy.get("world09_lava").is_some();
+        let world10 = policy.get("world10_lava").is_some();
         let world11 = policy.get("world11_lava").is_some();
         ensure!(
             u8::from(world01)
@@ -242,6 +248,7 @@ impl ScopedLava {
                 + u8::from(world04)
                 + u8::from(world05)
                 + u8::from(world09)
+                + u8::from(world10)
                 + u8::from(world11)
                 <= 1,
             "mixed Realm lava scopes"
@@ -348,6 +355,23 @@ impl ScopedLava {
                 "world09_lava",
                 3,
                 source_local_transform([2100, 2100]),
+            )
+        } else if world10 {
+            (
+                Self {
+                    world: 10,
+                    terrain: 0,
+                    side: 2000,
+                    source_side: 2000,
+                    offset: 0,
+                    pixels: 460,
+                    support: WORLD10_LAVA_SUPPORT,
+                },
+                WORLD10_ID,
+                WORLD10_SOURCE,
+                "world10_lava",
+                3,
+                source_local_transform([2000, 2000]),
             )
         } else if world11 {
             (
@@ -625,7 +649,7 @@ impl Recipe {
             }
             Self::ClassicV1(r) => {
                 ensure!(
-                    !matches!(r.id.as_str(), WORLD09_ID | WORLD11_ID),
+                    !matches!(r.id.as_str(), WORLD09_ID | WORLD10_ID | WORLD11_ID),
                     "{} requires its reviewed source recipe",
                     r.id
                 );
@@ -1356,7 +1380,10 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
     ensure!(
         recipe.schema == 4
             || (recipe.schema == 3
-                && matches!(recipe.id.as_str(), WORLD05_ID | WORLD09_ID | WORLD11_ID)),
+                && matches!(
+                    recipe.id.as_str(),
+                    WORLD05_ID | WORLD09_ID | WORLD10_ID | WORLD11_ID
+                )),
         "strict source audit requires an admitted source identity"
     );
     let _: UniqueJson = serde_json::from_slice(policy).context("strict-source policy keys")?;
@@ -1395,14 +1422,19 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
             "World9 requires its exact426-cell lava capability"
         );
     }
-    if recipe.id == WORLD11_ID && policy.get("world11_lava").is_some() {
-        keys.push("world11_lava");
-        let mut choice = lava_choice(577, WORLD11_LAVA_SUPPORT);
-        choice["cell"]["terrain"] = 0.into();
-        ensure!(
-            policy["world11_lava"] == choice,
-            "World11 requires its exact577-cell terrain0 lava capability"
-        );
+    for (id, key, pixels, support) in [
+        (WORLD10_ID, "world10_lava", 460, WORLD10_LAVA_SUPPORT),
+        (WORLD11_ID, "world11_lava", 577, WORLD11_LAVA_SUPPORT),
+    ] {
+        if recipe.id == id && policy.get(key).is_some() {
+            keys.push(key);
+            let mut choice = lava_choice(pixels, support);
+            choice["cell"]["terrain"] = 0.into();
+            ensure!(
+                policy[key] == choice,
+                "{id} requires its exact{pixels}-cell terrain0 lava capability"
+            );
+        }
     }
     strict_keys(&policy, &keys, "policy")?;
     strict_keys(
@@ -1758,6 +1790,7 @@ fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
         "world03.json",
         "world04.json",
         "world05.json",
+        "world10.json",
         "world11.json",
     ] {
         let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, name)? else {
