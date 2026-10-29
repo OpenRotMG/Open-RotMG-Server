@@ -20,7 +20,7 @@ export async function enter({browser,signal,actor,account}){
   await db('UPDATE accounts SET name=? WHERE id=?',[name,account]);
   await db("UPDATE characters SET stats=json_set(stats,'$.fame',20) WHERE account=?",[account]);
   c=await connect({...browser,url:origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
-  signal.addEventListener('abort',()=>c.close(),{once:true});
+  const connection=c;signal.addEventListener('abort',()=>connection.close(),{once:true});
   await c.call('Emulation.setFocusEmulationEnabled',{enabled:true});
   await c.eval('(()=>{const m=document.querySelector("ruffle-player").shadowRoot.querySelector("#hardware-acceleration-modal");if(m&&!m.classList.contains("hidden"))m.querySelector(".close-modal").click();})()');
   const deadline=Date.now()+30000;
@@ -83,11 +83,13 @@ export async function run(game){
   game.check('same-profile reload retains the same living account character and inventory',reloaded.view.lifecycle.alive&&reloaded.view.session.account===before.view.session.account&&reloaded.view.session.character===before.view.session.character&&JSON.stringify(reloaded.view.character.items)===JSON.stringify(before.view.character.items));
   await key('o');await button('graphics-after-reload',365,83);await shot('graphics-after-reload');
   await key('o');await save('after-reload');
-  const main=c,peer=await game.join({...fixture,seed:932,position:{x:110.5,y:42.5}}),peerC=c;c=main;
+  await game.act({keys:['Insert'],duration_ms:1200});await game.act({keys:[],duration_ms:700});
+  const home=await game.observe();game.check('reloaded character can return to Nexus for nearby requests',home.world==='Nexus');
+  const main=c,peer=await game.join({...fixture,seed:932,world:home.session.world,position:home.position}),peerC=c;c=main;
   Object.assign(config,JSON.parse(await readFile(join(out(),'native.json'),'utf8')));
   const chat=(connection,text)=>ui(text,async()=>{const previous=c;c=connection;try{await press('Enter','Enter',13);await c.call('Input.insertText',{text});await press('Enter','Enter',13);}finally{c=previous;}});
   const members=()=>db('SELECT a.name,g.name,m.rank FROM guild_members m JOIN accounts a ON a.id=m.account JOIN guilds g ON g.id=m.guild ORDER BY a.id');
-  const starts=async()=>((await readFile(join(out(),'state/server.log'),'utf8')).match(/native trade started/g)||[]).length;
+  const starts=async()=>[...(await readFile(join(out(),'state/server.log'),'utf8')).matchAll(/native trade started/g)].length;
   const inventories=await Promise.all([game.inspect(),peer.inspect()]);
   await api({op:'cheat',actor:peer.actor,change:{kind:'guild',name:'Display Guild',members:[]}});
   await game.act({keys:[],duration_ms:700});
