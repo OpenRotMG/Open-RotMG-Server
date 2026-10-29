@@ -43,6 +43,7 @@ with sqlite3.connect(sys.argv[1]) as db:
   await walk(peer,{x:76.5,y:77.5});await peer.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
   await capture(peer,'hall-nonmember-refused');
   game.check('nonmember portal refuses entry without reconnect',(await peer.observe()).world==='Nexus');
+  await walk(peer,{x:76.5,y:75.5});
   await api({op:'cheat',actor:game.actor,change:{kind:'guild',name:'Hall Research',members:[peer.actor]}});await game.act({keys:[],duration_ms:1000});
   await portal(game,0x72f,'Guild Hall');const first=await save('founder-arrived');
   await portal(peer,0x72f,'Guild Hall');await save('peer-arrived',peer);await game.act({keys:[],duration_ms:700});
