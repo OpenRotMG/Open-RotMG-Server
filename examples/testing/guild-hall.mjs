@@ -37,12 +37,12 @@ with sqlite3.connect(sys.argv[1]) as db:
   async function walk(g,p){for(let n=0;n<100;n++){const v=await g.observe(),dx=p.x-v.position.x,dy=p.y-v.position.y,d=Math.hypot(dx,dy);if(d<.9)return;const x=dx-dy,y=dx+dy,keys=[];if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');await g.act({keys,duration_ms:Math.min(350,Math.max(150,Math.round(d*100)))});}assert.fail('Native hall walk failed '+JSON.stringify({target:p,actual:(await g.observe()).position}));}
   async function portal(g,kind,world){const before=await g.observe(),e=(await g.inspect()).diagnostic.entities.find(e=>e.kind===kind);assert(e,'Portal not visible '+kind);await walk(g,e.pos);await g.act({keys:[],mouse:{x:700,y:575},duration_ms:700});for(let i=0;i<10&&(await g.observe()).session.world===before.session.world;i++)await g.act({keys:[],duration_ms:500});assert.equal((await g.observe()).world,world);}
   async function nexus(g){await g.act({keys:['Insert'],duration_ms:700});for(let i=0;i<10&&(await g.observe()).world!=='Nexus';i++)await g.act({keys:[],duration_ms:500});assert.equal((await g.observe()).world,'Nexus');}
-  const peer=await game.join({...fixture,seed:917}),outsider=await game.join({...fixture,seed:918});
+  const peer=await game.join({...fixture,seed:917});
   const initial=await save('initial'),peerInitial=await save('peer-initial',peer);
   await game.act({keys:[],duration_ms:1000});
-  await walk(outsider,{x:76.5,y:77.5});await outsider.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
-  await capture(outsider,'hall-nonmember-refused');
-  game.check('nonmember portal refuses entry without reconnect',(await outsider.observe()).world==='Nexus');
+  await walk(peer,{x:76.5,y:77.5});await peer.act({keys:[],mouse:{x:700,y:575},duration_ms:700});
+  await capture(peer,'hall-nonmember-refused');
+  game.check('nonmember portal refuses entry without reconnect',(await peer.observe()).world==='Nexus');
   await api({op:'cheat',actor:game.actor,change:{kind:'guild',name:'Hall Research',members:[peer.actor]}});await game.act({keys:[],duration_ms:1000});
   await portal(game,0x72f,'Guild Hall');const first=await save('founder-arrived');
   await portal(peer,0x72f,'Guild Hall');await save('peer-arrived',peer);await game.act({keys:[],duration_ms:700});
