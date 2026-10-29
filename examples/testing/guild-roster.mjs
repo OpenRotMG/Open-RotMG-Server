@@ -9,14 +9,17 @@ const clients=[];
 export async function beforeNavigate({browser,signal}){
   const client={rosters:[],pending:new Set()};
   const connection=await connect({...browser,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs'),onEvent:event=>{
-    if(event.method==='Network.requestWillBeSent'&&event.params.request.url.endsWith('/guild/listMembers'))client.form=new URLSearchParams(event.params.request.postData);
+    if(event.method==='Network.requestWillBeSent'&&event.params.request.url.endsWith('/guild/listMembers')){
+      if(typeof event.params.request.postData!=='string')client.error=Error('Roster request body missing from CDP capture');
+      else client.form=new URLSearchParams(event.params.request.postData);
+    }
     if(event.method==='Network.responseReceived'&&event.params.response.url.endsWith('/guild/listMembers'))client.pending.add(event.params.requestId);
     if(event.method==='Network.loadingFinished'&&client.pending.delete(event.params.requestId)){
       connection.call('Network.getResponseBody',{requestId:event.params.requestId}).then(r=>client.rosters.push(r.base64Encoded?Buffer.from(r.body,'base64').toString():r.body)).catch(e=>{client.error=e;});
     }
   }});
   client.connection=connection;
-  await connection.call('Network.enable');signal.addEventListener('abort',()=>connection.close(),{once:true});clients.push(client);
+  await connection.call('Network.enable',{maxPostDataSize:4096});signal.addEventListener('abort',()=>connection.close(),{once:true});clients.push(client);
 }
 export async function run(game){
   const out=process.env.QA_RESULTS_DIR,root=join(out,'native');
@@ -27,7 +30,7 @@ export async function run(game){
   const records=[];
   async function record(label){
     for(const c of clients)if(c.error)throw c.error;
-    records.push({label,states:await Promise.all([game.inspect(),peer.inspect()]),rosters:clients.map(c=>[...c.rosters])});
+    records.push({label,states:await Promise.all([game.inspect(),peer.inspect()]),requests:clients.map(c=>c.form?{num:c.form.get('num'),offset:c.form.get('offset')}:null),rosters:clients.map(c=>[...c.rosters])});
     await writeFile(join(out,'guild-roster-observations.json'),JSON.stringify(records,null,2));
   }
   async function click(player,x,y){await player.act({keys:[],mouse:{x,y},duration_ms:400});await player.act({keys:[],duration_ms:400});}
@@ -38,7 +41,7 @@ export async function run(game){
       if(distance<.18)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');
-      await player.act({keys,duration_ms:Math.min(300,Math.max(50,Math.round(distance*80)))});
+      await player.act({keys,duration_ms:Math.min(900,Math.max(50,Math.round(distance*180)))});
     }
     throw Error('Native walk did not reach Chronicle');
   }
