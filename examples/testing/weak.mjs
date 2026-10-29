@@ -47,7 +47,7 @@ export async function run(game){
   await game.act({keys:[],duration_ms:500});
   const ability=await save('weak-quiver'),abilityShots=(await shots()).slice(offset);
   game.check('Weak quiver retains unscaled 100–139 damage and spends mana',abilityShots.length===1&&abilityShots[0].damage>=100&&abilityShots[0].damage<=139&&ability.view.character.mp<mana);
-  game.check('quiver actually damages the boss while Weak',hp(ability)<hp(beforeAbility)&&Boolean(ability.view.character.conditions&weak));
+  game.check('quiver actually damages the boss while Weak',hp(beforeAbility)-hp(ability)>=abilityShots[0].damage-4&&Boolean(ability.view.character.conditions&weak));
   const revision=ability.view.character.inventory_revision;
   await game.act({keys:['1'],duration_ms:200});
   const cured=await save('cured');
