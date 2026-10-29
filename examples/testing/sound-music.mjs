@@ -10,6 +10,7 @@ const results=[];
 export async function beforeNavigate({browser,signal}) {
   c=await connect({port:browser.port,target:browser.target,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
   signal.addEventListener('abort',()=>c.close(),{once:true});
+  await c.call('Page.enable');
   // Successful requests cannot prove playback through saved mute settings: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf
   await c.call('Page.addScriptToEvaluateOnNewDocument',{source:`(()=>{
     const connect=AudioNode.prototype.connect,outputs=new Map(),since=new Map();
