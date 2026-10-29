@@ -7,7 +7,7 @@ import {randomBytes,createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
 export const fixture={class:0x30e,level:20,seed:923,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:null};
-const exec=promisify(execFile),email='recovery@example.invalid',old=randomBytes(16).toString('hex'),password=randomBytes(16).toString('hex');
+const exec=promisify(execFile),email='recovery@example.test',old=randomBytes(16).toString('hex'),password=randomBytes(16).toString('hex');
 let cdp,browserReceipt,origin,listRequest,lists=0,registration,registered=false,verified=false;
 const checks=[];
 function check(name,value){assert(value,name);checks.push(name);}
