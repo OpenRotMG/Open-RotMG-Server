@@ -102,7 +102,7 @@ export async function run(game){
   async function aimState(id){
     const s=await game.inspect(),target=entity(s,id),shots=s.diagnostic.own_projectiles;
     // Let already-fired bow shots resolve before rebinding a crystal they can finish.
-    const ceiling=500*(.5+(spec.stats[2]+2+100)/50)*1.5;
+    const ceiling=500*(.5+(spec.stats[2]+100)/50)*1.5;
     if(target?.kind===0xd51&&shots.length&&target.hp<=shots.length*ceiling){
       const wait=Math.max(...shots.map(p=>p.born+553))-s.view.time_ms;assert(wait>0&&wait<=553,'Pending bow lifetime must fit the selected 503ms projectile plus one tick');
       await idle(wait);return game.inspect();
