@@ -114,7 +114,7 @@ export async function run(game){
   const peerPlayer=(await peer.observe()).session.player;
   async function bubble(text,name){
     await chat(peerC,text);await shot(name);
-    const events=(await readFile(join(out(),'state/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l)).filter(r=>r.fields.message==='public chat delivered'&&r.fields.player===peerPlayer);
+    const events=(await readFile(join(out(),'state/server.log'),'utf8')).split('\n').slice(0,-1).filter(l=>l.startsWith('{')).map(l=>JSON.parse(l)).filter(r=>r.fields.message==='public chat delivered'&&r.fields.player===peerPlayer);
     game.check(name+' reaches both nearby native participants',events.at(-1).fields.recipients===2&&events.at(-1).fields.bytes===Buffer.byteLength(text));
   }
   await bubble('Display bubbles are hidden','bubbles-off-chat-visible');
