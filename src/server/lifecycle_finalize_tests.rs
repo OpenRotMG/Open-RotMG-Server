@@ -482,3 +482,42 @@ async fn dropped_connection_names_its_cause_across_restarts() {
     drop(socket);
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn failed_native_command_does_not_fail_shutdown() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let (port, server) = socket_server(&a).await;
+    let account = a.store.list("failed-command".into()).await.unwrap().id;
+    let ch = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    let id = socket_load(&mut socket, &dir, "failed-command", ch.id).await;
+    let pos = a
+        .world
+        .for_player(id)
+        .call(move |w| Ok(w.regress_native_ingress_for_test(id)))
+        .await
+        .unwrap();
+    let mut body = Writer::new();
+    body.i32(0).i32(1).f32(pos.x).f32(pos.y).i16(0);
+    socket
+        .send(Packet {
+            id: wire::MOVE,
+            body: body.0,
+        })
+        .await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    lifecycle::drain::prepare(&a);
+    a.shutdown.send_replace(true);
+    tokio::time::timeout(Duration::from_secs(20), lifecycle::drain::terminate(&a))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(a.world.supervisor.check_account(account).is_ok());
+    drop(socket);
+    server.abort();
+}

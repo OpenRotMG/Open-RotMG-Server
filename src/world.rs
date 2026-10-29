@@ -4215,6 +4215,13 @@ impl World {
             }
         })
     }
+    #[cfg(test)]
+    pub(crate) fn regress_native_ingress_for_test(&mut self, id: i32) -> Pos {
+        let p = self.players.get_mut(&id).unwrap();
+        p.last_move_at = u64::MAX;
+        p.tick = p.tick.max(1);
+        p.pos
+    }
     pub fn walkable(&self, pos: Pos) -> bool {
         let Some(c) = self.map.cell(pos.x, pos.y) else {
             return false;

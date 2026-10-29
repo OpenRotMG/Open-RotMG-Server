@@ -34,6 +34,32 @@ class UpdateTest(unittest.TestCase):
                     update.install_helper(source)
                 self.assertEqual(installed.read_text(), 'new = 2\n')
 
+    def test_failed_cutover_restarts_the_previous_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            live, old = root / 'server', root / 'server-stage-old'
+            live.mkdir()
+            (live / 'REVISION').write_text('new\n')
+            (root / 'previous-server-path').write_text(str(old) + '\n')
+            calls = []
+            def swap(a, b):
+                calls.append(('exchange', a, b))
+                (live / 'REVISION').write_text('old\n')
+            stopped = unittest.mock.MagicMock(returncode=3)
+            with patch.object(update, 'LIVE', live), patch.object(update, 'exchange', side_effect=swap), \
+                    patch.object(update.subprocess, 'run', return_value=stopped), \
+                    patch.object(update, 'run', side_effect=lambda *a: calls.append(a)), \
+                    patch.object(update, 'ready', side_effect=lambda port: calls.append(('ready', port))), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(update.restore_service({'bind': '127.0.0.1:18923'}, root), 'old')
+            self.assertEqual(calls, [('exchange', live, old), ('systemctl', 'reset-failed', 'openrotmg.service'),
+                                     ('systemctl', 'start', 'openrotmg.service'), ('ready', 18923)])
+            self.assertTrue((root / 'restored-server-path').exists())
+            running = unittest.mock.MagicMock(returncode=0)
+            with patch.object(update.subprocess, 'run', return_value=running), patch.object(update, 'run') as run:
+                self.assertEqual(update.restore_service({'bind': '127.0.0.1:18923'}, root), 'already_running')
+                run.assert_not_called()
+
     def test_caddy_install_reloads_changes_and_restores_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             live, source = Path(directory) / 'Caddyfile', Path(directory) / 'source'
