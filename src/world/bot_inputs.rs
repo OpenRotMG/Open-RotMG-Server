@@ -283,9 +283,15 @@ impl World {
             * self.content.grounds[&ground]
             * 50.;
         let p = self.players.get_mut(&id).unwrap();
-        let destination = p.inputs.as_mut().unwrap().movement(p.pos, step);
+        let from = p.pos;
+        let destination = p.inputs.as_mut().unwrap().movement(from, step);
         if let Some(destination) = destination
-            && let Err(error) = self.move_to(id, destination, self.now as i32)
+            && let Err(error) = match self.slide(from, destination) {
+                stuck if stuck.distance(from) <= 0.001 && destination.distance(from) > 0.001 => {
+                    Err(anyhow::anyhow!("no free axis toward held keys"))
+                }
+                resolved => self.move_to(id, resolved, self.now as i32),
+            }
         {
             let input = self.players.get_mut(&id).unwrap().inputs.as_mut().unwrap();
             input.keys = [0, 0];
@@ -300,5 +306,55 @@ impl World {
             .cursor
             .filter(|_| input.fire && p.conditions(self.now) & crate::content::STUNNED == 0)
             .map(|point| (point.y - p.pos.y).atan2(point.x - p.pos.x));
+    }
+    // The 2012 client's Player._u0: 0.4-tile substeps, each resolved against the starting position.
+    fn slide(&self, from: Pos, to: Pos) -> Pos {
+        let (dx, dy) = (to.x - from.x, to.y - from.y);
+        let substep = 0.4 / dx.abs().max(dy.abs());
+        let (mut point, mut remaining) = (from, 1f32);
+        while remaining > 0. {
+            let fraction = substep.min(remaining);
+            let next = Pos {
+                x: point.x + dx * fraction,
+                y: point.y + dy * fraction,
+            };
+            point = self.clamp_step(from, next);
+            remaining -= fraction;
+        }
+        point
+    }
+    // The 2012 client's Player._A_y: clamp to the half-cell edge, then slide along the axis that overshot more.
+    fn clamp_step(&self, from: Pos, to: Pos) -> Pos {
+        let crosses =
+            |a: f32, b: f32| (a % 0.5 == 0. && a != b) || (a * 2.).floor() != (b * 2.).floor();
+        let (cross_x, cross_y) = (crosses(from.x, to.x), crosses(from.y, to.y));
+        if !cross_x && !cross_y || self.player_position_valid(Some(from), to) {
+            return to;
+        }
+        let edge = |a: f32, b: f32| {
+            let edge = (a.max(b) * 2.).floor() / 2.;
+            edge - if edge.floor() > a.floor() { 0.01 } else { 0. }
+        };
+        let (edge_x, edge_y) = (edge(from.x, to.x), edge(from.y, to.y));
+        let keep_x = Pos { x: to.x, y: edge_y };
+        let keep_y = Pos { x: edge_x, y: to.y };
+        if !cross_x {
+            return keep_x;
+        }
+        if !cross_y {
+            return keep_y;
+        }
+        let slides = if (to.x - edge_x).abs() > (to.y - edge_y).abs() {
+            [keep_x, keep_y]
+        } else {
+            [keep_y, keep_x]
+        };
+        slides
+            .into_iter()
+            .find(|&slide| self.player_position_valid(Some(from), slide))
+            .unwrap_or(Pos {
+                x: edge_x,
+                y: edge_y,
+            })
     }
 }
