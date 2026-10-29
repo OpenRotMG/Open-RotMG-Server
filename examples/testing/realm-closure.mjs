@@ -162,7 +162,11 @@ export async function run(game){
     while(now<until){await act(game,{keys:[],duration_ms:Math.min(10000,until-now)});now=(await game.observe()).game_ms;}
     await ready();
     await appendFile(join(out,'renewals.jsonl'),JSON.stringify({before_ms:before.game_ms,renewed_ms:now,restPoint,returnToCombat})+'\n');
-    if(returnToCombat)for(const client of clients)await travel(combatAnchors.get(client.actor),()=>[],[client]);
+    if(returnToCombat){
+      const anchor=combatAnchors.get(game.actor);
+      if(clients.every(c=>combatAnchors.get(c.actor)===anchor))await travel(anchor);
+      else for(const client of clients)await travel(combatAnchors.get(client.actor),()=>[],[client]);
+    }
   }
   const seen=new Map(original.map(e=>[e.quest??e.id,e]));
   for(let encounter=0;encounter<100;encounter++){
@@ -172,8 +176,8 @@ export async function run(game){
     const position=(await game.observe()).position,pending=[...seen.keys()].filter(id=>!defeated.has(id)).sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y));
     if(!pending.length){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
     const first=pending[0],kind=seen.get(first).kind,batch=[first];
-    if(kind!==0xd5f){
-      const others=pending.slice(1).filter(id=>seen.get(id).kind!==0xd5f);
+    if(![0xd5f,0xd61].includes(kind)){
+      const others=pending.slice(1).filter(id=>![0xd5f,0xd61].includes(seen.get(id).kind));
       others.sort((a,b)=>Number(seen.get(a).kind!==kind)-Number(seen.get(b).kind!==kind)||Math.hypot(seen.get(a).pos.x-seen.get(first).pos.x,seen.get(a).pos.y-seen.get(first).pos.y)-Math.hypot(seen.get(b).pos.x-seen.get(first).pos.x,seen.get(b).pos.y-seen.get(first).pos.y));
       if(others.length)batch.push(others[0]);
     }
@@ -203,7 +207,7 @@ export async function run(game){
         // Waiting for a sampled Actual Ent shield opening can miss it again after native resume.
         const candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&!(e.condition&((1<<21)|(1<<23)|(e.kind===0x920?0:(1<<24)))));
         candidates.sort((a,b)=>Math.hypot(a.pos.x-views[i].position.x,a.pos.y-views[i].position.y)-Math.hypot(b.pos.x-views[i].position.x,b.pos.y-views[i].position.y));
-        return candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>e.kind===0x929)??candidates.find(e=>[0xd51,0xd5e,0xd62].includes(e.kind));
+        return candidates.find(e=>[0x91d,0x924].includes(e.kind))??candidates.find(e=>leaders.has(e.kind))??candidates.find(e=>e.kind===0x929)??candidates.find(e=>[0xd51,0xd5e,0xd64].includes(e.kind))??candidates.find(e=>e.kind===0xd62);
       });
       if(kind===0xd5f){
         const towers=families[0].filter(e=>e.kind===0xd5e&&e.hp>0);
@@ -215,9 +219,10 @@ export async function run(game){
         await approach(anchors.map((e,i)=>e?e.pos:views[i].position),range);continue;
       }
       // The existing target input acquires aim after resume, not from a stale paused-world position.
-      const group=[];
-      for(let i=0;i<clients.length;i++)if(targets[i]){
-        const target=targets[i],duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:targets.filter(Boolean).length===1?10000:4000;
+      const group=[],available=targets.flatMap((target,i)=>target?[i]:[]),shooters=kind===0xd5f?available:available.length?[available[step%available.length]]:[];
+      // One full-length input advances both active encounters' phases within the aggregate input bound.
+      for(const i of shooters){
+        const target=targets[i],duration_ms=target.kind===0xd5e?2000:evaluations.has(target.kind)?500:10000;
         group.push({actor:clients[i].actor,input:{keys:[],duration_ms,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}}});
       }
       if(group.length)await act(game,[group]);else await act(game,{keys:[],duration_ms:10000});
