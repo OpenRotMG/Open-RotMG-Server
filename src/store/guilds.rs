@@ -28,6 +28,9 @@ pub enum GuildAction {
     Upgrade { level: i32 },
 }
 
+#[cfg(test)]
+mod roster_tests;
+
 // Selected 123.5.1 GuildMerchant prices, not the reduced test prices: https://wikiwiki.jp/rmd/test/build121.5.2#guildfame
 pub const HALL_PRICES: [i32; 3] = [10_000, 100_000, 250_000];
 
