@@ -19,6 +19,13 @@ function towerPair(towers,views,assignments){
     assignments.set(i,available[0].id);used.add(available[0].id);return available[0];
   });
 }
+function nextEncounter(seen,dead,roles,positions,turn=0){
+  const free=roles.flatMap((id,i)=>id===null?[i]:[]);if(!free.length)return;
+  const active=new Set(roles.filter(id=>id!==null)),lead=free[turn%free.length],position=positions[lead];
+  const pending=[...seen.keys()].filter(id=>!dead.has(id)&&!active.has(id)&&(free.length===roles.length||![0xd5f,0xd61].includes(seen.get(id).kind)));
+  pending.sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y));
+  if(pending.length)return {root:pending[0],indices:[0xd5f,0xd61].includes(seen.get(pending[0]).kind)?free:[lead]};
+}
 let scout,spawnPoints;
 export async function prepare(api){
   const candidates=await Promise.all([-3,1].map(async id=>({id,...await api({op:'world_info',world:id})})));
@@ -155,7 +162,7 @@ export async function run(game){
     for(let i=0;i<clients.length;i++)if(group[i].input.keys.length){const count=Math.hypot(after[i].position.x-before[i].position.x,after[i].position.y-before[i].position.y)>.02?0:(stalled.get(clients[i].actor)??0)+1;stalled.set(clients[i].actor,count);assert(count<3,'Three stationary local native approach inputs: '+JSON.stringify({point,before:before[i].position,after:after[i].position,group}));}
     await appendFile(join(out,'approach.jsonl'),JSON.stringify({point,group,before:before.map(v=>v.position),after:after.map(v=>v.position)})+'\n');
   }
-  async function renewOnShore(returnToCombat){
+  async function renewOnShore(returnToCombat,selected=clients){
     const before=await api({op:'observe',actor:scout.actor}),until=Math.min(...protection.values());
     await travel(restPoint,budget=>{assert(budget>=2000,'Shore renewal must start before the party-travel safety margin');const wait=Math.min(8800,budget-2000);return wait>0?[{actor:game.actor,input:{keys:[],duration_ms:wait}}]:[];});
     let now=(await game.observe()).game_ms;
@@ -163,46 +170,52 @@ export async function run(game){
     await ready();
     await appendFile(join(out,'renewals.jsonl'),JSON.stringify({before_ms:before.game_ms,renewed_ms:now,restPoint,returnToCombat})+'\n');
     if(returnToCombat){
-      const anchor=combatAnchors.get(game.actor);
-      if(clients.every(c=>combatAnchors.get(c.actor)===anchor))await travel(anchor);
-      else for(const client of clients)await travel(combatAnchors.get(client.actor),()=>[],[client]);
+      const anchor=combatAnchors.get(selected[0].actor);
+      if(selected.every(c=>combatAnchors.get(c.actor)===anchor))await travel(anchor,()=>[],selected);
+      else for(const client of selected)await travel(combatAnchors.get(client.actor),()=>[],[client]);
     }
   }
-  const seen=new Map(original.map(e=>[e.quest??e.id,e]));
-  for(let encounter=0;encounter<100;encounter++){
-    const log=await events(),credits=log.filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin),defeated=new Set(credits.map(e=>e.hero)),current=await map();
-    for(const e of current.entities)if(roots.has(e.kind)&&e.quest===e.id)seen.set(e.id,e);
-    current.blocked.length=0;current.entities.length=0;
-    const position=(await game.observe()).position,pending=[...seen.keys()].filter(id=>!defeated.has(id)).sort((a,b)=>Math.hypot(seen.get(a).pos.x-position.x,seen.get(a).pos.y-position.y)-Math.hypot(seen.get(b).pos.x-position.x,seen.get(b).pos.y-position.y));
-    if(!pending.length){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
-    const first=pending[0],kind=seen.get(first).kind,batch=[first];
-    if(![0xd5f,0xd61].includes(kind)){
-      const others=pending.slice(1).filter(id=>![0xd5f,0xd61].includes(seen.get(id).kind));
-      others.sort((a,b)=>Number(seen.get(a).kind!==kind)-Number(seen.get(b).kind!==kind)||Math.hypot(seen.get(a).pos.x-seen.get(first).pos.x,seen.get(a).pos.y-seen.get(first).pos.y)-Math.hypot(seen.get(b).pos.x-seen.get(first).pos.x,seen.get(b).pos.y-seen.get(first).pos.y));
-      if(others.length)batch.push(others[0]);
+  const seen=new Map(original.map(e=>[e.quest??e.id,e])),roles=clients.map(()=>null),completed=new Set(),iterations=new Map(),towerAssignments=new Map();
+  const enter=async(client,id,selected)=>{
+    const tail=[],entry=seen.get(id).kind;
+    if(entry!==0xd5f){
+      tail.push({actor:client.actor,input:{keys:[],duration_ms:evaluations.has(entry)?500:8800,target:{entity:id,camera_angle:-Math.PI/4,fire:true}}});
+      if(evaluations.has(entry))tail.push({actor:client.actor,input:{keys:[],duration_ms:8300}});
     }
-    // Staying on separate encounters avoids regrouping travel and unnecessary mid-batch buff renewals.
-    const roles=clients.map((client,i)=>batch.length===1?first:batch[i]);
-    clients.forEach((client,i)=>combatAnchors.set(client.actor,seen.get(roles[i]).pos));
-    if(await ready()<50000)await renewOnShore(false);
-    const enter=async(client,id,selected)=>{
-      const tail=[],entry=seen.get(id).kind;
-      if(entry!==0xd5f){
-        tail.push({actor:client.actor,input:{keys:[],duration_ms:evaluations.has(entry)?500:8800,target:{entity:id,camera_angle:-Math.PI/4,fire:true}}});
-        if(evaluations.has(entry))tail.push({actor:client.actor,input:{keys:[],duration_ms:8300}});
+    await travel(seen.get(id).pos,()=>tail,selected);
+  };
+  for(let step=0;step<10000;step++){
+    const log=await events(),credits=log.filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin),dead=new Set(credits.map(e=>e.hero));
+    if(step===0||credits.length!==completed.size){
+      const current=await map();for(const e of current.entities)if(roots.has(e.kind)&&e.quest===e.id)seen.set(e.id,e);
+      current.blocked.length=0;current.entities.length=0;
+    }
+    for(const id of dead)if(!completed.has(id)){
+      assert(seen.has(id),'Every credited root needs its original or admitted roster identity');
+      await writeFile(join(out,'root-'+id+'.json'),JSON.stringify({root:id,kind:seen.get(id).kind,main:await game.observe(),peer:await peer.observe()}));completed.add(id);
+    }
+    for(let i=0;i<roles.length;i++)if(dead.has(roles[i]))roles[i]=null;
+    const positionViews=await Promise.all(clients.map(c=>c.observe())),next=nextEncounter(seen,dead,roles,positionViews.map(v=>v.position),step);
+    if(next){
+      if(await ready()<(roles.every(id=>id===null)?50000:40000)){
+        await renewOnShore(false);
+        for(let i=0;i<clients.length;i++)if(roles[i]!==null)await travel(combatAnchors.get(clients[i].actor),()=>[],[clients[i]]);
       }
-      await travel(seen.get(id).pos,()=>tail,selected);
-    };
-    if(batch.length===1)await enter(game,first,clients);
-    else for(let i=0;i<clients.length;i++)await enter(clients[i],roles[i],[clients[i]]);
-    const towerAssignments=new Map();let completed=false;
-    for(let step=0;step<100;step++){
-      const dead=new Set((await events()).filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin).map(e=>e.hero));
-      if(batch.every(id=>dead.has(id))){completed=true;break;}
-      if(await ready()<(kind===0xd5f?30000:20000)){await renewOnShore(true);continue;}
+      for(const i of next.indices){roles[i]=next.root;combatAnchors.set(clients[i].actor,seen.get(next.root).pos);}
+      if(seen.get(next.root).kind===0xd5f)towerAssignments.clear();
+      await enter(clients[next.indices[0]],next.root,next.indices.map(i=>clients[i]));
+      await appendFile(join(out,'assignments.jsonl'),JSON.stringify({...next,actors:next.indices.map(i=>clients[i].actor),roles})+'\n');
+      // There is no batch barrier: a finished fighter starts another real encounter immediately.
+      continue;
+    }
+    const batch=[...new Set(roles.filter(id=>id!==null))];
+    if(!batch.length){assert(credits.at(-1)?.remaining===0,'Every counted root must earn actual death credit');break;}
+    for(const id of batch){iterations.set(id,(iterations.get(id)??0)+1);assert(iterations.get(id)<=100,'Native combat did not finish counted encounter '+id);}
+    const kind=seen.get(batch[0]).kind;
+    if(await ready()<(kind===0xd5f?30000:20000)){await renewOnShore(true,clients.filter((_,i)=>roles[i]!==null));continue;}
       const views=await Promise.all(clients.map(c=>c.observe()));
       const snapshots=kind===0xd5f?[await api({op:'inspect',actor:scout.actor})]:await Promise.all(clients.map(c=>api({op:'inspect',actor:c.actor})));
-      const families=clients.map((_,i)=>dead.has(roles[i])?[]:snapshots[kind===0xd5f?0:i].diagnostic.entities.filter(e=>e.id===roles[i]||e.quest===roles[i]));
+      const families=clients.map((_,i)=>roles[i]===null?[]:snapshots[kind===0xd5f?0:i].diagnostic.entities.filter(e=>e.id===roles[i]||e.quest===roles[i]));
       const targets=families.map((family,i)=>{
         // Waiting for a sampled Actual Ent shield opening can miss it again after native resume.
         const candidates=family.filter(e=>e.hp>0&&(!evaluations.has(e.kind)||e.stage===0)&&!(e.condition&((1<<21)|(1<<23)|(e.kind===0x920?0:(1<<24)))));
@@ -226,10 +239,6 @@ export async function run(game){
         group.push({actor:clients[i].actor,input:{keys:[],duration_ms,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}}});
       }
       if(group.length)await act(game,[group]);else await act(game,{keys:[],duration_ms:10000});
-    }
-    const finalDead=new Set((await events()).filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin).map(e=>e.hero));
-    assert(completed||batch.every(id=>finalDead.has(id)),'Native combat did not finish counted encounter batch '+JSON.stringify(batch));
-    for(const id of batch)await writeFile(join(out,'root-'+id+'.json'),JSON.stringify({root:id,kind:seen.get(id).kind,main:await game.observe(),peer:await peer.observe()}));
   }
   const credits=(await events()).filter(e=>e.message==='qualifying Realm hero defeated'&&e.origin===origin);
   game.check('ordinary roster plus admitted events earns once-only closure credit',credits.length===seen.size&&new Set(credits.map(e=>e.hero)).size===credits.length&&credits.at(-1)?.remaining===0);
