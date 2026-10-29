@@ -69,7 +69,7 @@ export async function enter({browser,signal}){
     const rarePng=Buffer.concat([png.subarray(0,33),chunk('IDAT',deflateSync(rows)),chunk('IEND',Buffer.alloc(0))]);
     const rare=await save('Gallery Rare',3,'gallery,rare',guid,rarePng);owned.push(rare);
     const foreign='gallery-other-933';await post('char/list',new URLSearchParams({guid:foreign,password:''}));const foreignId=await save('Foreign Art',2,'gallery,foreign',foreign);
-    let page=await list(()=>key('l'),24);await thumbnails(page);check('Mine renders 24 of 25 owned artworks',ids(page.body.body).every(id=>owned.includes(id))&&!page.body.body.includes('<Admin'));
+    let page=await list(async()=>{await key('l');await click(640,85);},24);await thumbnails(page);check('Mine renders 24 of 25 owned artworks',ids(page.body.body).every(id=>owned.includes(id))&&!page.body.body.includes('<Admin'));
     await capture('gallery-page-one');
     const next=await list(()=>click(670,530),1);check('Next uses offset24 and retrieves final owned artwork',new URLSearchParams(next.form).get('offset')==='24'&&ids(next.body.body)[0]===firstId);await thumbnails(next);await capture('gallery-page-two');
     page=await list(()=>click(130,530),24);await thumbnails(page);check('Previous restores offset0',!new URLSearchParams(page.form).has('offset'));
