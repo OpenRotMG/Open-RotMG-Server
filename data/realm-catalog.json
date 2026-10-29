@@ -41,5 +41,10 @@
     "kind": "reconstruction",
     "recipe": "world04.json",
     "sha256": "60cecef2aabf39b80a3fbcd6d22923868205b7b696bb60dd2078ad8b3fc718c3"
+  },
+  {
+    "kind": "reconstruction",
+    "recipe": "world05.json",
+    "sha256": "c6daa9af6a24e958de538f76a58cd1f957ca6bc837b8252e564d62f789f7710b"
   }
 ]
