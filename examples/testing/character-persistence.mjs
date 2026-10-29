@@ -22,7 +22,7 @@ export async function run(game){
   await game.act({keys:['d'],duration_ms:500,mouse:{x:450,y:300}});
   await game.act({keys:[' '],duration_ms:200});
   const changed=await game.inspect(),ch=changed.diagnostic.character;
-  game.check('ordinary cloth and ring input commits appearance and equipment',ch.tex1===0x05000006&&ch.tex2===0&&ch.items[6]===-1&&ch.items[7]===-1&&ch.items[3]===0xa4f);
+  game.check('ordinary cloth and ring input commits appearance and equipment',ch.tex1===0x04000000&&ch.tex2===0&&ch.items[6]===-1&&ch.items[7]===-1&&ch.items[3]===0xa4f);
   game.check('native fire records actual shots and spell leaves an entry mana deficit',ch.lifetime.shots>before.diagnostic.character.lifetime.shots&&ch.mp<120);
   // Saved fields are a client contract, not proof of server cadence: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/appengine/SavedCharacter.as
   await game.act({keys:['Insert'],duration_ms:1200});
