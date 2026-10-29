@@ -29,7 +29,9 @@ export async function run(game){
   await game.act({keys:['d'],duration_ms:500});
   const moved=await game.observe();
   game.check('the entered native client can actually move',Math.hypot(moved.position.x-before.view.position.x,moved.position.y-before.view.position.y)>.3);
-  await game.act({keys:['Insert'],duration_ms:2000},{name:'client-nexus',when:v=>v.world==='Nexus'});
+  await game.act({keys:['Insert'],duration_ms:2000});
+  const settled=(await game.observe()).game_ms;
+  await game.act({keys:[],duration_ms:1000},{name:'client-nexus',when:v=>v.world==='Nexus'&&v.game_ms>=settled+300});
   const after=await game.inspect();
   game.check('ordinary reconnect retains account living character inventory and revision',after.view.map.name==='Nexus'&&after.view.lifecycle.alive&&after.view.session.player!==before.view.session.player&&after.view.session.account===before.view.session.account&&after.view.session.character===before.view.session.character&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items)&&after.view.character.inventory_revision===before.view.character.inventory_revision);
   const config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));
