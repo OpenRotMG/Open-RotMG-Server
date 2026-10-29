@@ -612,6 +612,51 @@ fn native_shots_trust_client_placement_without_moving_the_player() {
 }
 
 #[test]
+fn slowed_overrides_speed_and_speedy_until_expiry_but_not_paralysis() {
+    for speed in [0, 50, 75, 100] {
+        let (mut world, id) = fixture(0x18, false);
+        world.now = 1000;
+        world.players.get_mut(&id).unwrap().character.base[4] = speed;
+        world
+            .apply_condition(id, crate::condition::SPEEDY, 6000)
+            .unwrap();
+        world
+            .apply_condition(id, crate::condition::SLOWED, 3000)
+            .unwrap();
+        world.now = 2000;
+        world
+            .apply_condition(id, crate::condition::SLOWED, 500)
+            .unwrap();
+        assert_eq!(
+            world.players[&id].statuses[&crate::condition::SLOWED],
+            (2000, 4000)
+        );
+        for now in [2000, 3999] {
+            assert_eq!(
+                world.players[&id].speed(&world.content, now).unwrap(),
+                0.004
+            );
+        }
+        world
+            .apply_condition(id, crate::condition::PARALYZED, 1000)
+            .unwrap();
+        assert_eq!(world.players[&id].speed(&world.content, 2999).unwrap(), 0.);
+        assert_eq!(
+            world.players[&id].speed(&world.content, 3000).unwrap(),
+            0.004
+        );
+        let normal = 0.004 + 0.0056 * speed as f32 / 75.;
+        assert!(
+            (world.players[&id].speed(&world.content, 4000).unwrap() - normal * 1.5).abs()
+                < 0.000001
+        );
+        assert!(
+            (world.players[&id].speed(&world.content, 7000).unwrap() - normal).abs() < 0.000001
+        );
+    }
+}
+
+#[test]
 fn native_movement_trusts_client_positions_despite_speed_delay_or_terrain() {
     for (label, wall, x, time, received) in [
         ("speed", false, 12.5, 1100, 1100),
