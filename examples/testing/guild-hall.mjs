@@ -34,7 +34,7 @@ with sqlite3.connect(sys.argv[1]) as db:
  print(json.dumps(db.execute(sys.argv[2],json.loads(sys.argv[3])).fetchall()))`,config.state+'/game.db',sql,JSON.stringify(args)],{encoding:'utf8'}));
   async function save(label,g=game){const s=await g.inspect();records.push({label,...s});await writeFile(join(process.env.QA_RESULTS_DIR,'guild-hall.json'),JSON.stringify(records,null,2));return s;}
   async function capture(g,name){await g.act({keys:[],duration_ms:500});await g.act({keys:[],duration_ms:800},{name,when:()=>true});}
-  async function walk(g,p){for(let n=0;n<100;n++){const v=await g.observe(),dx=p.x-v.position.x,dy=p.y-v.position.y,d=Math.hypot(dx,dy);if(d<.18)return;const x=dx-dy,y=dx+dy,keys=[];if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');await g.act({keys,duration_ms:Math.min(250,Math.max(50,Math.round(d*70)))});}assert.fail('Native hall walk failed '+JSON.stringify({target:p,actual:(await g.observe()).position}));}
+  async function walk(g,p){for(let n=0;n<100;n++){const v=await g.observe(),dx=p.x-v.position.x,dy=p.y-v.position.y,d=Math.hypot(dx,dy);if(d<.9)return;const x=dx-dy,y=dx+dy,keys=[];if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');await g.act({keys,duration_ms:Math.min(350,Math.max(150,Math.round(d*100)))});}assert.fail('Native hall walk failed '+JSON.stringify({target:p,actual:(await g.observe()).position}));}
   async function portal(g,kind,world){const before=await g.observe(),e=(await g.inspect()).diagnostic.entities.find(e=>e.kind===kind);assert(e,'Portal not visible '+kind);await walk(g,e.pos);await g.act({keys:[],mouse:{x:700,y:575},duration_ms:700});for(let i=0;i<10&&(await g.observe()).session.world===before.session.world;i++)await g.act({keys:[],duration_ms:500});assert.equal((await g.observe()).world,world);}
   async function nexus(g){await g.act({keys:['Insert'],duration_ms:700});for(let i=0;i<10&&(await g.observe()).world!=='Nexus';i++)await g.act({keys:[],duration_ms:500});assert.equal((await g.observe()).world,'Nexus');}
   const peer=await game.join({...fixture,seed:917}),outsider=await game.join({...fixture,seed:918});
@@ -49,12 +49,12 @@ with sqlite3.connect(sys.argv[1]) as db:
   const shared=await save('shared'),other=await save('shared-peer',peer);
   game.check('members enter one shared hall and see each other',shared.view.session.world===other.view.session.world&&shared.view.player_markers.some(p=>p.account===other.view.session.account)&&other.view.player_markers.some(p=>p.account===shared.view.session.account));
   await capture(game,'hall-shared-founder');await capture(peer,'hall-shared-peer');
-  await walk(game,{x:14.5,y:8.25});await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});await capture(game,'hall-chronicle');
+  await walk(game,{x:14.5,y:7.5});await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});await capture(game,'hall-chronicle');
   await game.act({keys:[],mouse:{x:400,y:540},duration_ms:300});
-  await walk(game,{x:18.75,y:8.5});await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});await capture(game,'hall-board');
+  await walk(game,{x:19.5,y:8.5});await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});await capture(game,'hall-board');
   await game.act({keys:[],mouse:{x:540,y:510},duration_ms:300});
   game.check('viewing and dismissing hall facilities does not change membership or Board',db('SELECT count(*) FROM guild_members')[0][0]===2&&db('SELECT board FROM guilds')[0][0]==='');
-  await walk(game,{x:16.5,y:8.25});await walk(peer,{x:16.5,y:8.25});
+  await walk(game,{x:16.5,y:7.5});await walk(peer,{x:16.5,y:7.5});
   const before=db('SELECT level,fame,earned FROM guilds');assert.deepEqual(before,[[1,0,0]]);
   await peer.act({keys:[],mouse:{x:700,y:575},duration_ms:700});await capture(peer,'hall-initiate-upgrade-refused');
   game.check('Initiate upgrade click does not charge or upgrade',JSON.stringify(db('SELECT level,fame,earned FROM guilds'))===JSON.stringify(before));
@@ -76,7 +76,7 @@ with sqlite3.connect(sys.argv[1]) as db:
   await capture(game,'hall-upgraded-layout');
   await walk(peer,{x:76.5,y:77.5});await portal(peer,0x72f,'Guild Hall');
   game.check('second member reconnects to the same upgraded hall',(await peer.observe()).session.world===rebuilt.view.session.world);
-  await walk(game,{x:25.5,y:9.25});await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});await capture(game,'hall-upgraded-chronicle');
+  await walk(game,{x:25.5,y:8.5});await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});await capture(game,'hall-upgraded-chronicle');
   await game.act({keys:[],mouse:{x:748,y:158},duration_ms:500});await capture(game,'hall-remove-confirmation');
   await game.act({keys:[],mouse:{x:325,y:338},duration_ms:500});
   game.check('cancelled removal retains membership and both hall occupants',db('SELECT count(*) FROM guild_members')[0][0]===2&&(await peer.observe()).session.world===rebuilt.view.session.world);
