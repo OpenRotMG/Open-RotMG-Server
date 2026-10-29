@@ -9,9 +9,10 @@ const clients=[];
 export async function beforeNavigate({browser,signal}){
   const client={rosters:[],pending:new Set()};
   const connection=await connect({...browser,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs'),onEvent:event=>{
-    if(event.method==='Network.requestWillBeSent'&&event.params.request.url.endsWith('/guild/listMembers')){
-      if(typeof event.params.request.postData!=='string')client.error=Error('Roster request body missing from CDP capture');
-      else client.form=new URLSearchParams(event.params.request.postData);
+    if(event.method==='Network.requestWillBeSent'&&event.params.request.method==='POST'&&event.params.request.url.endsWith('/guild/listMembers')){
+      connection.call('Network.getRequestPostData',{requestId:event.params.requestId}).then(({postData})=>{
+        assert.equal(typeof postData,'string','Roster request body missing from CDP capture');client.form=new URLSearchParams(postData);
+      }).catch(e=>{client.error=e;});
     }
     if(event.method==='Network.responseReceived'&&event.params.response.url.endsWith('/guild/listMembers'))client.pending.add(event.params.requestId);
     if(event.method==='Network.loadingFinished'&&client.pending.delete(event.params.requestId)){
