@@ -129,11 +129,16 @@ impl std::fmt::Display for Failure {
     }
 }
 impl std::error::Error for Failure {}
+const AUTOMATIC_BURST: f64 = 4.;
+// A bucket of B tokens refilled at (800-B)/day can never admit more than 800 calls in any rolling day.
+const AUTOMATIC_REFILL_PER_SECOND: f64 = (800. - AUTOMATIC_BURST) / 86400.;
 struct Budget {
     minute: Instant,
     day: Instant,
     calls: u32,
     daily: u32,
+    tokens: f64,
+    refilled: Instant,
     successes: u64,
     failures: u64,
     local_capacity_denials: u64,
@@ -141,6 +146,80 @@ struct Budget {
     last_latency_ms: Option<u128>,
     contract_failed: bool,
     blocked_until: Instant,
+}
+impl Budget {
+    fn new(now: Instant) -> Self {
+        Self {
+            minute: now,
+            day: now,
+            calls: 0,
+            daily: 0,
+            tokens: AUTOMATIC_BURST,
+            refilled: now,
+            successes: 0,
+            failures: 0,
+            local_capacity_denials: 0,
+            last_error: None,
+            last_latency_ms: None,
+            contract_failed: false,
+            blocked_until: now,
+        }
+    }
+    fn automatic_tokens(&self, now: Instant) -> f64 {
+        let refill = now.saturating_duration_since(self.refilled).as_secs_f64();
+        (self.tokens + refill * AUTOMATIC_REFILL_PER_SECOND).min(AUTOMATIC_BURST)
+    }
+    // Ordinary automatic speech never spends the last token, so a speaker's first market
+    // repertoire waits at most one refill interval however busy adventure dialogue is.
+    fn automatic_resumes_in(&self, now: Instant, market: bool) -> Option<Duration> {
+        let needed = if market { 1. } else { 2. };
+        let window = |start: Instant, seconds: u64, full: bool| {
+            Duration::from_secs(if full { seconds } else { 0 })
+                .saturating_sub(now.saturating_duration_since(start))
+        };
+        let wait = [
+            Duration::from_secs_f64(
+                (needed - self.automatic_tokens(now)).max(0.) / AUTOMATIC_REFILL_PER_SECOND,
+            ),
+            self.blocked_until.saturating_duration_since(now),
+            window(self.minute, 60, self.calls >= 24),
+            window(self.day, 86400, self.daily >= 1000),
+        ]
+        .into_iter()
+        .fold(Duration::ZERO, Duration::max);
+        (!wait.is_zero()).then_some(wait)
+    }
+    fn admit(&mut self, now: Instant, payload: &Value) -> std::result::Result<(), Failure> {
+        if self.contract_failed {
+            return Err(Failure::Error("provider_contract_changed"));
+        }
+        if now < self.blocked_until {
+            return Err(Failure::Error("rate_limited"));
+        }
+        if now.duration_since(self.minute) >= Duration::from_secs(60) {
+            self.minute = now;
+            self.calls = 0;
+        }
+        if now.duration_since(self.day) >= Duration::from_secs(86400) {
+            self.day = now;
+            self.daily = 0;
+        }
+        if payload["automatic"] == true {
+            if self
+                .automatic_resumes_in(now, payload["market_generation"] == true)
+                .is_some()
+            {
+                return Err(Failure::Error("request_budget_exhausted"));
+            }
+            self.tokens = self.automatic_tokens(now) - 1.;
+            self.refilled = now;
+        } else if self.calls >= 30 || self.daily >= 1000 {
+            return Err(Failure::Error("request_budget_exhausted"));
+        }
+        self.calls += 1;
+        self.daily += 1;
+        Ok(())
+    }
 }
 pub(crate) struct Service {
     client: reqwest::Client,
@@ -175,7 +254,6 @@ impl Service {
         let mut key = reqwest::header::HeaderValue::from_str(&format!("Bearer {key}"))
             .context("invalid AI_GATEWAY_API_KEY header")?;
         key.set_sensitive(true);
-        let now = Instant::now();
         Ok(Self {
             client: reqwest::Client::builder()
                 .no_proxy()
@@ -187,40 +265,43 @@ impl Service {
             endpoint: endpoint.into(),
             slots: Arc::new(Semaphore::new(2)),
             wordings: Mutex::new(BTreeMap::new()),
-            budget: Mutex::new(Budget {
-                minute: now,
-                day: now,
-                calls: 0,
-                daily: 0,
-                successes: 0,
-                failures: 0,
-                local_capacity_denials: 0,
-                last_error: None,
-                last_latency_ms: None,
-                contract_failed: false,
-                blocked_until: now,
-            }),
+            budget: Mutex::new(Budget::new(Instant::now())),
         })
     }
-    pub(super) fn automatic_available(&self) -> bool {
+    fn automatic_ready(&self, market: bool) -> bool {
         let b = self.budget.lock().expect("dialogue budget poisoned");
         !b.contract_failed
-            && Instant::now() >= b.blocked_until
             && self.slots.available_permits() > 0
-            && (b.daily < 800 || b.day.elapsed() >= Duration::from_secs(86400))
-            && (b.calls < 24 || b.minute.elapsed() >= Duration::from_secs(60))
+            && b.automatic_resumes_in(Instant::now(), market).is_none()
+    }
+    pub(super) fn automatic_available(&self) -> bool {
+        self.automatic_ready(false)
     }
     pub fn health(&self) -> Value {
         let b = self.budget.lock().expect("dialogue budget poisoned");
+        let now = Instant::now();
         let remaining = Duration::from_secs(86400).saturating_sub(b.day.elapsed());
         let requests = if remaining.is_zero() { 0 } else { b.daily };
         let permits = self.slots.available_permits();
-        json!({"enabled":true,"model":MODEL,"status":if b.contract_failed || b.last_error.is_some(){"error"}else if permits == 0 {"busy"}else{"ready"},
+        let resumes = b.automatic_resumes_in(now, false);
+        let status = if b.contract_failed {
+            "error"
+        } else if resumes.is_some() {
+            "budget_exhausted"
+        } else if b.last_error.is_some() {
+            "error"
+        } else if permits == 0 {
+            "busy"
+        } else {
+            "ready"
+        };
+        json!({"enabled":true,"model":MODEL,"status":status,
+            "automatic_resumes_in_seconds":resumes.map(|wait|wait.as_millis().div_ceil(1000)),
             "last_error":b.last_error,"successes":b.successes,"failures":b.failures,"daily_requests":requests,
             "local_capacity_denials":b.local_capacity_denials,
             "budget_scope":"process-local","budget_resets_on_restart":true,"budget_window_seconds":86400,
             "budget_window_resets_in_seconds":remaining.as_secs(),"provider_quota":"unknown",
-            "automatic_limit":800,"automatic_remaining":800u32.saturating_sub(requests),
+            "automatic_limit":800,"automatic_tokens":b.automatic_tokens(now).floor(),
             "daily_limit":1000,"requests_remaining":1000u32.saturating_sub(requests),
             "contract_failed":b.contract_failed,"cooldown_seconds":b.blocked_until.saturating_duration_since(Instant::now()).as_millis().div_ceil(1000),
             "last_latency_ms":b.last_latency_ms,"in_flight":2-permits})
@@ -243,36 +324,10 @@ impl Service {
                 return Err(Failure::Error("service_closed"));
             }
         };
-        {
-            let now = Instant::now();
-            let mut b = self.budget.lock().expect("dialogue budget poisoned");
-            if b.contract_failed {
-                return Err(Failure::Error("provider_contract_changed"));
-            }
-            if now < b.blocked_until {
-                return Err(Failure::Error("rate_limited"));
-            }
-            if now.duration_since(b.minute) >= Duration::from_secs(60) {
-                b.minute = now;
-                b.calls = 0;
-            }
-            if now.duration_since(b.day) >= Duration::from_secs(86400) {
-                b.day = now;
-                b.daily = 0;
-            }
-            if b.calls >= 30
-                || b.daily
-                    >= if payload["automatic"] == true {
-                        800
-                    } else {
-                        1000
-                    }
-            {
-                return Err(Failure::Error("request_budget_exhausted"));
-            }
-            b.calls += 1;
-            b.daily += 1;
-        }
+        self.budget
+            .lock()
+            .expect("dialogue budget poisoned")
+            .admit(Instant::now(), payload)?;
         let market_generation = payload["market_generation"] == true;
         let reply_limit = if market_generation { 128 } else { 90 };
         let schema = reply_schema(payload)?;
@@ -920,5 +975,71 @@ impl Brain {
             | Intent::MarketBank
             | Intent::MarketThanks => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn automatic_speech_is_paced_through_simulated_days() {
+        let start = Instant::now();
+        let mut budget = Budget::new(start);
+        let ordinary = json!({"automatic":true});
+        let admitted: Vec<u64> = (0..3 * 86400)
+            .step_by(10)
+            .filter(|s| {
+                budget
+                    .admit(start + Duration::from_secs(*s), &ordinary)
+                    .is_ok()
+            })
+            .collect();
+        for hour in 0..72 {
+            let calls = admitted.iter().filter(|s| **s / 3600 == hour).count();
+            assert!((32..=37).contains(&calls), "hour {hour}: {calls} calls");
+        }
+        let busiest_day = (0..admitted.len())
+            .map(|i| admitted[i..].partition_point(|s| *s < admitted[i] + 86400))
+            .max();
+        assert!(busiest_day <= Some(800), "{busiest_day:?}");
+    }
+
+    #[test]
+    fn ordinary_automatic_speech_never_takes_a_first_market_repertoire_token() {
+        let now = Instant::now();
+        let mut budget = Budget::new(now);
+        let ordinary = json!({"automatic":true});
+        let market = json!({"automatic":true,"market_generation":true});
+        while budget.admit(now, &ordinary).is_ok() {}
+        assert!(budget.admit(now, &market).is_ok());
+        assert!(budget.admit(now, &market).is_err());
+        assert!(
+            budget.admit(now, &json!({})).is_ok(),
+            "player replies keep the total budget"
+        );
+        let refill = Duration::from_secs_f64(1. / AUTOMATIC_REFILL_PER_SECOND + 1.);
+        assert!(budget.admit(now + refill, &ordinary).is_err());
+        assert!(budget.admit(now + refill, &market).is_ok());
+    }
+
+    #[test]
+    fn health_reports_exhausted_automatic_budget_and_resume_time() {
+        let service = Service::new("unused", "http://127.0.0.1:1", Duration::from_secs(1)).unwrap();
+        assert_eq!(service.health()["status"], "ready");
+        assert_eq!(
+            service.health()["automatic_resumes_in_seconds"],
+            Value::Null
+        );
+        {
+            let mut budget = service.budget.lock().unwrap();
+            budget.tokens = 0.;
+            budget.refilled = Instant::now();
+        }
+        let health = service.health();
+        assert!(!service.automatic_available());
+        assert_eq!(health["status"], "budget_exhausted");
+        let resume = health["automatic_resumes_in_seconds"].as_u64().unwrap();
+        assert!((210..=218).contains(&resume), "{resume}");
     }
 }
