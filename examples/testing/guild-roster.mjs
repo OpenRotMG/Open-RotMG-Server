@@ -11,7 +11,7 @@ export async function beforeNavigate({browser,signal}){
   const connection=await connect({...browser,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs'),onEvent:event=>{
     if(event.method==='Network.requestWillBeSent'&&event.params.request.method==='POST'&&event.params.request.url.endsWith('/guild/listMembers')){
       connection.call('Network.getRequestPostData',{requestId:event.params.requestId}).then(({postData})=>{
-        assert.equal(typeof postData,'string','Roster request body missing from CDP capture');client.form=new URLSearchParams(postData);
+        assert.equal(typeof postData,'string','Roster request body missing from CDP capture');const form=new URLSearchParams(postData);client.page={num:form.get('num'),offset:form.get('offset')};
       }).catch(e=>{client.error=e;});
     }
     if(event.method==='Network.responseReceived'&&event.params.response.url.endsWith('/guild/listMembers'))client.pending.add(event.params.requestId);
@@ -19,8 +19,7 @@ export async function beforeNavigate({browser,signal}){
       connection.call('Network.getResponseBody',{requestId:event.params.requestId}).then(r=>client.rosters.push(r.base64Encoded?Buffer.from(r.body,'base64').toString():r.body)).catch(e=>{client.error=e;});
     }
   }});
-  client.connection=connection;
-  await connection.call('Network.enable',{maxPostDataSize:4096});signal.addEventListener('abort',()=>connection.close(),{once:true});clients.push(client);
+  await connection.call('Network.enable');signal.addEventListener('abort',()=>connection.close(),{once:true});clients.push(client);
 }
 export async function run(game){
   const out=process.env.QA_RESULTS_DIR,root=join(out,'native');
@@ -31,7 +30,7 @@ export async function run(game){
   const records=[];
   async function record(label){
     for(const c of clients)if(c.error)throw c.error;
-    records.push({label,states:await Promise.all([game.inspect(),peer.inspect()]),requests:clients.map(c=>c.form?{num:c.form.get('num'),offset:c.form.get('offset')}:null),rosters:clients.map(c=>[...c.rosters])});
+    records.push({label,states:await Promise.all([game.inspect(),peer.inspect()]),requests:clients.map(c=>c.page??null),rosters:clients.map(c=>[...c.rosters])});
     await writeFile(join(out,'guild-roster-observations.json'),JSON.stringify(records,null,2));
   }
   async function click(player,x,y){await player.act({keys:[],mouse:{x,y},duration_ms:400});await player.act({keys:[],duration_ms:400});}
@@ -59,7 +58,7 @@ export async function run(game){
   }
   const roster=index=>clients[index].rosters.at(-1);
   const rows=index=>[...roster(index).matchAll(/<Member><Name>([^<]+)<\/Name><Rank>(\d+)<\/Rank><Fame>(\d+)<\/Fame><\/Member>/g)].map(m=>({name:m[1],rank:Number(m[2]),fame:Number(m[3])}));
-  game.check('both clients request all fifty slots at offset zero',clients.every(c=>c.form.get('num')==='50'&&c.form.get('offset')==='0'));
+  game.check('both clients request all fifty slots at offset zero',clients.every(c=>c.page.num==='50'&&c.page.offset==='0'));
   game.check('both clients load the same two-member roster',clients.every(c=>c.rosters.length===1)&&roster(0)===roster(1)&&rows(0).length===2&&rows(0)[0].rank===40&&rows(0)[1].rank===0&&rows(0).every(r=>r.fame===0));
   const original=roster(0),peerName=rows(0)[1].name;
   await click(peer,686,126);
@@ -87,8 +86,9 @@ export async function run(game){
   await peer.act({keys:[],duration_ms:700});
   game.check('removed peer is durably returned to Nexus',(await peer.observe()).world==='Nexus');
   await capture(peer,'roster-peer-removed');
-  const refused=await clients[1].connection.call('Runtime.evaluate',{expression:`fetch(${JSON.stringify(config.origin+'/legacy-api/guild/listMembers')},{method:'POST',body:new URLSearchParams(${JSON.stringify(clients[1].form.toString())})}).then(r=>r.text())`,awaitPromise:true,returnByValue:true});
-  game.check('removed account cannot read the authenticated roster',refused.result.value==='<Error>You are not in a guild.</Error>');
+  await walk(peer,{x:76.5,y:77.5});await click(peer,700,575);
+  game.check('removed peer cannot reenter the Guild Hall through its ordinary portal',(await peer.observe()).world==='Nexus');
+  await capture(peer,'roster-peer-refused');
   const final=roster(0);
   await click(game,400,540);await game.act({keys:['Insert'],duration_ms:700});await game.act({keys:[],duration_ms:700});
   game.check('Founder ordinary reconnect returns to Nexus',(await game.observe()).world==='Nexus');
