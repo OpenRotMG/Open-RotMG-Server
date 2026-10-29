@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
 
 export const fixture={class:0x30e,level:1,seed:930,world:-1,position:{x:12.5,y:164.5},equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:null};
 let browser;
 const root=()=>process.env.QA_RESULTS_DIR;
-const open=()=>connect({...browser,helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
+const open=url=>connect({...browser,url,helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
 export async function beforeNavigate(context){
   browser=context.browser;
-  const cdp=await open();
+  const cdp=await open('about:blank');
   try{await cdp.call('Page.addScriptToEvaluateOnNewDocument',{source:`(${networkFaults.toString()})()`});}finally{cdp.close();}
 }
 function networkFaults(){
@@ -19,11 +20,13 @@ function networkFaults(){
     constructor(...args){
       super(...args);
       if(new URL(args[0]).pathname!=='/game')return;
-      const row={socket:rows.length+1,opened:performance.now(),held:0,released:null,dropped:false};rows.push(row);
+      const row={socket:rows.length+1,opened:performance.now(),seen:0,held:0,released:null,dropped:false};rows.push(row);
       if(row.socket===2){
         const queued=[],replayed=new WeakSet();let holding=true;
         this.addEventListener('message',event=>{
-          if(!holding||replayed.has(event))return;
+          if(replayed.has(event))return;
+          row.seen++;
+          if(!holding||row.seen===1)return;
           event.stopImmediatePropagation();queued.push(event);row.held++;
         });
         timer(()=>{
@@ -40,18 +43,33 @@ export async function run(game){
   async function save(name){const view=await game.observe();observations.push({name,view});await writeFile(join(root(),'reconnect.json'),JSON.stringify(observations,null,2));return view;}
   const initial=await save('tutorial');
   await game.act({keys:[],duration_ms:1000},{name:'tutorial-before',when:v=>v.world==='Tutorial'&&v.game_ms>=initial.game_ms+300});
-  await game.act({keys:['Insert'],duration_ms:3500});
-  const home=await save('delayed-nexus');assert.equal(home.world,'Nexus');
-  await game.act({keys:[],duration_ms:1200},{name:'delayed-nexus',when:v=>v.world==='Nexus'&&v.game_ms>=home.game_ms+500});
-  const cdp=await open();
+  const {origin}=JSON.parse(await readFile(join(root(),'native/native.json'),'utf8'));
+  const cdp=await open(origin+'/');
   try{
+    const action=game.act({keys:['Insert'],duration_ms:3500});
+    const capture=(async()=>{
+      const deadline=Date.now()+10000;
+      while(!await cdp.eval('window.reconnectQA[1]?.held>0')){assert(Date.now()<deadline,'Delayed destination never received initialization');await delay(20);}
+      for(const name of ['loading-nexus','loading-nexus-later']){
+        await writeFile(join(root(),name+'.png'),Buffer.from((await cdp.call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+        await delay(400);
+      }
+    })();
+    const results=await Promise.allSettled([action,capture]);for(const result of results)if(result.status==='rejected')throw result.reason;
+    const home=await save('delayed-nexus');assert.equal(home.world,'Nexus');
+    await game.act({keys:[],duration_ms:1200},{name:'delayed-nexus',when:v=>v.world==='Nexus'&&v.game_ms>=home.game_ms+500});
     const delayed=await cdp.eval('window.reconnectQA');
     game.check('destination initialization tolerates an ordered 1500ms network delay',delayed.length===2&&delayed[1].held>0&&delayed[1].released-delayed[1].opened>=1450);
     await game.act({keys:['d'],duration_ms:400});const moved=await save('nexus-moved');
     game.check('delayed destination releases input and remains playable',moved.world==='Nexus'&&Math.hypot(moved.position.x-home.position.x,moved.position.y-home.position.y)>.3);
-    await game.act({keys:['Enter'],duration_ms:50});
-    await cdp.call('Input.insertText',{text:'/tutorial'});
-    await game.act({keys:['Enter'],duration_ms:3500});
+    const retry=game.act({keys:[],duration_ms:4500});
+    const input=(async()=>{
+      const deadline=Date.now()+10000;
+      while((await game.observe()).paused){assert(Date.now()<deadline,'Chat action never unpaused');await delay(20);}
+      const key=async()=>{for(const type of ['keyDown','keyUp'])await cdp.call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13});};
+      await key();await cdp.call('Input.insertText',{text:'/tutorial'});await key();
+    })();
+    const retried=await Promise.allSettled([retry,input]);for(const result of retried)if(result.status==='rejected')throw result.reason;
     const returned=await save('retried-tutorial');assert.equal(returned.world,'Tutorial');
     await game.act({keys:[],duration_ms:1200},{name:'retried-tutorial',when:v=>v.world==='Tutorial'&&v.game_ms>=returned.game_ms+500});
     const faults=await cdp.eval('window.reconnectQA');await writeFile(join(root(),'network-faults.json'),JSON.stringify(faults,null,2));
