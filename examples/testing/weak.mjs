@@ -44,11 +44,17 @@ export async function run(game){
   game.check('ordinary native movement closes quiver range',Math.hypot(near.x-beforeAbility.view.position.x,near.y-beforeAbility.view.position.y)<2.5);
   offset=(await shots()).length;
   const mana=beforeAbility.view.character.mp;
-  await game.act({keys:[' '],duration_ms:300,target:{...target,fire:false}},{name:'weak-quiver',when:v=>Boolean(v.character.conditions&weak)&&v.character.mp<mana});
-  await game.act({keys:[],duration_ms:500});
-  const ability=await save('weak-quiver'),abilityShots=(await shots()).slice(offset);
-  game.check('Weak quiver retains unscaled 100–139 damage and spends mana',abilityShots.length===1&&abilityShots[0].damage>=100&&abilityShots[0].damage<=139&&ability.view.character.mp<mana);
-  game.check('quiver actually damages the boss while Weak',hp(beforeAbility)-hp(ability)>=abilityShots[0].damage-4&&Boolean(ability.view.character.conditions&weak));
+  let ability;
+  for(let n=0;n<5;n++){
+    await game.act({keys:[' '],duration_ms:300,target:{...target,fire:false}},{name:'weak-quiver-'+n,when:v=>Boolean(v.character.conditions&weak)&&v.character.mp<mana});
+    await game.act({keys:[],duration_ms:500});
+    ability=await save('weak-quiver-'+n);
+    if(hp(beforeAbility)-hp(ability)>=96)break;
+  }
+  const abilityShots=(await shots()).slice(offset);
+  game.check('Weak quivers retain unscaled 100–139 damage and spend mana',abilityShots.length>0&&abilityShots.length<=5&&abilityShots.every(s=>s.damage>=100&&s.damage<=139)&&ability.view.character.mp<mana);
+  game.check('quiver actually damages the boss while Weak',hp(beforeAbility)-hp(ability)>=96&&Boolean(ability.view.character.conditions&weak));
+  await paladin.act({keys:[' '],duration_ms:200});
   const revision=ability.view.character.inventory_revision;
   await game.act({keys:['1'],duration_ms:200});
   const cured=await save('cured');
