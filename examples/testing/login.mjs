@@ -78,7 +78,7 @@ export async function enter(context) {
   assert.equal(replies('account/verify').at(-1).body,'<Error>invalid email or password</Error>');
   await shot('wrong-password-refused');
   assert.deepEqual(await snapshot(),initial,'Refused credentials changed registered progress');
-  await click(350,425);await delay(500);
+  await click(400,425);await delay(500);
   await click(775,20);await delay(500);
   await type(300,235,'login-921@example.test');await type(300,323,'fixture-password');await click(480,425);
   await until(()=>replies('account/verify').length>=count+4,'successful native sign-in and account view');
