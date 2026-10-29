@@ -21,11 +21,7 @@ const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 10] = [
         2000,
     ),
     (WORLD10_ID, WORLD10_SOURCE, 2000),
-    (
-        "classic-world-13-reconstruction",
-        "15cb5c88982275f3e72d4dc0bc9fb940177662013cacd6b76c1b95aeca46ecd1",
-        2000,
-    ),
+    (WORLD13_ID, WORLD13_SOURCE, 2000),
     (
         "classic-world-06-reconstruction",
         "f5dcb4af75cce476d80bc59760df78ec880211ba9d3d2847225fc3d3a6b1b30a",
@@ -76,7 +72,7 @@ impl ReviewedRecipe {
         self.schema == 4
             || matches!(
                 self.id.as_str(),
-                WORLD05_ID | WORLD09_ID | WORLD10_ID | WORLD11_ID
+                WORLD05_ID | WORLD09_ID | WORLD10_ID | WORLD11_ID | WORLD13_ID
             )
     }
     fn dimensions(&self) -> Result<[usize; 2]> {
@@ -192,6 +188,13 @@ const WORLD11_SOURCE: &str = "3d3b93937ca405b4f9ce1e28d11694d2f92654acd6a4b7a11c
 const WORLD11_LAVA_SUPPORT: &str =
     "4f88fb5c98d4e7dbaa7fb6e5dde0dba336c559b9abbb99d3a8532dd2e0120b44";
 
+pub(super) const WORLD13_ID: &str = "classic-world-13-reconstruction";
+const WORLD13_SOURCE: &str = "15cb5c88982275f3e72d4dc0bc9fb940177662013cacd6b76c1b95aeca46ecd1";
+const WORLD13_LAVA_SUPPORT: &str =
+    "8738a28d39041c6953ef0b7cf69a650059741be08727137d2e7ab8b2c5226c70";
+const WORLD13_TOMB_SUPPORT: &str =
+    "efbf0451dbe54032518a244985efe6b18e9465edb5d2ccc855381782645cb091";
+
 pub(super) const WORLD02_ID: &str = "classic-world-02-reconstruction";
 pub(super) const WORLD03_ID: &str = "classic-world-03-reconstruction";
 
@@ -242,6 +245,7 @@ impl ScopedLava {
         let world09 = policy.get("world09_lava").is_some();
         let world10 = policy.get("world10_lava").is_some();
         let world11 = policy.get("world11_lava").is_some();
+        let world13 = policy.get("world13_lava").is_some();
         ensure!(
             u8::from(world01)
                 + u8::from(world23.is_some())
@@ -250,6 +254,7 @@ impl ScopedLava {
                 + u8::from(world09)
                 + u8::from(world10)
                 + u8::from(world11)
+                + u8::from(world13)
                 <= 1,
             "mixed Realm lava scopes"
         );
@@ -390,6 +395,23 @@ impl ScopedLava {
                 3,
                 source_local_transform([2100, 2100]),
             )
+        } else if world13 {
+            (
+                Self {
+                    world: 13,
+                    terrain: 0,
+                    side: 2000,
+                    source_side: 2000,
+                    offset: 0,
+                    pixels: 634,
+                    support: WORLD13_LAVA_SUPPORT,
+                },
+                WORLD13_ID,
+                WORLD13_SOURCE,
+                "world13_lava",
+                3,
+                source_local_transform([2000, 2000]),
+            )
         } else {
             return Ok(None);
         };
@@ -413,6 +435,9 @@ impl ScopedLava {
     fn choice(&self) -> serde_json::Value {
         let mut choice = lava_choice(self.pixels, self.support);
         choice["cell"]["terrain"] = self.terrain.into();
+        if self.world == 13 {
+            choice["rgb"] = serde_json::json!(["d54900", "d44900"]);
+        }
         choice
     }
     fn validate_content(&self, content: &Content) -> Result<()> {
@@ -649,7 +674,10 @@ impl Recipe {
             }
             Self::ClassicV1(r) => {
                 ensure!(
-                    !matches!(r.id.as_str(), WORLD09_ID | WORLD10_ID | WORLD11_ID),
+                    !matches!(
+                        r.id.as_str(),
+                        WORLD09_ID | WORLD10_ID | WORLD11_ID | WORLD13_ID
+                    ),
                     "{} requires its reviewed source recipe",
                     r.id
                 );
@@ -1382,7 +1410,7 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
             || (recipe.schema == 3
                 && matches!(
                     recipe.id.as_str(),
-                    WORLD05_ID | WORLD09_ID | WORLD10_ID | WORLD11_ID
+                    WORLD05_ID | WORLD09_ID | WORLD10_ID | WORLD11_ID | WORLD13_ID
                 )),
         "strict source audit requires an admitted source identity"
     );
@@ -1425,16 +1453,36 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
     for (id, key, pixels, support) in [
         (WORLD10_ID, "world10_lava", 460, WORLD10_LAVA_SUPPORT),
         (WORLD11_ID, "world11_lava", 577, WORLD11_LAVA_SUPPORT),
+        (WORLD13_ID, "world13_lava", 634, WORLD13_LAVA_SUPPORT),
     ] {
         if recipe.id == id && policy.get(key).is_some() {
             keys.push(key);
             let mut choice = lava_choice(pixels, support);
             choice["cell"]["terrain"] = 0.into();
+            if id == WORLD13_ID {
+                choice["rgb"] = serde_json::json!(["d54900", "d44900"]);
+            }
             ensure!(
                 policy[key] == choice,
                 "{id} requires its exact{pixels}-cell terrain0 lava capability"
             );
         }
+    }
+    if recipe.id == WORLD13_ID {
+        keys.push("world13_connections");
+        let connections = &policy["world13_connections"];
+        strict_keys(
+            connections,
+            &["object", "pixels", "rule", "support_sha256_le_u32"],
+            "World13 connection choice",
+        )?;
+        ensure!(
+            connections["object"] == 477
+                && connections["pixels"] == 48
+                && connections["support_sha256_le_u32"] == WORLD13_TOMB_SUPPORT
+                && connections["rule"].as_str().is_some_and(|r| !r.is_empty()),
+            "World13 requires its exact48-cell TombWall connection choice"
+        );
     }
     strict_keys(&policy, &keys, "policy")?;
     strict_keys(
@@ -1781,6 +1829,64 @@ fn world05_legacy_and_playable_lava_capabilities_remain_distinct() -> Result<()>
 }
 
 #[test]
+fn world13_source_choices_remain_scoped() -> Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("data/realms");
+    let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, "world13.json")? else {
+        unreachable!()
+    };
+    let bytes = std::fs::read(root.join("world13/source-policy.json"))?;
+    let annotations = std::fs::read(root.join("world13/source-annotations.json"))?;
+    let mut policy: serde_json::Value = serde_json::from_slice(&bytes)?;
+    strict_source_audit(&bytes, &annotations, &recipe)?;
+    ScopedLava::binding(&recipe, &policy)?.context("missing World13 lava")?;
+    policy["world13_lava"]["rgb"] = "d44a00".into();
+    assert!(ScopedLava::binding(&recipe, &policy).is_err());
+    policy = serde_json::from_slice(&bytes)?;
+    policy["world13_connections"]["pixels"] = 47.into();
+    assert!(strict_source_audit(&serde_json::to_vec(&policy)?, &annotations, &recipe).is_err());
+    let content = Content::load(root.parent().context("data directory missing")?)?;
+    let (mut map, _) = reviewed_map(&root, &recipe, &content)?;
+    let positions: Vec<_> = map
+        .cells
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| (c.object == Some(477)).then_some(i))
+        .collect();
+    assert_eq!(positions.len(), 48);
+    let support: Vec<_> = positions
+        .iter()
+        .flat_map(|&i| (i as u32).to_le_bytes())
+        .collect();
+    assert_eq!(sha256(&support), WORLD13_TOMB_SUPPORT);
+    let topology_matches = |map: &Map| {
+        positions.iter().all(|&i| {
+            let n = neighbors(i, map.width as usize);
+            let conn = [n[0], n[3], n[1], n[2]]
+                .into_iter()
+                .fold(0u32, |bits, next| {
+                    (bits << 8)
+                        | if map.cells.get(next).is_some_and(|c| c.object == Some(477)) {
+                            1
+                        } else {
+                            2
+                        }
+                });
+            map.cells[i].config == format!("conn:{conn}")
+        })
+    };
+    assert!(topology_matches(&map));
+    let cell = &mut map.cells[positions[0]];
+    cell.config = if cell.config == "conn:33686018" {
+        "conn:16843010"
+    } else {
+        "conn:33686018"
+    }
+    .into();
+    assert!(!topology_matches(&map));
+    Ok(())
+}
+
+#[test]
 fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
     let content = Content::load(&data)?;
@@ -1792,6 +1898,7 @@ fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
         "world05.json",
         "world10.json",
         "world11.json",
+        "world13.json",
     ] {
         let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, name)? else {
             unreachable!()

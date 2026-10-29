@@ -877,6 +877,7 @@ impl World {
                     | "classic-world-09-reconstruction"
                     | "classic-world-10-reconstruction"
                     | "classic-world-11-reconstruction"
+                    | "classic-world-13-reconstruction"
             )
         )
     }
