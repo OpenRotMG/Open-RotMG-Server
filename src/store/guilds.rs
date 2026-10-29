@@ -25,6 +25,9 @@ pub enum GuildAction {
     Upgrade { level: i32 },
 }
 
+#[cfg(test)]
+mod roster_tests;
+
 pub const HALL_PRICES: [i32; 3] = [10_000, 100_000, 250_000];
 
 // Preserve the selected client's stricter Officer matrix: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/util/_07E_.as#L61-L78
