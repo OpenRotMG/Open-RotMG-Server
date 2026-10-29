@@ -697,6 +697,90 @@ fn nomad_primary_cycle_and_selected_blind_are_independent() {
 }
 
 #[test]
+fn weak_weapon_rounding_overrides_attack_and_damaging_but_not_ability_shoot() {
+    for attack in [0, 15, 75] {
+        for weak in [false, true] {
+            for damaging in [false, true] {
+                let (mut w, id) = fixture(0x18, false);
+                w.now = 1000;
+                let p = w.players.get_mut(&id).unwrap();
+                p.character.class = 0x307;
+                p.character.base[2] = attack;
+                p.character.items[0] = 0xa1a;
+                p.character.items[1] = 0xa61;
+                p.seed = 1;
+                p.lab_conditions = if weak { bit(condition::WEAK) } else { 0 }
+                    | if damaging {
+                        bit(condition::DAMAGING)
+                    } else {
+                        0
+                    };
+                // Selected client _6D_/_G_Y_ short-circuit Weak and truncate the multiplied draw; ability Shoot passes false: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as
+                let multiplier = if weak {
+                    0.5
+                } else {
+                    (0.5 + f64::from(attack) * 0.02) * if damaging { 1.5 } else { 1. }
+                };
+                let start = Pos { x: 8.8, y: 8.5 };
+                w.shoot(id, 1000, 1, 0xa1a, start, 0.).unwrap();
+                assert_eq!(w.bullets.last().unwrap().damage, (17. * multiplier) as i32);
+                w.native_use_item(
+                    id,
+                    1000,
+                    Slot {
+                        object: id,
+                        slot: 1,
+                        kind: 0xa61,
+                    },
+                    Pos { x: 10.5, y: 8.5 },
+                )
+                .unwrap();
+                w.shoot(id, 1000, 2, 0xa61, start, 0.).unwrap();
+                assert_eq!(w.bullets.last().unwrap().damage, 109);
+                assert_eq!(w.players[&id].character.mp, 50);
+            }
+        }
+    }
+}
+
+#[test]
+fn weak_ack_reapplication_expiry_and_departure_remain_target_scoped() {
+    let (mut w, id) = fixture(0x18, false);
+    w.now = 1000;
+    w.players.get_mut(&id).unwrap().lab_conditions = bit(condition::INVULNERABLE);
+    let b = shot(&w, 999, 0x936, 1);
+    assert_eq!(b.spec.effects, [(condition::WEAK, 5000)]);
+    assert!(native_hits::expect_shoot_ack(
+        w.players.get_mut(&id).unwrap(),
+        vec![b.clone()],
+        &w.clock
+    ));
+    w.native_player_hit(id, b.owner, b.id).unwrap();
+    assert!(w.players[&id].statuses.is_empty());
+    w.acknowledge_shoot(id, 1000).unwrap();
+    w.native_player_hit(id, b.owner, b.id).unwrap();
+    assert_eq!(w.players[&id].statuses[&condition::WEAK], (1000, 6000));
+    assert_eq!(w.players[&id].character.hp, 200);
+    w.now = 2000;
+    w.native_player_hit(id, b.owner, b.id).unwrap();
+    assert_eq!(w.players[&id].statuses[&condition::WEAK], (1000, 6000));
+    w.apply_condition(id, condition::WEAK, 5000).unwrap();
+    w.apply_condition(id, condition::WEAK, 100).unwrap();
+    assert_eq!(w.players[&id].statuses[&condition::WEAK], (2000, 7000));
+    w.now = 6999;
+    assert_ne!(w.players[&id].conditions(w.now) & bit(condition::WEAK), 0);
+    w.now = 7000;
+    assert_eq!(w.players[&id].conditions(w.now) & bit(condition::WEAK), 0);
+    w.apply_condition(id, condition::WEAK, 5000).unwrap();
+    let character = w.leave(id).unwrap();
+    let replacement = w.enter(character, None).unwrap();
+    assert_eq!(
+        w.players[&replacement].conditions(w.now) & bit(condition::WEAK),
+        0
+    );
+}
+
+#[test]
 fn selected_rng_keeps_equal_bounds_and_half_open_damage_draws() {
     let (mut w, id) = fixture(0x18, false);
     let p = w.players.get_mut(&id).unwrap();
