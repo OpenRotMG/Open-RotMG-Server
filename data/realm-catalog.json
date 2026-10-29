@@ -46,5 +46,6 @@
     "kind": "reconstruction",
     "recipe": "world05.json",
     "sha256": "c6daa9af6a24e958de538f76a58cd1f957ca6bc837b8252e564d62f789f7710b"
-  }
+  },
+  {"kind":"reconstruction","recipe":"world11.json","sha256":"2c555db049f215dc28b34c638f1818f4c59d150519313e876ae06b27462184a5"}
 ]

@@ -1758,6 +1758,7 @@ fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
         "world03.json",
         "world04.json",
         "world05.json",
+        "world11.json",
     ] {
         let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, name)? else {
             unreachable!()
