@@ -515,15 +515,30 @@ fn band_edge_journeys_do_not_preempt_each_other() {
 fn unreachable_hunt_is_travel_that_aborts_not_engagement() {
     let (c, mut v) = fixture();
     let mut brain = Brain::new(ARCHETYPES[0], &v);
-    // The bot never gets closer, as when held movement cannot reach the quest.
-    for step in 0..12 {
+    // The bot never gets closer, as when held movement cannot reach the quest; the target shifts a tile.
+    let mut aborted = false;
+    for step in 0..20 {
         v.tick += 5;
         v.time_ms += 10_000;
         v.elapsed_ms += 10_000;
+        v.objects[0].position.x = 10.5 + (step % 2) as f32;
+        if aborted {
+            // Whatever journey follows ends; only remembering the target prevents re-choosing it.
+            brain.travel = None;
+        }
         let goal = brain.decide(&v, &c).unwrap().goal;
         if step == 0 {
             assert_eq!(goal, Goal::Hunt(2));
         }
+        assert!(
+            !aborted || goal != Goal::Hunt(2),
+            "step {step}: the aborted target is re-chosen"
+        );
+        aborted |= brain
+            .plan
+            .events
+            .iter()
+            .any(|e| e.reason == "travel deadline passed");
     }
     assert!(!brain.plan.engaged, "an out-of-range hunt is not a fight");
     assert!(

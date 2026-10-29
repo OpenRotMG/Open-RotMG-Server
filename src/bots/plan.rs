@@ -259,11 +259,12 @@ impl Plan {
                 "text":format!("Keeps fleeing: {} Nexus escapes in 30m, last for {}.",escapes.len(),last.reason)}));
         }
         let mut aborts: BTreeMap<(Option<Owner>, &str), Vec<u64>> = BTreeMap::new();
-        for e in self
-            .flagged
-            .iter()
-            .filter(|e| e.kind == Kind::Aborted && now.saturating_sub(e.at) < LOOP_WINDOW_MS)
-        {
+        // Brief blocks while fighting forward are not a wedge: progress clears earlier ones.
+        for e in self.flagged.iter().filter(|e| {
+            e.kind == Kind::Aborted
+                && now.saturating_sub(e.at) < LOOP_WINDOW_MS
+                && (e.reason != "movement blocked" || e.at >= self.last_progress)
+        }) {
             aborts.entry((e.owner, &e.reason)).or_default().push(e.at);
         }
         if let Some(((owner, reason), times)) = aborts.iter().find(|(_, t)| t.len() >= 3) {
@@ -335,5 +336,16 @@ mod tests {
             "looping",
             "three escapes are not fleeing"
         );
+        let mut wedged = Plan {
+            last_progress: 1,
+            ..Plan::default()
+        };
+        for at in [10, 20, 30] {
+            wedged.record(at, Kind::Aborted, None, "movement blocked".into());
+        }
+        assert_eq!(wedged.flag(100).unwrap()["kind"], "looping");
+        wedged.record(40, Kind::Progress, None, "gained experience".into());
+        wedged.record(50, Kind::Aborted, None, "movement blocked".into());
+        assert_eq!(wedged.flag(100), None, "progress clears earlier blocks");
     }
 }

@@ -268,6 +268,8 @@ struct Brain {
     steering: Option<(i32, f32)>,
     /// The kept journey and its distance-proportional deadline (ms).
     travel: Option<(Goal, u64)>,
+    /// Hunt/Fight targets whose approach failed, until a time (ms); moving targets defeat tile exclusion.
+    unreachable: BTreeMap<i32, u64>,
     last_aim: u64,
     previous: Pos,
     stationary: u64,
@@ -340,6 +342,7 @@ impl Brain {
             heading,
             steering: None,
             travel: None,
+            unreachable: BTreeMap::new(),
             last_aim: 0,
             previous: view.position,
             stationary: view.tick,
@@ -1628,6 +1631,9 @@ impl Brain {
             let offered = choices.iter().find(|(_, g, _)| *g == kept).map(|c| c.2);
             if v.time_ms >= deadline {
                 self.travel = None;
+                if let Goal::Hunt(id) | Goal::Fight(id) = kept {
+                    self.unreachable.insert(id, v.time_ms + 300_000);
+                }
                 if let Some(p) = offered {
                     self.blocked.insert(tile(p), v.tick + 100);
                 }
@@ -1641,6 +1647,13 @@ impl Brain {
                 choices.retain(|(_, g, p)| *g == kept || !travel(g, *p));
             }
         }
+        self.unreachable.retain(|_, until| v.time_ms < *until);
+        choices.retain(|(_, g, p)| match g {
+            Goal::Hunt(id) | Goal::Fight(id) => {
+                !self.unreachable.contains_key(id) || !travel(g, *p)
+            }
+            _ => true,
+        });
         // Exploration's maximum score is 20; a clear higher-ranked route makes its full-map search irrelevant.
         if !choices.iter().any(|(score, goal, position)| {
             score + if *goal == self.goal { 8. } else { 0. } > 20.
@@ -1836,6 +1849,9 @@ impl Brain {
                         self.blocked.insert(tile(destination), v.tick + 100);
                         if travel(&goal, destination) {
                             self.travel = None;
+                            if let Goal::Hunt(id) | Goal::Fight(id) = &goal {
+                                self.unreachable.insert(*id, v.time_ms + 300_000);
+                            }
                             self.plan.record(
                                 plan::now(),
                                 plan::Kind::Aborted,

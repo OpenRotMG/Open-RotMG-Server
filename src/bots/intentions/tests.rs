@@ -25,6 +25,13 @@ fn item_selection_is_useful_priced_missing_and_varied_without_guessed_targets() 
     assert!(
         matches!(&i.main.as_ref().unwrap().objective, Objective::Item { reason, .. } if reason.contains(&item.name))
     );
+    let goal = &i.payload(&v, &c, Activity::Adventure, String::new(), None)["goal"];
+    assert_eq!(goal["label"], format!("Acquire {}", item.name));
+    assert_eq!(
+        [&goal["current"], &goal["target"], &goal["unit"]],
+        [&serde_json::Value::Null; 3],
+        "an item kind is not a progress quantity"
+    );
     let mut malformed = serde_json::to_value(&i).unwrap();
     malformed["main"]["objective"]["item"]
         .as_object_mut()

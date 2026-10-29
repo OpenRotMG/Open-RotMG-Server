@@ -376,13 +376,14 @@ impl Intentions {
         errand: Option<&plan::Step>,
     ) -> serde_json::Value {
         let (goal, plan) = self.main.as_ref().map_or((serde_json::Value::Null, "No character goal selected"), |m| {
-            let (current, unit) = match &m.objective {
-                Objective::Reach20 => (v.character.level, "level"),
-                Objective::Speed => (v.character.base_stats[4], "Speed"),
-                Objective::Fame => (v.character.fame, "base fame"),
-                Objective::Item { .. } => (i32::from(v.character.items.contains(&m.target)), "item kind"),
+            // An item kind is not a quantity; the label names the item and the website omits Progress.
+            let (current, target, unit) = match &m.objective {
+                Objective::Reach20 => (Some(v.character.level), Some(m.target), Some("level")),
+                Objective::Speed => (Some(v.character.base_stats[4]), Some(m.target), Some("Speed")),
+                Objective::Fame => (Some(v.character.fame), Some(m.target), Some("base fame")),
+                Objective::Item { .. } => (None, None, None),
             };
-            (serde_json::json!({"id":m.id,"label":self.label(c),"current":current,"target":m.target,"unit":unit}), m.objective.how())
+            (serde_json::json!({"id":m.id,"label":self.label(c),"current":current,"target":target,"unit":unit}), m.objective.how())
         });
         let necessary = errand.is_some()
             || !matches!(
