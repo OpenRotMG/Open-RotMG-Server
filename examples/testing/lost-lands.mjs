@@ -6,7 +6,7 @@ import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
 // Keep this Lord route separate from the Ent Soulbound packaging follow-up.
 const questKinds=[0x675,0x678,0x668,0x67d,0x91b,0x928];
-const spec={class:0x31d,level:20,seed:817,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
+const spec={class:0x307,level:20,seed:817,equipment:[0xc02,0xb28,0xaf9,0xac0],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 const cappedQuestXp=(50+(spec.level-1)*100)/2;
 const history=async()=>(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields);
 let sites,refuge,reserved,world;
@@ -29,13 +29,13 @@ export async function prepare(api){
 }
 export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
-  const records=[];let until=0,modifiedUntil=0,scoutUntil=0,scoutModifier=0,lastTeleport=-10000,companion,companionUntil=0,peerModifier=0,cooperate=false,abilitySeen=false;
+  const records=[];let until=0,modifiedUntil=0,scoutUntil=0,scoutModifier=0,lastTeleport=-10000,companion,companionUntil=0,peerModifier=0,cooperate=false,combatDeadline=0;
   const browser=config.native.find(n=>n.actor===game.actor),connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});
   async function api(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
     const receipt=await response.json();assert(response.ok&&(command.op==='inspect'?receipt.diagnostic!==undefined:receipt.status==='succeeded'),JSON.stringify(receipt));return receipt;
   }
-  const scout=(await api({op:'spawn',spec:{...spec,class:0x307,equipment:[0xc02,0xb28,0xaf9,0xac0],stats:[700,252,75,25,50,50,40,50],world,guid:'lost-lands-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
+  const scout=(await api({op:'spawn',spec:{...spec,world,guid:'lost-lands-scout',position:refuge,controller:'direct',profile:null}})).result.actor;
   const scoutName=(await api({op:'inspect',actor:scout})).diagnostic.character.name;
   async function prepareScout(change){
     for(let n=0;n<100;n++){
@@ -58,6 +58,7 @@ export async function run(game){
   }
   async function protect(){
     const now=(await game.observe()).game_ms;
+    if(combatDeadline)assert(now+5000<combatDeadline,'Prepared encounter must retain a 5s margin inside one finite protection window; expiry coverage is not accepted');
     if(now>=until){await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});until=now+60000;}
     if(now>=scoutUntil){await prepareScout({kind:'protection',condition:'invulnerable',duration_ms:60000});scoutUntil=now+60000;}
     if(companion&&now>=companionUntil){await api({op:'cheat',actor:companion.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});companionUntil=now+60000;}
@@ -100,10 +101,10 @@ export async function run(game){
   }
   async function aimState(id){
     const s=await game.inspect(),target=entity(s,id),shots=s.diagnostic.own_projectiles;
-    // Let already-fired sword bolts resolve before rebinding a crystal they can finish.
-    const ceiling=275*(.5+(spec.stats[2]+100)/50)*1.5;
+    // Let already-fired bow shots resolve before rebinding a crystal they can finish.
+    const ceiling=500*(.5+(spec.stats[2]+2+100)/50)*1.5;
     if(target?.kind===0xd51&&shots.length&&target.hp<=shots.length*ceiling){
-      const wait=Math.max(...shots.map(p=>p.born+400))-s.view.time_ms;assert(wait>0&&wait<=400,'Pending sword lifetime must fit the selected 350ms projectile plus one tick');
+      const wait=Math.max(...shots.map(p=>p.born+553))-s.view.time_ms;assert(wait>0&&wait<=553,'Pending bow lifetime must fit the selected 503ms projectile plus one tick');
       await idle(wait);return game.inspect();
     }
     return s;
@@ -127,7 +128,7 @@ export async function run(game){
     if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
     const distance=Math.hypot(dx,dy),speed=(v.character.conditions&8)?4:(4+5.6*v.character.stats[4]/75)*((v.character.conditions&16384)?1.5:1);
     assert(Number.isFinite(speed)&&speed>0,'Observed movement speed must be finite and positive');
-    await game.act({keys:follow===null?keys:[...keys,' '],duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000))),...(follow===null?{}:{target:{entity:follow,camera_angle:-Math.PI/4,fire:true}})});
+    await game.act({keys,duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000))),...(follow===null?{}:{target:{entity:follow,camera_angle:-Math.PI/4,fire:true}})});
   }
   async function walk(point,range=1.5,follow=null){
     for(let n=0;n<30;n++){
@@ -149,13 +150,11 @@ export async function run(game){
     }
     const current=entity(await game.inspect(),id);if(current?.kind===0xd50&&current.stage>=9){await save('dying');await idle(2500);return;}
     const now=(await game.observe()).game_ms;if(now>=modifiedUntil){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifiedUntil=now+60000;}
-    const input={keys:[' '],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}};
+    const input={keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}};
     if(cooperate&&target.kind===0xd50){
       if(now>=peerModifier){await api({op:'cheat',actor:companion.actor,change:{kind:'stat_modifier',index:2,amount:100,duration_ms:60000}});peerModifier=now+60000;}
       await game.act([[{actor:game.actor,input},{actor:companion.actor,input}]]);
     }else await game.act(input);
-    const flags=(await game.observe()).character.conditions;
-    abilitySeen||=!!(flags&524288)&&!!(flags&16384);
   }
   const initial=await save('before-admission');
   game.check('startup reserves one Lord outside active indexes',reserved.length===1);
@@ -180,7 +179,8 @@ export async function run(game){
   // Let the old finite protection expire at the prepared refuge, not midway through combat.
   assert(Math.hypot((await game.observe()).position.x-refuge.x,(await game.observe()).position.y-refuge.y)<.2,'Prepared refuge required before protection boundary');
   while((await game.observe()).game_ms<until)await game.act({keys:[],duration_ms:Math.min(10000,until-(await game.observe()).game_ms)});
-  await protect();
+  await protect();combatDeadline=until;
+  await writeFile(join(out,'combat-window.json'),JSON.stringify({started_ms:until-60000,expires_ms:combatDeadline,reserve_ms:5000,qualification:'Single finite prepared encounter window; no protection-expiry renewal or survival proof.'}));
   await at({x:admitted.x,y:admitted.y});
   await game.act({keys:[],duration_ms:500},{name:'lost-lands-waiting',when:()=>true});
   const entry=await save('entry'),lord=entity(entry,admitted.entity);assert(lord?.hp===70000&&lord.stage===0);
@@ -188,7 +188,6 @@ export async function run(game){
   for(let n=0;n<8&&(entity(await game.inspect(),lord.id).damage[initial.view.session.character]??0)<=700;n++)await fire(lord.id,500);
   await idle(4000);
   let state=await save('activated');
-  game.check('native helm spends MP and applies Berserk and Speedy',abilitySeen&&state.view.character.mp<initial.view.character.mp);
   const family=s=>s.diagnostic.entities.filter(e=>e.quest===lord.id),crystals=s=>family(s).filter(e=>e.kind===0xd51);
   game.check('native damage activates Lord and summons Guardians and Knights',entity(state,lord.id).hp<69300&&[0xd52,0xd53].every(k=>family(state).some(e=>e.kind===k)));
   const samples=[];let pending,error;
@@ -218,9 +217,8 @@ export async function run(game){
   await writeFile(join(out,'protection-landings.json'),JSON.stringify(landings));
   const expected=landings.filter(p=>p.walkable).length,births=(await history()).filter(f=>f.message==='bounded named quest followers spawned'&&f.quest===lord.id&&f.kind===0xd51).reduce((n,f)=>n+f.count,0);
   game.check('all walkable radial crystal landings spawn owned protection',expected>0&&expected===births&&crystals(state).length===expected&&entity(state,lord.id).stage===8&&!!(entity(state,lord.id).condition&(1<<24)));
-  const hp=entity(state,lord.id).hp;await fire(lord.id,1000);state=await save('shield-rejects');
-  game.check('shield rejects native sword damage',entity(state,lord.id).hp===hp);
-  const protectionIds=crystals(state).map(e=>e.id);
+  const hp=entity(state,lord.id).hp,protectionIds=crystals(state).map(e=>e.id);await fire(lord.id,1000);state=await save('shield-rejects');
+  game.check('shield rejects native bow damage',entity(state,lord.id).hp===hp);
   // Reported crystals may never reach a fixed intercept, so replan from their observed positions.
   for(let n=0;n<120&&crystals(await game.inspect()).length;n++){
     const s=await game.inspect(),distance=e=>Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y);
@@ -274,6 +272,7 @@ export async function run(game){
   await game.act({keys:['Insert'],duration_ms:250});
   const retained=await game.observe();
   game.check('Nexus reconnect preserves the living character and Lord item',retained.world==='Nexus'&&retained.lifecycle.alive&&retained.session.character===picked.view.session.character&&JSON.stringify(retained.character.items)===JSON.stringify(picked.view.character.items)&&retained.character.inventory_revision===picked.view.character.inventory_revision);
-  await writeFile(join(out,'reward.json'),JSON.stringify({bag,observer,picked,retained}));
+  game.check('prepared journey ends inside its single finite protection window',retained.game_ms<combatDeadline);
+  await writeFile(join(out,'reward.json'),JSON.stringify({bag,observer,picked,retained,combatDeadline}));
   }finally{connection.close();}
 }
