@@ -26,7 +26,7 @@ pub enum GuildAction {
 }
 
 #[cfg(test)]
-mod tests;
+mod roster_tests;
 
 pub const HALL_PRICES: [i32; 3] = [10_000, 100_000, 250_000];
 
