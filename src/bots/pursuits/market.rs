@@ -596,6 +596,26 @@ impl Market {
         {
             return Ok(None);
         }
+        let quotes = self.quotes(v, c, future)?;
+        // Preserve a still-funded intention instead of oscillating between researched offers.
+        if let Some(previous) = &self.quote
+            && quotes.contains(previous)
+        {
+            return Ok(Some(previous.clone()));
+        }
+        if quotes.is_empty() {
+            tracing::debug!(
+                account = v.session.account,
+                reason = "no_compatible_whole_item_terms",
+                "market cannot quote"
+            );
+            return Ok(None);
+        }
+        Ok(Some(
+            quotes[style(&self.name) as usize % quotes.len()].clone(),
+        ))
+    }
+    fn quotes(&self, v: &PlayerView, c: &Content, future: Option<u16>) -> Result<Vec<[Goods; 2]>> {
         let stock = self.stock(v, c, future)?;
         let mut wants = Vec::new();
         for kind in c.item_values.kinds() {
@@ -622,23 +642,31 @@ impl Market {
                 }
             }
         }
-        // Preserve a still-funded intention instead of oscillating between researched offers.
-        if let Some(previous) = &self.quote
-            && quotes.contains(previous)
-        {
-            return Ok(Some(previous.clone()));
-        }
-        if quotes.is_empty() {
-            tracing::debug!(
-                account = v.session.account,
-                reason = "no_compatible_whole_item_terms",
-                "market cannot quote"
-            );
-            return Ok(None);
-        }
-        Ok(Some(
-            quotes[style(&self.name) as usize % quotes.len()].clone(),
-        ))
+        Ok(quotes)
+    }
+    // Peer gives q[0] for q[1]. Acquisition reservations may pay only for the target or the planned objective.
+    fn accepts(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+        q: &[Goods; 2],
+        objective: Option<&[Goods; 2]>,
+    ) -> Result<bool> {
+        let target = self.target == Some(q[0].kind) && !v.character.items.contains(&q[0].kind);
+        let planned = objective.is_some_and(|o| o[0].kind == q[1].kind && o[1].kind == q[0].kind);
+        let spendable = if target || planned {
+            usize::from(Self::verified_surplus(v, c, future, q[1].kind)?)
+        } else {
+            self.spendable_surplus(v, c, future, q[1].kind)?
+        };
+        Ok(spendable >= usize::from(q[1].quantity)
+            && if target {
+                q[0].quantity == 1
+            } else {
+                (planned && self.target.is_some())
+                    || self.wanted(v, c, future, q[0].kind)? >= q[0].quantity
+            })
     }
 
     pub(in crate::bots) fn message_current(
@@ -763,99 +791,71 @@ impl Market {
         let Some(ad) = ad else {
             return Ok(false);
         };
-        if v.map.name != "Nexus"
-            || self.incoming.is_some()
-            || self.trade.is_some()
-            || self
-                .bargain
-                .as_ref()
-                .is_some_and(|b| b.resolution.is_none())
-        {
+        if v.map.name != "Nexus" || self.locked() {
             return Ok(true);
         }
-        let Some(objective) = self.quote(v, c, future)? else {
-            return Ok(true);
+        let objective = self.quote(v, c, future)?;
+        let related = |o: &[Goods; 2]| match &ad {
+            Advertisement::Quote(q) => o[0].kind == q[1].kind && o[1].kind == q[0].kind,
+            Advertisement::Buying(g) => o[0].kind == g.kind,
+            Advertisement::Selling(g) => o[1].kind == g.kind,
         };
-        let related = match &ad {
-            Advertisement::Quote(q) => {
-                objective[0].kind == q[1].kind && objective[1].kind == q[0].kind
+        if let Advertisement::Quote(q) = &ad {
+            if !fair(q, c) {
+                tracing::info!(
+                    account = v.session.account,
+                    peer = peer.account,
+                    ?q,
+                    give_value = ?c.item_values.get(q[0].kind),
+                    want_value = ?c.item_values.get(q[1].kind),
+                    reason = "outside_shared_value_policy",
+                    "market advertised exchange refused"
+                );
+                return Ok(true);
             }
-            Advertisement::Buying(g) => g.kind == objective[0].kind,
-            Advertisement::Selling(g) => g.kind == objective[1].kind,
-        };
-        // Interest alone supplies neither a peer price nor permission to open a trade.
-        let Advertisement::Quote(q) = ad else {
-            if related
-                && self.outgoing.is_none()
-                && v.elapsed_ms >= self.next_message_ms
-                && let Some(account) = peer.account
+            // Ads are invitations to inspect a WINDOW, never evidence of consent or payment.
+            if let Some(account) = peer.account
+                && self.accepts(v, c, future, q, objective.as_ref())?
+            {
+                if objective.as_ref().is_some_and(related) {
+                    self.quote = objective;
+                }
+                self.incoming = Some(Incoming::outbound(
+                    v,
+                    peer.id,
+                    account,
+                    name,
+                    [q[1].clone(), q[0].clone()],
+                ));
+                return Ok(true);
+            }
+        }
+        // Interest alone supplies neither a peer price nor permission to open a trade, so answer with
+        // own carried terms. A counter stays current only while it is this bot's quote.
+        if self.outgoing.is_some() || v.elapsed_ms < self.next_message_ms {
+            return Ok(true);
+        }
+        let mut counters: Vec<_> = objective.into_iter().collect();
+        if self.target.is_none() && !self.preparing {
+            counters.extend(self.quotes(v, c, future)?);
+        }
+        if let Some(counter) = counters.into_iter().find(|o| {
+            related(o)
                 && v.character
                     .items
                     .iter()
                     .skip(4)
-                    .filter(|k| **k == objective[0].kind)
+                    .filter(|k| **k == o[0].kind)
                     .count()
-                    >= usize::from(objective[0].quantity)
-            {
-                self.respond(
-                    v,
-                    (peer.id, account, name),
-                    ReplyKind::Counter(objective),
-                    c,
-                )?;
+                    >= usize::from(o[0].quantity)
+        }) && let Some(account) = peer.account
+        {
+            // Incoming requests inherit this quote; preparation keeps the quote it is banking for.
+            if !self.preparing {
+                self.quote = Some(counter.clone());
             }
-            return Ok(true);
-        };
-        if !fair(&q, c) {
-            tracing::info!(
-                account = v.session.account,
-                peer = peer.account,
-                ?q,
-                give_value = ?c.item_values.get(q[0].kind),
-                want_value = ?c.item_values.get(q[1].kind),
-                reason = "outside_shared_value_policy",
-                "market advertised exchange refused"
-            );
-            return Ok(true);
+            self.respond(v, (peer.id, account, name), ReplyKind::Counter(counter), c)?;
         }
-        // Ads are invitations to inspect a WINDOW, never evidence of consent or payment.
-        if objective[0].kind == q[1].kind
-            && objective[1].kind == q[0].kind
-            && q[1].quantity <= objective[0].quantity
-            && q[0].quantity >= objective[1].quantity
-            && (self.target != Some(q[0].kind) || q[0].quantity == 1)
-            && (self.target.is_some() || self.wanted(v, c, future, q[0].kind)? >= q[0].quantity)
-            && Self::verified_surplus(v, c, future, q[1].kind)? >= q[1].quantity
-            && let Some(account) = peer.account
-        {
-            self.quote = Some(objective);
-            self.incoming = Some(Incoming::outbound(
-                v,
-                peer.id,
-                account,
-                name,
-                [q[1].clone(), q[0].clone()],
-            ));
-        } else if related
-            && self.outgoing.is_none()
-            && v.elapsed_ms >= self.next_message_ms
-            && let Some(account) = peer.account
-            && v.character
-                .items
-                .iter()
-                .skip(4)
-                .filter(|k| **k == objective[0].kind)
-                .count()
-                >= usize::from(objective[0].quantity)
-        {
-            self.respond(
-                v,
-                (peer.id, account, name),
-                ReplyKind::Counter(objective),
-                c,
-            )?;
-        }
-        let _ = channel;
         Ok(true)
     }
     pub(in crate::bots) fn recover(&mut self, receipts: Vec<Delivery>) -> Result<()> {
