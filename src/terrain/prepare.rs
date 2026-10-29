@@ -165,6 +165,7 @@ const WORLD01_SOURCE: &str = "7404dfa562627e015160a88820017cfbcfb2c6de3676a18dcc
 const WORLD01_LAVA_SUPPORT: &str =
     "93f3410a461d0daa70d6efc79938a5a0938f69018bd32e9c5667bf6ee25a2b17";
 
+pub(super) const WORLD04_ID: &str = "classic-world-04-reconstruction";
 const WORLD04_SOURCE: &str = "b22ff9156730a358e39c83ed37d11dadf86f282cd16e663e905f19eaa0cd20f5";
 const WORLD04_LAVA_SUPPORT: &str =
     "db7fa56ca8a4ea4396a75483b894262b66fe611b7fdf72b4b574f0999c1e8494";
@@ -298,7 +299,7 @@ impl ScopedLava {
                     pixels: 506,
                     support: WORLD04_LAVA_SUPPORT,
                 },
-                "classic-world-04-reconstruction",
+                WORLD04_ID,
                 WORLD04_SOURCE,
                 "world04_lava",
                 3,
@@ -1715,7 +1716,7 @@ fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
     let content = Content::load(&data)?;
     let root = data.join("realms");
-    for name in ["world02.json", "world03.json"] {
+    for name in ["world02.json", "world03.json", "world04.json"] {
         let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, name)? else {
             unreachable!()
         };
