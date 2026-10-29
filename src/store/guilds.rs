@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod hall_tests;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Membership {
     pub id: i32,
@@ -28,6 +31,7 @@ pub enum GuildAction {
 #[cfg(test)]
 mod roster_tests;
 
+// Selected 123.5.1 GuildMerchant prices, not the reduced test prices: https://wikiwiki.jp/rmd/test/build121.5.2#guildfame
 pub const HALL_PRICES: [i32; 3] = [10_000, 100_000, 250_000];
 
 // Preserve the selected client's stricter Officer matrix: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/util/_07E_.as#L61-L78
