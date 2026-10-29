@@ -10,7 +10,7 @@ export async function run(game){
   const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'vitals',hp:150,mp:120}}})});
   const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   const before=await game.inspect();
-  await game.act({keys:[],duration_ms:1000},{name:'persistence-before',when:v=>v.world==='Tutorial'});
+  await game.act({keys:[],duration_ms:2000},{name:'persistence-before',when:v=>v.world==='Tutorial'&&v.game_ms>=before.view.time_ms+1000});
   await game.act({keys:['1'],duration_ms:200});
   const grown=await game.observe();
   game.check('native stat potion commits the permanent gain and one consumed slot',grown.character.base_stats[2]===75&&grown.character.items[4]===-1&&grown.character.inventory_revision===before.view.character.inventory_revision+1);
@@ -26,7 +26,8 @@ export async function run(game){
   game.check('native fire records actual shots and spell leaves an entry mana deficit',ch.lifetime.shots>before.diagnostic.character.lifetime.shots&&ch.mp<120);
   // Saved fields are a client contract, not proof of server cadence: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/appengine/SavedCharacter.as
   await game.act({keys:['Insert'],duration_ms:1200});
-  await game.act({keys:[],duration_ms:1500},{name:'persistence-reconnected',when:v=>v.world==='Nexus'});
+  const settled=(await game.observe()).game_ms;
+  await game.act({keys:[],duration_ms:1500},{name:'persistence-reconnected',when:v=>v.world==='Nexus'&&v.game_ms>=settled+700});
   const after=await game.inspect(),saved=after.diagnostic.character;
   game.check('ordinary Nexus reconnect replaces player but retains account and character',after.view.map.name==='Nexus'&&after.view.session.player!==before.view.session.player&&after.view.session.account===before.view.session.account&&after.view.session.character===before.view.session.character&&after.view.lifecycle.alive);
   game.check('reconnect preserves class experience level permanent stats equipment and appearance',saved.class===ch.class&&saved.exp===ch.exp&&saved.level===ch.level&&JSON.stringify(saved.base)===JSON.stringify(ch.base)&&JSON.stringify(saved.items)===JSON.stringify(ch.items)&&saved.revision===ch.revision&&saved.tex1===ch.tex1&&saved.tex2===ch.tex2);
