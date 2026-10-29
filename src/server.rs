@@ -3,6 +3,8 @@ mod input;
 mod name_claims;
 
 #[cfg(test)]
+mod deletion_tests;
+#[cfg(test)]
 pub(crate) mod name_claims_tests;
 #[cfg(test)]
 mod password_tests;
