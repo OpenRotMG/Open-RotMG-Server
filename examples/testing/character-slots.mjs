@@ -34,7 +34,8 @@ export async function run(game) {
   let storedAtSelection;
   try {
     for(let i=0;;i++) {
-      if(!(await game.observe()).paused&&await c.eval('document.querySelector("ruffle-player").ruffle().isPlaying'))break;
+      const live=await game.observe();
+      if(!live.paused&&live.game_ms>=changed.game_ms+500&&await c.eval('document.querySelector("ruffle-player").ruffle().isPlaying'))break;
       assert(i<100,'Native control action did not resume');await delay(20);
     }
     // The selected client dispatches COMPLETE, not death: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_R_v/_zL_.as#L16-L18
