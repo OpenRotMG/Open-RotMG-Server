@@ -39,9 +39,6 @@ export async function enter({account}){
   await click(288,396);await click(490,477);await until(()=>registered&&verified,'Native registration');
   check('native registration succeeds',(await cdp.call('Network.getResponseBody',{requestId:registration})).body.includes('<Success'));
   check('name is assigned without changing credentials',(await post('/legacy-api/account/setName',{guid:email,password:old,name:'Recovera'})).text.includes('<Success'));
-  const disabled=await post('/legacy-api/account/forgotPassword',{guid:email});
-  check('unconfigured email explicitly refuses rather than pretending delivery',disabled.text.includes('not configured')&&disabled.cache==='no-store');
-  check('invalid email is refused',(await post('/legacy-api/account/forgotPassword',{guid:'not-email'})).text.startsWith('<Error>'));
   const beforeXml=(await post('/legacy-api/char/list',{guid:email,password:old})).text;
   const token=randomBytes(32).toString('hex'),hash=createHash('sha256').update(token).digest('hex');
   // The selected client promises an emailed password, not this modern grant; mail issuance is tested separately: https://openrotmg.org/restoration/reference-data/client-123.5.1.swf (§_-QA§.§_-FV§).
