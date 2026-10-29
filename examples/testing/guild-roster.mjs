@@ -35,7 +35,7 @@ export async function run(game){
   async function walk(player,pos){
     for(let i=0;i<80;i++){
       const v=await player.observe(),dx=pos.x-v.position.x,dy=pos.y-v.position.y,distance=Math.hypot(dx,dy);
-      if(distance<.6)return;
+      if(distance<.18)return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');
       await player.act({keys,duration_ms:Math.min(300,Math.max(50,Math.round(distance*80)))});
@@ -46,9 +46,10 @@ export async function run(game){
   await api({op:'cheat',actor:game.actor,change:{kind:'guild',name:'Roster Research',members:[peer.actor]}});
   await game.act({keys:[],duration_ms:700});
   for(const player of [game,peer]){
+    await walk(player,{x:76.5,y:77.5});
     await click(player,700,575);
     game.check('ordinary Guild Hall portal transfers member '+player.actor,(await player.observe()).world==='Guild Hall');
-    await walk(player,{x:14.5,y:8.5});
+    await walk(player,{x:14.5,y:8.0});
     await click(player,700,575);
     await capture(player,player===game?'roster-founder':'roster-initiate');
   }
@@ -63,6 +64,7 @@ export async function run(game){
   await click(game,686,158);await capture(game,'roster-promote-confirmation');
   await click(game,325,335);
   game.check('cancelled promotion leaves roster unchanged',clients[0].rosters.length===1&&roster(0)===original);
+  await capture(game,'roster-promote-cancelled');
   await click(game,686,158);await click(game,475,335);
   // The selected screen reloads on acceptance, so require a new response: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_sP_/_07x.as
   game.check('accepted promotion reloads the actual Member rank',clients[0].rosters.length===2&&rows(0).find(r=>r.name===peerName)?.rank===10);
@@ -74,6 +76,7 @@ export async function run(game){
   game.check('accepted demotion reloads Initiate',clients[0].rosters.length===3&&rows(0).find(r=>r.name===peerName)?.rank===0);
   await click(game,747,158);await capture(game,'roster-remove-confirmation');await click(game,325,335);
   game.check('cancelled removal retains both members',clients[0].rosters.length===3&&rows(0).length===2);
+  await capture(game,'roster-remove-cancelled');
   await click(game,747,158);await click(game,475,335);
   game.check('accepted removal reloads the one-member roster',clients[0].rosters.length===4&&rows(0).length===1&&rows(0)[0].rank===40);
   await capture(game,'roster-removed');
@@ -85,9 +88,9 @@ export async function run(game){
   const final=roster(0);
   await click(game,400,540);await game.act({keys:['Insert'],duration_ms:700});await game.act({keys:[],duration_ms:700});
   game.check('Founder ordinary reconnect returns to Nexus',(await game.observe()).world==='Nexus');
-  await walk(game,{x:76.5,y:78.5});await click(game,700,575);
+  await walk(game,{x:76.5,y:77.5});await click(game,700,575);
   game.check('Founder still enters the same guild hall',(await game.observe()).world==='Guild Hall');
-  await walk(game,{x:14.5,y:8.5});await click(game,700,575);
+  await walk(game,{x:14.5,y:8.0});await click(game,700,575);
   game.check('ordinary reconnect preserves the final roster',clients[0].rosters.length===5&&roster(0)===final);
   await capture(game,'roster-reconnected');
   game.check('both ordinary clients remain alive',(await game.observe()).lifecycle.alive&&(await peer.observe()).lifecycle.alive);
