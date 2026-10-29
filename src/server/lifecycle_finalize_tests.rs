@@ -339,6 +339,55 @@ async fn lifecycle_finalize_real_socket_manual_and_resurrection_transfer_retire_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn client_entry_rejects_debug_worlds_without_changing_saved_character() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let (port, server) = socket_server(&a).await;
+    let guid = "ordinary-client-entry";
+    let account = a.store.list(guid.into()).await.unwrap().id;
+    let character = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    for mode in ["build", "editor-world", "editor-json"] {
+        let mut hello = socket_hello(&dir, guid, -2, None);
+        match mode {
+            "build" => hello.body[8] = b'0',
+            "editor-world" => hello.body[9..13].copy_from_slice(&(-6_i32).to_be_bytes()),
+            "editor-json" => {
+                let offset = hello.body.len() - 12;
+                hello.body[offset..offset + 4].copy_from_slice(&2_i32.to_be_bytes());
+                hello.body.splice(offset + 4..offset + 4, *b"{}");
+            }
+            _ => unreachable!(),
+        }
+        let mut socket = NativeSocket::connect(port, &a.origin).await;
+        socket.send(hello).await;
+        let refusal = socket.receive_one_of(&[0, wire::MAP_INFO]).await;
+        assert_eq!(refusal.id, 0, "{mode} was admitted to a world");
+        let mut reader = Reader::new(&refusal.body);
+        assert_eq!(reader.i32().unwrap(), 0);
+        assert!(!reader.utf().unwrap().is_empty());
+        reader.done().unwrap();
+        drop(socket);
+        released(&a, account).await;
+        assert_eq!(
+            a.store.load(account, character.id).await.unwrap(),
+            character
+        );
+    }
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    socket_load(&mut socket, &dir, guid, character.id).await;
+    assert_eq!(
+        a.store.load(account, character.id).await.unwrap(),
+        character
+    );
+    drop(socket);
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dropped_connection_names_its_cause_across_restarts() {
     let (dir, a) = account_actions::tests::fixture();
     a.world.clock.set_paused(true);
