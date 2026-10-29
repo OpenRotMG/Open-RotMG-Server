@@ -104,25 +104,8 @@ export async function run(game){
   await chat(game,0,'/invite GuildBeta');await chat(other,2,'/invite GuildBeta');await capture(peer,'replacement-invitation');
   await button(peer,1,'accept-replacement',750,580);
   game.check('replacement accepts the currently displayed guild',(await members()).some(r=>r[0]==='GuildBeta'&&r[1]==='Gamma Guild'));
-  for(const [player,index] of [[other,2],[peer,1]]){
-    await walk(player,78.5,42.5);await walk(player,78.5,77.5);await walk(player,76.5,77.5);
-    await button(player,index,'enter-guild-hall',700,580);
-    game.check('ordinary portal admits current guild member '+index,(await player.observe()).world==='Guild Hall');
-    await walk(player,14.5,22.5);await walk(player,14.5,7.5);
-  }
-  await button(other,2,'open-chronicle',700,580);await capture(other,'lower-rank-removal');
-  await button(other,2,'open-removal-cancel',746,158);await button(other,2,'cancel-removal',325,340);
-  game.check('cancelled removal preserves recipient membership',(await members()).some(r=>r[0]==='GuildBeta'&&r[1]==='Gamma Guild'));
-  await button(other,2,'open-removal',746,158);await button(other,2,'confirm-removal',475,340);
-  game.check('confirmed lower-rank removal commits and revokes occupied Hall access',!(await members()).some(r=>r[0]==='GuildBeta')&&(await peer.observe()).world==='Nexus');
-  await capture(peer,'removed-to-nexus');
-  await chat(peer,1,'/tutorial');
-  game.check('ordinary reconnect separates recipient from inviters',(await peer.observe()).world==='Tutorial');
-  await chat(game,0,'/invite GuildBeta');
-  game.check('cross-world invitation is refused',has(0,'Player is not nearby.'));
-  await peer.act({keys:['Insert'],duration_ms:1000});await peer.act({keys:[],duration_ms:1500});
-  game.check('reconnect retains removed membership and living identity',(await peer.observe()).world==='Nexus'&&(await peer.observe()).lifecycle.alive&&!(await members()).some(r=>r[0]==='GuildBeta'));
-  await walk(peer,78.5,42.5);await walk(peer,109.5,41.5);
+  await refreshRegister(peer);
+  await button(peer,1,'open-gamma-renounce',700,580);await button(peer,1,'confirm-gamma-renounce',475,340);
   await chat(game,0,'/invite GuildBeta');
   for(const duration_ms of [10000,10000,1500])await peer.act({keys:[],duration_ms});
   await capture(peer,'invitation-panel-expired');
@@ -138,5 +121,26 @@ export async function run(game){
   await button(peer,1,'accept-departed-inviter',750,580);
   game.check('departed inviter cannot authorize acceptance or resurrect the deleted guild',(await members()).length===1&&clients[1].packets.slice(start).some(p=>p.text==='You are not in a guild.'));
   await capture(peer,'departed-inviter-refusal');
+  await chat(other,2,'/invite GuildBeta');await button(peer,1,'accept-reinvitation',750,580);
+  game.check('ordinary reinvitation restores only the remaining guild relation',(await members()).some(r=>r[0]==='GuildBeta'&&r[1]==='Gamma Guild'));
+  for(const [player,index] of [[other,2],[peer,1]]){
+    await walk(player,78.5,42.5);await walk(player,78.5,77.5);await walk(player,76.5,77.5);
+    await button(player,index,'enter-guild-hall',700,580);
+    game.check('ordinary portal admits current guild member '+index,(await player.observe()).world==='Guild Hall');
+    await walk(player,14.5,22.5);await walk(player,14.5,7.5);
+  }
+  await button(other,2,'open-chronicle',700,580);await capture(other,'lower-rank-removal');
+  await button(other,2,'open-removal-cancel',746,158);await button(other,2,'cancel-removal',325,340);
+  game.check('cancelled removal preserves recipient membership',(await members()).some(r=>r[0]==='GuildBeta'&&r[1]==='Gamma Guild'));
+  await button(other,2,'open-removal',746,158);await button(other,2,'confirm-removal',475,340);
+  game.check('confirmed lower-rank removal commits and revokes occupied Hall access',!(await members()).some(r=>r[0]==='GuildBeta')&&(await peer.observe()).world==='Nexus');
+  await capture(peer,'removed-to-nexus');
+  await chat(peer,1,'/tutorial');
+  game.check('ordinary reconnect separates recipient from inviters',(await peer.observe()).world==='Tutorial');
+  await button(other,2,'close-chronicle',400,550);
+  await chat(other,2,'/invite GuildBeta');
+  game.check('cross-world invitation is refused',has(2,'Player is not nearby.'));
+  await peer.act({keys:['Insert'],duration_ms:1000});await peer.act({keys:[],duration_ms:1500});
+  game.check('reconnect retains removed membership and living identity',(await peer.observe()).world==='Nexus'&&(await peer.observe()).lifecycle.alive&&!(await members()).some(r=>r[0]==='GuildBeta'));
   await save('final');
 }
