@@ -107,6 +107,7 @@ export async function run(game) {
     throw Error('Native walk failed: '+JSON.stringify({x,y,position:(await player.observe()).position}));
   }
   async function approachRegister(player) {
+    await player.act({keys:[],mouse:{x:300,y:300},duration_ms:150});
     await walk(player,109.5,43.2);
     await player.act({keys:['d','w'],duration_ms:250});
   }
