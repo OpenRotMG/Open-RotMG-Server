@@ -106,6 +106,10 @@ export async function run(game) {
     }
     throw Error('Native walk failed: '+JSON.stringify({x,y,position:(await player.observe()).position}));
   }
+  async function approachRegister(player) {
+    await walk(player,109.5,43.2);
+    await player.act({keys:['d','w'],duration_ms:250});
+  }
   const initial=await Promise.all([game.observe(),peer.observe()]);
   await game.act({keys:[],duration_ms:5000});
   for(const [index,player] of [game,peer].entries()) {
@@ -118,13 +122,13 @@ export async function run(game) {
     await ui(player,index,'named-'+index,async c=>{await type(c,300,255,index===0?'GuildOwner':'GuildGuest');await click(c,480,380);});
     game.check('ordinary client chooses its account name '+index,(await player.inspect()).diagnostic.character.name===(index===0?'GuildOwner':'GuildGuest'));
     await player.act({keys:[],mouse:{x:300,y:300},duration_ms:200});
-    await walk(player,73.9,75.5);await walk(player,109.5,43.2);
-    await player.act({keys:['d','w'],duration_ms:250});
+    await walk(player,73.9,75.5);await approachRegister(player);
   }
   await ui(game,0,'guild-register',async()=>{});
   await ui(game,0,'create-cancel-dialog',c=>click(c,700,580));
   await ui(game,0,'create-cancelled',c=>click(c,390,386));
   game.check('cancelling creation preserves membership and wallet',(await members()).length===0&&JSON.stringify(await wallet(accounts[0]))==='[[3000,3000]]');
+  await approachRegister(game);
   await ui(game,0,'create-dialog',c=>click(c,700,580));
   await ui(game,0,'empty-name-refused',c=>click(c,490,386));
   await rejected('Guild names must contain 1–20 letters and spaces.');
@@ -133,16 +137,20 @@ export async function run(game) {
   await ui(game,0,'guild-founded',async c=>{await type(c,300,260,'  Guild  Research  ');await click(c,490,386);});
   game.check('native Register creation normalizes spaces and assigns Founder',JSON.stringify(await members())==='[["GuildOwner","Guild Research",40]]');
   game.check('creation spends exactly1000 personal Fame without changing lifetime earnings',JSON.stringify(await wallet(accounts[0]))==='[[2000,3000]]');
+  await approachRegister(game);
+  await ui(game,0,'founder-register-rank',async()=>{});
   await ui(peer,1,'duplicate-dialog',c=>click(c,700,580));
   await ui(peer,1,'duplicate-refused',async c=>{await type(c,300,260,'guild research');await click(c,490,386);});
   await rejected('Guild name is already taken.');
   game.check('case-insensitive duplicate creation leaves the original guild and both wallets intact',(await members()).length===1&&JSON.stringify(await wallet(accounts[1]))==='[[0,0]]');
   await ui(peer,1,'duplicate-cancelled',c=>click(c,390,386));
+  await approachRegister(peer);
   await ui(peer,1,'unfunded-dialog',c=>click(c,700,580));
   await ui(peer,1,'unfunded-refused',async c=>{await type(c,300,260,'Different Guild');await click(c,490,386);});
   await rejected('Creating a guild costs 1000 Fame.');
   game.check('unfunded creation cannot create membership or a second guild',(await db('SELECT count(*) FROM guilds'))[0][0]===1&&(await members()).length===1);
   await ui(peer,1,'unfunded-cancelled',c=>click(c,390,386));
+  await approachRegister(peer);
   await chat(peer,1,'/join Guild Research');
   await rejected('You have not been invited to that guild.');
   game.check('joining without an invitation refuses',(await members()).length===1);
