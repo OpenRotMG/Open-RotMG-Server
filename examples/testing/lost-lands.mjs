@@ -101,7 +101,7 @@ export async function run(game){
   async function walk(point,range=1.5,follow=null){
     for(let n=0;n<30;n++){
       await protect();const s=await game.inspect(),v=s.view;
-      if(follow!==null){const target=entity(s,follow);if(!target){assert((await history()).some(f=>['enemy defeated','timed enemy defeat'].includes(f.message)&&f.entity===follow),'Chased target vanished without defeat');return;}point=target.pos;}
+      if(follow!==null){const target=entity(s,follow);if(!target){assert((await history()).some(f=>['enemy defeated','timed enemy defeat'].includes(f.message)&&f.entity===follow),'Chased target vanished without defeat');return;}if(target.kind===0xd50&&target.stage>=9)return;point=target.pos;}
       if(Math.hypot(point.x-v.position.x,point.y-v.position.y)<range)return;
       const key=(x,y)=>x+','+y,cell=p=>key(Math.floor(p.x),Math.floor(p.y));
       const blocked=new Set(v.objects.filter(e=>e.blocks).map(e=>cell(e.position)));
@@ -118,7 +118,7 @@ export async function run(game){
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
       const distance=Math.hypot(dx,dy),speed=(v.character.conditions&8)?4:(4+5.6*v.character.stats[4]/75)*((v.character.conditions&16384)?1.5:1);
       assert(Number.isFinite(speed)&&speed>0,'Observed movement speed must be finite and positive');
-      await game.act({keys,duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000)))});
+      await game.act({keys:follow===null?keys:[...keys,' '],duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000))),...(follow===null?{}:{target:{entity:follow,camera_angle:-Math.PI/4,fire:true}})});
     }
     throw Error('Native walk did not reach target '+JSON.stringify({point,range,position:(await game.observe()).position}));
   }
@@ -203,7 +203,7 @@ export async function run(game){
   for(let n=0;n<120&&crystals(await game.inspect()).length;n++){
     const s=await game.inspect(),distance=e=>Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y);
     const target=crystals(s).sort((a,b)=>distance(a)-distance(b))[0];
-    if(distance(target)>2)await walk(target.pos,1.5);else await fire(target.id);
+    await fire(target.id);
   }
   await idle(500);state=await save('shield-released');
   const defeats=await history();
