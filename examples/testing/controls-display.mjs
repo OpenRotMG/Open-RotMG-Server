@@ -3,15 +3,22 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {randomUUID} from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {connect} from '../../scripts/record-demo.mjs';
 
 const out=()=>join(process.env.QA_RESULTS_DIR,'native');
-let c,api;
+let c,api,entered=0;
+const exec=promisify(execFile);
+async function db(sql,params=[]){const {stdout}=await exec('python3',['-c','import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); r=c.execute(sys.argv[2],json.loads(sys.argv[3])); rows=r.fetchall(); c.commit(); print(json.dumps(rows))',join(out(),'state/game.db'),sql,JSON.stringify(params)]);return JSON.parse(stdout);}
 export const fixture={class:0x30e,level:20,seed:931,world:-2,position:{x:109.5,y:42.5},equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:null};
-export async function enter({browser,signal,actor}){
+export async function enter({browser,signal,actor,account}){
   const {origin}=JSON.parse(await readFile(join(out(),'result.json'),'utf8'));
   const token=(await readFile(join(out(),'state/control.token'),'utf8')).trim();
-  api=async command=>{const r=await fetch(origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok&&s.status==='succeeded',JSON.stringify(s));return s.result;};
+  api=async command=>{const r=await fetch(origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok,JSON.stringify(s));if(command.op==='native_state'){assert(Array.isArray(s.actors)&&typeof s.runtime==='string',JSON.stringify(s));return s;}assert(s.status==='succeeded',JSON.stringify(s));return s.result;};
+  const name=['PrefsAlpha','PrefsBeta'][entered++];assert(name,'Only two owned starting accounts');
+  await db('UPDATE accounts SET name=? WHERE id=?',[name,account]);
+  await db("UPDATE characters SET stats=json_set(stats,'$.fame',20) WHERE account=?",[account]);
   c=await connect({...browser,url:origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
   signal.addEventListener('abort',()=>c.close(),{once:true});
   await c.call('Emulation.setFocusEmulationEnabled',{enabled:true});
@@ -32,7 +39,7 @@ export async function run(game){
   async function ui(label,work){
     const log=join(out(),'controller.stderr'),offset=(await readFile(log,'utf8')).length;
     const action=game.act({keys:[],duration_ms:1800});
-    const input=(async()=>{const end=Date.now()+5000;while(true){const lines=(await readFile(log,'utf8')).slice(offset).split('\n').slice(0,-1);if(lines.some(l=>l.startsWith('{"event":"native_sync_verified_ack"')&&JSON.parse(l).context.actor===game.actor))break;assert(Date.now()<end,'UI requires current native ACK');await delay(20);}await work();})();
+    const input=(async()=>{const end=Date.now()+5000;while(true){const lines=(await readFile(log,'utf8')).slice(offset).split('\n').slice(0,-1),acks=new Set(lines.filter(l=>l.startsWith('{"event":"native_sync_verified_ack"')).map(l=>JSON.parse(l).context.actor));if(config.native.every(n=>acks.has(n.actor)))break;assert(Date.now()<end,'UI requires current native cohort ACKs');await delay(20);}await work();})();
     const results=await Promise.allSettled([action,input]);for(const r of results)if(r.status==='rejected')throw r.reason;
     await save(label);
   }
@@ -75,6 +82,35 @@ export async function run(game){
   const reloaded=await game.inspect();
   game.check('same-profile reload retains the same living account character and inventory',reloaded.view.lifecycle.alive&&reloaded.view.session.account===before.view.session.account&&reloaded.view.session.character===before.view.session.character&&JSON.stringify(reloaded.view.character.items)===JSON.stringify(before.view.character.items));
   await key('o');await button('graphics-after-reload',365,83);await shot('graphics-after-reload');
-  await key('o');await save('final');
+  await key('o');await save('after-reload');
+  const main=c,peer=await game.join({...fixture,seed:932,position:{x:110.5,y:42.5}}),peerC=c;c=main;
+  Object.assign(config,JSON.parse(await readFile(join(out(),'native.json'),'utf8')));
+  const chat=(connection,text)=>ui(text,async()=>{const previous=c;c=connection;try{await press('Enter','Enter',13);await c.call('Input.insertText',{text});await press('Enter','Enter',13);}finally{c=previous;}});
+  const members=()=>db('SELECT a.name,g.name,m.rank FROM guild_members m JOIN accounts a ON a.id=m.account JOIN guilds g ON g.id=m.guild ORDER BY a.id');
+  const starts=async()=>((await readFile(join(out(),'state/server.log'),'utf8')).match(/native trade started/g)||[]).length;
+  const inventories=await Promise.all([game.inspect(),peer.inspect()]);
+  await api({op:'cheat',actor:peer.actor,change:{kind:'guild',name:'Display Guild',members:[]}});
+  await game.act({keys:[],duration_ms:700});
+  await key('o');await button('popup-graphics',365,83);
+  await button('trade-popup-on',35,269);await button('guild-popup-on',430,269);await key('o');
+  await chat(peerC,'/trade PrefsAlpha');await shot('trade-popup-on');
+  const firstStart=await starts();await button('accept-visible-trade',750,580);
+  game.check('visible trade popup accepts the pending request',(await starts())===firstStart+1);
+  await shot('trade-started-visible');await button('cancel-visible-trade',650,580);
+  await chat(peerC,'/invite PrefsAlpha');await shot('guild-popup-on');await button('reject-visible-guild',650,580);
+  game.check('rejecting a visible guild popup does not join',(await members()).length===1);
+  await key('o');await button('hide-popups-graphics',365,83);
+  await button('trade-popup-off',35,269);await button('guild-popup-off',430,269);await key('o');
+  await chat(peerC,'/trade PrefsAlpha');await shot('trade-popup-off-chat-notice');
+  const hiddenStart=await starts();await chat(main,'/trade PrefsBeta');
+  game.check('hidden trade popup does not reject reciprocal chat acceptance',(await starts())===hiddenStart+1);
+  await shot('trade-started-hidden');await button('cancel-hidden-trade',650,580);
+  await chat(peerC,'/invite PrefsAlpha');await shot('guild-popup-off-chat-notice');await chat(main,'/join Display Guild');
+  game.check('hidden guild popup does not reject ordinary chat acceptance',(await members()).some(r=>r[0]==='PrefsAlpha'&&r[1]==='Display Guild'&&r[2]===0));
+  await shot('hidden-guild-request-accepted');
+  const final=await Promise.all([game.inspect(),peer.inspect()]);
+  game.check('popup choices and cancelled trades preserve both living inventories',final.every((s,i)=>s.view.lifecycle.alive&&s.view.session.character===inventories[i].view.session.character&&JSON.stringify(s.view.character.items)===JSON.stringify(inventories[i].view.character.items)&&s.view.character.inventory_revision===inventories[i].view.character.inventory_revision));
+  await writeFile(join(out(),'popup-outcomes.json'),JSON.stringify({preparedNamesAndFame:true,preparedFounderGuild:true,before:inventories,after:final,members:await members()},null,2));
+  await save('final');
   game.check('same owned native actor remains bound',config.native[0].actor===game.actor);
 }
