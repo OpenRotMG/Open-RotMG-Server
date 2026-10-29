@@ -21,7 +21,8 @@ export async function run(game){
   game.check('native Invulnerable blocks HP loss',character.hp===670&&(character.conditions&bit(25)));
   game.check('actual web hits still apply Slowed through Invulnerable',character.conditions&bit(4));
   game.check('ordinary staff fire admits paired projectiles',protectedHit.diagnostic.character.shots-initial.diagnostic.character.shots>=4&&(protectedHit.diagnostic.character.shots-initial.diagnostic.character.shots)%2===0);
-  await game.act({keys:[],duration_ms:12000},{name:'combat-damage',when:v=>v.character.hp<670});
+  await game.act({keys:[],duration_ms:3000});
+  await game.act({keys:[],duration_ms:10000},{name:'combat-damage',when:v=>v.character.hp<670});
   const damaged=await save('unprotected-hit');
   game.check('actual hostile fire reduces HP after protection expires',damaged.view.character.hp<670&&!(damaged.view.character.conditions&bit(25)));
   game.check('ordinary boss Weak overlaps web Slowed',(damaged.view.character.conditions&(bit(3)|bit(4)))===(bit(3)|bit(4)));

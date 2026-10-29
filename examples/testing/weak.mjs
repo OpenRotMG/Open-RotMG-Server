@@ -3,6 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const root=join(process.env.QA_RESULTS_DIR,'native'),weak=1<<2;
+process.env.RUST_LOG='info,openrotmg::world=debug';
 export const fixture={class:0x307,level:20,seed:936,world:'spider-den',worldSeed:12351,position:{x:75.5,y:16.5},equipment:[0xa1a,0xa61,-1,-1],backpack:[0xc21,-1,-1,-1,-1,-1,-1,-1],stats:[700,252,75,25,50,50,40,50]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
@@ -58,6 +59,6 @@ export async function run(game){
   await cheat({kind:'teleport',position:{x,y}});
   await game.act({keys:[],duration_ms:5500},{name:'weak-expired',when:v=>!(v.character.conditions&weak)});
   const expired=await save('expired');
-  game.check('Weak expires without further hits and preserves Attack',!(expired.view.character.conditions&weak)&&expired.view.character.stats.attack===75);
+  game.check('Weak expires without further hits and preserves Attack',!(expired.view.character.conditions&weak)&&expired.view.character.stats[2]===75);
   game.check('same living Archer retains bow and quiver',expired.view.lifecycle.alive&&expired.view.session.character===initial.view.session.character&&expired.view.character.items[0]===0xa1a&&expired.view.character.items[1]===0xa61);
 }
