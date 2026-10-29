@@ -108,34 +108,45 @@ export async function run(game){
     }
     return s;
   }
+  async function approach(point,range=1.5,follow=null){
+    await protect();const s=await aimState(follow),v=s.view;
+    if(follow!==null){const target=entity(s,follow);if(!target){assert((await history()).some(f=>['enemy defeated','timed enemy defeat'].includes(f.message)&&f.entity===follow),'Chased target vanished without defeat');return;}if(target.kind===0xd50&&target.stage>=9)return;point=target.pos;}
+    if(Math.hypot(point.x-v.position.x,point.y-v.position.y)<range)return;
+    const key=(x,y)=>x+','+y,cell=p=>key(Math.floor(p.x),Math.floor(p.y));
+    const blocked=new Set(v.objects.filter(e=>e.blocks).map(e=>cell(e.position)));
+    const clear=new Set(v.tiles.filter(t=>t.ground_speed>0&&!blocked.has(cell(t))&&Math.abs(t.x-v.position.x)<12&&Math.abs(t.y-v.position.y)<12).map(cell));
+    const start=cell(v.position),goal=cell(point),queue=[start],parents=new Map([[start,null]]);
+    for(let i=0;i<queue.length&&!parents.has(goal);i++){
+      const [x,y]=queue[i].split(',').map(Number);
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const next=key(x+dx,y+dy);if(clear.has(next)&&!parents.has(next)){parents.set(next,queue[i]);queue.push(next);}}
+    }
+    assert(parents.has(goal),'No visible walkable route to observed target '+JSON.stringify(point));
+    let next=goal;while(parents.get(next)!==start&&next!==start)next=parents.get(next);
+    const [tx,ty]=next.split(',').map(Number),waypoint=next===goal?point:{x:tx+.5,y:ty+.5};
+    const dx=waypoint.x-v.position.x,dy=waypoint.y-v.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+    if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
+    const distance=Math.hypot(dx,dy),speed=(v.character.conditions&8)?4:(4+5.6*v.character.stats[4]/75)*((v.character.conditions&16384)?1.5:1);
+    assert(Number.isFinite(speed)&&speed>0,'Observed movement speed must be finite and positive');
+    await game.act({keys:follow===null?keys:[...keys,' '],duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000))),...(follow===null?{}:{target:{entity:follow,camera_angle:-Math.PI/4,fire:true}})});
+  }
   async function walk(point,range=1.5,follow=null){
     for(let n=0;n<30;n++){
-      await protect();const s=await aimState(follow),v=s.view;
-      if(follow!==null){const target=entity(s,follow);if(!target){assert((await history()).some(f=>['enemy defeated','timed enemy defeat'].includes(f.message)&&f.entity===follow),'Chased target vanished without defeat');return;}if(target.kind===0xd50&&target.stage>=9)return;point=target.pos;}
-      if(Math.hypot(point.x-v.position.x,point.y-v.position.y)<range)return;
-      const key=(x,y)=>x+','+y,cell=p=>key(Math.floor(p.x),Math.floor(p.y));
-      const blocked=new Set(v.objects.filter(e=>e.blocks).map(e=>cell(e.position)));
-      const clear=new Set(v.tiles.filter(t=>t.ground_speed>0&&!blocked.has(cell(t))&&Math.abs(t.x-v.position.x)<12&&Math.abs(t.y-v.position.y)<12).map(cell));
-      const start=cell(v.position),goal=cell(point),queue=[start],parents=new Map([[start,null]]);
-      for(let i=0;i<queue.length&&!parents.has(goal);i++){
-        const [x,y]=queue[i].split(',').map(Number);
-        for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const next=key(x+dx,y+dy);if(clear.has(next)&&!parents.has(next)){parents.set(next,queue[i]);queue.push(next);}}
-      }
-      assert(parents.has(goal),'No visible walkable route to observed target '+JSON.stringify(point));
-      let next=goal;while(parents.get(next)!==start&&next!==start)next=parents.get(next);
-      const [tx,ty]=next.split(',').map(Number),waypoint=next===goal?point:{x:tx+.5,y:ty+.5};
-      const dx=waypoint.x-v.position.x,dy=waypoint.y-v.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
-      if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
-      const distance=Math.hypot(dx,dy),speed=(v.character.conditions&8)?4:(4+5.6*v.character.stats[4]/75)*((v.character.conditions&16384)?1.5:1);
-      assert(Number.isFinite(speed)&&speed>0,'Observed movement speed must be finite and positive');
-      await game.act({keys:follow===null?keys:[...keys,' '],duration_ms:Math.max(50,Math.min(350,Math.round(distance/speed*1000))),...(follow===null?{}:{target:{entity:follow,camera_angle:-Math.PI/4,fire:true}})});
+      await approach(point,range,follow);
+      const s=await game.inspect(),target=follow===null?null:entity(s,follow);
+      if(follow!==null&&!target){assert((await history()).some(f=>['enemy defeated','timed enemy defeat'].includes(f.message)&&f.entity===follow),'Chased target vanished without defeat');return;}
+      if(target?.kind===0xd50&&target.stage>=9)return;
+      const goal=follow===null?point:target.pos;
+      if(Math.hypot(goal.x-s.view.position.x,goal.y-s.view.position.y)<range)return;
     }
     throw Error('Native walk did not reach target '+JSON.stringify({point,range,position:(await game.observe()).position}));
   }
   async function fire(id,ms=500){
     await protect();const state=await aimState(id),target=entity(state,id);
     if(!target){assert((await history()).some(f=>f.message==='enemy defeated'&&f.entity===id),'Target vanished without combat defeat');return;}
-    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2){await walk(target.pos,1.5,id);if(!entity(await game.inspect(),id))return;}
+    if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2){
+      if(target.kind===0xd51){await approach(target.pos,1.5,id);return;}
+      await walk(target.pos,1.5,id);if(!entity(await game.inspect(),id))return;
+    }
     const current=entity(await game.inspect(),id);if(current?.kind===0xd50&&current.stage>=9){await save('dying');await idle(2500);return;}
     const now=(await game.observe()).game_ms;if(now>=modifiedUntil){await cheat({kind:'stat_modifier',index:2,amount:100,duration_ms:60000});modifiedUntil=now+60000;}
     const input={keys:[' '],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}};
