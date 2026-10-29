@@ -56,7 +56,7 @@ export async function enter() {
 export async function run(game) {
   const click=(x,y)=>game.act({keys:[],mouse:{x,y},duration_ms:120});
   const options=async()=>{await game.act({keys:['o'],duration_ms:120});await click(480,82);};
-  const sample=(name,input)=>measure(name,()=>game.act(input));
+  const sample=(name,input)=>measure(name,()=>game.act([{actor:game.actor,input:{keys:[],duration_ms:500}},{actor:game.actor,input}]));
   const idle={keys:[],duration_ms:1600},fire={keys:[],mouse:{x:450,y:300},duration_ms:1000};
   const continueInput={keys:[],mouse:{x:400,y:540},duration_ms:1000};
   try {
@@ -72,7 +72,7 @@ export async function run(game) {
     const before=await game.observe();await game.act({keys:[' '],duration_ms:500});
     const spent=await game.observe();game.check('ordinary spell spends mana',spent.character.mp<before.character.mp);
     game.check('SFX remains audible with weapon sounds disabled',await sample('potion-weapon-off',{keys:['1'],duration_ms:1000})>0.001);
-    const after=await game.observe();game.check('audible potion consumes once and restores mana',after.character.items[4]===-1&&after.character.mp>spent.character.mp);
+    const after=await game.observe();game.check('audible potion consumes once and restores mana',after.character.items[4]===-1&&after.character.mp>spent.character.mp&&after.character.inventory_revision===spent.character.inventory_revision+1);
     await options();await click(60,182);await game.act({keys:['o'],duration_ms:120});
     await game.act({keys:[' '],duration_ms:500});
     game.check('SFX toggle suppresses potion audio',await sample('sfx-off',{keys:['2'],duration_ms:1000})<0.00001);
