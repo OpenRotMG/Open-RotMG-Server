@@ -111,6 +111,16 @@ export async function run(game){
   await chat(peerC,'/invite PrefsAlpha');await shot('guild-popup-off-chat-notice');await chat(main,'/join Display Guild');
   game.check('hidden guild popup does not reject ordinary chat acceptance',(await members()).some(r=>r[0]==='PrefsAlpha'&&r[1]==='Display Guild'&&r[2]===0));
   await shot('hidden-guild-request-accepted');
+  const peerPlayer=(await peer.observe()).session.player;
+  async function bubble(text,name){
+    await chat(peerC,text);await shot(name);
+    const events=(await readFile(join(out(),'state/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l)).filter(r=>r.fields.message==='public chat delivered'&&r.fields.player===peerPlayer);
+    game.check(name+' reaches both nearby native participants',events.at(-1).fields.recipients===2&&events.at(-1).fields.bytes===Buffer.byteLength(text));
+  }
+  await bubble('Display bubbles are hidden','bubbles-off-chat-visible');
+  await key('o');await button('bubble-graphics',365,83);await button('bubbles-on',430,225);await key('o');
+  await bubble('Display bubbles are shown','bubbles-on-chat-visible');
+  await key('o');await button('restore-bubble-graphics',365,83);await button('restore-bubbles-off',430,225);await key('o');
   const final=await Promise.all([game.inspect(),peer.inspect()]);
   game.check('popup choices and cancelled trades preserve both living inventories',final.every((s,i)=>s.view.lifecycle.alive&&s.view.session.character===inventories[i].view.session.character&&JSON.stringify(s.view.character.items)===JSON.stringify(inventories[i].view.character.items)&&s.view.character.inventory_revision===inventories[i].view.character.inventory_revision));
   await writeFile(join(out(),'popup-outcomes.json'),JSON.stringify({preparedNamesAndFame:true,preparedFounderGuild:true,before:inventories,after:final,members:await members()},null,2));
