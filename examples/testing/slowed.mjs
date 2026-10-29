@@ -44,12 +44,13 @@ export async function run(game){
   game.check('prepared Speed change does not remove either condition',has(stat,4)&&has(stat,15));
   await game.act({keys:['1'],duration_ms:250});
   const cured=await save('holy-water');
-  game.check('ordinary Holy Water consumes once, clears Slowed and preserves Speedy',cured.character.items[4]===-1&&!has(cured,4)&&has(cured,15));
+  game.check('ordinary Holy Water consumes once, clears Slowed and preserves Speedy',cured.character.items[4]===-1&&cured.character.inventory_revision===stat.character.inventory_revision+1&&!has(cured,4)&&has(cured,15));
   await measure('cleansed-speedy-floor',(4+5.6*70/75)*1.5);
   await web();await place(60.5,34.5);
-  await game.act({keys:[],duration_ms:6500});
-  const expired=await save('expired');
-  game.check('Slowed and Speedy expire without cure away from new hits',!has(expired,4)&&!has(expired,15));
+  await game.act({keys:[],duration_ms:3300});
+  game.check('three-second web Slowed expires away from new hits',!has(await save('slowed-expired'),4));
+  await game.act({keys:[],duration_ms:3200});
+  game.check('Speedy also expires without cure',!has(await save('speedy-expired'),15));
   await measure('expired-normal-floor',4+5.6*70/75);
   await web();
   await game.act({keys:['Insert'],duration_ms:500});
