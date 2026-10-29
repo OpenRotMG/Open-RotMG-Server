@@ -1216,115 +1216,133 @@ mod tests {
     }
 
     #[test]
-    fn world09_full_population_preserves_native_landmarks_and_lava() {
-        let path = std::path::Path::new("data");
-        let content = Arc::new(Content::load(path).unwrap());
-        let mut sources = crate::terrain::realms::sources(path).unwrap();
-        let index = sources
-            .iter()
-            .position(|s| s.name() == "classic-world-09-reconstruction")
-            .unwrap();
-        let seed = (0..256)
-            .find(|seed| {
-                rand::rngs::StdRng::seed_from_u64(*seed).gen_range(0..sources.len()) == index
-            })
-            .unwrap();
-        eprintln!("World9 native catalog-selection seed: {seed}");
-        let source = sources.swap_remove(index);
-        let sites = source.sites().unwrap();
-        let original = source.open(&content).unwrap();
-        let lava: Vec<_> = original
-            .cells
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.ground == 244)
-            .map(|(i, _)| i)
-            .collect();
-        assert_eq!(lava.len(), 426);
-        let directory =
-            Directory::configured(path, content, 85, seed, Some(seed), vec![source], 2).unwrap();
-        for id in [-3, 1] {
-            let world = &directory.worlds[&id];
-            assert_eq!(
-                world.realm_layout.as_deref(),
-                Some("classic-world-09-reconstruction")
-            );
-            assert_eq!((world.map.width, world.map.height), (2100, 2100));
-            assert_eq!(world.map.spawns.len(), 4);
-            assert_eq!(world.actors().filter(|e| e.kind == 0x91f).count(), 14);
-            assert_eq!(world.actors().filter(|e| e.kind == 0xdc2).count(), 16);
-            assert!((4..7).contains(&world.actors().filter(|e| e.kind == 0x91b).count()));
-            assert!(
-                world
-                    .actors()
-                    .filter(|e| e.population_slot.is_some())
-                    .count()
-                    > 100
-            );
-            let width = world.map.width as usize;
-            let (x, y) = world.map.spawns[0];
-            let origin = y.floor() as usize * width + x.floor() as usize;
-            let mut reachable = vec![false; world.map.cells.len()];
-            let mut pending = vec![origin];
-            reachable[origin] = true;
-            while let Some(i) = pending.pop() {
-                let (x, y) = ((i % width) as i32, (i / width) as i32);
-                for (dx, dy) in [(0, -1), (-1, 0), (1, 0), (0, 1)] {
-                    let pos = Pos {
-                        x: (x + dx) as f32 + 0.5,
-                        y: (y + dy) as f32 + 0.5,
-                    };
-                    if world.walkable(pos) {
-                        let n = pos.y as usize * width + pos.x as usize;
-                        if !reachable[n] && world.map.cells[n].ground != 244 {
-                            reachable[n] = true;
-                            pending.push(n);
+    fn full_population_preserves_classic_landmarks_lava_and_routes() {
+        for (name, lava_count, groves, coils, liches) in [
+            ("classic-world-01-reconstruction", 703, 19, 2, 6..=6),
+            ("classic-world-02-reconstruction", 864, 24, 2, 4..=6),
+            ("classic-world-03-reconstruction", 629, 21, 2, 4..=6),
+            ("classic-world-09-reconstruction", 426, 14, 16, 4..=6),
+        ] {
+            let path = std::path::Path::new("data");
+            let content = Arc::new(Content::load(path).unwrap());
+            let mut sources = crate::terrain::realms::sources(path).unwrap();
+            let index = sources.iter().position(|s| s.name() == name).unwrap();
+            let seed = (0..256)
+                .find(|seed| {
+                    rand::rngs::StdRng::seed_from_u64(*seed).gen_range(0..sources.len()) == index
+                })
+                .unwrap();
+            eprintln!("{name} native catalog-selection seed: {seed}");
+            let source = sources.swap_remove(index);
+            let sites = source.sites().unwrap();
+            let original = source.open(&content).unwrap();
+            let lava: Vec<_> = original
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.ground == 244)
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(lava.len(), lava_count);
+            let directory =
+                Directory::configured(path, content, 85, seed, Some(seed), vec![source], 2)
+                    .unwrap();
+            for id in [-3, 1] {
+                let world = &directory.worlds[&id];
+                assert_eq!(world.realm_layout.as_deref(), Some(name));
+                assert_eq!((world.map.width, world.map.height), (2100, 2100));
+                assert_eq!(world.map.spawns.len(), 4);
+                assert_eq!(world.actors().filter(|e| e.kind == 0x91f).count(), groves);
+                assert_eq!(world.actors().filter(|e| e.kind == 0xdc2).count(), coils);
+                assert!(liches.contains(&world.actors().filter(|e| e.kind == 0x91b).count()));
+                assert!(
+                    world
+                        .actors()
+                        .filter(|e| e.population_slot.is_some())
+                        .count()
+                        > 100
+                );
+                let width = world.map.width as usize;
+                let (x, y) = world.map.spawns[0];
+                let origin = y.floor() as usize * width + x.floor() as usize;
+                let mut reachable = vec![false; world.map.cells.len()];
+                let mut pending = vec![origin];
+                reachable[origin] = true;
+                while let Some(i) = pending.pop() {
+                    let (x, y) = ((i % width) as i32, (i / width) as i32);
+                    for (dx, dy) in [(0, -1), (-1, 0), (1, 0), (0, 1)] {
+                        let pos = Pos {
+                            x: (x + dx) as f32 + 0.5,
+                            y: (y + dy) as f32 + 0.5,
+                        };
+                        if world.walkable(pos) {
+                            let n = pos.y as usize * width + pos.x as usize;
+                            if !reachable[n] && world.map.cells[n].ground != 244 {
+                                reachable[n] = true;
+                                pending.push(n);
+                            }
                         }
                     }
                 }
-            }
-            for &(x, y) in &world.map.spawns {
-                assert!(reachable[y.floor() as usize * width + x.floor() as usize]);
-            }
-            for site in &sites {
-                assert!(
-                    reachable[site.spawn[1] as usize * width + site.spawn[0] as usize],
-                    "populated Realm {id} disconnected authored site {:?}",
-                    site.spawn
-                );
-            }
-            for i in &lava {
-                let (a, b) = (&original.cells[*i], &world.map.cells[*i]);
-                assert_eq!(
-                    (a.ground, a.object, &a.config, a.terrain, a.region),
-                    (b.ground, b.object, &b.config, b.terrain, b.region)
-                );
-            }
-            for site in &sites {
-                let [x, y, width, height] = site.bounds;
-                for yy in y..y + height {
-                    for xx in x..x + width {
-                        let i = (yy * world.map.width + xx) as usize;
-                        let (a, b) = (&original.cells[i], &world.map.cells[i]);
-                        assert_eq!(
-                            (a.ground, a.object, &a.config, a.terrain, a.region),
-                            (b.ground, b.object, &b.config, b.terrain, b.region)
-                        );
-                    }
+                for &(x, y) in &world.map.spawns {
+                    assert!(reachable[y.floor() as usize * width + x.floor() as usize]);
                 }
-                assert!(world.walkable(Pos {
-                    x: site.spawn[0] as f32,
-                    y: site.spawn[1] as f32
-                }));
-                assert_eq!(
-                    world
-                        .actors()
-                        .filter(|e| e.kind == site.kind
-                            && e.home.x == site.spawn[0] as f32
-                            && e.home.y == site.spawn[1] as f32)
-                        .count(),
-                    1
-                );
+                for site in &sites {
+                    let cell = site.spawn[1] as usize * width + site.spawn[0] as usize;
+                    // Red Demons and their chests intentionally stand on Fissure lava, not dry ground.
+                    let hazard_approach = site.kind == 0x668
+                        && world.map.cells[cell].ground == 244
+                        && [(0, -1), (-1, 0), (1, 0), (0, 1)]
+                            .into_iter()
+                            .any(|(dx, dy)| {
+                                (1..=8)
+                                    .map(|distance| Pos {
+                                        x: (site.spawn[0] + dx * distance) as f32 + 0.5,
+                                        y: (site.spawn[1] + dy * distance) as f32 + 0.5,
+                                    })
+                                    .take_while(|pos| world.walkable(*pos))
+                                    .any(|pos| reachable[pos.y as usize * width + pos.x as usize])
+                            });
+                    assert!(
+                        reachable[cell] || hazard_approach,
+                        "populated {name} Realm {id} lacks an approach to authored {:#x} at {:?}",
+                        site.kind,
+                        site.spawn
+                    );
+                }
+                for i in &lava {
+                    let (a, b) = (&original.cells[*i], &world.map.cells[*i]);
+                    assert_eq!(
+                        (a.ground, a.object, &a.config, a.terrain, a.region),
+                        (b.ground, b.object, &b.config, b.terrain, b.region)
+                    );
+                }
+                for site in &sites {
+                    let [x, y, width, height] = site.bounds;
+                    for yy in y..y + height {
+                        for xx in x..x + width {
+                            let i = (yy * world.map.width + xx) as usize;
+                            let (a, b) = (&original.cells[i], &world.map.cells[i]);
+                            assert_eq!(
+                                (a.ground, a.object, &a.config, a.terrain, a.region),
+                                (b.ground, b.object, &b.config, b.terrain, b.region)
+                            );
+                        }
+                    }
+                    assert!(world.walkable(Pos {
+                        x: site.spawn[0] as f32,
+                        y: site.spawn[1] as f32
+                    }));
+                    assert_eq!(
+                        world
+                            .actors()
+                            .filter(|e| e.kind == site.kind
+                                && e.home.x == site.spawn[0] as f32
+                                && e.home.y == site.spawn[1] as f32)
+                            .count(),
+                        1
+                    );
+                }
             }
         }
     }
