@@ -7,7 +7,7 @@ export const fixture = {
   equipment:[-1,-1,-1,-1], backpack:Array(8).fill(-1), stats:[700,100,15,25,75,15,15,10],
 };
 export async function run(game) {
-  const out=process.argv[process.argv.indexOf('--run-dir')+1],config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));
+  const dir=process.argv[process.argv.indexOf('--run-dir')+1],config=JSON.parse(await readFile(join(dir,'native.json'),'utf8'));
   const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+(await readFile(join(config.state,'control.token'),'utf8')).trim(),'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}}),signal:AbortSignal.timeout(10000)});
   const protection=await response.json();assert(response.ok&&protection.status==='succeeded',JSON.stringify(protection));
   const ground=async()=>{
