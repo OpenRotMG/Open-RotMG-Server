@@ -31,6 +31,16 @@ fn write(ch: &Character) -> InventoryWrite {
 async fn mutate(store: &Store, content: &Content, operation: &str) -> Result<()> {
     let mut left = store.load(1, 1).await?;
     match operation {
+        "progress" => {
+            left.hp = 17;
+            left.mp = 23;
+            left.tex1 = 0x05000006;
+            left.tex2 = 0x04000006;
+            left.base[2] += 1;
+            left.lifetime.shots += 3;
+            left.fame += 1;
+            store.progress(left).await?;
+        }
         "trade" => {
             let mut right = store.load(2, 2).await?;
             std::mem::swap(&mut left.items[4], &mut right.items[4]);
@@ -73,7 +83,7 @@ fn snapshot(path: &Path) -> Vec<String> {
     let db = Connection::open(path).unwrap();
     [
         "SELECT json_group_array(json_array(id,name,credits,character_slots,vault_mask)) FROM (SELECT * FROM accounts ORDER BY id)",
-        "SELECT json_group_array(json_array(id,account,alive,revision,items,json_extract(stats,'$.fame'))) FROM (SELECT * FROM characters ORDER BY id)",
+        "SELECT json_group_array(json_array(id,account,alive,revision,items,json(stats))) FROM (SELECT * FROM characters ORDER BY id)",
         "SELECT json_group_array(json_array(account,chest,revision,items)) FROM (SELECT * FROM vaults ORDER BY account,chest)",
         "SELECT json_group_array(json_array(character,snapshot,receipt)) FROM (SELECT * FROM deaths ORDER BY character)",
         "SELECT json_group_array(json_array(account,balance,earned)) FROM (SELECT * FROM account_fame ORDER BY account)",
@@ -160,7 +170,7 @@ async fn killed_mutations_recover_without_duplicates_or_account_lockouts() {
             |r| r.get(0),
         )
         .unwrap();
-    for operation in ["trade", "pickup", "drop", "death", "bot_entry"] {
+    for operation in ["progress", "trade", "pickup", "drop", "death", "bot_entry"] {
         let expected_path = root.join(format!("{operation}-expected.db"));
         Connection::open(&template)
             .unwrap()
@@ -185,7 +195,7 @@ async fn killed_mutations_recover_without_duplicates_or_account_lockouts() {
         assert_eq!(
             held,
             match operation {
-                "trade" => initial,
+                "progress" | "trade" => initial,
                 "pickup" => initial + 1,
                 "drop" => initial - 1,
                 "death" => initial / 2,
@@ -194,6 +204,16 @@ async fn killed_mutations_recover_without_duplicates_or_account_lockouts() {
             },
             "{operation}: item conservation"
         );
+        if operation == "progress" {
+            let saved = expected_store.load(1, 1).await.unwrap();
+            assert_eq!(
+                (saved.hp, saved.mp, saved.tex1, saved.tex2),
+                (17, 23, 0x05000006, 0x04000006)
+            );
+            assert_eq!(saved.lifetime.shots, 3);
+            assert_eq!(saved.fame, 8);
+            assert!(expected_store.load(2, 1).await.is_err());
+        }
         if operation == "trade" {
             assert_eq!(expected_store.load(1, 1).await.unwrap().items[4], 0xa97);
             assert_eq!(expected_store.load(2, 2).await.unwrap().items[4], 0xa4f);
@@ -276,7 +296,7 @@ async fn killed_mutations_recover_without_duplicates_or_account_lockouts() {
             }
             if operation == "bot_entry" {
                 mutate(&recovered, &content, operation).await.unwrap();
-            } else {
+            } else if operation != "progress" {
                 assert!(
                     recovered.exchange(vec![stale], vec![]).await.is_err(),
                     "{operation}/{cut}: stale inventory replay accepted"
