@@ -35,6 +35,8 @@ World5: authored 2100-square image-guided reconstruction, not authenticated; ima
 World9: authored image-guided reconstruction, not authenticated; image-derived rights unverified.
 World10: authored 2000-square image-guided reconstruction, not authenticated; image-derived rights unverified.
 World11: authored 2100-square image-guided reconstruction, not authenticated; image-derived rights unverified.
+World12: authored 2100-square image-guided reconstruction, not authenticated; image-derived rights unverified.
+Its 31 Grove, 8 Lich and 8 Coil placements are authored; the Cherry remnant and wooden ruins remain scenery.
 World13: authored 2000-square image-guided reconstruction, not authenticated; image-derived rights unverified.
 
 Retained classic-v1 generator only: Amit J Patel, Copyright 2010; MIT notice:
@@ -44,5 +46,5 @@ Offline rebuild without client/state/network: openrotmg build-realm --data data 
 IDs: classic-world-01-reconstruction, classic-world-02-reconstruction,
 classic-world-03-reconstruction, classic-world-04-reconstruction, classic-world-05-reconstruction,
 classic-world-09-reconstruction, classic-world-10-reconstruction, classic-world-11-reconstruction,
-classic-world-13-reconstruction.
+classic-world-12-reconstruction, classic-world-13-reconstruction.
 Add --check to compare.
