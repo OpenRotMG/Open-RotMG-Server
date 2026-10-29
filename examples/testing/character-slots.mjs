@@ -24,10 +24,12 @@ export async function run(game) {
   const capture=async name=>writeFile(join(root,name+'.png'),Buffer.from((await c.call('Page.captureScreenshot',{format:'png'})).data,'base64'));
   const before=await game.observe();
   await game.act({keys:[],duration_ms:700},{name:'before-switch',when:v=>v.game_ms>=before.game_ms+300});
-  await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:678,y:528}}});
+  await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:428},to:{x:678,y:428}}});
+  const dragged=await game.observe();
+  game.check('Native inventory drag changes the actual carried slots and revision',dragged.character.items[4]===-1&&dragged.character.items[5]===0xa22&&dragged.character.inventory_revision>before.character.inventory_revision);
   await game.act({keys:[],mouse:{x:400,y:300},duration_ms:500});
   const changed=await game.observe();
-  game.check('Native inventory drag and weapon fire change actual living progress',changed.character.items[4]===-1&&changed.character.items[5]===0xa22&&changed.character.inventory_revision>before.character.inventory_revision&&changed.verification.shots>before.verification.shots);
+  game.check('Native weapon fire advances the actual living shot counter',changed.verification.shots>before.verification.shots);
   const action=game.act({keys:[],duration_ms:6000});
   let storedAtSelection;
   try {
