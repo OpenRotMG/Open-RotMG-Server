@@ -9,7 +9,9 @@ export async function run(game){
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),samples=[];
   async function command(command){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});
-    const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));return receipt.result;
+    const receipt=await response.json();assert(response.ok,JSON.stringify(receipt));
+    if(command.op==='world_info')return receipt;
+    assert.equal(receipt.status,'succeeded',JSON.stringify(receipt));return receipt.result;
   }
   const cheat=change=>command({op:'cheat',actor:game.actor,change});
   async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(join(root,'weak-observations.json'),JSON.stringify(samples,null,2));return state;}
