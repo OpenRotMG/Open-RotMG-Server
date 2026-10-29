@@ -588,6 +588,28 @@ def rehearse(stage, work, config):
             and module.snapshot(restored / 'levels.sqlite', module.DISCORD) == bundle['discord'], 'Credential-free restore mismatch')
 
 
+def exchange(live, stage):
+    libc = ctypes.CDLL(None, use_errno=True)
+    require(libc.renameat2(-100, os.fsencode(live), -100, os.fsencode(stage), 2) == 0,
+            'Atomic source exchange failed; frozen recovery state retained')
+
+
+def restore_service(config, work):
+    """A failed cutover must not leave production stopped; restart whichever release is safest to run."""
+    if subprocess.run(['systemctl', 'is-active', '--quiet', 'openrotmg.service']).returncode == 0:
+        return 'already_running'
+    previous = work / 'previous-server-path'
+    if previous.exists():
+        exchange(LIVE, Path(previous.read_text().strip()))
+        previous.rename(work / 'restored-server-path')
+    run('systemctl', 'reset-failed', 'openrotmg.service')
+    run('systemctl', 'start', 'openrotmg.service')
+    ready(int(config['bind'].rsplit(':', 1)[1]))
+    revision = (LIVE / 'REVISION').read_text().strip()
+    print(json.dumps({'service_restored': revision}), flush=True)
+    return revision
+
+
 def deploy(stage, work, metadata, config):
     try:
         run('runuser', '-u', 'openrotmg', '--', 'test', '-x', str(stage / 'openrotmg'))
@@ -610,9 +632,10 @@ def deploy(stage, work, metadata, config):
         warn_restart(config)
         require(main_revision() == metadata['revision'], 'Main advanced during restart warning; no cutover performed')
         outcome(work, 'cutover', stage)
-        stop_prepared(config, work)
-        cutover = 'shutdown_result'
+        cutover = 'stop'
         try:
+            stop_prepared(config, work)
+            cutover = 'shutdown_result'
             require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
             cutover = 'freeze_recovery'
             frozen = work / 'cutover'
@@ -621,9 +644,7 @@ def deploy(stage, work, metadata, config):
             shutil.copyfile(Path(config['state']) / 'server.pem', frozen / 'server.pem')
             (frozen / 'server.pem').chmod(0o600)
             cutover = 'source_exchange'
-            libc = ctypes.CDLL(None, use_errno=True)
-            require(libc.renameat2(-100, os.fsencode(LIVE), -100, os.fsencode(stage), 2) == 0,
-                    'Atomic source exchange failed; frozen recovery state retained')
+            exchange(LIVE, stage)
             (work / 'previous-server-path').write_text(str(stage) + '\n')
             cutover = 'start'
             run('runuser', '-u', 'openrotmg', '--', 'test', '-x', str(LIVE / 'openrotmg'))
@@ -637,7 +658,12 @@ def deploy(stage, work, metadata, config):
         except BaseException as error:
             failure = {'stage': cutover, 'error': str(error), 'recovery': str(work), 'previous_server': str(stage)}
             (work / 'post-stop-failure.json').write_text(json.dumps(failure, indent=2) + '\n')
-            raise RuntimeError(f'Post-stop {cutover} failed: {error}; recovery: {work}') from error
+            try:
+                failure['restored'] = restore_service(config, work)
+            except BaseException as restore:
+                failure['restore_error'] = str(restore)
+            (work / 'post-stop-failure.json').write_text(json.dumps(failure, indent=2) + '\n')
+            raise RuntimeError(f'Post-stop {cutover} failed: {error}; restored: {failure.get("restored")}; recovery: {work}') from error
     try:
         start_backup()
     except BaseException as error:

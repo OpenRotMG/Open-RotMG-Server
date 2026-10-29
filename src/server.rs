@@ -2420,9 +2420,6 @@ async fn connection_io<S, I>(
                         if let Err(e)=result {
                             let rejected = lifecycle::rule_rejection(&e);
                             close_reason=if e.is::<ReplyQueueError>() { CloseReason::Output } else if rejected { CloseReason::Controller } else { e.downcast_ref::<CloseReason>().copied().unwrap_or(CloseReason::Internal) };
-                            if close_reason == CloseReason::Internal && let Some(owner) = &session.account {
-                                owner.failed(format!("unclassified native command failure: {e:#}"));
-                            }
                             tracing::error!(account=session.account.as_ref().map(|o|o.id),player=session.player,packet=id,error=%format_args!("{e:#}"),"game command rejected");
                             if e.is::<ReplyQueueError>() { close_reason=CloseReason::Output;break 'connection; }
                             if e.downcast_ref::<CloseReason>() == Some(&CloseReason::Protocol) {
