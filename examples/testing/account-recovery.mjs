@@ -8,7 +8,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
 export const fixture={class:0x30e,level:20,seed:923,world:-2,position:'spawn',equipment:[-1,-1,-1,-1],backpack:Array(8).fill(-1),stats:null};
 const exec=promisify(execFile),email='recovery@example.test',old=randomBytes(16).toString('hex'),password=randomBytes(16).toString('hex');
-let cdp,browserReceipt,origin,listRequest,lists=0,registration,registered=false,verified=false;
+let cdp,browserReceipt,origin,listRequest,listDone=false,lists=0,registration,registered=false,verified=false;
 const checks=[];
 function check(name,value){assert(value,name);checks.push(name);}
 async function until(test,label){const end=Date.now()+30000;while(!await test()){assert(Date.now()<end,label);await delay(30);}}
@@ -25,11 +25,12 @@ export async function beforeNavigate({browser,signal}){
   browserReceipt=browser;
   cdp=await connect({port:browser.port,target:browser.target,url:'about:blank',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
     if(e.method==='Network.requestWillBeSent'){
-      const u=new URL(e.params.request.url);if(u.pathname==='/legacy-api/char/list'){origin=u.origin;listRequest=e.params.requestId;lists++;}
+      const u=new URL(e.params.request.url);if(u.pathname==='/legacy-api/char/list'){origin=u.origin;listRequest=e.params.requestId;listDone=false;lists++;}
       if(u.pathname==='/legacy-api/account/verify')verified=true;
     }
     if(e.method==='Network.responseReceived'&&e.params.response.url.endsWith('/legacy-api/account/register'))registration=e.params.requestId;
     if(e.method==='Network.loadingFinished'&&e.params.requestId===registration)registered=true;
+    if(e.method==='Network.loadingFinished'&&e.params.requestId===listRequest)listDone=true;
   }});signal.addEventListener('abort',()=>cdp.close(),{once:true});await cdp.call('Network.enable',{maxPostDataSize:65536});
 }
 export async function enter({account}){
@@ -75,13 +76,17 @@ t=int(time.time());c.execute('INSERT INTO email_password_resets(account,email,ha
     const afterXml=(await post('/legacy-api/char/list',{guid:email,password})).text;
     check('reset preserves account and saved character listing',afterXml.replace('<VerifiedEmail/>','')===beforeXml.replace('<VerifiedEmail/>',''));
   }finally{await page.call('Fetch.disable');page.close();}
-  await cdp.call('Page.navigate',{url:origin});await until(()=>cdp.eval('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Native return');await modal();
-  await shot('native-return');
+  const returning=lists;await cdp.call('Page.navigate',{url:origin});
+  await until(async()=>lists>returning&&listDone&&await cdp.eval('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Native return');await modal();
+  await cdp.eval('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');await shot('native-return');
+  const loggingOut=lists;await click(760,15);await until(()=>lists>loggingOut&&listDone,'Ordinary logout');
+  const guest=new URLSearchParams((await cdp.call('Network.getRequestPostData',{requestId:listRequest})).postData);
+  check('ordinary logout clears the stale saved password',guest.get('guid')!==email&&!guest.get('password'));
   await click(760,15);await shot('native-login');
   for(const [y,text] of [[235,email],[321,password]]){await click(350,y);await cdp.call('Input.insertText',{text});}
-  const before=lists;await click(490,412);await until(()=>lists>before,'Recovered native char list');
+  const before=lists;await click(490,412);await until(()=>lists>before&&listDone,'Recovered native char list');
   check('native login uses recovered credentials',new URLSearchParams((await cdp.call('Network.getRequestPostData',{requestId:listRequest})).postData).get('guid')===email);
-  const namedLists=lists;await cdp.call('Page.reload');await until(()=>lists>namedLists,'Recovered saved login reconnect');
+  const namedLists=lists;await cdp.call('Page.reload');await until(()=>lists>namedLists&&listDone,'Recovered saved login reconnect');
   check('reload retains same registered email',new URLSearchParams((await cdp.call('Network.getRequestPostData',{requestId:listRequest})).postData).get('guid')===email);
   await until(()=>cdp.eval('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Recovered menu');await modal();await click(400,550);await click(400,550);
 }
