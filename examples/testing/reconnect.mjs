@@ -5,13 +5,12 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
 
 export const fixture={class:0x30e,level:1,seed:930,world:-1,position:{x:12.5,y:164.5},equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:null};
-let browser;
+let cdp;
 const root=()=>process.env.QA_RESULTS_DIR;
-const open=url=>connect({...browser,url,helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
-export async function beforeNavigate(context){
-  browser=context.browser;
-  const cdp=await open('about:blank');
-  try{await cdp.call('Page.addScriptToEvaluateOnNewDocument',{source:`(${networkFaults.toString()})()`});}finally{cdp.close();}
+export async function beforeNavigate({browser,signal}){
+  cdp=await connect({...browser,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
+  signal.addEventListener('abort',()=>cdp.close(),{once:true});
+  await cdp.call('Page.addScriptToEvaluateOnNewDocument',{source:`(${networkFaults.toString()})()`});
 }
 function networkFaults(){
   const Socket=WebSocket,timer=setTimeout,rows=[];
@@ -22,16 +21,16 @@ function networkFaults(){
       if(new URL(args[0]).pathname!=='/game')return;
       const row={socket:rows.length+1,opened:performance.now(),seen:0,held:0,released:null,dropped:false};rows.push(row);
       if(row.socket===2){
-        const queued=[],replayed=new WeakSet();let holding=true;
+        const queued=[];let holding=true;
         this.addEventListener('message',event=>{
-          if(replayed.has(event))return;
+          if(!holding)return;
           row.seen++;
-          if(!holding||row.seen===1)return;
+          if(row.seen===1)return;
           event.stopImmediatePropagation();queued.push(event);row.held++;
         });
         timer(()=>{
           holding=false;row.released=performance.now();
-          for(const event of queued){const copy=new MessageEvent('message',{data:event.data,origin:event.origin});replayed.add(copy);this.dispatchEvent(copy);}
+          for(const event of queued)this.dispatchEvent(new MessageEvent('message',{data:event.data,origin:event.origin}));
         },1500);
       }
       if(row.socket===3)this.addEventListener('open',event=>{event.stopImmediatePropagation();row.dropped=true;this.close(1000,'owned reconnect interruption');});
@@ -43,9 +42,8 @@ export async function run(game){
   async function save(name){const view=await game.observe();observations.push({name,view});await writeFile(join(root(),'reconnect.json'),JSON.stringify(observations,null,2));return view;}
   const initial=await save('tutorial');
   await game.act({keys:[],duration_ms:1000},{name:'tutorial-before',when:v=>v.world==='Tutorial'&&v.game_ms>=initial.game_ms+300});
-  const {origin}=JSON.parse(await readFile(join(root(),'native/native.json'),'utf8'));
-  const cdp=await open(origin+'/');
   try{
+    assert(await cdp.eval('Array.isArray(window.reconnectQA)&&window.reconnectQA.length===1'),'Expected one instrumented initial game socket');
     const action=game.act({keys:['Insert'],duration_ms:3500});
     const capture=(async()=>{
       const deadline=Date.now()+10000;
@@ -68,6 +66,8 @@ export async function run(game){
       while((await game.observe()).paused){assert(Date.now()<deadline,'Chat action never unpaused');await delay(20);}
       const key=async()=>{for(const type of ['keyDown','keyUp'])await cdp.call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13});};
       await key();await cdp.call('Input.insertText',{text:'/tutorial'});await key();
+      while(!await cdp.eval('window.reconnectQA[2]?.dropped')){assert(Date.now()<deadline,'Transfer interruption never executed');await delay(20);}
+      await writeFile(join(root(),'retry-error.png'),Buffer.from((await cdp.call('Page.captureScreenshot',{format:'png'})).data,'base64'));
     })();
     const retried=await Promise.allSettled([retry,input]);for(const result of retried)if(result.status==='rejected')throw result.reason;
     const returned=await save('retried-tutorial');assert.equal(returned.world,'Tutorial');
