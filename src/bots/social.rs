@@ -142,6 +142,10 @@ pub(super) async fn receive_market(
     if packet.id == wire::TEXT && !view.lifecycle.busy {
         recover_market(app, brain).await?;
     }
+    // A successful native TRADEDONE for the active exchange is the settled trade.
+    let traded = packet.id == 12
+        && brain.mind.market.incoming.is_some()
+        && Reader::new(&packet.body).i32()? == 0;
     let mut next = brain.mind.market.clone();
     let handled = next.receive(packet, view, &app.content, brain.mind.future_class)?;
     if handled && next.revoke_trade {
@@ -171,6 +175,14 @@ pub(super) async fn receive_market(
     }
     if handled {
         brain.mind.market = next;
+    }
+    if traded {
+        brain.plan.record(
+            plan::now(),
+            plan::Kind::Trade,
+            None,
+            "exchange settled".into(),
+        );
     }
     if before != brain.mind {
         brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
@@ -317,11 +329,12 @@ pub(super) async fn market(
                     brain.mind.market.outgoing = None;
                     if matches!(
                         error.downcast_ref::<dialogue::Failure>(),
-                        Some(dialogue::Failure::LocalCapacity)
+                        Some(dialogue::Failure::LocalCapacity | dialogue::Failure::AutomaticBudget)
                     ) {
                         tracing::info!(
                             account = v.session.account,
-                            "market speech skipped after local capacity denial; no substitute speech"
+                            %error,
+                            "market speech skipped after admission denial; no substitute speech"
                         );
                     } else {
                         tracing::error!(account=v.session.account, %error, "market generation failed; no substitute speech");

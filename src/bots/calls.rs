@@ -285,7 +285,7 @@ impl Brain {
             Some("another_call_pending")
         } else if peer.position.distance(v.position) <= 7. {
             Some("already_near_caller")
-        } else if !self.crowd.bands.survivable(v, peer.position) {
+        } else if !self.crowd.bands.teleportable(v, peer.position) {
             Some("unsafe_realm_destination")
         } else {
             self.call_rejection(v, c, activity, caller)?
@@ -335,7 +335,7 @@ impl Brain {
                 && !p.equipped.is_empty()
                 && p.account == Some(o.account)
                 && p.name == o.name
-                && self.crowd.bands.survivable(v, p.position)
+                && self.crowd.bands.teleportable(v, p.position)
         });
         let rejection = if o.world != v.session.world
             || !live

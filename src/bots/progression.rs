@@ -187,6 +187,7 @@ pub(super) fn bank(
     content: &Content,
     grid: &Grid,
     future: Option<u16>,
+    exclude: Option<i32>,
 ) -> Result<Option<Decision>> {
     let Some(chest) = v.objects.iter().find(|o| o.kind == 0x504) else {
         return Ok(None);
@@ -227,7 +228,7 @@ pub(super) fn bank(
             .filter(|(_, k)| **k >= 0)
         {
             let value = priority(v, content, *kind, true, future)?;
-            if value >= 100 || !spare(content, *kind)? {
+            if value >= 100 || exclude == Some(*kind) || !spare(content, *kind)? {
                 continue;
             }
             let to = chest.contents.iter().position(|k| *k == -1);

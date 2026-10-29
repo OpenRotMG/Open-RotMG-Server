@@ -424,33 +424,43 @@ fn dungeon_rusher_does_not_override_safety_or_teleport_policy() {
 #[test]
 fn wavelength_vault_errand_banks_before_leaving() {
     let (c, mut v) = fixture();
-    v.map.name = "Vault".into();
+    v.map.name = "Nexus".into();
     v.quest = None;
-    let potion = 0xa1f;
+    let (falchion, potion) = (0xa6e, 0xa1f);
     let stat = progression::potion_index(&c, potion).unwrap().unwrap();
     v.character.base_stats[stat] = c.classes[&v.character.class].caps[stat];
-    v.character.items[4] = potion;
-    let chest = &mut v.objects[0];
+    v.character.items[4..].copy_from_slice(&[falchion, potion, potion, -1, -1, -1, -1, -1]);
+    let mut chest = v.objects.remove(0);
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.mind.market.trader = true;
+    brain.decide(&v, &c).unwrap();
+    assert_eq!(
+        brain.mind.market.reserved_kind(),
+        Some(potion),
+        "a funded quote opened a Nexus market session"
+    );
+    brain
+        .plan
+        .start(plan::now(), plan::Owner::Bank, "Vault".into());
+    v.map.name = "Vault".into();
     chest.kind = 0x504;
     chest.hp = 0;
     chest.position = Pos { x: 11.5, y: 10.5 };
     chest.contents = vec![-1; 8];
-    let mut brain = Brain::new(ARCHETYPES[1], &v);
-    brain
-        .plan
-        .start(plan::now(), plan::Owner::Bank, "Vault".into());
+    v.objects.push(chest);
+    v.tick += 5;
     let deposit = brain.decide(&v, &c).unwrap();
     assert_eq!(deposit.goal, Goal::Bank(2));
+    assert!(matches!(&deposit.item, Some(Action::Swap { from, .. }) if from.kind == falchion));
     assert!(
         deposit.journey.is_none(),
         "the Vault is not left before banking"
     );
     v.character.items[4] = -1;
-    v.objects[0].contents[0] = potion;
+    v.objects[0].contents[0] = falchion;
     v.character.inventory_revision += 1;
     v.tick += 5;
-    brain.decide(&v, &c).unwrap();
-    assert!(brain.plan.idle());
+    let leave = brain.decide(&v, &c).unwrap();
     assert!(
         brain
             .plan
@@ -458,10 +468,11 @@ fn wavelength_vault_errand_banks_before_leaving() {
             .iter()
             .any(|e| e.kind == plan::Kind::Completed && e.owner == Some(plan::Owner::Bank))
     );
-    v.tick += 5;
-    v.elapsed_ms += 2000;
-    let leave = brain.decide(&v, &c).unwrap();
-    assert!(matches!(leave.journey, Some(Journey::Nexus)));
+    assert!(
+        matches!(leave.journey, Some(Journey::Nexus)),
+        "quote stock stays carried and the market visit resumes: {:?}",
+        leave.journey
+    );
 }
 
 #[test]

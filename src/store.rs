@@ -1210,12 +1210,25 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         }
         // A persona keeps living one life across sessions; alts are only a deterministic successor.
         let selected = mind.as_ref().and_then(|mind| mind.character);
-        let index = account
+        let index = match account
             .characters
             .iter()
             .position(|ch| Some(ch.id) == selected)
-            .or_else(|| (0..account.characters.len()).min_by_key(|i| account.characters[*i].id))
-            .context("persona account has no living character")?;
+        {
+            Some(index) => index,
+            None => {
+                let index = (0..account.characters.len())
+                    .min_by_key(|i| account.characters[*i].id)
+                    .context("persona account has no living character")?;
+                tracing::info!(
+                    account = account.id,
+                    previous = ?selected,
+                    character = account.characters[index].id,
+                    "persona saved character unavailable; switched to lowest-id living successor"
+                );
+                index
+            }
+        };
         Ok(account.characters.swap_remove(index))
     }
     pub(crate) async fn persona_name_available(&self, account: i32, name: String) -> Result<()> {

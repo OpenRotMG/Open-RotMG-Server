@@ -281,7 +281,8 @@ impl Intentions {
                 )
             } else if v.character.level < 20 && !aside("reach20") {
                 (Objective::Reach20, 20)
-            } else if v.character.base_stats[4] < cap && !aside("speed") {
+            } else if v.character.level == 20 && v.character.base_stats[4] < cap && !aside("speed")
+            {
                 (Objective::Speed, cap)
             } else {
                 (

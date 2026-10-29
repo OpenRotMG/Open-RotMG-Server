@@ -79,7 +79,8 @@ pub(super) struct Offer {
     pub to: Member,
     pub purpose: Purpose,
     pub until: u64,
-    pub text: String,
+    /// `None` for an invitation settled without wording; its answer stays silent too.
+    pub text: Option<String>,
     pub(super) answer_started: bool,
 }
 #[derive(Clone, Debug)]
@@ -329,7 +330,7 @@ impl Society {
         owner: Member,
         plan: Plan,
         joined: bool,
-        text: String,
+        text: Option<String>,
         now: u64,
     ) {
         match plan {
@@ -338,7 +339,7 @@ impl Society {
                     account = owner.account,
                     peer = peer.account,
                     ?purpose,
-                    text,
+                    ?text,
                     "autonomous adventure offered"
                 );
                 self.offers.push(Offer {
@@ -402,13 +403,7 @@ impl Society {
                 ready,
                 "adventure plan settled without wording"
             );
-            self.apply(
-                owner,
-                plan,
-                ready,
-                purpose.description().into(),
-                v.elapsed_ms,
-            );
+            self.apply(owner, plan, ready, None, v.elapsed_ms);
         }
     }
     pub(super) fn remember(&mut self, account: i32, peer: i32) -> bool {
@@ -459,26 +454,6 @@ impl Society {
         peers
     }
 }
-pub(super) fn policy_reply(
-    request: &dialogue::Request,
-    intent: dialogue::Intent,
-) -> Result<dialogue::Reply> {
-    let text = match (&request.plan, intent) {
-        (Some(Plan::Invite { purpose, .. }), dialogue::Intent::Invite) => {
-            format!("{}, want to {}?", request.name, purpose.description())
-        }
-        (Some(Plan::Answer(_)), dialogue::Intent::Join) => "yes, let's go together".into(),
-        (Some(Plan::Answer(_)), dialogue::Intent::Decline) => {
-            "not ready, need to recover first".into()
-        }
-        _ => anyhow::bail!("no policy speech for this intention"),
-    };
-    crate::world::chat::validate(&text)?;
-    Ok(dialogue::Reply {
-        intent,
-        reply: text,
-    })
-}
 pub(super) fn ready(v: &PlayerView, content: &Content) -> bool {
     v.character.level >= 1
         && matches!(v.map.name.as_str(), "Realm" | "Nexus")
@@ -514,7 +489,10 @@ impl Brain {
                 }],
                 format!(
                     "{} invited you: {}. Join means share the activity while making your own travel and combat choices. Decline if not ready.",
-                    o.from.name, o.text
+                    o.from.name,
+                    o.text
+                        .as_deref()
+                        .context("unspoken invitation has no verbal answer")?
                 ),
             ),
         };

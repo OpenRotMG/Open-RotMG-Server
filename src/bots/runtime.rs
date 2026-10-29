@@ -948,6 +948,7 @@ pub(super) async fn launch(
                         if brain.blocked.get(&tile).is_none_or(|until| *until <= view.tick) {
                             brain.blocked.insert(tile, view.tick + 100);
                             tracing::warn!(player=id,tick=view.tick,x=blocked.x,y=blocked.y,"virtual held movement blocked; route excluded");
+                            brain.plan.record(plan::now(), plan::Kind::Aborted, brain.plan.owner(), "movement blocked".into());
                         }
                     }
                     if let Some(selected) = selected { ensure!(view.session.character == selected, "selected autonomous character changed"); }
@@ -1054,7 +1055,7 @@ pub(super) async fn launch(
                                 dialogue::skipped(&request, None, "interaction_busy");
                             } else {
                                 last_dialogue = Some(std::time::Instant::now());
-                                pending = Some(dialogue::Pending::start(Some(service.clone()), request, profile));
+                                pending = Some(dialogue::Pending::start(service.clone(), request, profile));
                             }
                             continue;
                         }
@@ -1074,10 +1075,11 @@ pub(super) async fn launch(
                         let speaking=app.dialogue.clone().filter(|service|service.automatic_available());
                         let mut society=app.society.lock().expect("adventure registry poisoned");
                         if let Some(plan)=society.next(&brain,&view,&app.content,speaking.is_some()) {
-                            if speaking.is_some() {
+                            // An unspoken invitation gets no public answer.
+                            if let Some(service)=speaking.filter(|_|!matches!(&plan,adventures::Plan::Answer(o) if o.text.is_none())) {
                                 drop(society);
                                 let request=brain.adventure_request(plan,&view,&app.content)?;
-                                pending=Some(dialogue::Pending::start(speaking,request,profile));
+                                pending=Some(dialogue::Pending::start(service,request,profile));
                             } else {
                                 let owner=adventures::Member{account,name:brain.mind.market.name.as_str().into()};
                                 society.settle_silently(owner,plan,&view,&app.content);
@@ -1098,6 +1100,13 @@ pub(super) async fn launch(
                                 ready_reply = Some((completed.request.clone(), reply, completed.id.clone()));
                             }
                             Err(dialogue::Failure::LocalCapacity) => dialogue::skipped(&completed.request, Some(&completed.id), "local_capacity"),
+                            Err(dialogue::Failure::AutomaticBudget) => {
+                                dialogue::skipped(&completed.request, Some(&completed.id), "request_budget_exhausted");
+                                if let Some(plan)=completed.request.plan.clone() {
+                                    let owner=adventures::Member{account,name:brain.mind.market.name.as_str().into()};
+                                    app.society.lock().expect("adventure registry poisoned").settle_silently(owner,plan,&view,&app.content);
+                                }
+                            }
                             Err(dialogue::Failure::Error(reason)) => dialogue::failed(&app, &completed.request, &completed.id, reason).await,
                         }
                     }

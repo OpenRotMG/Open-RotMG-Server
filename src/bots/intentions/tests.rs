@@ -111,6 +111,10 @@ fn stalled_goal_is_abandoned_and_set_aside_for_the_next_objective() {
     assert_eq!(i.main.as_ref().unwrap().objective, Objective::Reach20);
     i.abandon("no XP in 15 minutes", plan::now());
     i.observe(&v, &c, "Bayleaf").unwrap();
-    assert_eq!(i.main.as_ref().unwrap().objective, Objective::Speed);
+    assert_eq!(
+        i.main.as_ref().unwrap().objective,
+        Objective::Fame,
+        "Speed waits for level 20"
+    );
     i.validate().unwrap();
 }

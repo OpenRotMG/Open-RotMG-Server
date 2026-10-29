@@ -498,12 +498,7 @@ impl Life {
         });
         weapon == v.character.items[0] && v.elapsed_ms.saturating_sub(since) < 1500
     }
-    pub(in crate::bots) fn decide(
-        &mut self,
-        v: &PlayerView,
-        grid: &Grid,
-        willingness: f32,
-    ) -> Option<Decision> {
+    pub(in crate::bots) fn decide(&mut self, v: &PlayerView) -> Option<Decision> {
         if self.gift.is_some() {
             return Some(idle());
         }
@@ -545,50 +540,13 @@ impl Life {
                     self.waiting = Some((p.id, v.elapsed_ms));
                 }
                 if v.elapsed_ms == since {
-                    self.outgoing = Some(
-                        if willingness >= 6. {
-                            "Realm is full, looking for a Vault"
-                        } else {
-                            "Realm is full, waiting here"
-                        }
-                        .into(),
-                    );
+                    self.outgoing = Some("Realm is full, waiting here".into());
                     tracing::info!(
                         account = v.session.account,
                         portal = p.id,
                         name = p.name,
                         "autonomous full entrance observed"
                     );
-                }
-                if willingness >= 6. && v.elapsed_ms.saturating_sub(since) >= 5000 {
-                    if let Some(vault) = v.objects.iter().find(|p| p.kind == 0x720 && p.usable) {
-                        let near = v.position.distance(vault.position) < 1.4;
-                        let mut d = idle();
-                        d.goal = Goal::Portal(vault.id);
-                        d.movement = if near {
-                            None
-                        } else {
-                            grid.towards(v.position, vault.position)
-                        };
-                        d.journey = near.then_some(Journey::Portal(vault.id));
-                        return Some(d);
-                    }
-                    let next = grid
-                        .reachable(v.position)
-                        .iter()
-                        .copied()
-                        .filter(|t| grid.frontier(*t, v.map.width, v.map.height))
-                        .min_by(|a, b| {
-                            center(*a)
-                                .distance(v.position)
-                                .total_cmp(&center(*b).distance(v.position))
-                        });
-                    if let Some(next) = next {
-                        let mut d = idle();
-                        d.goal = Goal::Explore(next.0, next.1);
-                        d.movement = grid.towards(v.position, center(next));
-                        return Some(d);
-                    }
                 }
                 return Some(idle());
             }
@@ -802,10 +760,7 @@ pub(in crate::bots) async fn life(
         let generosity = brain.profile.companions;
         let check = brain.equipment_check(v, gift.as_ref().and_then(|g| g.equipment.as_ref()));
         let content = app.content.clone();
-        let recipient = if matches!(
-            text.as_str(),
-            "Realm is full, looking for a Vault" | "Realm is full, waiting here"
-        ) {
+        let recipient = if text == "Realm is full, waiting here" {
             None
         } else {
             text.split_once(',').map(|(name, _)| name.to_owned())

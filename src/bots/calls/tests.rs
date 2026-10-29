@@ -28,7 +28,20 @@ fn fixture() -> (Content, PlayerView, Brain) {
         .unwrap()
         .observe(&v, &c, b.profile.identity)
         .unwrap();
+    observe_ground(&mut b, &mut v, &c);
     (c, v, b)
+}
+/// Calls teleport, so the caller must stand on ground already seen to hold only low-band enemies.
+fn observe_ground(b: &mut Brain, v: &mut PlayerView, c: &Content) {
+    let low = c
+        .objects
+        .values()
+        .find(|o| o.enemy && (8..=10).contains(&o.terrain))
+        .unwrap()
+        .kind;
+    let caller = std::mem::replace(&mut v.objects[0].kind, low);
+    b.crowd.bands.observe(v, c);
+    v.objects[0].kind = caller;
 }
 fn pending(b: &mut Brain, v: &PlayerView) {
     b.calls.opportunity = Some(Opportunity {
@@ -73,6 +86,7 @@ fn interested_ready_receivers_make_a_partial_choice_without_claiming_entry() {
             .unwrap()
             .observe(&v, &c, b.profile.identity)
             .unwrap();
+        observe_ground(&mut b, &mut v, &c);
         let main = serde_json::to_value(&b.mind.intentions).unwrap();
         assert_eq!(
             b.call_rejection(&v, &c, Activity::Snake, 200).unwrap(),

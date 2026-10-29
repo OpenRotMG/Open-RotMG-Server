@@ -533,7 +533,7 @@ impl Market {
             _ => None,
         }))
     }
-    fn locked(&self) -> bool {
+    pub(in crate::bots) fn locked(&self) -> bool {
         self.reserved_bargain() || self.incoming.is_some() || self.trade.is_some()
     }
     fn stock(&self, v: &PlayerView, c: &Content, future: Option<u16>) -> Result<Vec<Goods>> {
@@ -562,6 +562,13 @@ impl Market {
     }
     pub(in crate::bots) fn reserves_stock(&self) -> bool {
         self.locked() || self.preparing || (self.session.is_some() && self.quote.is_some())
+    }
+    /// Stock the open quote is selling, which banking must leave carried.
+    pub(in crate::bots) fn reserved_kind(&self) -> Option<i32> {
+        self.quote
+            .as_ref()
+            .filter(|_| self.reserves_stock())
+            .map(|q| q[0].kind)
     }
     fn gear_want(
         &self,

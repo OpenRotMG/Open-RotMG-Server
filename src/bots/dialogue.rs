@@ -113,12 +113,15 @@ impl std::error::Error for Obsolete {}
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Failure {
     LocalCapacity,
+    /// `automatic_available()` is checked before the spawned request is admitted; losing that race is a skip.
+    AutomaticBudget,
     Error(&'static str),
 }
 impl Failure {
     fn reason(self) -> &'static str {
         match self {
             Self::LocalCapacity => "local_capacity",
+            Self::AutomaticBudget => "request_budget_exhausted",
             Self::Error(reason) => reason,
         }
     }
@@ -209,7 +212,7 @@ impl Budget {
                 .automatic_resumes_in(now, payload["market_generation"] == true)
                 .is_some()
             {
-                return Err(Failure::Error("request_budget_exhausted"));
+                return Err(Failure::AutomaticBudget);
             }
             self.tokens = self.automatic_tokens(now) - 1.;
             self.refilled = now;
@@ -456,7 +459,7 @@ impl Service {
         let mut b = self.budget.lock().expect("dialogue budget poisoned");
         match result {
             // Admission denial is not a completed provider attempt.
-            Err(Failure::LocalCapacity) => {}
+            Err(Failure::LocalCapacity | Failure::AutomaticBudget) => {}
             Ok(_) => {
                 b.last_latency_ms = Some(elapsed.as_millis());
                 b.successes += 1;
@@ -566,47 +569,29 @@ impl Drop for Pending {
     }
 }
 impl Pending {
-    pub fn start(service: Option<Arc<Service>>, request: Request, profile: Profile) -> Self {
+    pub fn start(service: Arc<Service>, request: Request, profile: Profile) -> Self {
         let id = format!("{:016x}", rand::random::<u64>());
         let payload = request.payload.clone();
         let log_id = id.clone();
         let bot = request.session.1;
         let speaker = request.speaker;
         let created = request.created;
-        let policy = if service.is_none() {
-            Some(
-                serde_json::from_value(payload["allowed_intents"][0].clone())
-                    .map_err(|_| Failure::Error("invalid_policy_intent"))
-                    .and_then(|intent| {
-                        adventures::policy_reply(&request, intent)
-                            .map_err(|_| Failure::Error("invalid_policy_reply"))
-                    }),
-            )
-        } else {
-            None
-        };
         let task = tokio::spawn(async move {
             let start = Instant::now();
-            let result = if let Some(service) = service {
-                let result = service.ask(&payload, &log_id).await;
-                service.completed(&result, start.elapsed());
-                match &result {
-                    Ok(_) => {
-                        tracing::info!(request=%log_id,player=bot,speaker,model=MODEL,elapsed_ms=start.elapsed().as_millis(),"bot dialogue provider succeeded")
-                    }
-                    Err(Failure::LocalCapacity) => {
-                        tracing::info!(request=%log_id,player=bot,speaker,reason="local_capacity",
-                            "bot dialogue admission denied; no provider request")
-                    }
-                    Err(error) => {
-                        tracing::error!(request=%log_id,player=bot,speaker,model=MODEL,elapsed_ms=start.elapsed().as_millis(),%error,"bot dialogue interaction failed")
-                    }
+            let result = service.ask(&payload, &log_id).await;
+            service.completed(&result, start.elapsed());
+            match &result {
+                Ok(_) => {
+                    tracing::info!(request=%log_id,player=bot,speaker,model=MODEL,elapsed_ms=start.elapsed().as_millis(),"bot dialogue provider succeeded")
                 }
-                result
-            } else {
-                tracing::info!(request=%log_id,player=bot,speaker,"bot dialogue explicitly disabled; deterministic adventure policy");
-                policy.expect("missing deterministic speech")
-            };
+                Err(denied @ (Failure::LocalCapacity | Failure::AutomaticBudget)) => {
+                    tracing::info!(request=%log_id,player=bot,speaker,reason=%denied,
+                        "bot dialogue admission denied; no provider request")
+                }
+                Err(error) => {
+                    tracing::error!(request=%log_id,player=bot,speaker,model=MODEL,elapsed_ms=start.elapsed().as_millis(),%error,"bot dialogue interaction failed")
+                }
+            }
             if result.is_ok() {
                 let at = publication_at(
                     created,
@@ -734,7 +719,7 @@ pub(super) async fn publish(
             if let Some(plan) = plan
                 && (joined || matches!(reply_intent, Intent::Invite | Intent::Decline))
             {
-                state.apply(owner, plan, joined, text, now);
+                state.apply(owner, plan, joined, Some(text), now);
             }
             Ok(true)
         })

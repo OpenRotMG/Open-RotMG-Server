@@ -62,31 +62,36 @@ impl Bands {
             }
         }
     }
-    /// Highest band remembered around a position; unobserved ground is not evidence either way.
-    pub fn known(&self, p: Pos) -> u8 {
+    /// Highest band remembered around a position; `None` is unobserved ground.
+    pub fn known(&self, p: Pos) -> Option<u8> {
         let (x, y) = region(p);
         (x - 1..=x + 1)
             .flat_map(|x| (y - 1..=y + 1).map(move |y| (x, y)))
             .filter_map(|r| self.regions.get(&r))
             .map(|(tier, _)| *tier)
             .max()
-            .unwrap_or(0)
     }
+    /// Walking may enter unobserved ground; `None` orders below every band.
     pub fn survivable(&self, v: &PlayerView, p: Pos) -> bool {
-        v.map.name != "Realm" || self.known(p) <= self.limit
+        v.map.name != "Realm" || self.known(p) <= Some(self.limit)
+    }
+    /// A far marker may stand among enemies never seen, so low levels only teleport onto observed ground.
+    pub fn teleportable(&self, v: &PlayerView, p: Pos) -> bool {
+        self.survivable(v, p)
+            && (v.map.name != "Realm" || v.character.level >= 20 || self.known(p).is_some())
     }
     /// Where to farm next: back out of a band above this character, or up toward its suitable band.
     pub fn venture(&self, v: &PlayerView) -> Option<Pos> {
         let (here, goal) = (self.known(v.position), self.limit);
-        if here == goal {
+        if here == Some(goal) {
             return None;
         }
         self.regions
             .values()
             .filter(|(tier, p)| {
                 *tier <= goal
-                    && (here > goal || *tier > here)
-                    && self.known(*p) <= goal
+                    && (here > Some(goal) || Some(*tier) > here)
+                    && self.known(*p) <= Some(goal)
                     && p.distance(v.position) > 8.
             })
             .max_by(|(a, p), (b, q)| {

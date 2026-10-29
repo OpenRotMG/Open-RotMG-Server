@@ -250,6 +250,23 @@ fn newer_public_peer_can_attract_passive_company_and_shared_damage_catchup() {
 }
 
 #[test]
+fn level_five_refuses_teleport_to_far_unobserved_marker() {
+    for (level, teleports) in [(5, false), (20, true)] {
+        let (c, mut v, mut b) = fixture();
+        v.objects.retain(|o| o.id != 2 && o.id != 3);
+        b.crowd.bands = bands::Bands::default();
+        v.player_markers[0].position = Pos { x: 60.5, y: 10.5 };
+        v.character.level = level;
+        let journey = adventure(&c, &v, &mut b).journey;
+        assert_eq!(
+            matches!(journey, Some(Journey::Regroup(3))),
+            teleports,
+            "level {level}: {journey:?}"
+        );
+    }
+}
+
+#[test]
 fn public_world_rank_is_strict_acyclic_and_not_account_age_ordered() {
     assert!(can_approach(-4, 199, 200));
     assert!(can_approach(-3, 200, 199));
@@ -422,8 +439,7 @@ fn attributed_heal_prefers_matched_account_without_level_special_follow() {
     for level in [1, 5, 6, 20] {
         v.character.level = level;
         assert_eq!(destination(&v, &b), Some(4));
-        let grid = b.navigation_grid(&v, &c, &[]);
-        assert!(b.mind.social.decide(&v, &grid, 0.).is_none());
+        assert!(b.mind.social.decide(&v).is_none());
     }
     b.mind.social.bind();
     v.objects[2].id = 5;
@@ -551,8 +567,7 @@ fn repeated_help_and_recognition_cannot_renew_passive_expiry_or_cooldown() {
         advance(&mut v, ms);
         receive_heal(&v, &mut b);
         b.mind.social.bind();
-        let grid = b.navigation_grid(&v, &c, &[]);
-        assert!(b.mind.social.decide(&v, &grid, 0.).is_none());
+        assert!(b.mind.social.decide(&v).is_none());
         b.crowd.attend(&v, &c, &b.mind.cognition, false);
         if v.time_ms < deadline {
             assert_eq!(

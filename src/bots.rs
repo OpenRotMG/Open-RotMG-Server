@@ -573,6 +573,12 @@ impl Brain {
         {
             self.blocked.insert(tile(destination), v.tick + 100);
             tracing::warn!(player=v.session.player,tick=v.tick,goal=?self.goal,x=destination.x,y=destination.y,"autonomous route made no progress; temporarily excluded");
+            self.plan.record(
+                plan::now(),
+                plan::Kind::Aborted,
+                self.plan.owner(),
+                "movement blocked".into(),
+            );
             self.heading = self.rng.gen_range(0.0..std::f32::consts::TAU);
             self.stationary = v.tick;
         }
@@ -588,7 +594,7 @@ impl Brain {
         };
         let now = plan::now();
         self.observe_goal(v, content, now)?;
-        self.plan.observe(v, &self.mind.market, now);
+        self.plan.observe(v, now);
         let (activity, decision) = if v.lifecycle.busy {
             (Activity::Busy, decision)
         } else {
@@ -826,8 +832,10 @@ impl Brain {
         if self.committed(v) {
             self.crowd.release(v, "explicit_commitment");
         }
-        // Consent and receipts outrank every errand; only they can settle a reserved exchange.
-        if reserved {
+        // Consent and receipts outrank every errand; an advertised quote does not preempt a started one.
+        if self.mind.market.locked()
+            || reserved && self.plan.owner().is_none_or(|o| o == plan::Owner::Trade)
+        {
             decision.item = None;
             if let Some(market) = self.mind.market.decide(
                 v,
@@ -908,7 +916,7 @@ impl Brain {
         }
         if self.agreement.is_none()
             && peaceful(&s.enemies, v.position)
-            && let Some(social) = self.mind.social.decide(v, &s.grid, self.profile.companions)
+            && let Some(social) = self.mind.social.decide(v)
             && (!matches!(social.goal, Goal::Follow(_)) || s.quarry.is_none())
         {
             return Ok((Activity::Social, social));
@@ -1019,7 +1027,13 @@ impl Brain {
                 match v.map.name.as_str() {
                     _ if !due => Yield,
                     "Vault" => {
-                        match progression::bank(v, content, &s.grid, self.mind.future_class)? {
+                        match progression::bank(
+                            v,
+                            content,
+                            &s.grid,
+                            self.mind.future_class,
+                            self.mind.market.reserved_kind(),
+                        )? {
                             Some(d) if matches!(d.goal, Goal::Bank(_)) => Act(Activity::Bank, d),
                             _ => Done("own Vault organized"),
                         }
@@ -1270,7 +1284,11 @@ impl Brain {
         }
         let speed = self.mind.intentions.as_ref().is_some_and(|i| i.speed());
         if v.map.name == "Realm" && health >= (self.profile.recovery + 0.1).max(0.75) {
-            let snakes = self.crowd.bands.snake_source.filter(|_| speed);
+            let snakes = self
+                .crowd
+                .bands
+                .snake_source
+                .filter(|p| speed && self.crowd.bands.survivable(v, *p));
             if let Some(ground) = snakes.or_else(|| self.crowd.bands.venture(v)) {
                 choices.push((60. + self.profile.resources, Goal::Venture, ground));
             }
@@ -1543,6 +1561,7 @@ impl Brain {
                     && distance > 24.
                     && v.map.allow_teleport
                     && v.time_ms >= self.next_teleport
+                    && self.crowd.bands.teleportable(v, marker.position)
                 {
                     self.next_teleport = v.time_ms + 10000;
                     decision.goal = Goal::Follow(marker.id);
@@ -1819,7 +1838,7 @@ impl Brain {
                 && enemies
                     .iter()
                     .all(|e| e.position.distance(destination) > 3.)
-                && self.crowd.bands.survivable(v, destination)
+                && self.crowd.bands.teleportable(v, destination)
             {
                 decision.journey = Some(Journey::Regroup(id));
                 self.next_teleport = v.time_ms + 10000;

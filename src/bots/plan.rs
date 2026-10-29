@@ -106,11 +106,12 @@ struct Checkpoint {
 pub(super) struct Plan {
     pub step: Option<Step>,
     pub events: VecDeque<Event>,
+    // Escapes and aborts outlive the display ring, so errand churn cannot hide fleeing or looping.
+    flagged: VecDeque<Event>,
     pub last_progress: u64,
     pub engaged: bool,
     rest: BTreeMap<Owner, u64>,
     checkpoint: Option<Checkpoint>,
-    settled_trade: Option<u64>,
     goal: Option<(u64, i64, u64)>,
     areas: BTreeSet<i32>,
     held: BTreeSet<i32>,
@@ -136,8 +137,16 @@ impl Plan {
             reason,
         };
         tracing::info!(event=%serde_json::to_string(&event).expect("plan event serialization"), "bot plan event");
-        if matches!(kind, Kind::Completed | Kind::Progress | Kind::Trade) {
+        // Shared-event steps flip with idle safety, so finishing one is not progress.
+        if matches!(kind, Kind::Progress | Kind::Trade)
+            || kind == Kind::Completed && owner != Some(Owner::Event)
+        {
             self.last_progress = now;
+        }
+        if matches!(kind, Kind::Escape | Kind::Aborted) {
+            self.flagged
+                .retain(|e| now.saturating_sub(e.at) < FLEE_WINDOW_MS);
+            self.flagged.push_back(event.clone());
         }
         self.events.push_back(event);
         if self.events.len() > EVENTS {
@@ -189,8 +198,8 @@ impl Plan {
     pub(super) fn overdue(&self, now: u64) -> bool {
         self.step.as_ref().is_some_and(|s| now >= s.deadline)
     }
-    /// Progress hooks: XP, permanent stats, fame, a new item kind, a new area or a settled trade.
-    pub(super) fn observe(&mut self, v: &PlayerView, market: &pursuits::market::Market, now: u64) {
+    /// Progress hooks: XP, permanent stats, fame, a new item kind or a new area.
+    pub(super) fn observe(&mut self, v: &PlayerView, now: u64) {
         if self.last_progress == 0 {
             self.last_progress = now;
         }
@@ -231,13 +240,6 @@ impl Plan {
                 self.record(now, Kind::Progress, None, reason);
             }
         }
-        if let Some(b) = &market.bargain
-            && b.resolution.as_deref() == Some("settled_all_installments_transaction_identified")
-            && self.settled_trade != Some(b.terms.version)
-        {
-            self.settled_trade = Some(b.terms.version);
-            self.record(now, Kind::Trade, None, "exchange settled".into());
-        }
     }
     pub(super) fn public(&self, now: u64) -> Value {
         json!({"flag":self.flag(now),"last_progress_at":self.last_progress,"step":self.step,
@@ -246,7 +248,7 @@ impl Plan {
     pub(super) fn flag(&self, now: u64) -> Option<Value> {
         let minutes = |since: u64| now.saturating_sub(since) / 60_000;
         let escapes: Vec<_> = self
-            .events
+            .flagged
             .iter()
             .filter(|e| e.kind == Kind::Escape && now.saturating_sub(e.at) < FLEE_WINDOW_MS)
             .collect();
@@ -257,7 +259,7 @@ impl Plan {
         }
         let mut aborts: BTreeMap<(Option<Owner>, &str), Vec<u64>> = BTreeMap::new();
         for e in self
-            .events
+            .flagged
             .iter()
             .filter(|e| e.kind == Kind::Aborted && now.saturating_sub(e.at) < LOOP_WINDOW_MS)
         {
@@ -306,6 +308,11 @@ mod tests {
             plan.abort(at, "left the Vault before banking");
         }
         plan.complete(40, "unrelated");
+        for at in 41..80 {
+            plan.start(at, Owner::Event, "shared event".into());
+            plan.complete(at, "event needs nothing more");
+        }
+        assert_eq!(plan.last_progress, 1, "event churn is not progress");
         let looping = plan.flag(100).unwrap();
         assert_eq!(looping["kind"], "looping");
         assert_eq!(looping["since_ms"], 10);
@@ -314,7 +321,7 @@ mod tests {
             plan.record(at, Kind::Escape, None, "critical_health".into());
         }
         assert_eq!(plan.flag(100).unwrap()["kind"], "fleeing");
-        plan.events.retain(|e| e.kind != Kind::Escape || e.at > 0);
+        plan.flagged.retain(|e| e.kind != Kind::Escape || e.at > 0);
         assert_eq!(
             plan.flag(100).unwrap()["kind"],
             "looping",
