@@ -213,7 +213,7 @@ export async function run(game){
         const towers=families[0].filter(e=>e.kind===0xd5e&&e.hp>0);
         if(towers.length)targets.splice(0,targets.length,...towerPair(towers,views,towerAssignments));
       }
-      const anchors=targets.map((target,i)=>target??families[i].find(e=>leaders.has(e.kind))),range=kind===0xd5f?6.5:5.5;
+      const anchors=targets.map((target,i)=>target??families[i].find(e=>leaders.has(e.kind))),range=kind===0xd5f?6.5:kind===0xd61?2:5.5;
       await appendFile(join(out,'combat.jsonl'),JSON.stringify({batch,roles,step,game_ms:views[0].game_ms,targets:targets.map(e=>e?.id),pair:[...towerAssignments.values()],families:families.map(f=>f.map(({id,kind,pos,hp,condition,stage,activated})=>({id,kind,pos,hp,condition,stage,activated})))})+'\n');
       if(views.some((view,i)=>anchors[i]&&Math.hypot(view.position.x-anchors[i].pos.x,view.position.y-anchors[i].pos.y)>range)){
         await approach(anchors.map((e,i)=>e?e.pos:views[i].position),range);continue;
