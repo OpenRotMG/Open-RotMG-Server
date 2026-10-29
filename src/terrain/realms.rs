@@ -109,6 +109,7 @@ impl Source {
             WORLD04_ID => Some((21, 6, 16, 1, 44)),
             WORLD05_ID => Some((19, 5, 22, 2, 48)),
             WORLD09_ID => Some((14, 3, 16, 0, 33)),
+            WORLD11_ID => Some((20, 9, 25, 2, 56)),
             _ => None,
         };
         if let Some((ents, liches, coils, oases, total)) = census {
