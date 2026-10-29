@@ -47,5 +47,6 @@
     "recipe": "world05.json",
     "sha256": "c6daa9af6a24e958de538f76a58cd1f957ca6bc837b8252e564d62f789f7710b"
   },
-  {"kind":"reconstruction","recipe":"world11.json","sha256":"2c555db049f215dc28b34c638f1818f4c59d150519313e876ae06b27462184a5"}
+  {"kind":"reconstruction","recipe":"world11.json","sha256":"2c555db049f215dc28b34c638f1818f4c59d150519313e876ae06b27462184a5"},
+  {"kind":"reconstruction","recipe":"world10.json","sha256":"b2c6221f3ff7100810277107581875b47f2e6e3b897e194a3074a5dda8e81e01"}
 ]

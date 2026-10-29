@@ -33,6 +33,7 @@ The same rebuild and unverified image-derived rights limits apply.
 World4: authored 2000-square image-guided reconstruction, not authenticated; image-derived rights unverified.
 World5: authored 2100-square image-guided reconstruction, not authenticated; image-derived rights unverified.
 World9: authored image-guided reconstruction, not authenticated; image-derived rights unverified.
+World10: authored 2000-square image-guided reconstruction, not authenticated; image-derived rights unverified.
 World11: authored 2100-square image-guided reconstruction, not authenticated; image-derived rights unverified.
 
 Retained classic-v1 generator only: Amit J Patel, Copyright 2010; MIT notice:
@@ -41,5 +42,5 @@ MAPGEN2-LICENSE.
 Offline rebuild without client/state/network: openrotmg build-realm --data data --id ID
 IDs: classic-world-01-reconstruction, classic-world-02-reconstruction,
 classic-world-03-reconstruction, classic-world-04-reconstruction, classic-world-05-reconstruction,
-classic-world-09-reconstruction, classic-world-11-reconstruction.
+classic-world-09-reconstruction, classic-world-10-reconstruction, classic-world-11-reconstruction.
 Add --check to compare.

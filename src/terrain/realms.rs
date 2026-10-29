@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
 use super::prepare::{
-    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD04_ID, WORLD05_ID, WORLD09_ID, WORLD11_ID,
+    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD04_ID, WORLD05_ID, WORLD09_ID, WORLD10_ID, WORLD11_ID,
     bounded_read, read_recipe, safe_path, valid_hash, valid_id,
 };
 use serde::Deserialize;
@@ -42,7 +42,13 @@ impl Asset {
             ensure!(
                 !matches!(
                     self.id.as_str(),
-                    WORLD02_ID | WORLD03_ID | WORLD04_ID | WORLD05_ID | WORLD09_ID | WORLD11_ID
+                    WORLD02_ID
+                        | WORLD03_ID
+                        | WORLD04_ID
+                        | WORLD05_ID
+                        | WORLD09_ID
+                        | WORLD10_ID
+                        | WORLD11_ID
                 ) || !map.cells.iter().any(|c| c.ground == 244),
                 "{} requires its source-exact lava capability {phase}",
                 self.contract
@@ -109,6 +115,7 @@ impl Source {
             WORLD04_ID => Some((21, 6, 16, 1, 44)),
             WORLD05_ID => Some((19, 5, 22, 2, 48)),
             WORLD09_ID => Some((14, 3, 16, 0, 33)),
+            WORLD10_ID => Some((16, 5, 17, 1, 39)),
             WORLD11_ID => Some((20, 9, 25, 2, 56)),
             _ => None,
         };
@@ -227,7 +234,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                         ensure!(
                             !matches!(
                                 id.as_str(),
-                                WORLD04_ID | WORLD05_ID | WORLD09_ID | WORLD11_ID
+                                WORLD04_ID | WORLD05_ID | WORLD09_ID | WORLD10_ID | WORLD11_ID
                             ),
                             "{id} requires its reviewed source recipe"
                         );

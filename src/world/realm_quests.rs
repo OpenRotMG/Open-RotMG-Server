@@ -22,7 +22,10 @@ impl World {
                 0xdc2 => (0xc5, Some(0x1f2)),
                 0x928 | 0x67d => (0x60, Some(0x120)),
                 0x678
-                    if self.realm_layout.as_deref() == Some("classic-world-11-reconstruction") =>
+                    if matches!(
+                        self.realm_layout.as_deref(),
+                        Some("classic-world-10-reconstruction" | "classic-world-11-reconstruction")
+                    ) =>
                 {
                     (0xf5, Some(0x18e))
                 }
@@ -1125,7 +1128,9 @@ mod tests {
                 "classic-world-01-reconstruction" => [5, 7, 8, 6],
                 "classic-world-02-reconstruction" => [1, 6, 0, 8],
                 "classic-world-03-reconstruction" => [4, 3, 0, 6],
-                "classic-world-04-reconstruction" => [0, 0, 1, 0],
+                "classic-world-04-reconstruction" | "classic-world-10-reconstruction" => {
+                    [0, 0, 1, 0]
+                }
                 "classic-world-05-reconstruction" | "classic-world-11-reconstruction" => {
                     [0, 0, 2, 0]
                 }
@@ -1152,7 +1157,10 @@ mod tests {
                 );
                 assert!(world.setpieces.is_empty());
             }
-            if source.name() == "classic-world-11-reconstruction" {
+            if matches!(
+                source.name(),
+                "classic-world-10-reconstruction" | "classic-world-11-reconstruction"
+            ) {
                 let mut wrong_source = World::new(content.clone(), map.clone()).unwrap();
                 wrong_source.realm_layout = Some("classic-world-05-reconstruction".into());
                 assert!(
@@ -1172,7 +1180,7 @@ mod tests {
                 authored_liches,
                 match source.name() {
                     "classic-world-01-reconstruction" | "classic-world-04-reconstruction" => 6,
-                    "classic-world-05-reconstruction" => 5,
+                    "classic-world-05-reconstruction" | "classic-world-10-reconstruction" => 5,
                     "classic-world-09-reconstruction" => 3,
                     "classic-world-11-reconstruction" => 9,
                     _ => 0,
@@ -1204,6 +1212,7 @@ mod tests {
                 match source.name() {
                     "classic-world-04-reconstruction" | "classic-world-09-reconstruction" => 16,
                     "classic-world-05-reconstruction" => 22,
+                    "classic-world-10-reconstruction" => 17,
                     "classic-world-11-reconstruction" => 25,
                     _ => 2,
                 }
@@ -1248,6 +1257,7 @@ mod tests {
             ("classic-world-04-reconstruction", 2000, 506, 21, 16, 6..=6),
             ("classic-world-05-reconstruction", 2100, 702, 19, 22, 5..=6),
             ("classic-world-09-reconstruction", 2100, 426, 14, 16, 4..=6),
+            ("classic-world-10-reconstruction", 2000, 460, 16, 17, 5..=6),
             ("classic-world-11-reconstruction", 2100, 577, 20, 25, 9..=9),
         ] {
             let path = std::path::Path::new("data");
