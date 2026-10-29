@@ -18,13 +18,22 @@ impl World {
         for site in sites {
             let (ground, scenery) = match site.kind {
                 0x91f => (0x46, Some(0x194)),
+                0x91b
+                    if self.realm_layout.as_deref() == Some("classic-world-13-reconstruction") =>
+                {
+                    (0xad, Some(0x162))
+                }
                 0x91b => (0xad, Some(0x160)),
                 0xdc2 => (0xc5, Some(0x1f2)),
                 0x928 | 0x67d => (0x60, Some(0x120)),
                 0x678
                     if matches!(
                         self.realm_layout.as_deref(),
-                        Some("classic-world-10-reconstruction" | "classic-world-11-reconstruction")
+                        Some(
+                            "classic-world-10-reconstruction"
+                                | "classic-world-11-reconstruction"
+                                | "classic-world-13-reconstruction"
+                        )
                     ) =>
                 {
                     (0xf5, Some(0x18e))
@@ -1131,9 +1140,9 @@ mod tests {
                 "classic-world-04-reconstruction" | "classic-world-10-reconstruction" => {
                     [0, 0, 1, 0]
                 }
-                "classic-world-05-reconstruction" | "classic-world-11-reconstruction" => {
-                    [0, 0, 2, 0]
-                }
+                "classic-world-05-reconstruction"
+                | "classic-world-11-reconstruction"
+                | "classic-world-13-reconstruction" => [0, 0, 2, 0],
                 "classic-world-09-reconstruction" => [0; 4],
                 "realm-fsod-1" | "realm-fsod-2" | "realm-fsod-3" => [0; 4],
                 name => panic!("unreviewed authored-site roster {name}"),
@@ -1172,6 +1181,15 @@ mod tests {
                 );
                 assert!(wrong_source.setpieces.is_empty());
             }
+            if source.name() == "classic-world-13-reconstruction" {
+                let mut wrong_source = World::new(content.clone(), map.clone()).unwrap();
+                wrong_source.realm_layout = Some("classic-world-05-reconstruction".into());
+                for kind in [0x91b, 0x678] {
+                    let site = sites.iter().find(|s| s.kind == kind).unwrap().clone();
+                    assert!(wrong_source.populate_authored_sites(&[site]).is_err());
+                    assert!(wrong_source.setpieces.is_empty());
+                }
+            }
             world.populate_authored_sites(&sites).unwrap();
             assert!(Arc::ptr_eq(&map, &world.map));
             assert_eq!(world.setpieces.len(), sites.len());
@@ -1183,6 +1201,7 @@ mod tests {
                     "classic-world-05-reconstruction" | "classic-world-10-reconstruction" => 5,
                     "classic-world-09-reconstruction" => 3,
                     "classic-world-11-reconstruction" => 9,
+                    "classic-world-13-reconstruction" => 4,
                     _ => 0,
                 }
             );
@@ -1211,7 +1230,7 @@ mod tests {
                 world.actors().filter(|e| e.kind == 0xdc2).count(),
                 match source.name() {
                     "classic-world-04-reconstruction" | "classic-world-09-reconstruction" => 16,
-                    "classic-world-05-reconstruction" => 22,
+                    "classic-world-05-reconstruction" | "classic-world-13-reconstruction" => 22,
                     "classic-world-10-reconstruction" => 17,
                     "classic-world-11-reconstruction" => 25,
                     _ => 2,
@@ -1259,6 +1278,7 @@ mod tests {
             ("classic-world-09-reconstruction", 2100, 426, 14, 16, 4..=6),
             ("classic-world-10-reconstruction", 2000, 460, 16, 17, 5..=6),
             ("classic-world-11-reconstruction", 2100, 577, 20, 25, 9..=9),
+            ("classic-world-13-reconstruction", 2000, 634, 23, 22, 4..=6),
         ] {
             let path = std::path::Path::new("data");
             let content = Arc::new(Content::load(path).unwrap());
