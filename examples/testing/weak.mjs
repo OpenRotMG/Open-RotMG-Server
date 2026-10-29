@@ -15,7 +15,7 @@ export async function run(game){
   }
   const cheat=change=>command({op:'cheat',actor:game.actor,change});
   async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(join(root,'weak-observations.json'),JSON.stringify(samples,null,2));return state;}
-  async function shots(){return (await readFile(join(root,'server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='player shot'&&f.player===player);}
+  async function shots(){return (await readFile(join(root,'server.log'),'utf8')).split('\n').slice(0,-1).filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='player shot'&&f.player===player);}
   const initial=await save('prepared'),player=initial.view.session.player,boss=initial.diagnostic.entities.find(e=>e.kind===0x936);assert(boss);
   const target={entity:boss.id,camera_angle:-Math.PI/4,fire:true};
   const hp=state=>state.diagnostic.entities.find(e=>e.id===boss.id).hp;
@@ -43,7 +43,7 @@ export async function run(game){
   const beforeAbility=await save('weak-damaging');
   offset=(await shots()).length;
   const mana=beforeAbility.view.character.mp;
-  await game.act({keys:[' '],duration_ms:500,target:{...target,fire:false}},{name:'weak-quiver',when:v=>Boolean(v.character.conditions&weak)&&v.character.mp<mana});
+  await game.act({keys:[' '],duration_ms:300,target:{...target,fire:false}},{name:'weak-quiver',when:v=>Boolean(v.character.conditions&weak)&&v.character.mp<mana});
   await game.act({keys:[],duration_ms:500});
   const ability=await save('weak-quiver'),abilityShots=(await shots()).slice(offset);
   game.check('Weak quiver retains unscaled 100–139 damage and spends mana',abilityShots.length===1&&abilityShots[0].damage>=100&&abilityShots[0].damage<=139&&ability.view.character.mp<mana);
