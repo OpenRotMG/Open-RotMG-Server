@@ -12,17 +12,19 @@ export async function enter({browser}){
     await cdp.eval('(()=>{const modal=document.querySelector("ruffle-player").shadowRoot.querySelector("#hardware-acceleration-modal");if(modal&&!modal.classList.contains("hidden"))modal.querySelector(".close-modal").click();})()');
     const rect=await cdp.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};})()');
     assert(rect.width===800&&rect.height===600);
-    await writeFile(join(process.env.QA_RESULTS_DIR,'selection.png'),Buffer.from((await cdp.call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+    const capture=async name=>writeFile(join(process.env.QA_RESULTS_DIR,name+'.png'),Buffer.from((await cdp.call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+    await capture('title');
     for(let i=0;i<2;i++){
       const p={x:rect.x+400,y:rect.y+550,button:'left',clickCount:1};
       try{await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}
       await cdp.eval('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
+      if(i===0)await capture('selection');
     }
   }finally{cdp.close();}
 }
 export async function run(game){
   const out=join(process.env.QA_RESULTS_DIR,'native'),before=await game.inspect();
-  await game.act({keys:[],duration_ms:1000},{name:'client-tutorial',when:v=>v.game_ms>before.view.game_ms+300});
+  await game.act({keys:[],duration_ms:1000},{name:'client-tutorial',when:v=>v.world==='Tutorial'&&v.game_ms>=300});
   game.check('normal selection and LOAD enter the prepared living Wizard in Tutorial',before.view.map.name==='Tutorial'&&before.view.lifecycle.alive&&before.view.character.level===1);
   await game.act({keys:['d'],duration_ms:500});
   const moved=await game.observe();
