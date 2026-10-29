@@ -5,7 +5,7 @@ use std::{collections::VecDeque, path::Path, sync::Arc};
 
 use super::prepare::{
     ScopedLava, WORLD02_ID, WORLD03_ID, WORLD04_ID, WORLD05_ID, WORLD09_ID, WORLD10_ID, WORLD11_ID,
-    WORLD13_ID, bounded_read, read_recipe, safe_path, valid_hash, valid_id,
+    WORLD12_ID, WORLD13_ID, bounded_read, read_recipe, safe_path, valid_hash, valid_id,
 };
 use serde::Deserialize;
 
@@ -49,6 +49,7 @@ impl Asset {
                         | WORLD09_ID
                         | WORLD10_ID
                         | WORLD11_ID
+                        | WORLD12_ID
                         | WORLD13_ID
                 ) || !map.cells.iter().any(|c| c.ground == 244),
                 "{} requires its source-exact lava capability {phase}",
@@ -118,6 +119,7 @@ impl Source {
             WORLD09_ID => Some((14, 3, 16, 0, 33)),
             WORLD10_ID => Some((16, 5, 17, 1, 39)),
             WORLD11_ID => Some((20, 9, 25, 2, 56)),
+            WORLD12_ID => Some((31, 8, 8, 0, 47)),
             WORLD13_ID => Some((23, 4, 22, 2, 51)),
             _ => None,
         };
@@ -241,6 +243,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                                     | WORLD09_ID
                                     | WORLD10_ID
                                     | WORLD11_ID
+                                    | WORLD12_ID
                                     | WORLD13_ID
                             ),
                             "{id} requires its reviewed source recipe"
