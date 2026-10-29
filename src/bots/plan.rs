@@ -100,7 +100,6 @@ struct Checkpoint {
     experience: i32,
     stats: i32,
     fame: i32,
-    items: Vec<i32>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -113,6 +112,8 @@ pub(super) struct Plan {
     checkpoint: Option<Checkpoint>,
     settled_trade: Option<u64>,
     goal: Option<(u64, i64, u64)>,
+    areas: BTreeSet<i32>,
+    held: BTreeSet<i32>,
     seq: u64,
 }
 impl Plan {
@@ -193,27 +194,28 @@ impl Plan {
         if self.last_progress == 0 {
             self.last_progress = now;
         }
-        let mut items: Vec<_> = v
-            .character
-            .items
-            .iter()
-            .copied()
-            .filter(|k| *k >= 0)
-            .collect();
-        items.sort_unstable();
+        // Only a kind never held this session is new; Vault deposits and withdrawals are not.
+        let first = self.checkpoint.is_none();
+        let mut acquired = false;
+        for kind in v.character.items.iter().filter(|k| **k >= 0) {
+            acquired |= self.held.insert(*kind) && !first;
+        }
         let current = Checkpoint {
             world: v.session.world,
             experience: v.character.experience,
             stats: v.character.base_stats.iter().sum(),
             fame: v.character.fame,
-            items,
         };
         if let Some(old) = self.checkpoint.replace(current.clone()) {
-            let reason = if current.world != old.world {
+            // Nexus and Vault trips are errands, not exploration.
+            let reason = if current.world != old.world
+                && !matches!(v.map.name.as_str(), "Nexus" | "Vault")
+                && self.areas.insert(current.world)
+            {
                 Some(format!("entered {}", v.map.name))
             } else if current.stats > old.stats {
                 Some("permanent stat increased".into())
-            } else if current.items.iter().any(|k| !old.items.contains(k)) {
+            } else if acquired {
                 Some("new item held".into())
             } else if current.experience > old.experience || current.fame > old.fame {
                 // Combat XP arrives every few seconds; one event per minute keeps the log readable.

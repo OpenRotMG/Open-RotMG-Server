@@ -1819,6 +1819,7 @@ impl Brain {
                 && enemies
                     .iter()
                     .all(|e| e.position.distance(destination) > 3.)
+                && self.crowd.bands.survivable(v, destination)
             {
                 decision.journey = Some(Journey::Regroup(id));
                 self.next_teleport = v.time_ms + 10000;
