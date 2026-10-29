@@ -225,7 +225,6 @@ async fn guest_persona_controller_resume_death_replacement_and_retirement_preser
         )
     );
     settled.lifetime.follows(&saved.lifetime).unwrap();
-    assert!(!app.world.supervisor.account_fenced(saved.account).unwrap());
 
     // A prepared spare makes inherited dead inventory distinguishable from ordinary starter gear.
     let mut dead = settled;

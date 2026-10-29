@@ -104,10 +104,6 @@ async fn killed_mutations_recover_without_duplicates_or_account_lockouts() {
         let supervisor =
             crate::supervision::Supervisor::recovered(path.join("incident.json"), &store).unwrap();
         supervisor.failure("fixture", anyhow::anyhow!("injected uncertain completion"));
-        let mut incident = supervisor.latest().unwrap().unwrap();
-        supervisor
-            .preserve_accounts(&mut incident, &[1, 2])
-            .unwrap();
         let cut = std::env::var("ROTMG_RESTART_CUT").unwrap();
         let boundary = path.clone();
         store
@@ -285,12 +281,8 @@ async fn killed_mutations_recover_without_duplicates_or_account_lockouts() {
                 .clone(),
                 "{operation}/{cut}"
             );
-            let supervisor =
-                crate::supervision::Supervisor::recovered(dir.join("incident.json"), &recovered)
-                    .unwrap();
-            for account in [1, 2] {
-                supervisor.check_account(account).unwrap();
-            }
+            crate::supervision::Supervisor::recovered(dir.join("incident.json"), &recovered)
+                .unwrap();
             if cut != "committed" {
                 mutate(&recovered, &content, operation).await.unwrap();
             }

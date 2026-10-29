@@ -62,8 +62,6 @@ pub struct Incident {
     pub failure: String,
     pub location: Option<String>,
     pub context: ContextIds,
-    pub fences_preserved: bool,
-    pub fenced_accounts: Vec<i32>,
 }
 #[derive(Clone)]
 pub struct Supervisor {
@@ -84,18 +82,7 @@ impl Supervisor {
             path: Some(path),
             ..Self::default()
         };
-        if let Some(mut incident) = value.latest()? {
-            // The old world is gone; SQLite recovers complete commits, not reservations: https://www.sqlite.org/wal.html#how_wal_works
-            let accounts = std::mem::take(&mut incident.fenced_accounts);
-            if !accounts.is_empty() {
-                value
-                    .save(&incident)
-                    .context("cannot release recovered account fences")?;
-                for account in accounts {
-                    tracing::info!(account, incident=%incident.id, "account fence released after database recovery");
-                }
-            }
-        }
+        value.latest()?;
         Ok(value)
     }
     fn save(&self, incident: &Incident) -> Result<()> {
@@ -117,25 +104,6 @@ impl Supervisor {
             "critical worker stopped; new ownership operations refused"
         );
         Ok(())
-    }
-    pub fn account_fenced(&self, account: i32) -> Result<bool> {
-        Ok(self
-            .latest()?
-            .is_some_and(|incident| incident.fenced_accounts.contains(&account)))
-    }
-    pub fn check_account(&self, account: i32) -> Result<()> {
-        ensure!(
-            !self.account_fenced(account)?,
-            "account ownership is fenced until restart"
-        );
-        self.ensure_running()
-    }
-    pub fn preserve_accounts(&self, incident: &mut Incident, accounts: &[i32]) -> Result<()> {
-        incident.fenced_accounts.extend_from_slice(accounts);
-        incident.fenced_accounts.sort_unstable();
-        incident.fenced_accounts.dedup();
-        incident.fences_preserved = true;
-        self.save(incident)
     }
     pub fn spawn(
         &self,
@@ -239,8 +207,6 @@ impl Supervisor {
             failure: failure.into(),
             location: panic.as_ref().map(|v| v.0.clone()),
             context: panic.map(|v| v.1).unwrap_or_default(),
-            fences_preserved: false,
-            fenced_accounts: Vec::new(),
         };
         tracing::error!(component, failure, error=%detail, incident=%incident.id, "critical worker terminated");
         self.fatal.send_if_modified(|current| {

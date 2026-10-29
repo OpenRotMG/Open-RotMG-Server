@@ -11,7 +11,17 @@ async fn full_admission_is_retryable_without_fencing_or_stealing_a_human_slot() 
         "development world full"
     );
     assert_eq!(app.owners.lock().unwrap().len(), 1);
-    assert!(!app.world.supervisor.account_fenced(waiting).unwrap());
     drop(owner);
     assert!(app.try_claim(waiting).unwrap().is_some());
+}
+
+#[tokio::test]
+async fn failed_session_releases_the_account_when_it_closes() {
+    let (_dir, app) = super::super::account_actions::tests::fixture();
+    let account = app.store.list("failed-session".into()).await.unwrap().id;
+    let owner = app.claim(account).unwrap();
+    owner.failed("injected session failure".into());
+    assert!(app.try_claim(account).is_err());
+    drop(owner);
+    assert!(app.try_claim(account).unwrap().is_some());
 }

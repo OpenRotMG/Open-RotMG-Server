@@ -53,10 +53,6 @@ async fn fill(
     let classes = app.content.classes.len();
     let mut counts = [0usize; 4];
     for (&identity, &account) in online.iter() {
-        ensure!(
-            !app.world.supervisor.account_fenced(account)?,
-            "fenced account remains in active population"
-        );
         counts[rank_band(identity, app.store.account_stars(account).await?, classes)] += 1;
     }
     let mut profiles: Vec<_> = persona::PERSONAS
@@ -75,14 +71,6 @@ async fn fill(
             continue;
         }
         let stars = if let Some(account) = app.store.shore_account(profile.identity.into()).await? {
-            if app.world.supervisor.account_fenced(account)? {
-                tracing::error!(
-                    account,
-                    name = profile.name,
-                    "fenced persona remains offline pending inspection"
-                );
-                continue;
-            }
             app.store.account_stars(account).await?
         } else {
             profile.stars

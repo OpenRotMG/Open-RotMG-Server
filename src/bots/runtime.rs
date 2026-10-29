@@ -1238,7 +1238,7 @@ pub(super) async fn launch(
             };
             if let Err(error) = saved {
                 finalized = false;
-                tracing::error!(player=id,account,%error,"autonomous finalization failed; account remains fenced");
+                tracing::error!(player=id,account,%error,"autonomous finalization failed");
                 result = Err(error);
             }
         }

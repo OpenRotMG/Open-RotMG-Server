@@ -517,7 +517,6 @@ async fn failed_native_command_does_not_fail_shutdown() {
         .await
         .unwrap()
         .unwrap();
-    assert!(a.world.supervisor.check_account(account).is_ok());
     drop(socket);
     server.abort();
 }
