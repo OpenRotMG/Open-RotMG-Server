@@ -478,6 +478,18 @@ impl World {
             })
             .map(|p| p.character.account)
             .collect();
+        if boss.kind == lab::CREATION {
+            // https://wikiwiki.jp/rmd/::cmd/source?page=Horrific+Creation Potion of Defense ((必ず一人には落ちる))
+            for account in owners {
+                self.loot_bags(boss.pos, Some(account), &[0xa20])?;
+            }
+            return Ok(());
+        }
+        ensure!(
+            boss.kind == lab::BOSS,
+            "lab loot requested for {:#x}",
+            boss.kind
+        );
         for account in owners {
             let mut rewards: Vec<_> = crate::loot::rewards(&self.content, lab::BOSS, &mut self.rng)
                 .into_iter()

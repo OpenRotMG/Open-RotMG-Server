@@ -5987,7 +5987,10 @@ impl World {
         if defeated.kind == crate::dungeon::spider::BOSS {
             return self.spider_loot(defeated);
         }
-        if defeated.kind == crate::dungeon::lab::BOSS {
+        if matches!(
+            defeated.kind,
+            crate::dungeon::lab::BOSS | crate::dungeon::lab::CREATION
+        ) {
             return self.lab_loot(defeated);
         }
         if crate::dungeon::abyss::ROSTER.contains(&defeated.kind) {

@@ -130,7 +130,8 @@ export async function run(game) {
   const final=await game.inspect();
   game.check('native weapon fire defeats the original Creation and earns kill and XP credit',!final.diagnostic.entities.some(e=>e.id===original.id)&&final.diagnostic.character.kills>beforeFinal.diagnostic.character.kills&&final.view.character.experience>beforeFinal.view.character.experience);
   game.check('optional defeat does not duplicate Mad Lab clear credit',final.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
-  game.check('Creation does not invent unsupported equipment rewards',!final.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)&&Math.hypot(e.pos.x-original.pos.x,e.pos.y-original.pos.y)<10));
+  const bags=final.diagnostic.entities.filter(e=>Math.hypot(e.pos.x-original.pos.x,e.pos.y-original.pos.y)<10&&e.items?.some(i=>i>=0));
+  game.check('Horrific Creation guarantees one defense potion and no other equipment',bags.length===1&&bags[0].items.filter(i=>i>=0).every(i=>i===0xa20));
   await act({keys:[],duration_ms:1000},{name:'creation-defeated',when:()=>true});
   await save('creation-defeated');
   await go(64.5,12.5);
