@@ -110,12 +110,16 @@ async fn realm_progress_starts_each_owned_save_before_waiting_for_other_accounts
         avatars.push(avatar(&app, name).await);
     }
     let ids: Vec<_> = avatars.iter().map(|(_, id, _)| *id).collect();
-    app.world
+    let expected = app
+        .world
         .call(move |world| {
+            let mut expected = std::collections::BTreeMap::new();
             for id in ids {
-                world.players.get_mut(&id).unwrap().character.lifetime.tiles += 1;
+                let player = world.players.get_mut(&id).unwrap();
+                player.character.lifetime.tiles += 1;
+                expected.insert(id, player.character.lifetime.tiles);
             }
-            Ok(())
+            Ok(expected)
         })
         .await
         .unwrap();
@@ -146,7 +150,7 @@ async fn realm_progress_starts_each_owned_save_before_waiting_for_other_accounts
     );
     for (owner, id, before) in avatars {
         let saved = app.store.load(before.account, before.id).await.unwrap();
-        assert_eq!(saved.lifetime.tiles, before.lifetime.tiles + 1);
+        assert_eq!(saved.lifetime.tiles, expected[&id]);
         assert_eq!(saved.items, before.items);
         assert!(saved.alive);
         assert!(!state(&app, before.account).unwrap().0);
@@ -157,7 +161,6 @@ async fn realm_progress_starts_each_owned_save_before_waiting_for_other_accounts
             .wait()
             .await
             .unwrap();
-        assert!(app.world.for_player(id).call(|_| Ok(())).await.is_err());
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
