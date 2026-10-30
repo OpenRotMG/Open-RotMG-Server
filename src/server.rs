@@ -1811,7 +1811,7 @@ async fn handle_inner(
                     .next()
                     .map(str::to_ascii_lowercase)
                     .as_deref(),
-                Some("/ignore" | "/unignore")
+                Some("/ignore" | "/unignore" | "/lock")
             ) {
                 let result = async {
                     crate::world::validate_chat(&text)?;
@@ -1819,24 +1819,41 @@ async fn handle_inner(
                         .directory(move |d| d.chat_permit(id, received))
                         .await?;
                     let args: Vec<_> = text.split_whitespace().collect();
+                    let lock = args[0].eq_ignore_ascii_case("/lock");
                     ensure!(
                         args.len() == 2,
-                        lifecycle::controller("Usage: /ignore <player> or /unignore <player>")
+                        lifecycle::controller(if lock {
+                            "Usage: /lock <player>"
+                        } else {
+                            "Usage: /ignore <player> or /unignore <player>"
+                        })
                     );
                     let owner = account
                         .as_ref()
                         .context("authenticated session required")?
                         .id;
+                    // Name commands resolve saved accounts, not nearby objects: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/commands/UnrankedCommands.cs#L358-L400
                     let target = a.store.account_named(args[1].into()).await?;
-                    let add = args[0].eq_ignore_ascii_case("/ignore");
+                    let add = !args[0].eq_ignore_ascii_case("/unignore");
+                    let list = i32::from(!lock);
                     lifecycle::stage(Stage::Store);
-                    let lists = a.store.edit_account_list(owner, 1, add, target).await?;
+                    let lists = a.store.edit_account_list(owner, list, add, target).await?;
                     lifecycle::stage(Stage::Publication);
                     a.world
                         .call(move |w| w.sync_account_lists(id, Some(lists)))
                         .await?;
                     lifecycle::stage(Stage::Settled);
-                    Ok::<_, anyhow::Error>(if add {
+                    tracing::info!(
+                        player = id,
+                        owner,
+                        target,
+                        list,
+                        add,
+                        "account list command committed"
+                    );
+                    Ok::<_, anyhow::Error>(if lock {
+                        "Player locked."
+                    } else if add {
                         "Player ignored."
                     } else {
                         "Player unignored."
@@ -3376,3 +3393,5 @@ async fn shutdown_signal() -> Result<()> {
 
 #[cfg(test)]
 mod lifecycle_finalize_tests;
+#[cfg(test)]
+mod lock_command_tests;
