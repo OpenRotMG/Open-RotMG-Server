@@ -43,6 +43,16 @@ const STAGES: [&str; 7] = [
 ];
 const EXAMPLES: usize = 4;
 static NEXT: AtomicU64 = AtomicU64::new(1);
+static LAST_INCIDENT_NS: AtomicU64 = AtomicU64::new(0);
+static COALESCED_INCIDENTS: AtomicU64 = AtomicU64::new(0);
+
+fn claim_incident(last: &AtomicU64, now: u64) -> bool {
+    last.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
+        (previous == 0 || now.saturating_sub(previous) >= 1_000_000_000).then_some(now)
+    })
+    .is_ok()
+}
+
 thread_local! { static CURRENT: Cell<(&'static str, u64)> = const { Cell::new(("coordinator_tick", 0)) }; }
 pub(crate) struct Context(
     (&'static str, u64),
@@ -162,8 +172,17 @@ impl Sample {
         })
     }
     pub(crate) fn incident(&self, world: Option<i32>) {
-        if self.execution.is_some() && self.total() > Duration::from_millis(50) {
-            tracing::warn!(pid=std::process::id(), world, clock="CLOCK_MONOTONIC", sample=%self.snapshot(), "latency incident");
+        if let Some(execution) = &self.execution
+            && self.total() > Duration::from_millis(50)
+        {
+            // Per-event storms can block CPU-worker completion and suppress unrelated journal diagnostics (#1250).
+            if !claim_incident(&LAST_INCIDENT_NS, execution.end_ns) {
+                COALESCED_INCIDENTS.fetch_add(1, Ordering::Relaxed);
+                return;
+            }
+            let coalesced_incidents = COALESCED_INCIDENTS.swap(0, Ordering::Relaxed);
+            tracing::warn!(pid=std::process::id(), world, clock="CLOCK_MONOTONIC", coalesced_incidents,
+                max_incidents_per_second=1, sample=%self.snapshot(), "latency incident");
         }
     }
     fn total(&self) -> Duration {
@@ -326,6 +345,26 @@ mod tests {
     use super::*;
     use std::{io, sync::Arc};
 
+    #[test]
+    fn incident_claim_is_atomic_and_handles_out_of_order_completion() {
+        let last = AtomicU64::new(0);
+        assert!(claim_incident(&last, 1));
+        assert!(!claim_incident(&last, 1_000_000_000));
+        assert!(claim_incident(&last, 1_000_000_001));
+        assert!(!claim_incident(&last, 900_000_000));
+        let claims = AtomicU64::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..16 {
+                scope.spawn(|| {
+                    if claim_incident(&last, 2_000_000_001) {
+                        claims.fetch_add(1, Ordering::Relaxed);
+                    }
+                });
+            }
+        });
+        assert_eq!(claims.load(Ordering::Relaxed), 1);
+    }
+
     struct Lines(Arc<AtomicU64>);
     impl io::Write for Lines {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -366,6 +405,9 @@ mod tests {
         let report = attribution.report().expect("completed attribution window");
         assert_eq!(report["operations"][0]["total"]["count"], 1_000);
         assert_eq!(report["operations"][0]["total"]["max_us"], 100_000);
+        for stage in STAGES {
+            assert_eq!(report["operations"][0]["stages"][stage]["count"], 1_000);
+        }
         assert_eq!(report["slowest_jobs"].as_array().unwrap().len(), EXAMPLES);
         println!(
             "1000 slow operations: {emitted} incident lines in {:.3}s; all histograms and worst examples retained",
