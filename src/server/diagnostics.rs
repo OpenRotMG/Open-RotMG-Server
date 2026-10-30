@@ -354,8 +354,23 @@ pub struct ConnectionDiagnostics {
     last_move: Option<Instant>,
     last_update_ack: Option<Instant>,
     pub last_socket_send: Option<Instant>,
+    native_ticks_sent: u64,
+    last_native_tick_send: Option<Instant>,
+    max_native_tick_send_gap: Option<(std::time::Duration, u64)>,
 }
 impl ConnectionDiagnostics {
+    // Fast writes do not rule out long pauses between them (#1250).
+    pub fn queued_packet_sent(&mut self, packet: u8, now: Instant) {
+        self.last_socket_send = Some(now);
+        if packet == 62 {
+            self.native_ticks_sent += 1;
+            if let Some(previous) = self.last_native_tick_send.replace(now) {
+                self.max_native_tick_send_gap = self
+                    .max_native_tick_send_gap
+                    .max(Some((now.duration_since(previous), unix_ms())));
+            }
+        }
+    }
     pub fn handled(&mut self, sample: CommandSample) {
         let queue_ms = sample.queued.as_secs_f64() * 1000.;
         let handler_ms = sample.handling.as_secs_f64() * 1000.;
@@ -447,6 +462,9 @@ impl ConnectionDiagnostics {
             "pending_ping_ages_ms": self.pending.values().map(|t| t.elapsed().as_millis()).collect::<Vec<_>>(),
             "expired_pings_session": self.expired_pings, "unmatched_pongs_session": self.unmatched_pongs,
             "game_commands_in_session": self.packets_in, "queued_packets_out_session": self.packets_out,
+            "native_ticks_sent_session":self.native_ticks_sent,
+            "max_native_tick_send_gap_ms_session":self.max_native_tick_send_gap.map(|(gap,_)|gap.as_secs_f64()*1000.),
+            "max_native_tick_send_gap_end_unix_ms":self.max_native_tick_send_gap.map(|(_,at)|at),
             "max_socket_send_ms_session": self.max_send_ms, "max_handler_ms_session": self.max_handler_ms, "max_input_queue_ms_session": self.max_input_queue_ms,
             "observed_outgoing_queue_high_water_session": self.queue_high_water,
             "ping_observation_age_ms": self.started.map(|t| t.elapsed().as_millis())})
@@ -607,6 +625,9 @@ fn public_diagnostics(report: &Value) -> Value {
             "slowest_handler":command_observation(&connection["slowest_handler"]),"slowest_input_queue":command_observation(&connection["slowest_input_queue"]),
             "last_move_received_age_ms":connection["last_move_received_age_ms"],"last_processed_packet":connection["last_processed_packet"],"last_processed_age_ms":connection["last_processed_age_ms"],
             "last_queued_packet_send_age_ms":connection["last_queued_packet_send_age_ms"],"last_pong_age_ms":connection["last_pong_age_ms"],
+            "native_ticks_sent":connection["native_ticks_sent_session"].as_u64(),
+            "max_native_tick_send_gap_ms":connection["max_native_tick_send_gap_ms_session"].as_f64(),
+            "max_native_tick_send_gap_end_unix_ms":connection["max_native_tick_send_gap_end_unix_ms"].as_u64(),
             "max_socket_send_ms": connection["max_socket_send_ms_session"], "max_handler_ms": connection["max_handler_ms_session"],
             "max_input_queue_ms": connection["max_input_queue_ms_session"], "outgoing_queue_high_water": connection["observed_outgoing_queue_high_water_session"],
             "expired_pings": connection["expired_pings_session"], "pending_ping_ages_ms": connection["pending_ping_ages_ms"]},
@@ -614,7 +635,7 @@ fn public_diagnostics(report: &Value) -> Value {
         "population": {"world_players": report["context"]["world_players"], "world_entities": report["context"]["world_entities"], "world_projectiles": report["context"]["world_projectiles"],
             "total_players": report["context"]["total_players"], "total_worlds": report["context"]["total_worlds"]},
         "history": history, "browser_history": browser_history,
-        "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable. Command handler times include awaits/descheduling; world-request sums may overlap and are not exclusive handler CPU. native_lag covers up to 120 seconds in five-second buckets of the current World residency; transfer resets it. MOVE tick-ACK ingress gaps include server update cadence, network and client processing, not just network RTT. First ACK has no gap; repeated/regressed tick IDs are counted separately. Visibility hints use overlapping browser samples and never suppress gaps. World performance native_lag windows overlap: do not sum them. Other correction reasons remain in the rejection logs."})
+        "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable. Native tick send gaps cover successful application socket writes, not client receipt; the first tick has no gap and the maximum covers the connection session. Command handler times include awaits/descheduling; world-request sums may overlap and are not exclusive handler CPU. native_lag covers up to 120 seconds in five-second buckets of the current World residency; transfer resets it. MOVE tick-ACK ingress gaps include server update cadence, network and client processing, not just network RTT. First ACK has no gap; repeated/regressed tick IDs are counted separately. Visibility hints use overlapping browser samples and never suppress gaps. World performance native_lag windows overlap: do not sum them. Other correction reasons remain in the rejection logs."})
 }
 pub(super) async fn disconnect(
     a: &App,
@@ -1106,6 +1127,38 @@ pub async fn receipt(
 #[cfg(test)]
 mod native_lag_tests {
     use super::*;
+    #[test]
+    fn native_dispatch_gaps_ignore_other_packets_and_keep_the_session_maximum() {
+        let mut connection = ConnectionDiagnostics::default();
+        let start = Instant::now() - std::time::Duration::from_secs(5);
+        assert!(connection.snapshot()["max_native_tick_send_gap_ms_session"].is_null());
+        connection.queued_packet_sent(62, start);
+        assert!(connection.snapshot()["max_native_tick_send_gap_ms_session"].is_null());
+        connection.queued_packet_sent(wire::PING, start + std::time::Duration::from_secs(2));
+        connection.queued_packet_sent(62, start + std::time::Duration::from_secs(3));
+        connection.queued_packet_sent(62, start + std::time::Duration::from_secs(4));
+        let snapshot = connection.snapshot();
+        assert_eq!(snapshot["native_ticks_sent_session"], 3);
+        assert_eq!(
+            snapshot["max_native_tick_send_gap_ms_session"].as_f64(),
+            Some(3000.)
+        );
+        assert!(
+            snapshot["max_native_tick_send_gap_end_unix_ms"]
+                .as_u64()
+                .is_some()
+        );
+        assert_eq!(
+            connection.last_socket_send,
+            Some(start + std::time::Duration::from_secs(4))
+        );
+        let public = public_diagnostics(&json!({"connection":snapshot}));
+        assert_eq!(public["connection"]["native_ticks_sent"], 3);
+        assert_eq!(
+            public["connection"]["max_native_tick_send_gap_ms"].as_f64(),
+            Some(3000.)
+        );
+    }
     #[test]
     fn visibility_is_a_hint_and_missing_metrics_are_not_zero() {
         let raw = json!({"max_gap_ms":700.,"max_gap_end_age_ms":100.,"private":"SECRET",
