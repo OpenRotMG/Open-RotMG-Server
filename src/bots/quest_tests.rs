@@ -645,3 +645,22 @@ fn explorer_joins_a_crowded_realm_event_by_teleporting_beside_it() {
         d.movement
     );
 }
+
+#[test]
+fn arrow_follower_seeds_an_uncrowded_realm_event() {
+    // Live: Lord of the Lost Lands was skipped 16 times in 25 minutes because nobody would start the crowd.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.objects[0].kind = 0xd50;
+    v.objects[0].hp = 70000;
+    v.objects[0].max_hp = 70000;
+    let mut profile = ARCHETYPES[0];
+    profile.role = persona::Role::Newbie;
+    let d = Brain::new(profile, &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    assert!(
+        d.movement.is_some_and(|m| m.y > v.position.y),
+        "{:?}",
+        d.movement
+    );
+}
