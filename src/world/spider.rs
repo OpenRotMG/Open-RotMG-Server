@@ -111,8 +111,12 @@ impl World {
             })
             .map(|p| p.character.account)
             .collect();
+        let item = i32::from(
+            crate::loot::participation_reward(boss.kind)
+                .context("Arachna participation reward missing")?,
+        );
         for account in owners {
-            self.loot_bags(boss.pos, Some(account), &[0x707])?;
+            self.loot_bags(boss.pos, Some(account), &[item])?;
         }
         Ok(())
     }

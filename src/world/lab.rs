@@ -479,11 +479,10 @@ impl World {
             .map(|p| p.character.account)
             .collect();
         // The wiki guarantees at least one DEF; retain Lab's per-contributor allocation as reconstruction: https://wikiwiki.jp/rmd/::cmd/source?page=Horrific+Creation
-        let potion = match boss.kind {
-            lab::BOSS => 0xa35,
-            lab::CREATION => 0xa20,
-            _ => bail!("lab loot requested for {:#x}", boss.kind),
-        };
+        let potion = i32::from(
+            crate::loot::participation_reward(boss.kind)
+                .with_context(|| format!("lab loot requested for {:#x}", boss.kind))?,
+        );
         for account in owners {
             let mut rewards: Vec<_> = crate::loot::rewards(&self.content, boss.kind, &mut self.rng)
                 .into_iter()

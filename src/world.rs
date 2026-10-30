@@ -6014,33 +6014,7 @@ impl World {
             self.loot_bags(defeated.pos, None, &[0xc25])?;
         }
         let private = crate::loot::private(defeated.kind);
-        // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
-        let threshold = if defeated.kind == crate::dungeon::trench::HERMIT {
-            // The comparator's 0.01 threshold tests integer damage, not an HP fraction: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs#L106
-            0
-        } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
-            100
-        } else if crate::loot::potion_damage(defeated.kind).is_some() {
-            0
-        } else if matches!(defeated.kind, 0xd56 | 0xd59) {
-            self.content.objects[&defeated.kind].hp / 20
-        } else if matches!(
-            defeated.kind,
-            0xd50 | 0xe37 | 0xd5a | 0xd60 | crate::dungeon::tomb::SPHINX | 0x1705
-        ) || matches!(
-            defeated.kind,
-            crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
-        ) {
-            self.content.objects[&defeated.kind].hp / 100
-        } else if defeated.kind == crate::dungeon::manor::BOSS {
-            100
-        } else if defeated.kind == crate::dungeon::manor::COFFIN {
-            800
-        } else if matches!(defeated.kind, 0x927 | crate::dungeon::davy::BOSS) {
-            100
-        } else {
-            (self.content.objects[&defeated.kind].hp / 10).max(1)
-        };
+        let threshold = crate::loot::damage_threshold(&self.content, defeated.kind);
         let mut eligible: Vec<_> = self
             .players
             .values()
@@ -6075,27 +6049,7 @@ impl World {
             return self.god_loot_bags(defeated.pos, loot);
         }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
-        // The older Tomb loot engine shares two rolls instead of guaranteeing Life to every raider.
-        let attempts = if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
-            2
-        } else if private {
-            eligible.len()
-        } else if crate::loot::period_dungeon(defeated.kind)
-            || crate::loot::period_surface(defeated.kind)
-            || crate::encounter::tutorial::ROSTER.contains(&defeated.kind)
-            // realm-src Loots.cs Handle rolls public skeleton loot once per death, not per contributor.
-            || matches!(defeated.kind, 0x65a..=0x65d)
-        {
-            1
-        } else {
-            // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
-            let multiplier = match defeated.kind {
-                0x609 | 0x60d | 0x614 | 0x617 | 0x61a | 0x6c4 | 0x7f00 => 4,
-                0x62c => 3,
-                _ => 2,
-            };
-            (eligible.len() * multiplier).min(8)
-        };
+        let attempts = crate::loot::attempts(defeated.kind, eligible.len());
         for i in 0..attempts {
             let mut rewards = crate::loot::rewards(&self.content, defeated.kind, &mut self.rng);
             if defeated.kind == crate::dungeon::trench::THESSAL
