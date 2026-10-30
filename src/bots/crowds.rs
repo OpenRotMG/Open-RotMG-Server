@@ -240,6 +240,39 @@ impl Crowd {
             }
         }
     }
+    /// Players gathered around a position: the whole minimap for those who read it, otherwise the screen.
+    pub fn near(&self, v: &PlayerView, position: Pos) -> usize {
+        v.player_markers
+            .iter()
+            .filter(|p| p.position.distance(position) < 12.)
+            .filter(|p| self.knows_minimap || v.objects.iter().any(|o| o.id == p.id))
+            .count()
+    }
+    /// Players heading for a Realm quest teleport to whoever stands nearest it.
+    pub fn nearest_to<'a>(
+        &self,
+        v: &'a PlayerView,
+        objective: Pos,
+        eligible: impl Fn(Pos) -> bool,
+    ) -> Option<&'a PlayerMarker> {
+        if !self.knows_minimap || !v.map.allow_teleport {
+            return None;
+        }
+        let own = v.position.distance(objective);
+        v.player_markers
+            .iter()
+            .filter(|p| {
+                p.position.distance(objective) < 12.
+                    && p.position.distance(objective) + 16. < own
+                    && self.bands.teleportable(v, p.position)
+                    && eligible(p.position)
+            })
+            .min_by(|a, b| {
+                a.position
+                    .distance(objective)
+                    .total_cmp(&b.position.distance(objective))
+            })
+    }
     pub fn shortcut(
         &self,
         v: &PlayerView,

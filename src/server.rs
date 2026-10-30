@@ -2529,7 +2529,8 @@ async fn connection_io<S, I>(
             outgoing=rx.recv()=>{
                 let Some(packet)=outgoing else {break};
                 for (packet, queued) in outgoing_burst(packet, &mut rx) {
-                    let reconnect=packet.id==39;
+                    let id=packet.id;
+                    let reconnect=id==39;
                     session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(queued);
                     let nonce = (packet.id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
                     let frame = codec.frame(packet.id,packet.body);
@@ -2537,7 +2538,7 @@ async fn connection_io<S, I>(
                     let sending = std::time::Instant::now();
                     if send!(Message::Binary(frame.into())).is_err(){break 'connection;}
                     session.diagnostics.packets_out += 1;
-                    session.diagnostics.last_socket_send=Some(std::time::Instant::now());
+                    session.diagnostics.queued_packet_sent(id,std::time::Instant::now());
                     session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
                     // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
                     if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));break;}

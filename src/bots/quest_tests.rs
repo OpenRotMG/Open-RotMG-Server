@@ -603,3 +603,45 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
         "a visible supply is not a reason to leave"
     );
 }
+
+#[test]
+fn explorer_joins_a_crowded_realm_event_by_teleporting_beside_it() {
+    // Live: level 20s kept exploring past their quest and routed around any event they could not solo, even in a crowd.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.objects[0].kind = 0xd50;
+    v.objects[0].hp = 70000;
+    v.objects[0].max_hp = 70000;
+    v.player_markers = (3..7)
+        .map(|id| PlayerMarker {
+            id,
+            account: id,
+            name: format!("P{id}"),
+            position: Pos {
+                x: 8.5 + id as f32,
+                y: 85.5,
+            },
+        })
+        .collect();
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.goal = Goal::Explore(20, 10);
+    brain.travel = Some((Goal::Explore(20, 10), u64::MAX));
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    assert!(
+        matches!(d.journey, Some(Journey::Regroup(3))),
+        "{:?}",
+        d.journey
+    );
+    // Waiting out the teleport cooldown, the bot walks toward the event instead of around it.
+    v.tick += 10;
+    v.time_ms += 100;
+    v.elapsed_ms += 100;
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    assert!(
+        d.movement.is_some_and(|m| m.y > v.position.y),
+        "{:?}",
+        d.movement
+    );
+}
