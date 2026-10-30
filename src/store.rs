@@ -818,24 +818,6 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
                 migrated += 1;
             }
         }
-        // Retired mind fields must not survive in rows that backups re-validate field by field.
-        let minds = {
-            let mut q = migration.prepare("SELECT account,mind FROM bot_minds")?;
-            q.query_map([], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)))?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        for (account, raw) in minds {
-            let mind: crate::bots::pursuits::Mind = serde_json::from_str(&raw)
-                .with_context(|| format!("account {account} mind migration"))?;
-            let canonical = serde_json::to_string(&mind)?;
-            if canonical != raw {
-                migration.execute(
-                    "UPDATE bot_minds SET mind=?2 WHERE account=?1",
-                    params![account, canonical],
-                )?;
-                tracing::info!(account, "account mind canonicalized after field retirement");
-            }
-        }
         if !wallet_exists {
             let mut earned = std::collections::BTreeMap::<i32, i64>::new();
             {
