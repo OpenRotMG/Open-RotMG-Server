@@ -478,24 +478,18 @@ impl World {
             })
             .map(|p| p.character.account)
             .collect();
-        if boss.kind == lab::CREATION {
-            // https://wikiwiki.jp/rmd/::cmd/source?page=Horrific+Creation Potion of Defense ((必ず一人には落ちる))
-            for account in owners {
-                self.loot_bags(boss.pos, Some(account), &[0xa20])?;
-            }
-            return Ok(());
-        }
-        ensure!(
-            boss.kind == lab::BOSS,
-            "lab loot requested for {:#x}",
-            boss.kind
-        );
+        // The wiki guarantees at least one DEF; retain Lab's per-contributor allocation as reconstruction: https://wikiwiki.jp/rmd/::cmd/source?page=Horrific+Creation
+        let potion = match boss.kind {
+            lab::BOSS => 0xa35,
+            lab::CREATION => 0xa20,
+            _ => bail!("lab loot requested for {:#x}", boss.kind),
+        };
         for account in owners {
-            let mut rewards: Vec<_> = crate::loot::rewards(&self.content, lab::BOSS, &mut self.rng)
+            let mut rewards: Vec<_> = crate::loot::rewards(&self.content, boss.kind, &mut self.rng)
                 .into_iter()
                 .map(i32::from)
                 .collect();
-            rewards.push(0xa35);
+            rewards.push(potion);
             self.loot_bags(boss.pos, Some(account), &rewards)?;
         }
         Ok(())
