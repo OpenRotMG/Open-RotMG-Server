@@ -686,6 +686,22 @@ impl Brain {
                 .item_target(),
         )
     }
+    fn quest_appeal(
+        &self,
+        v: &PlayerView,
+        content: &Content,
+        quest: &crate::world::view::VisibleObject,
+    ) -> Option<quests::Appeal> {
+        (v.map.name == "Realm" && v.character.level == 20 && v.quest == Some(quest.id)).then(|| {
+            quests::appeal(
+                &self.profile,
+                content,
+                quest.kind,
+                self.crowd.near(v, quest.position),
+                self.plan.last_progress,
+            )
+        })
+    }
     fn set_activity(&mut self, v: &PlayerView, activity: Activity) {
         if activity != self.activity {
             tracing::info!(account=v.session.account,player=v.session.player,from=%self.activity,to=%activity,"autonomous activity changed");
@@ -808,12 +824,11 @@ impl Brain {
         let avoid: Vec<_> = enemies
             .iter()
             .filter(|enemy| !retreat && !progression::can_fight(v, content, enemy))
-            // A level 20 does not route around the Realm quest a crowd is already fighting.
+            // A level 20 does not route around the Realm quest it has chosen to take on.
             .filter(|enemy| {
-                v.map.name != "Realm"
-                    || v.character.level != 20
-                    || v.quest != Some(enemy.id)
-                    || self.crowd.near(v, enemy.position) < 3
+                !self
+                    .quest_appeal(v, content, enemy)
+                    .is_some_and(|a| a.joins(false))
             })
             .map(|e| e.position)
             .collect();
@@ -1325,39 +1340,30 @@ impl Brain {
         }
         // Level 20s weigh whether a Realm quest is worth it; lower levels keep following their leveling quests.
         let veteran_realm = v.map.name == "Realm" && v.character.level == 20;
-        let realm_quest =
-            if veteran_realm && let Some(quest) = enemies.iter().find(|e| v.quest == Some(e.id)) {
-                let crowd = self.crowd.near(v, quest.position);
-                let appeal = quests::appeal(
-                    &self.profile,
-                    content,
-                    quest.kind,
-                    crowd,
-                    self.plan.last_progress,
+        let realm_quest = if let Some(quest) = enemies.iter().find(|e| v.quest == Some(e.id))
+            && let Some(appeal) = self.quest_appeal(v, content, quest)
+        {
+            let joined = appeal.joins(progression::can_fight(v, content, quest));
+            if self.quest_interest != Some((quest.id, joined)) {
+                self.quest_interest = Some((quest.id, joined));
+                tracing::info!(
+                    account = v.session.account,
+                    quest = quest.kind,
+                    score = appeal.score,
+                    value = appeal.value,
+                    crowd = appeal.crowd,
+                    habit = ?appeal.habit,
+                    joined,
+                    "autonomous realm quest appeal"
                 );
-                // A crowd beats what nobody would fight alone.
-                let joined = appeal.interesting()
-                    && (crowd >= 3 || progression::can_fight(v, content, quest));
-                if self.quest_interest != Some((quest.id, joined)) {
-                    self.quest_interest = Some((quest.id, joined));
-                    tracing::info!(
-                        account = v.session.account,
-                        quest = quest.kind,
-                        score = appeal.score,
-                        value = appeal.value,
-                        crowd = appeal.crowd,
-                        habit = ?appeal.habit,
-                        joined,
-                        "autonomous realm quest appeal"
-                    );
-                }
-                joined.then(|| {
-                    choices.push((appeal.score, Goal::Hunt(quest.id), quest.position));
-                    Goal::Hunt(quest.id)
-                })
-            } else {
-                None
-            };
+            }
+            joined.then(|| {
+                choices.push((appeal.score, Goal::Hunt(quest.id), quest.position));
+                Goal::Hunt(quest.id)
+            })
+        } else {
+            None
+        };
         // Grated rooms cannot stay cleared; geared players push past snakes: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
         let dungeon =
             !matches!(v.map.name.as_str(), "Realm" | "Nexus" | "Vault") && v.quest.is_some();
