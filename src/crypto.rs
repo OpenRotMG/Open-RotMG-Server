@@ -15,6 +15,7 @@ use std::{
 mod email;
 mod gold;
 mod interpolation;
+mod news;
 mod projectiles;
 
 const REFERENCE: &str = "07ae4fc3ca021a5bf08bbf94f057f7620be18b85e01abd763b3a198382e8fa48";
@@ -229,6 +230,7 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
     let mut gold = 0;
     let mut projectiles = 0;
     let mut interpolation = 0;
+    let mut news = 0;
     let mut emails = 0;
     while p < body.len() {
         let h = u16::from_le_bytes(
@@ -265,6 +267,7 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
             loading += patch_loading(&mut abc)?;
             projectiles += projectiles::patch(&mut abc)?;
             interpolation += interpolation::patch(&mut abc)?;
+            news += news::patch(&mut abc)?;
             let mut d = data[..offset].to_vec();
             d.extend(abc);
             d
@@ -303,6 +306,10 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
     ensure!(
         interpolation == 1,
         "expected one exact remote interpolation method, found {interpolation}"
+    );
+    ensure!(
+        news == 1,
+        "expected one exact character/news initializer, found {news}"
     );
     let mut result = source[..8].to_vec();
     result[4..8].copy_from_slice(&((out.len() + 8) as u32).to_le_bytes());
