@@ -41,6 +41,10 @@ impl Appeal {
     pub fn interesting(&self) -> bool {
         self.score >= INTERESTING
     }
+    /// Habitual players start the crowd others join; a crowd beats what nobody would fight alone.
+    pub fn joins(&self, solo: bool) -> bool {
+        self.interesting() && (solo || self.crowd >= 3 || self.habit.is_some())
+    }
 }
 
 pub(super) fn appeal(
