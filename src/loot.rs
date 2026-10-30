@@ -938,7 +938,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         ],
         crate::dungeon::abyss::IDOL => &[
             (1., Item(0xa34)),
-            // Restore Trapped's DEF candidate using our VIT guarantee, not its ordered weights: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Abyss.cs#L224-L235
+            // Legacy Trapped candidates, but our paired guarantees are reconstruction, not original per-account odds: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Abyss.cs#L224-L235
             (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.001, Item(0xc01)),
