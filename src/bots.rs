@@ -32,6 +32,7 @@ mod progression;
 pub(crate) mod pursuits;
 #[cfg(test)]
 mod quest_tests;
+mod quests;
 
 mod realms;
 
@@ -291,6 +292,8 @@ struct Brain {
     nexus_spot: Option<Pos>,
     portal: Option<(i32, u64)>,
     hunting: Option<Pos>,
+    /// Last logged Realm quest and whether it was worth joining.
+    quest_interest: Option<(i32, bool)>,
     last_encounter: u64,
     navigation: Option<Arc<Grid>>,
     navigation_version: Option<(u64, u64)>,
@@ -368,6 +371,7 @@ impl Brain {
             nexus_spot: None,
             portal: None,
             hunting: None,
+            quest_interest: None,
             last_encounter: view.time_ms,
             navigation: None,
             navigation_version: None,
@@ -804,6 +808,13 @@ impl Brain {
         let avoid: Vec<_> = enemies
             .iter()
             .filter(|enemy| !retreat && !progression::can_fight(v, content, enemy))
+            // A level 20 does not route around the Realm quest a crowd is already fighting.
+            .filter(|enemy| {
+                v.map.name != "Realm"
+                    || v.character.level != 20
+                    || v.quest != Some(enemy.id)
+                    || self.crowd.near(v, enemy.position) < 3
+            })
             .map(|e| e.position)
             .collect();
         let grid = self.navigation_grid(v, content, &avoid);
@@ -1312,6 +1323,41 @@ impl Brain {
                 choices.push((60. + self.profile.resources, Goal::Venture, ground));
             }
         }
+        // Level 20s weigh whether a Realm quest is worth it; lower levels keep following their leveling quests.
+        let veteran_realm = v.map.name == "Realm" && v.character.level == 20;
+        let realm_quest =
+            if veteran_realm && let Some(quest) = enemies.iter().find(|e| v.quest == Some(e.id)) {
+                let crowd = self.crowd.near(v, quest.position);
+                let appeal = quests::appeal(
+                    &self.profile,
+                    content,
+                    quest.kind,
+                    crowd,
+                    self.plan.last_progress,
+                );
+                // A crowd beats what nobody would fight alone.
+                let joined = appeal.interesting()
+                    && (crowd >= 3 || progression::can_fight(v, content, quest));
+                if self.quest_interest != Some((quest.id, joined)) {
+                    self.quest_interest = Some((quest.id, joined));
+                    tracing::info!(
+                        account = v.session.account,
+                        quest = quest.kind,
+                        score = appeal.score,
+                        value = appeal.value,
+                        crowd = appeal.crowd,
+                        habit = ?appeal.habit,
+                        joined,
+                        "autonomous realm quest appeal"
+                    );
+                }
+                joined.then(|| {
+                    choices.push((appeal.score, Goal::Hunt(quest.id), quest.position));
+                    Goal::Hunt(quest.id)
+                })
+            } else {
+                None
+            };
         // Grated rooms cannot stay cleared; geared players push past snakes: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
         let dungeon =
             !matches!(v.map.name.as_str(), "Realm" | "Nexus" | "Vault") && v.quest.is_some();
@@ -1371,6 +1417,7 @@ impl Brain {
             }
             // Stheno's shield cannot prevent approaching the quest that wakes her encounter.
             if v.quest == Some(enemy.id)
+                && !veteran_realm
                 && (!protected || v.map.name == "Snake Pit")
                 && (v.character.level >= 3 || d <= 48.)
             {
@@ -1644,7 +1691,10 @@ impl Brain {
                     "travel deadline passed".into(),
                 );
             } else if offered.is_some() || matches!(kept, Goal::Explore(..)) {
-                choices.retain(|(_, g, p)| *g == kept || !travel(g, *p));
+                // A worthwhile quest is the reason to travel, not one more journey waiting its turn.
+                choices.retain(|(_, g, p)| {
+                    *g == kept || !travel(g, *p) || Some(g) == realm_quest.as_ref()
+                });
             }
         }
         self.unreachable.retain(|_, until| v.time_ms < *until);
@@ -1725,10 +1775,15 @@ impl Brain {
                 && decision.item.is_none()
                 && v.time_ms >= self.next_teleport
             {
-                self.crowd
-                    .shortcut(v, self.group.as_ref(), destination)
-                    .filter(|p| enemies.iter().all(|e| e.position.distance(p.position) > 3.))
-                    .map(|p| p.id)
+                let clear = |p: Pos| enemies.iter().all(|e| e.position.distance(p) > 3.);
+                if Some(&goal) == realm_quest.as_ref() {
+                    self.crowd.nearest_to(v, destination, clear)
+                } else {
+                    self.crowd
+                        .shortcut(v, self.group.as_ref(), destination)
+                        .filter(|p| clear(p.position))
+                }
+                .map(|p| p.id)
             } else {
                 None
             };
@@ -1748,7 +1803,8 @@ impl Brain {
                         target,
                         quest,
                         world = v.session.world,
-                        "autonomous dungeon rusher shortcut"
+                        map = v.map.name,
+                        "autonomous quest shortcut"
                     );
                     None
                 }
