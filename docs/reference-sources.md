@@ -1,12 +1,14 @@
 # Gameplay references
 
-Static audit, 16 October 2026; target: recovered **123.5.1**. Start source-first; resolve conflicts/gaps with period documentation/footage. No official provenance, fidelity, runtime/security certification or gameplay change is claimed.
+Target: recovered **123.5.1**. Start source-first; resolve conflicts/gaps with period documentation/footage. No official provenance, fidelity, runtime/security certification or gameplay change is claimed.
 
 ## Selected source policy
 
 Owner-selected priority: selected **123.5.1** client definitions, then compiled/registered Kithio C# as primary reconstruction reference; version-specific corrections override mirror values. Other community sources and period evidence resolve gaps/conflicts. This is not authenticated official source.
 
-Original seven MPGH RAR parts require login; mirror byte equivalence remains unverified. Missing/uncompiled content does not prove no drops; retain unsupported content as reconstructed. Check engine semantics (eligibility, probability units/tier expansion, ownership, repeated rolls, guarantees/caps/transformations) and file/asset reuse rights; priority grants no license.
+Trapped is retired as a reconstruction authority, including copies of its disputed tables. Retain legacy attribution, research and notices, not approval. Missing definitions justify neither deleting drops nor guessing higher rates.
+
+The original seven-part Kithio archive passes integrity checks; 72 audited files match mirror text after newline normalization, not whole-package authentication. Check engine semantics (eligibility, probability units/tier expansion, ownership, repeated rolls, guarantees/caps/transformations) and file/asset reuse rights; priority grants no license.
 
 ## Pinned sources
 
@@ -14,8 +16,7 @@ Licenses below are observations, not file/asset reuse clearance; **none** means 
 
 | Pin | Use/caveats | License |
 | --- | --- | --- |
-| https://github.com/Zolmex/kithio-as3-source/tree/d15f321edcce0ef890001890c6991c25a1b0f718 | Primary reconstruction reference; use compiled C# paths. Original RAR equivalence unverified | none |
-| https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe | 2013 comparator | none |
+| https://github.com/Zolmex/kithio-as3-source/tree/d15f321edcce0ef890001890c6991c25a1b0f718 | Primary reconstruction reference; use compiled C# paths; scoped original-archive text comparison verified | none |
 | https://github.com/moistosaurus/realm-src/tree/1855c017eab870d13f0b61b1cf0b9e66a01922ff | Modified NR-Core 7.0; unfinished dungeons/server-side hit tracking | GPL-3.0; check AGPL integration |
 | https://github.com/moistosaurus/realm-cli/tree/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e | Modified 7.0 client, not AI/2012 specification | none |
 | https://github.com/ossimc82/fabiano-swagger-of-doom/tree/6fd20aad4a7905b13f25389c68368a942a2b68cb | 27.3.2; README warns about 27.5 | AGPL-3.0 + attribution/named-user exclusions: unresolved |
@@ -35,7 +36,9 @@ Boss sample: Ent Ancient, Lich, Ghost King, Phoenix Lord. All four tables were l
 
 Discovery: https://docs.realmdex.com/sources.html (“Skillys V1?”→realm-src/realm-cli). Hidden “Skilly's 7.0 NR-Core”/“Educational” links remain unidentified; don't equate with betterSkillys. Zero.Gdk returned 404; no verdict/pin.
 
-## Concrete discrepancies
+## Legacy comparisons
+
+Retired source: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe (no repository-wide license found). The comparisons below record conflicts, not implementation authority.
 
 Anchors: pinned `wServer/logic/db/BehaviorDb.{EntAncient,Lich,GhostKing,Phoenix}.cs`; Trapped also `wServer/logic/Behavior.cs`.
 
