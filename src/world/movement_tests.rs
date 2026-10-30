@@ -60,6 +60,43 @@ fn native(
 }
 
 #[test]
+fn godlands_gods_stop_at_a_ghost_king_tower() {
+    let (mut world, _) = fixture(0x18, false);
+    let area = realm_setpieces::Area {
+        x: 12,
+        y: 12,
+        width: 8,
+        height: 8,
+    };
+    {
+        let map = Arc::make_mut(&mut world.map);
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                map.cells[(y * map.width + x) as usize].terrain = 1;
+            }
+        }
+    }
+    world.claim_ghost_tower(area);
+    assert_eq!(
+        world.map.cell(15.5, 15.5).unwrap().terrain,
+        4,
+        "tower floor stayed godlands"
+    );
+    let id = world
+        .spawn_entity(0x651, Pos { x: 10.5, y: 15.5 }, vec![])
+        .unwrap();
+    world
+        .move_entity_colliding(id, Pos { x: 16.5, y: 15.5 }, 8., true)
+        .unwrap();
+    let pos = world.entities[&id].pos;
+    assert!(
+        !world.inside_ghost_tower(pos),
+        "god entered the tower at {pos:?}"
+    );
+    assert!(pos.x < 12.);
+}
+
+#[test]
 fn lair_slime_children_start_on_the_defeated_parents_floor() {
     for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
         let (mut world, _) = fixture(0x18, true);
