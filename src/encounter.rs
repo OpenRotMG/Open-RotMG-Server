@@ -319,7 +319,7 @@ pub fn profile(kind: u16) -> Option<Profile> {
                 anchor: Anchor::Parent,
                 radius: crate::dungeon::snake::PET_RADIUS,
             },
-            nr_speed(7.5),
+            crate::dungeon::snake::pet_speed(),
             1000,
             25.,
         ),

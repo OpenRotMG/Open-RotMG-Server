@@ -61,3 +61,58 @@ fn guardians_circle_through_sthenos_phases_without_stalling_on_cover() {
         );
     }
 }
+
+#[test]
+fn stheno_guardians_keep_the_authored_orbit_rate_inside_cover() {
+    let (fixture, player) = super::movement_tests::fixture(0x18, false);
+    let map = crate::dungeon::snake_pit(&fixture.content, 855).unwrap();
+    let mut world = World::new(fixture.content.clone(), Arc::new(map)).unwrap();
+    world.name = "Snake Pit".into();
+    world.encounter = true;
+    let boss = world
+        .actors()
+        .find(|e| e.kind == crate::dungeon::snake::BOSS)
+        .unwrap()
+        .id;
+    let center = world.entities[&boss].pos;
+    let player = world
+        .enter(fixture.players[&player].character.clone(), None)
+        .unwrap();
+    world.players.get_mut(&player).unwrap().pos = Pos {
+        x: center.x - 3.,
+        y: center.y,
+    };
+    let mut angles = Vec::new();
+    for tick in 1..=40 {
+        world.now = tick * 50;
+        world.npc_step();
+        let boss_pos = world.entities[&boss].pos;
+        let pet = world
+            .actors()
+            .find(|e| e.kind == crate::dungeon::snake::PET && e.parent == Some(boss))
+            .unwrap();
+        angles.push((pet.pos.y - boss_pos.y).atan2(pet.pos.x - boss_pos.x));
+    }
+    let step = (5.55 * 7.5 + 0.74) / 10. * 0.05;
+    let mut moved = 0;
+    let mut turn = 0.;
+    for pair in angles.windows(2) {
+        let mut delta = pair[1] - pair[0];
+        if delta > std::f32::consts::PI {
+            delta -= std::f32::consts::TAU;
+        } else if delta < -std::f32::consts::PI {
+            delta += std::f32::consts::TAU;
+        }
+        if delta.abs() < 0.01 {
+            continue;
+        }
+        moved += 1;
+        turn += delta;
+    }
+    let expected = step * moved as f32;
+    assert!(moved >= 30, "guardian barely moved: {moved} steps");
+    assert!(
+        (turn - expected).abs() < 0.05,
+        "moving steps turned {turn} rad, authored Orbit(7.5, 10) rate is {expected}"
+    );
+}
