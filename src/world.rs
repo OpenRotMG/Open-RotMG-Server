@@ -3240,7 +3240,7 @@ impl World {
             .context("portal has no walkable position clear of loot and interactions")?;
         self.spawn_entity(kind, pos, vec![])
     }
-    fn remove_entity(&mut self, id: i32) -> Entity {
+    pub(crate) fn remove_entity(&mut self, id: i32) -> Entity {
         self.actor_ids.remove(&id);
         self.world_effect_ids.remove(&id);
         self.timed_ids.remove(&id);

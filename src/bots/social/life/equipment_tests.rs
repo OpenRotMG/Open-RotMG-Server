@@ -35,6 +35,16 @@ impl Scene {
             .directory(move |d| {
                 let w = d.worlds.get_mut(&world).unwrap();
                 let pos = w.players[&id].pos;
+                // Gifts require no enemy within 12 tiles; Realm population near spawn must not decide the scene.
+                let nearby: Vec<_> = w
+                    .entities
+                    .iter()
+                    .filter(|(_, e)| w.content.objects[&e.kind].enemy && e.pos.distance(pos) < 32.)
+                    .map(|(id, _)| *id)
+                    .collect();
+                for enemy in nearby {
+                    w.remove_entity(enemy);
+                }
                 w.players.get_mut(&peer).unwrap().pos = Pos {
                     x: pos.x + 0.5,
                     y: pos.y,
