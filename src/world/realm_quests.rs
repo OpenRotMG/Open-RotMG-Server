@@ -132,6 +132,9 @@ impl World {
         // Enter bosses/chests without repainting; anchors are engineered against hash-bound maps, not recovered: https://github.com/Zolmex/kithio-as3-source/tree/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/setpieces
         for (site, area) in sites.iter().zip(areas) {
             self.setpieces.push(area);
+            if site.kind == 0x928 {
+                self.claim_ghost_tower(area);
+            }
             let pos = Pos {
                 x: site.spawn[0] as f32,
                 y: site.spawn[1] as f32,
@@ -2131,4 +2134,45 @@ fn quest_preparation_motors_preserve_other_phases() {
     for id in [boss, foreign_boss, foreign, unowned] {
         world.remove_entity(id);
     }
+}
+
+#[cfg(test)]
+#[test]
+fn ghost_king_towers_are_not_godlands_and_hold_no_gods() {
+    let path = std::path::Path::new("data");
+    let content = Arc::new(Content::load(path).unwrap());
+    let source = crate::terrain::realms::sources(path)
+        .unwrap()
+        .into_iter()
+        .find(|s| s.name() == "classic-world-01-reconstruction")
+        .unwrap();
+    let directory = Directory::configured(path, content, 16, 1, Some(1), vec![source], 2).unwrap();
+    let world = &directory.worlds[&-3];
+    let kings: Vec<_> = world
+        .entities
+        .values()
+        .filter(|e| e.kind == 0x928)
+        .map(|e| e.pos)
+        .collect();
+    assert!(!kings.is_empty(), "world 1 has no Ghost King");
+    assert!(world.ghost_towers.len() >= kings.len());
+    assert!(world.ghost_towers.iter().all(|area| {
+        (area.y..area.y + area.height).all(|y| {
+            (area.x..area.x + area.width).all(|x| {
+                world
+                    .map
+                    .cell(x as f32 + 0.5, y as f32 + 0.5)
+                    .is_some_and(|cell| cell.terrain != 1)
+            })
+        })
+    }));
+    assert!(
+        world
+            .entities
+            .values()
+            .filter(|e| {
+                world.content.objects[&e.kind].god && world.content.objects[&e.kind].terrain == 1
+            })
+            .all(|e| !world.inside_ghost_tower(e.pos))
+    );
 }
