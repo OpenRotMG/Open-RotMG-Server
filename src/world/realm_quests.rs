@@ -133,7 +133,8 @@ impl World {
         for (site, area) in sites.iter().zip(areas) {
             self.setpieces.push(area);
             if site.kind == 0x928 {
-                self.claim_ghost_tower(area);
+                // Authored cells and their shared map stay immutable; exclusion needs only the area.
+                self.ghost_towers.push(area);
             }
             let pos = Pos {
                 x: site.spawn[0] as f32,
@@ -1208,6 +1209,7 @@ mod tests {
                 | "classic-world-11-reconstruction"
                 | "classic-world-13-reconstruction" => [0, 0, 2, 0],
                 "classic-world-06-reconstruction"
+                | "classic-world-07-reconstruction"
                 | "classic-world-09-reconstruction"
                 | "classic-world-12-reconstruction" => [0; 4],
                 "realm-fsod-1" | "realm-fsod-2" | "realm-fsod-3" => [0; 4],
@@ -1267,6 +1269,7 @@ mod tests {
                     "classic-world-05-reconstruction"
                     | "classic-world-06-reconstruction"
                     | "classic-world-10-reconstruction" => 5,
+                    "classic-world-07-reconstruction" => 10,
                     "classic-world-09-reconstruction" => 3,
                     "classic-world-11-reconstruction" => 9,
                     "classic-world-12-reconstruction" => 8,
@@ -1301,6 +1304,7 @@ mod tests {
                     "classic-world-04-reconstruction" | "classic-world-09-reconstruction" => 16,
                     "classic-world-05-reconstruction" | "classic-world-13-reconstruction" => 22,
                     "classic-world-06-reconstruction" => 14,
+                    "classic-world-07-reconstruction" => 21,
                     "classic-world-10-reconstruction" => 17,
                     "classic-world-11-reconstruction" => 25,
                     "classic-world-12-reconstruction" => 8,
@@ -1360,6 +1364,14 @@ mod tests {
             ("classic-world-04-reconstruction", 2000, 506, 21, 16, 6..=6),
             ("classic-world-05-reconstruction", 2100, 702, 19, 22, 5..=6),
             ("classic-world-06-reconstruction", 2100, 698, 25, 14, 5..=6),
+            (
+                "classic-world-07-reconstruction",
+                2100,
+                660,
+                20,
+                21,
+                10..=10,
+            ),
             ("classic-world-09-reconstruction", 2100, 426, 14, 16, 4..=6),
             ("classic-world-10-reconstruction", 2000, 460, 16, 17, 5..=6),
             ("classic-world-11-reconstruction", 2100, 577, 20, 25, 9..=9),
@@ -2178,7 +2190,7 @@ fn quest_preparation_motors_preserve_other_phases() {
 
 #[cfg(test)]
 #[test]
-fn ghost_king_towers_are_not_godlands_and_hold_no_gods() {
+fn ghost_king_towers_keep_authored_cells_and_hold_no_gods() {
     let path = std::path::Path::new("data");
     let content = Arc::new(Content::load(path).unwrap());
     let source = crate::terrain::realms::sources(path)
@@ -2186,6 +2198,15 @@ fn ghost_king_towers_are_not_godlands_and_hold_no_gods() {
         .into_iter()
         .find(|s| s.name() == "classic-world-01-reconstruction")
         .unwrap();
+    let authored = source.open(&content).unwrap();
+    let authored_towers: Vec<_> = source
+        .sites()
+        .unwrap()
+        .into_iter()
+        .filter(|site| site.kind == 0x928)
+        .map(|site| site.bounds)
+        .collect();
+    assert!(!authored_towers.is_empty());
     let directory = Directory::configured(path, content, 16, 1, Some(1), vec![source], 2).unwrap();
     let world = &directory.worlds[&-3];
     let kings: Vec<_> = world
@@ -2196,13 +2217,43 @@ fn ghost_king_towers_are_not_godlands_and_hold_no_gods() {
         .collect();
     assert!(!kings.is_empty(), "world 1 has no Ghost King");
     assert!(world.ghost_towers.len() >= kings.len());
+    assert!(authored_towers.iter().all(|bounds| {
+        world
+            .ghost_towers
+            .iter()
+            .any(|area| *bounds == [area.x, area.y, area.width, area.height])
+    }));
     assert!(world.ghost_towers.iter().all(|area| {
+        let fixed = authored_towers.contains(&[area.x, area.y, area.width, area.height]);
         (area.y..area.y + area.height).all(|y| {
             (area.x..area.x + area.width).all(|x| {
-                world
-                    .map
-                    .cell(x as f32 + 0.5, y as f32 + 0.5)
-                    .is_some_and(|cell| cell.terrain != 1)
+                let pos = Pos {
+                    x: x as f32 + 0.5,
+                    y: y as f32 + 0.5,
+                };
+                let cell = world.map.cell(pos.x, pos.y).unwrap();
+                if fixed {
+                    let original = authored.cell(pos.x, pos.y).unwrap();
+                    assert_eq!(
+                        (
+                            cell.ground,
+                            cell.object,
+                            &cell.config,
+                            cell.terrain,
+                            cell.region
+                        ),
+                        (
+                            original.ground,
+                            original.object,
+                            &original.config,
+                            original.terrain,
+                            original.region
+                        )
+                    );
+                } else {
+                    assert_ne!(cell.terrain, 1);
+                }
+                !world.family_ground(pos, 1)
             })
         })
     }));
