@@ -141,13 +141,14 @@ impl World {
             } else {
                 self.spawn_named_quest(site.kind, pos)?;
                 if let Some([x, y]) = site.chest {
-                    self.spawn_landmark_chests(
-                        site.kind,
-                        Pos {
-                            x: x as f32,
-                            y: y as f32,
-                        },
-                    )?;
+                    let chest = Pos {
+                        x: x as f32,
+                        y: y as f32,
+                    };
+                    if site.kind == 0x668 {
+                        self.place_red_demon_platform(chest)?;
+                    }
+                    self.spawn_landmark_chests(site.kind, chest)?;
                 }
             }
         }
@@ -200,6 +201,26 @@ impl World {
             let pos = self.place_named_setpiece(kind, terrains)?;
             self.spawn_named_quest(kind, pos)?;
         }
+        Ok(())
+    }
+    fn place_red_demon_platform(&mut self, pos: Pos) -> Result<()> {
+        // The chest tile is always Partial Red Floor, so standing there is not lava: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/setpieces/LavaFissure.cs#L71
+        let ground = self
+            .map
+            .cell(pos.x, pos.y)
+            .context("Red Demon chest outside map")?
+            .ground;
+        ensure!(ground == 0xf4, "Red Demon chest is not on Lava Blend");
+        let floor = self.content.get(0x153)?;
+        ensure!(
+            floor.static_object && floor.protects_ground && !floor.blocks,
+            "Partial Red Floor cannot protect a fissure chest"
+        );
+        ensure!(
+            !self.entities_at(pos).any(|e| e.kind == 0x153),
+            "Red Demon chest already has a Partial Red Floor"
+        );
+        self.spawn_entity(0x153, pos, vec![])?;
         Ok(())
     }
     fn spawn_named_quest(&mut self, kind: u16, pos: Pos) -> Result<()> {
@@ -1267,6 +1288,19 @@ mod tests {
                         site.kind,
                         source.name()
                     );
+                    if site.kind == 0x668 {
+                        let pos = Pos {
+                            x: x as f32,
+                            y: y as f32,
+                        };
+                        assert!(
+                            world.entities_at(pos).any(|e| {
+                                e.kind == 0x153 && world.content.objects[&e.kind].protects_ground
+                            }),
+                            "Red Demon chest at {x},{y} in {} has no Partial Red Floor",
+                            source.name()
+                        );
+                    }
                 }
             }
             let liches = world.entities.values().filter(|e| e.kind == 0x91b).count();
