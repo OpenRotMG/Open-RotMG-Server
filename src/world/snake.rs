@@ -31,7 +31,7 @@ impl World {
             let pet = &self.entities[pet_id];
             if pet.kind == PET && pet.parent == Some(id) && pet.orbit.is_none() {
                 self.entities.get_mut(pet_id).unwrap().orbit = Some(realm_events::Orbit {
-                    speed: crate::encounter::nr_speed(7.5),
+                    speed: crate::dungeon::snake::pet_speed(),
                     radius: crate::dungeon::snake::PET_RADIUS,
                     direction: 1.,
                 });
