@@ -31,6 +31,12 @@ impl Area {
             || self.y + self.height + 2 <= other.y
             || other.y + other.height + 2 <= self.y
     }
+    pub(super) fn contains(&self, p: Pos) -> bool {
+        p.x >= self.x as f32
+            && p.y >= self.y as f32
+            && p.x < (self.x + self.width) as f32
+            && p.y < (self.y + self.height) as f32
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum GroundWrite {
@@ -855,6 +861,37 @@ impl World {
         }
         Ok(previous)
     }
+    pub(super) fn claim_ghost_tower(&mut self, area: Area) {
+        // Tower belongs on HighForest/HighPlains; Rock floors kept Mountains and stayed legal god spawns. https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
+        let mut released = 0;
+        {
+            let map = Arc::make_mut(&mut self.map);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    if x < 0 || y < 0 || x >= map.width || y >= map.height {
+                        continue;
+                    }
+                    let cell = &mut map.cells[(y * map.width + x) as usize];
+                    if cell.terrain == 1 {
+                        cell.terrain = 4;
+                        released += 1;
+                    }
+                }
+            }
+        }
+        tracing::info!(
+            x = area.x,
+            y = area.y,
+            width = area.width,
+            height = area.height,
+            released,
+            "Ghost King tower released from godlands"
+        );
+        self.ghost_towers.push(area);
+    }
+    pub(super) fn inside_ghost_tower(&self, pos: Pos) -> bool {
+        self.ghost_towers.iter().any(|area| area.contains(pos))
+    }
     pub(super) fn outside_setpieces(&self, pos: Pos) -> bool {
         // Most Realm cells are beyond the bounding box, so avoid millions of hypot calls.
         self.setpieces.iter().all(|a| {
@@ -1155,6 +1192,9 @@ impl World {
             "named Realm boss setpiece placed"
         );
         self.setpieces.push(area);
+        if kind == 0x928 {
+            self.claim_ghost_tower(area);
+        }
         Ok(pos)
     }
 }
