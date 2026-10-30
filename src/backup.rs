@@ -3,6 +3,28 @@ use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use std::{io::Read, path::Path};
 
+// Rows saved before the plan executor keep these bot-internal fields until their next save.
+fn retire_mind_fields(value: &mut Value) -> Result<()> {
+    let mind = value
+        .as_object_mut()
+        .context("account mind is not an object")?;
+    for key in ["next_activity", "activity", "history"] {
+        mind.remove(key);
+    }
+    if let Some(intentions) = mind.get_mut("intentions").and_then(Value::as_object_mut) {
+        for key in [
+            "detour",
+            "main_remaining_ms",
+            "needs_progress",
+            "return_to_main",
+            "checkpoint",
+        ] {
+            intentions.remove(key);
+        }
+    }
+    Ok(())
+}
+
 // Deserialization ignores unknown fields; exporting their original JSON could leak credentials.
 fn known_fields(value: &Value, saved: &Value) -> bool {
     match (value, saved) {
@@ -97,7 +119,8 @@ pub async fn run(args: &[String]) -> Result<bool> {
             let state: Community = serde_json::from_slice(&input)
                 .map_err(|_| anyhow::anyhow!("Unsupported community backup payload"))?;
             for row in &state.bot_minds {
-                let value: Value = serde_json::from_str(&row.mind)?;
+                let mut value: Value = serde_json::from_str(&row.mind)?;
+                retire_mind_fields(&mut value)?;
                 let mind: crate::bots::pursuits::Mind = serde_json::from_str(&row.mind)?;
                 mind.validate()?;
                 ensure!(
@@ -820,7 +843,17 @@ mod tests {
         item["intentions"]["main"]["objective"] = serde_json::json!({"item":{
             "reason":"Current-class weapon upgrade: Staff of Horror", "revision":2
         }});
-        for original in [legacy, current, item] {
+        let mut retired = current.clone();
+        retired["next_activity"] = serde_json::json!(3);
+        retired["activity"] = serde_json::Value::Null;
+        retired["history"] = serde_json::json!([]);
+        retired["intentions"]["detour"] = serde_json::Value::Null;
+        retired["intentions"]["main_remaining_ms"] = serde_json::json!(0);
+        retired["intentions"]["needs_progress"] = serde_json::json!(false);
+        retired["intentions"]["return_to_main"] = serde_json::json!(false);
+        retired["intentions"]["checkpoint"] = serde_json::json!([0, 0, 0]);
+        for mut original in [legacy, current, item, retired] {
+            retire_mind_fields(&mut original).unwrap();
             let decoded: crate::bots::pursuits::Mind =
                 serde_json::from_value(original.clone()).unwrap();
             decoded.validate().unwrap();
