@@ -1,4 +1,4 @@
-use crate::bots::{crowds, pursuits::market::Market};
+use crate::bots::pursuits::market::Market;
 use crate::content::{Ability, Content, Object, STATS};
 use crate::world::view::{OutputState, PlayerView};
 use anyhow::{Result, ensure};
@@ -117,7 +117,6 @@ pub(in crate::bots) fn select(
                 || peer.equipped.len() != 4
                 || !distance.is_finite()
                 || distance >= 2.
-                || !crowds::survivable(v, peer.position)
                 || v.objects
                     .iter()
                     .filter(|o| {

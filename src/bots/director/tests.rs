@@ -156,7 +156,13 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
         .iter()
         .find(|p| p.name == "Equrel")
         .unwrap();
-    let mut character = runtime::persona_character(&app, profile).await.unwrap();
+    let first = runtime::persona_character(&app, profile).await.unwrap();
+    let guid = app.store.account_guid(first.account).await.unwrap();
+    // The newest living alt is never the deterministic default, so only the saved life selects it.
+    let mut character = (app.store.list(guid).await.unwrap().characters.into_iter())
+        .max_by_key(|ch| ch.id)
+        .unwrap();
+    assert_ne!(character.id, first.id);
     character.items[4] = -1;
     let mut vault = app.store.vault(character.account, 0).await.unwrap();
     vault.items[0] = -1;
@@ -254,10 +260,6 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
             serde_json::to_value(app.store.vaults(character.account).await.unwrap()).unwrap(),
             vaults
         );
-        let guid = app.store.account_guid(character.account).await.unwrap();
-        let living = app.store.list(guid).await.unwrap().characters;
-        let competing = living.iter().position(|ch| ch.id != character.id).unwrap();
-        assert_ne!(living[competing].id, character.id);
         let mut rng = rand::rngs::StdRng::seed_from_u64(persona::seed(profile.identity));
         let (roster, vault) = persona::life(&profile, &app.content, &mut rng).unwrap();
         let returned = app
@@ -266,14 +268,13 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
                 profile.identity.into(),
                 roster,
                 vault,
-                competing,
                 persona::starting_stock(&profile, &app.content).unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(
             returned.id, character.id,
-            "saved life wins over a different roster pick"
+            "saved life wins over the deterministic default"
         );
         assert_eq!(returned.name, character.name);
         assert_eq!(returned.items, character.items);
@@ -394,7 +395,7 @@ async fn all_dead_legacy_personas_initialize_missing_intent_from_real_death_not_
     let identity = "persona:v1:LegacyCareer".to_owned();
     let mut character = app
         .store
-        .persona_character(identity.clone(), roster.clone(), vec![[-1; 8]], 0, None)
+        .persona_character(identity.clone(), roster.clone(), vec![[-1; 8]], None)
         .await
         .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
@@ -429,7 +430,7 @@ async fn all_dead_legacy_personas_initialize_missing_intent_from_real_death_not_
         app.store = crate::store::Store::open(&path, &app.content).unwrap();
         let replacement = app
             .store
-            .persona_character(identity.clone(), roster.clone(), vec![[-1; 8]], 0, None)
+            .persona_character(identity.clone(), roster.clone(), vec![[-1; 8]], None)
             .await
             .unwrap();
         assert_eq!(replacement.account, character.account);

@@ -283,3 +283,82 @@ fn goal_bank_prepares_carried_surplus_and_refuses_keeps_that_cannot_fit() {
         "refused preparation leaves ordinary personal consumption available"
     );
 }
+
+const DEX: i32 = 2636;
+
+fn nexus_peer(stock: [i32; 8]) -> (Content, PlayerView) {
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    v.map.name = "Nexus".into();
+    v.character.items[4..].copy_from_slice(&stock);
+    let peer = &mut v.objects[0];
+    (peer.id, peer.account, peer.name) = (9, Some(2), "Peer".into());
+    peer.equipped = vec![-1; 4];
+    peer.position = v.position;
+    (c, v)
+}
+
+fn peer_said(text: &str) -> Packet {
+    let mut w = crate::wire::Writer::new();
+    w.utf("Peer").i32(9).i32(0).u8(5).utf("").utf(text).utf("");
+    Packet {
+        id: wire::TEXT,
+        body: w.0,
+    }
+}
+
+fn wts(q: &[Goods; 2], c: &Content) -> String {
+    format!(
+        "wts {} for {}",
+        goods_text(&q[0], c).unwrap(),
+        goods_text(&q[1], c).unwrap()
+    )
+}
+
+#[test]
+fn fair_non_mirrored_peer_quote_opens_trade_and_overpay_is_refused() {
+    let (c, v) = nexus_peer([SPEED; 8]);
+    let objective = bounded_quote(&goods(SPEED, 8), &goods(DEFENSE, 8), &c).unwrap();
+    let mut m = Market {
+        name: "Trader".into(),
+        quote: Some(objective.clone()),
+        ..Market::default()
+    };
+    assert_eq!(m.quote(&v, &c, None).unwrap(), Some(objective));
+    let terms = bounded_quote(&goods(DEX, 8), &goods(SPEED, 8), &c).unwrap();
+    let overpay = [terms[0].clone(), goods(SPEED, 8)];
+    assert!(!fair(&overpay, &c));
+    assert!(
+        m.receive(&peer_said(&wts(&overpay, &c)), &v, &c, None)
+            .unwrap()
+    );
+    assert!(m.incoming.is_none() && m.outgoing.is_none());
+    assert!(
+        m.receive(&peer_said(&wts(&terms, &c)), &v, &c, None)
+            .unwrap()
+    );
+    let incoming = m.incoming.expect("fair wanted quote opens a trade");
+    assert_eq!((incoming.player, incoming.account), (9, 2));
+    assert_eq!(incoming.quote, Some([terms[1].clone(), terms[0].clone()]));
+}
+
+#[test]
+fn buy_order_is_answered_from_spare_stock_outside_own_quote() {
+    let (c, v) = nexus_peer([
+        SPEED, SPEED, SPEED, SPEED, DEFENSE, DEFENSE, DEFENSE, DEFENSE,
+    ]);
+    let objective = bounded_quote(&goods(SPEED, 4), &goods(DEX, 8), &c).unwrap();
+    let mut m = Market {
+        name: "Trader".into(),
+        quote: Some(objective.clone()),
+        ..Market::default()
+    };
+    assert_eq!(m.quote(&v, &c, None).unwrap(), Some(objective));
+    assert!(m.receive(&peer_said("wtb def"), &v, &c, None).unwrap());
+    assert!(m.incoming.is_none(), "interest is not a price");
+    let counter = m.quote.clone().unwrap();
+    assert_eq!(counter[0].kind, DEFENSE);
+    assert!(fair(&counter, &c));
+    let reply = m.outgoing.clone().unwrap();
+    assert_eq!(reply.text, format!("nty {}", wts(&counter, &c)));
+    assert!(m.message_current(&reply, &v, &c, None).unwrap());
+}

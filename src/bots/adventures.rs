@@ -79,7 +79,8 @@ pub(super) struct Offer {
     pub to: Member,
     pub purpose: Purpose,
     pub until: u64,
-    pub text: String,
+    /// `None` for an invitation settled without wording; its answer stays silent too.
+    pub text: Option<String>,
     pub(super) answer_started: bool,
 }
 #[derive(Clone, Debug)]
@@ -329,7 +330,7 @@ impl Society {
         owner: Member,
         plan: Plan,
         joined: bool,
-        text: String,
+        text: Option<String>,
         now: u64,
     ) {
         match plan {
@@ -338,7 +339,7 @@ impl Society {
                     account = owner.account,
                     peer = peer.account,
                     ?purpose,
-                    text,
+                    ?text,
                     "autonomous adventure offered"
                 );
                 self.offers.push(Offer {
@@ -374,6 +375,35 @@ impl Society {
                     tracing::info!(account = owner.account, "autonomous adventure declined");
                 }
             }
+        }
+    }
+    /// Wording is presentation only: without it the outing still happens, with no canned speech.
+    pub(super) fn settle_silently(
+        &mut self,
+        owner: Member,
+        plan: Plan,
+        v: &PlayerView,
+        c: &Content,
+    ) {
+        let (purpose, peer) = match &plan {
+            Plan::Invite { peer, purpose } => (*purpose, peer.account),
+            Plan::Answer(o) => (o.purpose, o.from.account),
+        };
+        let ready = purpose.ready(v, c)
+            && v.objects
+                .iter()
+                .any(|p| p.account == Some(peer) && purpose.public_ready(p, c));
+        if let Err(error) = self.validate(owner.account, &plan, v.elapsed_ms) {
+            tracing::info!(account = owner.account, peer, %error, "silent adventure plan obsolete");
+        } else if ready || matches!(plan, Plan::Answer(_)) {
+            tracing::info!(
+                account = owner.account,
+                peer,
+                ?purpose,
+                ready,
+                "adventure plan settled without wording"
+            );
+            self.apply(owner, plan, ready, None, v.elapsed_ms);
         }
     }
     pub(super) fn remember(&mut self, account: i32, peer: i32) -> bool {
@@ -424,26 +454,6 @@ impl Society {
         peers
     }
 }
-pub(super) fn policy_reply(
-    request: &dialogue::Request,
-    intent: dialogue::Intent,
-) -> Result<dialogue::Reply> {
-    let text = match (&request.plan, intent) {
-        (Some(Plan::Invite { purpose, .. }), dialogue::Intent::Invite) => {
-            format!("{}, want to {}?", request.name, purpose.description())
-        }
-        (Some(Plan::Answer(_)), dialogue::Intent::Join) => "yes, let's go together".into(),
-        (Some(Plan::Answer(_)), dialogue::Intent::Decline) => {
-            "not ready, need to recover first".into()
-        }
-        _ => anyhow::bail!("no policy speech for this intention"),
-    };
-    crate::world::chat::validate(&text)?;
-    Ok(dialogue::Reply {
-        intent,
-        reply: text,
-    })
-}
 pub(super) fn ready(v: &PlayerView, content: &Content) -> bool {
     v.character.level >= 1
         && matches!(v.map.name.as_str(), "Realm" | "Nexus")
@@ -479,7 +489,10 @@ impl Brain {
                 }],
                 format!(
                     "{} invited you: {}. Join means share the activity while making your own travel and combat choices. Decline if not ready.",
-                    o.from.name, o.text
+                    o.from.name,
+                    o.text
+                        .as_deref()
+                        .context("unspoken invitation has no verbal answer")?
                 ),
             ),
         };
@@ -488,7 +501,7 @@ impl Brain {
             .iter()
             .find(|o| o.account == Some(peer.account))
             .context("invitation peer no longer visible")?;
-        let payload = serde_json::json!({"bot":{"name":self.mind.market.name.as_str(),"world":v.map.name,"level":v.character.level,"hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"priorities":{"recovery":self.profile.recovery,"resources":self.profile.resources,"companions":self.profile.companions}},"speaker":{"name":peer.name,"level":actor.level},"allowed_intents":intents,"message":event});
+        let payload = serde_json::json!({"bot":{"name":self.mind.market.name.as_str(),"world":v.map.name,"level":v.character.level,"hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"priorities":{"recovery":self.profile.recovery,"resources":self.profile.resources,"companions":self.profile.companions}},"speaker":{"name":peer.name,"level":actor.level},"allowed_intents":intents,"automatic":true,"message":event});
         Ok(dialogue::Request {
             speaker: actor.id,
             name: peer.name.clone(),

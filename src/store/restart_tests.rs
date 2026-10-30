@@ -66,13 +66,7 @@ async fn mutate(store: &Store, content: &Content, operation: &str) -> Result<()>
         "bot_entry" => {
             let ch = Character::fresh(content.get(WIZARD)?)?;
             store
-                .persona_character(
-                    "persona:v1:Crashbot".into(),
-                    vec![ch],
-                    vec![[-1; 8]],
-                    0,
-                    None,
-                )
+                .persona_character("persona:v1:Crashbot".into(), vec![ch], vec![[-1; 8]], None)
                 .await?;
         }
         _ => panic!("unknown crash operation"),

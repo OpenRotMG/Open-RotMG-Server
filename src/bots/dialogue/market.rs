@@ -290,7 +290,7 @@ impl Service {
                 None => return Ok(None),
             }
         }
-        if !self.automatic_available() {
+        if !self.automatic_ready(true) {
             return Ok(None);
         }
         ensure!(
@@ -330,11 +330,14 @@ impl Service {
             });
             service.completed(&reply, start.elapsed());
             match &reply {
-                Err(Failure::LocalCapacity) => tracing::info!(
-                    request = id,
-                    bot = name,
-                    "market generation skipped after local capacity denial; no substitute speech"
-                ),
+                Err(denied @ (Failure::LocalCapacity | Failure::AutomaticBudget)) => {
+                    tracing::info!(
+                        request = id,
+                        bot = name,
+                        reason = %denied,
+                        "market generation skipped after admission denial; no substitute speech"
+                    )
+                }
                 Err(error) => {
                     tracing::error!(request=id, bot=name, %error, "market generation failed; no substitute speech")
                 }

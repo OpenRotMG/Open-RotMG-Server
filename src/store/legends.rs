@@ -141,7 +141,6 @@ mod tests {
                 "persona:v1:LegendBot".into(),
                 vec![preset],
                 vec![[-1; 8]],
-                0,
                 None,
             )
             .await
