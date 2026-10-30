@@ -918,7 +918,8 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
 
     #[cfg(test)]
     pub(crate) fn lifecycle_pending_jobs(&self) -> usize {
-        self.lifecycle_jobs.load(std::sync::atomic::Ordering::SeqCst)
+        self.lifecycle_jobs
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     async fn call<T: Send + 'static>(
