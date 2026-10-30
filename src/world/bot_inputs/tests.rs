@@ -222,3 +222,70 @@ fn eight_keys_normalize_speed_and_release_at_waypoints() {
         assert_eq!(input.keys, [0, 0]);
     }
 }
+
+fn held_walk(open: fn(usize, usize) -> bool, start: Pos, target: Pos) -> (Pos, Inputs) {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let cells = (0..24 * 24)
+        .map(|i| crate::content::Cell {
+            ground: if open(i % 24, i / 24) { 1 } else { 255 },
+            object: None,
+            config: String::new(),
+            terrain: 0,
+            region: 0,
+        })
+        .collect();
+    let map = Map {
+        width: 24,
+        height: 24,
+        cells,
+        spawns: vec![(start.x, start.y)],
+    };
+    let mut w = World::new(content.clone(), Arc::new(map)).unwrap();
+    let mut ch = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+    ch.id = 1;
+    ch.account = 2;
+    let id = w.enter(ch, None).unwrap();
+    let p = w.players.get_mut(&id).unwrap();
+    p.controller = Controller::Autonomous;
+    p.pos = start;
+    w.bot_inputs((id, 2, 1), Some(target), None, 4).unwrap();
+    for _ in 0..60 {
+        w.now += 50;
+        w.step_bot_inputs(id);
+    }
+    let p = &w.players[&id];
+    (p.pos, p.inputs.clone().unwrap())
+}
+
+#[test]
+fn diagonal_into_wall_corner_slides_around_it() {
+    let (end, input) = held_walk(
+        |x, y| !(x == 12 && y >= 11),
+        Pos { x: 11.3, y: 11.7 },
+        Pos { x: 14.5, y: 8.5 },
+    );
+    assert!(input.blocked.is_none(), "{input:?}");
+    assert!(end.x > 12.5 && end.y < 10.5, "{end:?}");
+}
+
+#[test]
+fn diagonal_approach_passes_one_tile_gap() {
+    let (end, input) = held_walk(
+        |x, y| y != 12 || x == 15,
+        Pos { x: 13.4, y: 9.5 },
+        Pos { x: 18.4, y: 14.5 },
+    );
+    assert!(input.blocked.is_none(), "{input:?}");
+    assert!(end.y > 13., "{end:?}");
+}
+
+#[test]
+fn diagonal_into_dead_end_slides_to_its_end_then_blocks() {
+    let (end, input) = held_walk(
+        |x, y| y == 10 && (5..=12).contains(&x),
+        Pos { x: 8.5, y: 10.5 },
+        Pos { x: 14.5, y: 16.5 },
+    );
+    assert!(input.blocked.is_some() && input.keys == [0, 0], "{input:?}");
+    assert!(end.x > 12.4 && end.y == 10.5, "{end:?}");
+}

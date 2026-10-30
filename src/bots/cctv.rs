@@ -32,7 +32,7 @@ struct Feed {
     frame: Value,
     session: Option<(i32, i32)>,
     thoughts: VecDeque<(u64, u128, String)>,
-    reason: String,
+    plan: plan::Plan,
     shots: Vec<u8>,
     viewers: usize,
 }
@@ -43,7 +43,7 @@ impl Registry {
             frame: Value::Null,
             session: None,
             thoughts: VecDeque::new(),
-            reason: String::new(),
+            plan: plan::Plan::default(),
             shots: Vec::new(),
             viewers: 0,
         })
@@ -94,9 +94,12 @@ impl Cctv {
         }
     }
     fn live_bots(&self) -> Vec<Value> {
-        self.lock().feeds.iter().filter(|(_,f)|f.session.is_some()).map(|(name,f)|
-            json!({"name":name,"age_ms":f.updated.elapsed().as_millis(),"viewers":f.viewers,"frame":f.frame})
-        ).collect()
+        let now = plan::now();
+        self.lock().feeds.iter().filter(|(_,f)|f.session.is_some()).map(|(name,f)| {
+            let mut bot = json!({"name":name,"age_ms":f.updated.elapsed().as_millis(),"viewers":f.viewers,"frame":f.frame});
+            bot.as_object_mut().expect("bot object").extend(f.plan.public(now).as_object().expect("plan object").clone());
+            bot
+        }).collect()
     }
     pub(crate) fn register_view(
         &self,
@@ -172,11 +175,11 @@ impl Cctv {
     }
     pub(super) fn decided(
         &self,
-        name: &str,
         v: &PlayerView,
         d: &Decision,
         reason: String,
         intent: &Value,
+        brain: &Brain,
         content: &Content,
     ) {
         let shots: Vec<u8> = v
@@ -186,18 +189,26 @@ impl Cctv {
             .map(|p| p.id)
             .collect();
         let mut registry = self.lock();
-        let feed = registry.feed(name);
+        let feed = registry.feed(brain.mind.market.name.as_str());
         let fired = shots.iter().any(|id| !feed.shots.contains(id));
-        if feed.reason != reason {
-            feed.think(reason.clone());
+        let seen = feed.plan.events.back().map_or(0, |e| e.seq);
+        // A new controller session numbers its events from one again.
+        let seen = if brain.plan.events.back().is_some_and(|e| e.seq < seen) {
+            0
+        } else {
+            seen
+        };
+        for event in brain.plan.events.iter().filter(|e| e.seq > seen) {
+            feed.think(event.text());
         }
+        feed.plan = brain.plan.clone();
         feed.frame = json!({"class":content.objects[&v.character.class].name,"level":v.character.level,
             "hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"max_mp":v.character.stats[1],
             "world":v.map.name,"x":v.position.x,"y":v.position.y,"aim":actual_aim(v),"fired":fired,"inputs":v.inputs,"tick":v.tick,
-            "character":v.session.character,"target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason,"intent":intent});
+            "character":v.session.character,"target":d.movement.map(|p|[p.x,p.y]),"goal":format!("{:?}",d.goal),"reason":reason,"intent":intent,
+            "public_call":brain.calls.last,"acquisition":{"resources":brain.mind.market.resource_payload(),"selected_action":&d.item}});
         feed.session = Some((v.session.player, v.session.account));
         feed.shots = shots;
-        feed.reason = reason;
         feed.updated = Instant::now();
     }
     pub(super) fn inputs(&self, name: &str, v: &PlayerView) {
@@ -284,7 +295,7 @@ pub(super) fn reason(
         (None, Goal::Dodge) => "under threat, dodging".into(),
         (None, Goal::Fight(id)) => format!("fighting {}", named(id)),
         (None, Goal::Hunt(id)) => format!("hunting quest {}", named(id)),
-        (None, Goal::Venture) => "heading inland for tougher enemies".into(),
+        (None, Goal::Venture) => "heading to an observed band suited to this character".into(),
         (None, Goal::Bank(id)) => match &d.item {
             Some(Action::Swap { from, .. }) if from.object == *id => {
                 "withdrawing observed goods from own Vault".into()
@@ -526,11 +537,11 @@ mod tests {
         let cctv = Cctv::default();
         cctv.entered("Triceps", view.session.player, view.session.account);
         cctv.decided(
-            "Triceps",
             &view,
             &decision,
             "testing".into(),
             &Value::Null,
+            &Brain::new(ARCHETYPES[0], &view),
             &content,
         );
         assert_eq!(

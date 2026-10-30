@@ -812,7 +812,6 @@ mod tests {
         current["intentions"]["next_id"] = serde_json::json!(2);
         current["intentions"]["main"] =
             serde_json::json!({"id":1,"character":3,"objective":"reach20","target":20});
-        current["intentions"]["detour"] = serde_json::json!({"runtime":7,"world":-3,"remaining_ms":90000,"opportunity":{"kind":"loot","object":8,"item":2591,"count":0,"revision":2}});
         let mut legacy = current.clone();
         legacy["schema"] = serde_json::json!(1);
         legacy.as_object_mut().unwrap().remove("intentions");

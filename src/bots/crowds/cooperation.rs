@@ -258,9 +258,6 @@ pub(super) fn visible(
     if p.position.distance(v.position) > 36. {
         return Err("separated");
     }
-    if !survivable(v, p.position) {
-        return Err("unsafe_target");
-    }
     Ok(p.position)
 }
 

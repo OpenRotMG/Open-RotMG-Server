@@ -23,7 +23,6 @@ fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
         range: 6.,
         passes_cover: false,
         health: v.character.hp as f32 / v.character.stats[0] as f32,
-        danger: 10.,
         threatened: false,
         retreat: false,
         outmatched: false,
@@ -43,7 +42,6 @@ fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
                 journey: None,
                 chat: None,
             },
-            false,
         )
         .unwrap()
 }
@@ -421,4 +419,187 @@ fn dungeon_rusher_does_not_override_safety_or_teleport_policy() {
             decision.journey
         );
     }
+}
+
+#[test]
+fn wavelength_vault_errand_banks_before_leaving() {
+    let (c, mut v) = fixture();
+    v.map.name = "Nexus".into();
+    v.quest = None;
+    let (falchion, potion) = (0xa6e, 0xa1f);
+    let stat = progression::potion_index(&c, potion).unwrap().unwrap();
+    v.character.base_stats[stat] = c.classes[&v.character.class].caps[stat];
+    v.character.items[4..].copy_from_slice(&[falchion, potion, potion, -1, -1, -1, -1, -1]);
+    let mut chest = v.objects.remove(0);
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.mind.market.trader = true;
+    brain.decide(&v, &c).unwrap();
+    assert_eq!(
+        brain.mind.market.reserved_kind(),
+        Some(potion),
+        "a funded quote opened a Nexus market session"
+    );
+    brain
+        .plan
+        .start(plan::now(), plan::Owner::Bank, "Vault".into());
+    v.map.name = "Vault".into();
+    chest.kind = 0x504;
+    chest.hp = 0;
+    chest.position = Pos { x: 11.5, y: 10.5 };
+    chest.contents = vec![-1; 8];
+    v.objects.push(chest);
+    v.tick += 5;
+    let deposit = brain.decide(&v, &c).unwrap();
+    assert_eq!(deposit.goal, Goal::Bank(2));
+    assert!(matches!(&deposit.item, Some(Action::Swap { from, .. }) if from.kind == falchion));
+    assert!(
+        deposit.journey.is_none(),
+        "the Vault is not left before banking"
+    );
+    v.character.items[4] = -1;
+    v.objects[0].contents[0] = falchion;
+    v.character.inventory_revision += 1;
+    v.tick += 5;
+    let leave = brain.decide(&v, &c).unwrap();
+    assert!(
+        brain
+            .plan
+            .events
+            .iter()
+            .any(|e| e.kind == plan::Kind::Completed && e.owner == Some(plan::Owner::Bank))
+    );
+    assert!(
+        matches!(leave.journey, Some(Journey::Nexus)),
+        "quote stock stays carried and the market visit resumes: {:?}",
+        leave.journey
+    );
+}
+
+#[test]
+fn band_edge_journeys_do_not_preempt_each_other() {
+    // Smoke runs: Venture pulled back across a region edge every other decision (Explore, then Revisit).
+    for revisit in [None, Some(Pos { x: 30.5, y: 10.5 })] {
+        let (c, mut v) = fixture();
+        v.quest = None;
+        v.character.level = 11;
+        v.position = Pos { x: 15.5, y: 10.5 };
+        v.objects[0].kind = c
+            .objects
+            .values()
+            .find(|o| o.enemy && (5..=7).contains(&o.terrain))
+            .unwrap()
+            .kind;
+        v.objects[0].position = Pos { x: 2.5, y: 10.5 };
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        brain.crowd.observe(&v, &c);
+        v.objects.clear();
+        brain.heading = 0.;
+        brain.hunting = revisit;
+        v.time_ms += 1_000_000;
+        let mut goals = Vec::new();
+        for _ in 0..12 {
+            v.tick += 5;
+            v.time_ms += 250;
+            v.elapsed_ms += 250;
+            let d = brain.decide(&v, &c).unwrap();
+            v.position = d.movement.expect("the bot keeps travelling");
+            goals.push(format!("{:?}", d.goal));
+        }
+        let kinds: Vec<_> = goals.iter().map(|g| g.split('(').next().unwrap()).collect();
+        let switches = kinds.windows(2).filter(|w| w[0] != w[1]).count();
+        assert!(switches <= 3, "journeys alternate: {goals:?}");
+    }
+}
+
+#[test]
+fn unreachable_hunt_is_travel_that_aborts_not_engagement() {
+    let (c, mut v) = fixture();
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    // The bot never gets closer, as when held movement cannot reach the quest; the target shifts a tile.
+    let mut aborted = false;
+    for step in 0..20 {
+        v.tick += 5;
+        v.time_ms += 10_000;
+        v.elapsed_ms += 10_000;
+        v.objects[0].position.x = 10.5 + (step % 2) as f32;
+        if aborted {
+            // Whatever journey follows ends; only remembering the target prevents re-choosing it.
+            brain.travel = None;
+        }
+        let goal = brain.decide(&v, &c).unwrap().goal;
+        if step == 0 {
+            assert_eq!(goal, Goal::Hunt(2));
+        }
+        assert!(
+            !aborted || goal != Goal::Hunt(2),
+            "step {step}: the aborted target is re-chosen"
+        );
+        aborted |= brain
+            .plan
+            .events
+            .iter()
+            .any(|e| e.reason == "travel deadline passed");
+    }
+    assert!(!brain.plan.engaged, "an out-of-range hunt is not a fight");
+    assert!(
+        brain
+            .plan
+            .events
+            .iter()
+            .any(|e| e.kind == plan::Kind::Aborted && e.reason == "travel deadline passed")
+    );
+}
+
+#[test]
+fn realm_wedge_loops_but_nexus_spawn_congestion_does_not() {
+    for (map, looping) in [("Nexus", false), ("Realm", true)] {
+        let (c, mut v) = fixture();
+        v.map.name = map.into();
+        v.quest = None;
+        v.objects.clear();
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        for _ in 0..3 {
+            brain.destination = Some(Pos { x: 20.5, y: 10.5 });
+            v.tick += 31;
+            brain.decide(&v, &c).unwrap();
+        }
+        let flag = brain.plan.flag(plan::now());
+        assert_eq!(
+            flag.as_ref().is_some_and(|f| f["kind"] == "looping"),
+            looping,
+            "{map}: {flag:?}"
+        );
+    }
+}
+
+#[test]
+fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
+    let (c, mut v) = fixture();
+    v.quest = None;
+    let mut bag = v.objects.remove(0);
+    bag.id = 9;
+    bag.kind = 0x500;
+    bag.hp = 0;
+    bag.contents = vec![0xa22];
+    bag.position = Pos { x: 11.5, y: 10.5 };
+    v.objects.push(bag);
+    v.projectiles.push(crate::world::view::VisibleProjectile {
+        owner: 2,
+        id: 1,
+        start: Pos { x: 13.5, y: 10.5 },
+        position: Pos { x: 12.5, y: 10.5 },
+        angle: std::f32::consts::PI,
+        speed: 100.,
+        lifetime_ms: 2000.,
+        amplitude: 0.,
+        frequency: 0.,
+        passes_cover: false,
+    });
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(brain.activity, Activity::Survive);
+    assert!(
+        d.journey.is_none(),
+        "a visible supply is not a reason to leave"
+    );
 }
