@@ -1244,10 +1244,12 @@ pub(super) async fn launch(
                                 lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
                                 let plan = std::mem::take(&mut brain.plan);
+                                let sought = brain.mind.market.sought;
                                 // A Vault errand belongs to the same Nexus market visit.
                                 let visit = (matches!((view.map.name.as_str(), portal_kind), ("Nexus", Some(0x720)) | ("Vault", None))).then(|| brain.mind.market.clone());
                                 (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
                                 brain.plan = plan;
+                                brain.mind.market.sought = sought;
                                 if let Some(market) = visit { brain.mind.market.continue_visit(&market); }
                                 let current_character = brain.session.2;
                                 let destination = if current_character != previous { -2 } else { destination };
