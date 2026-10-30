@@ -664,3 +664,26 @@ fn arrow_follower_seeds_an_uncrowded_realm_event() {
         d.movement
     );
 }
+
+#[test]
+fn veteran_carrying_tradeable_loot_travels_to_the_nexus_to_trade_it() {
+    // Live: 1 bot in 58 wanted anything, and loot was only offered when banking happened to pass the Nexus.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.objects.clear();
+    let cap = c.classes[&v.character.class].caps[2];
+    v.character.base_stats[2] = cap;
+    v.character.stats[2] = cap;
+    v.character.items[4] = 0xa1f;
+    v.character.items[5] = 0xa1f;
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(
+        matches!(d.journey, Some(Journey::Nexus)),
+        "{:?} {:?}",
+        d.goal,
+        d.journey
+    );
+    assert_eq!(brain.plan.owner(), Some(plan::Owner::Trade));
+    assert!(brain.mind.market.sought);
+}

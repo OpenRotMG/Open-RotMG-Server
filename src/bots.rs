@@ -1031,6 +1031,22 @@ impl Brain {
                 {
                     return Ok(Yield);
                 }
+                let started = self.plan.owner() == Some(owner);
+                if v.map.name == "Realm"
+                    && s.health >= 0.75
+                    && if started {
+                        self.mind.market.sought
+                    } else {
+                        self.mind
+                            .market
+                            .trip_due(v, content, self.mind.future_class)?
+                    }
+                {
+                    self.mind.market.sought = true;
+                    let mut d = idle();
+                    d.journey = Some(Journey::Nexus);
+                    return Ok(Act(Activity::Trade, d));
+                }
                 match self.mind.market.decide(
                     v,
                     content,
