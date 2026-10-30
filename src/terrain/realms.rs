@@ -4,9 +4,9 @@ use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, path::Path, sync::Arc};
 
 use super::prepare::{
-    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD04_ID, WORLD05_ID, WORLD06_ID, WORLD07_ID, WORLD09_ID,
-    WORLD10_ID, WORLD11_ID, WORLD12_ID, WORLD13_ID, bounded_read, read_recipe, safe_path,
-    valid_hash, valid_id,
+    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD04_ID, WORLD05_ID, WORLD06_ID, WORLD07_ID, WORLD08_ID,
+    WORLD09_ID, WORLD10_ID, WORLD11_ID, WORLD12_ID, WORLD13_ID, bounded_read, read_recipe,
+    safe_path, valid_hash, valid_id,
 };
 use serde::Deserialize;
 
@@ -49,6 +49,7 @@ impl Asset {
                         | WORLD05_ID
                         | WORLD06_ID
                         | WORLD07_ID
+                        | WORLD08_ID
                         | WORLD09_ID
                         | WORLD10_ID
                         | WORLD11_ID
@@ -121,6 +122,7 @@ impl Source {
             WORLD05_ID => Some((19, 5, 22, 2, 48)),
             WORLD06_ID => Some((25, 5, 14, 0, 44)),
             WORLD07_ID => Some((20, 10, 21, 0, 51)),
+            WORLD08_ID => Some((17, 6, 11, 0, 34)),
             WORLD09_ID => Some((14, 3, 16, 0, 33)),
             WORLD10_ID => Some((16, 5, 17, 1, 39)),
             WORLD11_ID => Some((20, 9, 25, 2, 56)),
@@ -247,6 +249,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                                     | WORLD05_ID
                                     | WORLD06_ID
                                     | WORLD07_ID
+                                    | WORLD08_ID
                                     | WORLD09_ID
                                     | WORLD10_ID
                                     | WORLD11_ID
