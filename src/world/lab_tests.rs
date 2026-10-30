@@ -220,6 +220,60 @@ async fn lab_cage_children_do_not_duplicate_boss_rewards_or_clear() {
     assert_eq!(w.players[&players[0]].clears_queued.iter().sum::<u64>(), 1);
 }
 
+#[tokio::test]
+async fn horrific_creation_guarantees_defense_potion_to_each_contributor() {
+    let (mut w, creation) = arena();
+    w.name = "Mad Lab".into();
+    w.encounter = true;
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &w.content).unwrap();
+    let home = w.entities[&creation].home;
+    let mut ids = Vec::new();
+    for name in ["top", "chip", "bystander"] {
+        let account = store.list(name.into()).await.unwrap();
+        let character = store
+            .create(account.id, w.content.get(crate::content::WIZARD).unwrap())
+            .await
+            .unwrap();
+        let id = w.enter(character, None).unwrap();
+        w.players.get_mut(&id).unwrap().pos = home;
+        ids.push(id);
+    }
+    let top = w.players[&ids[0]].character.id;
+    let chip = w.players[&ids[1]].character.id;
+    let owners = [
+        w.players[&ids[0]].character.account,
+        w.players[&ids[1]].character.account,
+    ];
+    w.entities
+        .get_mut(&creation)
+        .unwrap()
+        .damage
+        .insert(top, 50);
+    w.entities
+        .get_mut(&creation)
+        .unwrap()
+        .damage
+        .insert(chip, 1);
+    w.defeat_entity(creation).unwrap();
+    assert!(!w.cleared);
+    let bags: Vec<_> = w.bag_expiry.keys().copied().collect();
+    assert_eq!(bags.len(), 2);
+    for account in owners {
+        let bag = bags
+            .iter()
+            .find(|id| w.entities[id].extra_stats.contains(&(54, account)))
+            .unwrap();
+        assert_eq!(
+            w.entities[bag]
+                .items
+                .iter()
+                .filter(|item| **item == 0xa20)
+                .count(),
+            1
+        );
+    }
+}
+
 #[test]
 fn lab_pool_remedy_is_actor_driven_source_aware_and_player_local() {
     let (mut w, first) = super::movement_tests::fixture(0xa7, false);
