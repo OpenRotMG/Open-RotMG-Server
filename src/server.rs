@@ -3038,7 +3038,8 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
         else {
             continue;
         };
-        for (guard, id, snapshot) in progress {
+        // Every plan already holds its account; serial completion makes native input wait for unrelated saves.
+        futures_util::future::join_all(progress.into_iter().map(|(guard, id, snapshot)| async move {
             if let Err(error) = lifecycle::complete(guard, move |a| async move {
                 persist_progress_inner(&a, id, snapshot).await
             })
@@ -3046,7 +3047,8 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
             {
                 tracing::error!(player=id,error=%format_args!("{error:#}"),"progress completion failed");
             }
-        }
+        }))
+        .await;
     }
     let mut dying = Vec::new();
     for world in a.world.worlds() {

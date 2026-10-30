@@ -103,6 +103,69 @@ async fn fatal_world_and_persistence_workers_stop_real_server_and_preserve_incid
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn realm_progress_starts_each_owned_save_before_waiting_for_other_accounts() {
+    let (dir, app) = fixture();
+    let mut avatars = Vec::new();
+    for name in ["save-first", "save-second", "save-third"] {
+        avatars.push(avatar(&app, name).await);
+    }
+    let ids: Vec<_> = avatars.iter().map(|(_, id, _)| *id).collect();
+    let expected = app
+        .world
+        .call(move |world| {
+            let mut expected = std::collections::BTreeMap::new();
+            for id in ids {
+                let player = world.players.get_mut(&id).unwrap();
+                player.character.lifetime.tiles += 1;
+                expected.insert(id, player.character.lifetime.tiles);
+            }
+            Ok(expected)
+        })
+        .await
+        .unwrap();
+    let (entered, release) = app.store.lifecycle_test_pause_reply();
+    let saving = tokio::spawn({
+        let app = app.clone();
+        async move { super::super::persistence_tick(&app).await }
+    });
+    tokio::time::timeout(Duration::from_secs(5), entered)
+        .await
+        .unwrap()
+        .unwrap();
+    let submitted = tokio::time::timeout(Duration::from_secs(1), async {
+        while app.store.lifecycle_pending_jobs() < avatars.len() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), saving)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        submitted.is_ok(),
+        "later accounts remain reserved without starting their saves while native input waits"
+    );
+    for (owner, id, before) in avatars {
+        let saved = app.store.load(before.account, before.id).await.unwrap();
+        assert_eq!(saved.lifetime.tiles, expected[&id]);
+        assert_eq!(saved.items, before.items);
+        assert!(saved.alive);
+        assert!(!state(&app, before.account).unwrap().0);
+        owner
+            .close(&app, CloseReason::Transport)
+            .unwrap()
+            .unwrap()
+            .wait()
+            .await
+            .unwrap();
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn failed_shutdown_drain_records_incident_and_restart_admits_the_account() {
     let (dir, app) = fixture();
     let (_owner, player, mut character) = avatar(&app, "held-shutdown").await;
