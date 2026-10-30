@@ -47,7 +47,6 @@ async fn chat(socket: &mut NativeSocket, text: &str, expected: &str) -> Lists {
 #[tokio::test]
 async fn lock_command_persists_offline_account_and_publishes_only_to_owner() {
     let (dir, app) = account_actions::tests::fixture();
-    app.world.clock.set_paused(true);
     let owner = app
         .store
         .list("lock-command-owner".into())
