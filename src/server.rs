@@ -3148,6 +3148,13 @@ fn client_assets(client: &std::path::Path) -> Router<App> {
 }
 
 fn routes(a: &App, client: PathBuf) -> Router {
+    let drops = axum::body::Bytes::from(
+        serde_json::to_vec(&crate::loot::catalogue::snapshot(
+            &a.content,
+            a.diagnostics.source_revision.as_deref(),
+        ))
+        .expect("validated loot catalogue JSON"),
+    );
     let app = Router::new()
         .route(
             "/legacy-api/picture/save",
@@ -3193,6 +3200,21 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route(
             "/internal/discord/updates",
             post(updates::sync).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
+        .route(
+            "/api/drop-rates",
+            get(move || {
+                let body = drops.clone();
+                async move {
+                    (
+                        [
+                            ("content-type", "application/json"),
+                            ("cache-control", "no-cache"),
+                        ],
+                        body,
+                    )
+                }
+            }),
         )
         .route("/api/hiscores", get(hiscores))
         .route("/api/collection/{account}", get(collection))

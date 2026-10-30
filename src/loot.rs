@@ -6,6 +6,9 @@ pub(crate) enum Pick {
     Item(u16),
     Tier(u8, &'static [i32]),
 }
+pub(crate) mod catalogue;
+// Selected balance for ordinary dungeon uniques, not authenticated historical odds.
+pub(crate) const DUNGEON_UNIQUE_RATE: f64 = 0.01;
 pub(crate) const WEAPONS: &[i32] = &[1, 2, 3, 8, 17];
 pub(crate) const ABILITIES: &[i32] = &[4, 5, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23];
 // The period wiki calls Wolfskin/Neophyte/Iron Mail T0; the selected client calls them T1.
@@ -88,7 +91,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Item(0xc1d)),
             (0.01, Item(0xc1f)),
             (0.05, Item(0xc20)),
-            (0.005, Item(0xc09)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc09)),
             (0.01, Item(0xc22)),
             (0.005, Item(0x722)),
             (0.03, Tier(9, WEAPONS)),
@@ -214,8 +217,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.02, Item(0xa23)),
         ],
         crate::dungeon::lab::BOSS => &[
-            (0.005, Item(0xc30)),
-            (0.005, Item(0xc32)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc30)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc32)),
             (0.01, Item(0xc31)),
             (0.005, Item(crate::endgame::INCANTATION)),
             (0.2, Tier(8, WEAPONS)),
@@ -819,7 +822,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0x917 => &[
             (1., Item(0xa21)),
             (0.006, Item(crate::endgame::INCANTATION)),
-            (0.001, Item(0xc04)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc04)),
             (0.45, Item(0xa3e)),
             (0.45, Item(0xa40)),
             (0.45, Item(0xa41)),
@@ -844,7 +847,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (1., Item(0xa4c)),
             (0.1, Item(0xa4b)),
             (0.006, Item(crate::endgame::INCANTATION)),
-            (0.001, Item(0xc03)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc03)),
             (0.01, Item(0xa5a)),
             (0.05, Tier(7, ARMOR)),
             (0.05, Tier(3, ABILITIES)),
@@ -858,7 +861,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0xd90 => &[
             (1., Item(0xa35)),
             (0.006, Item(crate::endgame::INCANTATION)),
-            (0.001, Item(0xc02)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc02)),
             (0.4, Tier(7, WEAPONS)),
             (0.2, Tier(8, WEAPONS)),
             (0.4, Tier(3, ABILITIES)),
@@ -924,7 +927,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (1., Item(0xa34)),
             (1., Item(0xa20)),
             (0.006, Item(crate::endgame::INCANTATION)),
-            (0.001, Item(0xc01)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc01)),
             (0.7, Tier(7, WEAPONS)),
             (0.4, Tier(9, WEAPONS)),
             (0.15, Tier(10, WEAPONS)),
@@ -941,7 +944,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             // Legacy Trapped candidates, but our paired guarantees are reconstruction, not original per-account odds: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Abyss.cs#L224-L235
             (1., Item(0xa20)),
             (0.005, Item(crate::endgame::INCANTATION)),
-            (0.001, Item(0xc01)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
             (0.4, Tier(8, WEAPONS)),
             (0.11, Tier(9, WEAPONS)),
@@ -1169,9 +1172,12 @@ pub(crate) fn god_loot(
     loot
 }
 
+fn per_item(kind: u16) -> bool {
+    potion_damage(kind).is_some() || matches!(kind, 0x624..=0x626 | 0x91d | 0x91e)
+}
 pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     // Sprite tier candidates roll independently, not as an exclusive choice: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/LootDefs.cs#L77-L86
-    let per_item = potion_damage(kind).is_some() || matches!(kind, 0x624..=0x626 | 0x91d | 0x91e);
+    let per_item = per_item(kind);
     let mut items = if per_item {
         god_equipment(content, kind, rng)
     } else if independent(kind) {
@@ -1196,18 +1202,21 @@ pub fn rewards(content: &Content, kind: u16, rng: &mut impl Rng) -> Vec<u16> {
     }
     items
 }
+fn fauna_multiplier(kind: u16) -> usize {
+    match kind {
+        0x20d | 0x952 | 0x903 | 0x924 => 1,
+        0x941 => 8,
+        0x949 | 0x950 | 0x945 | 0x957 => 2,
+        _ => unreachable!("unsupported dual-channel fauna kind {kind:#x}"),
+    }
+}
 pub fn fauna_private_rewards(
     content: &Content,
     kind: u16,
     contributors_by_damage: &[(i32, i32)],
     rng: &mut impl Rng,
 ) -> Vec<(i32, u16)> {
-    let multiplier = match kind {
-        0x20d | 0x952 | 0x903 | 0x924 => 1,
-        0x941 => 8,
-        0x949 | 0x950 | 0x945 | 0x957 => 2,
-        _ => unreachable!("unsupported dual-channel fauna kind {kind:#x}"),
-    };
+    let multiplier = fauna_multiplier(kind);
     let owners: Vec<_> = contributors_by_damage
         .iter()
         .filter(|(_, damage)| *damage > 1)
@@ -1249,6 +1258,65 @@ pub fn private(kind: u16) -> bool {
         | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
+}
+pub(crate) fn damage_threshold(content: &Content, kind: u16) -> i32 {
+    if kind == crate::dungeon::trench::HERMIT {
+        // The comparator's 0.01 threshold tests integer damage, not an HP fraction: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs#L106
+        0
+    } else if crate::dungeon::tomb::BOSSES.contains(&kind) {
+        100
+    } else if crate::loot::potion_damage(kind).is_some() {
+        0
+    } else if matches!(kind, 0xd56 | 0xd59) {
+        content.objects[&kind].hp / 20
+    } else if matches!(
+        kind,
+        0xd50 | 0xe37 | 0xd5a | 0xd60 | crate::dungeon::tomb::SPHINX | 0x1705
+    ) || matches!(
+        kind,
+        crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
+    ) {
+        content.objects[&kind].hp / 100
+    } else if kind == crate::dungeon::manor::BOSS {
+        100
+    } else if kind == crate::dungeon::manor::COFFIN {
+        800
+    } else if matches!(kind, 0x927 | crate::dungeon::davy::BOSS) {
+        100
+    } else {
+        (content.objects[&kind].hp / 10).max(1)
+    }
+}
+pub(crate) fn attempts(kind: u16, contributors: usize) -> usize {
+    if crate::dungeon::tomb::BOSSES.contains(&kind) {
+        2
+    } else if private(kind) {
+        contributors
+    } else if crate::loot::period_dungeon(kind)
+            || crate::loot::period_surface(kind)
+            || crate::encounter::tutorial::ROSTER.contains(&kind)
+            // realm-src Loots.cs Handle rolls public skeleton loot once per death, not per contributor.
+            || matches!(kind, 0x65a..=0x65d)
+    {
+        1
+    } else {
+        // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
+        let multiplier = match kind {
+            0x609 | 0x60d | 0x614 | 0x617 | 0x61a | 0x6c4 | 0x7f00 => 4,
+            0x62c => 3,
+            _ => 2,
+        };
+        (contributors * multiplier).min(8)
+    }
+}
+
+pub(crate) fn participation_reward(kind: u16) -> Option<u16> {
+    match kind {
+        crate::dungeon::lab::BOSS => Some(0xa35),
+        crate::dungeon::lab::CREATION => Some(0xa20),
+        crate::dungeon::spider::BOSS => Some(0x707),
+        _ => None,
+    }
 }
 fn chest_table(kind: u16) -> Vec<(f64, Pick)> {
     use Pick::Tier;

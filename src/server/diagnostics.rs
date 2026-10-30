@@ -10,7 +10,7 @@ use std::{
 pub struct Diagnostics {
     root: PathBuf,
     pub binary_sha256: String,
-    source_revision: Option<String>,
+    pub(super) source_revision: Option<String>,
     browsers: Mutex<HashMap<String, std::sync::Weak<Mutex<Browser>>>>,
     files: Mutex<Reports>,
     drops: Mutex<HashMap<i32, Value>>,
