@@ -130,16 +130,25 @@ export async function run(game) {
   const final=await game.inspect();
   game.check('native weapon fire defeats the original Creation and earns kill and XP credit',!final.diagnostic.entities.some(e=>e.id===original.id)&&final.diagnostic.character.kills>beforeFinal.diagnostic.character.kills&&final.view.character.experience>beforeFinal.view.character.experience);
   game.check('optional defeat does not duplicate Mad Lab clear credit',final.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
-  game.check('Creation does not invent unsupported equipment rewards',!final.diagnostic.entities.some(e=>e.items?.some(i=>i>=0)&&Math.hypot(e.pos.x-original.pos.x,e.pos.y-original.pos.y)<10));
+  const bags=final.diagnostic.entities.filter(e=>Math.hypot(e.pos.x-original.pos.x,e.pos.y-original.pos.y)<10&&e.items?.some(i=>i>=0));
+  game.check('Horrific Creation guarantees one private defense potion and no other equipment',bags.length===1&&bags[0].items.filter(i=>i>=0).length===1&&bags[0].items.includes(0xa20)&&bags[0].extra_stats.some(([stat,account])=>stat===54&&account===final.view.session.account));
   await act({keys:[],duration_ms:1000},{name:'creation-defeated',when:()=>true});
   await save('creation-defeated');
+  await go(bags[0].pos.x,bags[0].pos.y);
+  await act({keys:[],duration_ms:900},{name:'creation-loot',when:()=>true});
+  const revision=(await game.observe()).character.inventory_revision;
+  await act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+  const picked=await game.observe();
+  game.check('native drag commits the earned Defense potion once',picked.character.items[4]===0xa20&&picked.character.inventory_revision===revision+1);
+  await act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
+  game.check('dragging the emptied Creation bag cannot duplicate Defense',(await game.observe()).character.inventory_revision===picked.character.inventory_revision);
   await go(64.5,12.5);
   const exit=(await entities()).find(e=>e.kind===0x71d);
   if(!exit)throw Error('Previously committed Dr Terrible exit is missing');
   await go(exit.pos.x,exit.pos.y);await act({keys:[],duration_ms:900});
   await act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
   const returned=await game.inspect();
-  game.check('same living character can use the retained first-boss exit after Creation',returned.view.map.name==='Nexus'&&returned.view.session.character===beforeFinal.view.session.character&&returned.view.lifecycle.alive&&returned.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
+  game.check('same living character can use the retained first-boss exit after Creation',returned.view.map.name==='Nexus'&&returned.view.session.character===beforeFinal.view.session.character&&returned.view.lifecycle.alive&&returned.view.character.items[4]===0xa20&&returned.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
   await act({keys:[],duration_ms:1000},{name:'creation-returned',when:()=>true});
   await save('creation-returned');
 }
