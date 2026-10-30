@@ -223,7 +223,14 @@ impl World {
             !self.entities_at(pos).any(|e| e.kind == 0x153),
             "Red Demon chest already has a Partial Red Floor"
         );
-        self.spawn_entity(0x153, pos, vec![])?;
+        self.spawn_entity(
+            0x153,
+            Pos {
+                x: pos.x.floor() + 0.5,
+                y: pos.y.floor() + 0.5,
+            },
+            vec![],
+        )?;
         Ok(())
     }
     fn spawn_named_quest(&mut self, kind: u16, pos: Pos) -> Result<()> {
@@ -1149,6 +1156,39 @@ mod tests {
             .quest_birth((cube, pos, pos), 0xd5a, 32, 1, 5.)
             .unwrap();
         assert_eq!(world.quest_actors(cube).count(), 32);
+    }
+
+    #[test]
+    fn authored_red_demon_chest_protects_only_its_tile_without_repainting_lava() {
+        let (mut world, player) = super::super::movement_tests::fixture(0xf4, false);
+        let original = world.map.clone();
+        let pos = world.players[&player].pos;
+        let initial = world.players[&player].character.hp;
+        world.ground_damage(player, 1000, pos).unwrap();
+        let damaged = world.players[&player].character.hp;
+        assert!(damaged < initial);
+        world
+            .populate_authored_sites(&[crate::terrain::realms::Site {
+                kind: 0x668,
+                bounds: [5, 5, 7, 7],
+                spawn: [8, 8],
+                chest: Some([8, 8]),
+                support: 49,
+            }])
+            .unwrap();
+        assert!(Arc::ptr_eq(&original, &world.map));
+        let floor = world.entities_at(pos).find(|e| e.kind == 0x153).unwrap();
+        assert_eq!((floor.pos.x, floor.pos.y), (8.5, 8.5));
+        let floor = floor.id;
+        assert!(world.entities_at(pos).any(|e| e.kind == 0x501));
+        world.updates(player, true).unwrap();
+        assert!(world.players[&player].known.contains(&floor));
+        world.ground_damage(player, 1601, pos).unwrap();
+        assert_eq!(world.players[&player].character.hp, damaged);
+        world
+            .ground_damage(player, 2202, Pos { x: 9.5, y: 8.5 })
+            .unwrap();
+        assert!(world.players[&player].character.hp < damaged);
     }
 
     #[test]
