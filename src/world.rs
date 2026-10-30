@@ -826,6 +826,7 @@ pub struct World {
     population_next: u64,
     god_reproduction: BTreeMap<i32, u64>,
     setpieces: Vec<realm_setpieces::Area>,
+    ghost_towers: Vec<realm_setpieces::Area>,
     event_sites: Vec<realm_setpieces::EventSite>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
@@ -2933,6 +2934,7 @@ impl World {
             population_next: 10000,
             god_reproduction: BTreeMap::new(),
             setpieces: vec![],
+            ghost_towers: vec![],
             event_sites: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
@@ -6192,6 +6194,12 @@ impl World {
             y: (pos.y - old.y) / samples as f32,
         };
         let kind = self.entities[&id].kind;
+        let godlands = {
+            let object = &self.content.objects[&kind];
+            object.god && object.terrain == 1
+        };
+        let home = self.entities[&id].home;
+        let started_inside = godlands && self.inside_ghost_tower(old);
         let mut resolved = old;
         for i in 1..=samples {
             let next = if slide {
@@ -6213,9 +6221,13 @@ impl World {
                 x: resolved.x,
                 y: next.y,
             };
-            let clear = |pos| {
-                (kind != crate::dungeon::trench::HERMIT && self.jungle_walkable(kind, pos))
-                    || self.ocean_walkable(kind, pos)
+            let clear = |pos: Pos| {
+                let open = (kind != crate::dungeon::trench::HERMIT
+                    && self.jungle_walkable(kind, pos))
+                    || self.ocean_walkable(kind, pos);
+                open && (!godlands
+                    || !self.inside_ghost_tower(pos)
+                    || (started_inside && pos.distance(home) + 0.05 < old.distance(home)))
             };
             let x_clear = clear(horizontal);
             let y_clear = clear(vertical);
