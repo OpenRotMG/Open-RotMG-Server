@@ -320,3 +320,60 @@ impl Attribution {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{io, sync::Arc};
+
+    struct Lines(Arc<AtomicU64>);
+    impl io::Write for Lines {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.fetch_add(
+                bytes.iter().filter(|&&byte| byte == b'\n').count() as u64,
+                Ordering::Relaxed,
+            );
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn incident_output_is_bounded_without_dropping_histograms_or_worst_examples() {
+        let lines = Arc::new(AtomicU64::new(0));
+        let output = lines.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || Lines(output.clone()))
+            .finish();
+        let mut attribution = Attribution::default();
+        let started = Instant::now();
+        tracing::subscriber::with_default(subscriber, || {
+            for _ in 0..1_000 {
+                let mut sample = Sample::new("incident_regression");
+                sample.stages[1] = Duration::from_millis(100);
+                sample.execution = Execution::start().map(Execution::finish);
+                sample.incident(Some(1));
+                attribution.record(sample);
+            }
+        });
+        let elapsed = started.elapsed();
+        let emitted = lines.load(Ordering::Relaxed);
+        attribution.started = Some(Instant::now() - Duration::from_secs(60));
+        let report = attribution.report().expect("completed attribution window");
+        assert_eq!(report["operations"][0]["total"]["count"], 1_000);
+        assert_eq!(report["operations"][0]["total"]["max_us"], 100_000);
+        assert_eq!(report["slowest_jobs"].as_array().unwrap().len(), EXAMPLES);
+        println!(
+            "1000 slow operations: {emitted} incident lines in {:.3}s; all histograms and worst examples retained",
+            elapsed.as_secs_f64()
+        );
+        assert!(
+            emitted <= elapsed.as_secs() + 1,
+            "incident output must not exceed one line per process per second"
+        );
+    }
+}
