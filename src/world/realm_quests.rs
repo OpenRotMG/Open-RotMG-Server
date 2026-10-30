@@ -1143,7 +1143,9 @@ mod tests {
                 "classic-world-05-reconstruction"
                 | "classic-world-11-reconstruction"
                 | "classic-world-13-reconstruction" => [0, 0, 2, 0],
-                "classic-world-09-reconstruction" | "classic-world-12-reconstruction" => [0; 4],
+                "classic-world-06-reconstruction"
+                | "classic-world-09-reconstruction"
+                | "classic-world-12-reconstruction" => [0; 4],
                 "realm-fsod-1" | "realm-fsod-2" | "realm-fsod-3" => [0; 4],
                 name => panic!("unreviewed authored-site roster {name}"),
             };
@@ -1198,7 +1200,9 @@ mod tests {
                 authored_liches,
                 match source.name() {
                     "classic-world-01-reconstruction" | "classic-world-04-reconstruction" => 6,
-                    "classic-world-05-reconstruction" | "classic-world-10-reconstruction" => 5,
+                    "classic-world-05-reconstruction"
+                    | "classic-world-06-reconstruction"
+                    | "classic-world-10-reconstruction" => 5,
                     "classic-world-09-reconstruction" => 3,
                     "classic-world-11-reconstruction" => 9,
                     "classic-world-12-reconstruction" => 8,
@@ -1232,6 +1236,7 @@ mod tests {
                 match source.name() {
                     "classic-world-04-reconstruction" | "classic-world-09-reconstruction" => 16,
                     "classic-world-05-reconstruction" | "classic-world-13-reconstruction" => 22,
+                    "classic-world-06-reconstruction" => 14,
                     "classic-world-10-reconstruction" => 17,
                     "classic-world-11-reconstruction" => 25,
                     "classic-world-12-reconstruction" => 8,
@@ -1277,6 +1282,7 @@ mod tests {
             ("classic-world-03-reconstruction", 2100, 629, 21, 2, 4..=6),
             ("classic-world-04-reconstruction", 2000, 506, 21, 16, 6..=6),
             ("classic-world-05-reconstruction", 2100, 702, 19, 22, 5..=6),
+            ("classic-world-06-reconstruction", 2100, 698, 25, 14, 5..=6),
             ("classic-world-09-reconstruction", 2100, 426, 14, 16, 4..=6),
             ("classic-world-10-reconstruction", 2000, 460, 16, 17, 5..=6),
             ("classic-world-11-reconstruction", 2100, 577, 20, 25, 9..=9),

@@ -50,5 +50,6 @@
   {"kind":"reconstruction","recipe":"world11.json","sha256":"2c555db049f215dc28b34c638f1818f4c59d150519313e876ae06b27462184a5"},
   {"kind":"reconstruction","recipe":"world10.json","sha256":"b2c6221f3ff7100810277107581875b47f2e6e3b897e194a3074a5dda8e81e01"},
   {"kind":"reconstruction","recipe":"world13.json","sha256":"230f4229e5cb4aa4316417f0fa707a71dc8bf26a3443aaf48867188cc3ce0f5e"},
-  {"kind":"reconstruction","recipe":"world12.json","sha256":"aa256c870048e9c7235c5ff5a5ca222a0c81fe7d7796f454ad290d93d82e28d3"}
+  {"kind":"reconstruction","recipe":"world12.json","sha256":"aa256c870048e9c7235c5ff5a5ca222a0c81fe7d7796f454ad290d93d82e28d3"},
+  {"kind":"reconstruction","recipe":"world06.json","sha256":"c726584e7bd453662e048c6b6522a912f16611c7a94c39843a54404f76e372bb"}
 ]
