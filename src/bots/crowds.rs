@@ -248,7 +248,7 @@ impl Crowd {
             .filter(|p| self.knows_minimap || v.objects.iter().any(|o| o.id == p.id))
             .count()
     }
-    /// Players heading for a Realm quest teleport to whoever stands nearest it.
+    /// Players heading for a Realm quest teleport into the crowd around it, then walk in.
     pub fn nearest_to<'a>(
         &self,
         v: &'a PlayerView,
@@ -262,7 +262,8 @@ impl Crowd {
         v.player_markers
             .iter()
             .filter(|p| {
-                p.position.distance(objective) < 12.
+                // Live: half of level-20 deaths came within 10 seconds of landing beside the boss.
+                (10. ..=16.).contains(&p.position.distance(objective))
                     && p.position.distance(objective) + 16. < own
                     && self.bands.teleportable(v, p.position)
                     && eligible(p.position)

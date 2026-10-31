@@ -605,7 +605,7 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
 }
 
 #[test]
-fn explorer_joins_a_crowded_realm_event_by_teleporting_beside_it() {
+fn explorer_joins_a_crowded_realm_event_by_teleporting_into_the_crowd() {
     // Live: level 20s kept exploring past their quest and routed around any event they could not solo, even in a crowd.
     let (c, mut v) = fixture();
     v.character.level = 20;
@@ -619,7 +619,7 @@ fn explorer_joins_a_crowded_realm_event_by_teleporting_beside_it() {
             name: format!("P{id}"),
             position: Pos {
                 x: 8.5 + id as f32,
-                y: 85.5,
+                y: 79.5,
             },
         })
         .collect();
