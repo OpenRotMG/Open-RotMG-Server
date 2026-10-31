@@ -219,6 +219,50 @@ mod tests {
         assert!(w.landmark_mechanics(cb, target, 4000).is_err());
     }
     #[test]
+    fn deathmage_keeps_fighting_while_its_summons_wait_for_room() {
+        let mut w = world();
+        let a = root(&mut w, 20.);
+        w.entities.get_mut(&a).unwrap().next_aux = 0;
+        let holder = w
+            .spawn_entity(0x223, Pos { x: 60., y: 60. }, vec![])
+            .unwrap();
+        for i in 0..256 {
+            let pos = Pos {
+                x: 1.5 + (i % 60) as f32,
+                y: 50.5 + (i / 60) as f32,
+            };
+            let filler = w.spawn_entity(0x223, pos, vec![]).unwrap();
+            w.entities
+                .get_mut(&filler)
+                .unwrap()
+                .parent
+                .set(Some(holder), filler, &mut w.timed_ids);
+        }
+        let character: Character = serde_json::from_value(serde_json::json!({
+            "schema":1,"lifetime":crate::store::FameLifetime::complete(),
+            "class":0x300,"base":[200,100,15,0,75,15,15,10],
+            "id":1,"account":1,"name":"Crowded","level":20,"exp":0,
+            "fame":0,"hp":200,"mp":100,"revision":0,"alive":true,
+            "items":[0xa14,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1]
+        }))
+        .unwrap();
+        let player = w.enter(character, None).unwrap();
+        w.players.get_mut(&player).unwrap().pos = Pos { x: 30., y: 20. };
+        for _ in 0..100 {
+            w.now += 50;
+            w.npc_step();
+        }
+        assert_eq!(
+            w.quest_actors(a).count(),
+            1,
+            "full budget must still refuse summons"
+        );
+        assert!(
+            w.entities[&a].bullet > 0,
+            "a waiting summon froze the Deathmage"
+        );
+    }
+    #[test]
     fn deathmage_target_window_keeps_attack_hysteresis_and_home_tether() {
         let mut w = world();
         let a = root(&mut w, 20.);

@@ -52,7 +52,7 @@ impl World {
                     + self.abyss_pending_count()
                     + positions.len()
                     <= 256,
-                "Spider Den summon budget exhausted"
+                SummonBudget("Spider Den summon budget exhausted".into())
             );
             ensure!(
                 positions.iter().all(|(_, pos)| self.walkable(*pos)),
