@@ -176,10 +176,22 @@ fn validated_template(template: &str, intent: Intent) -> std::result::Result<boo
     Ok(priced)
 }
 
+/// Slots are program tokens: an UPPERCASE voice may capitalize the words around them, not the slots.
+fn lowercase_slots(template: &str) -> String {
+    let lower = template.to_ascii_lowercase();
+    let mut out = template.to_owned();
+    for slot in ["{give}", "{want}", "{name}"] {
+        for (i, _) in lower.match_indices(slot) {
+            out.replace_range(i..i + slot.len(), slot);
+        }
+    }
+    out
+}
+
 fn repertoire(reply: &str, intent: Intent) -> std::result::Result<Repertoire, Failure> {
     let templates: Repertoire = reply
         .split('|')
-        .map(|s| s.trim().to_owned())
+        .map(|s| lowercase_slots(s.trim()))
         .collect::<Vec<_>>()
         .try_into()
         .map_err(|_| Failure::Error("invalid_market_wording"))?;
@@ -574,6 +586,16 @@ mod tests {
             Some("nty 3 spd for 1 def".into())
         );
         assert_eq!(service.health()["daily_requests"], 0);
+    }
+
+    #[test]
+    fn uppercase_voice_keeps_slots_valid() {
+        // Live: 11 of 12 rejected repertoires in an hour wrote {GIVE}/{WANT} in an UPPERCASE voice.
+        let shapes = FAVORITE_SHAPES[..3].join("|").to_ascii_uppercase();
+        assert!(
+            repertoire(&shapes, Intent::MarketAdvertise).is_ok(),
+            "{shapes}"
+        );
     }
 
     #[test]

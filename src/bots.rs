@@ -278,6 +278,8 @@ struct Brain {
     stationary: u64,
     destination: Option<Pos>,
     blocked: BTreeMap<(i16, i16), u64>,
+    /// Stalls per destination tile and the last one, so a tile that keeps failing stays excluded longer.
+    stalls: BTreeMap<(i16, i16), (u32, u64)>,
     cover: BTreeSet<(i16, i16)>,
     visits: BTreeMap<(i16, i16), u64>,
     companion: Option<i32>,
@@ -358,6 +360,7 @@ impl Brain {
             stationary: view.tick,
             destination: None,
             blocked: BTreeMap::new(),
+            stalls: BTreeMap::new(),
             cover: BTreeSet::new(),
             visits: BTreeMap::new(),
             companion: None,
@@ -593,8 +596,15 @@ impl Brain {
         if v.tick.saturating_sub(self.stationary) > 30
             && let Some(destination) = self.destination
         {
-            self.blocked.insert(tile(destination), v.tick + 100);
-            tracing::warn!(player=v.session.player,tick=v.tick,goal=?self.goal,x=destination.x,y=destination.y,"autonomous route made no progress; temporarily excluded");
+            // Live: one bot re-chose the same unreachable tile 123 times an hour; repeats back off exponentially.
+            self.stalls
+                .retain(|_, (_, last)| v.tick.saturating_sub(*last) < 12_000);
+            let (repeats, last) = self.stalls.entry(tile(destination)).or_insert((0, 0));
+            *repeats += 1;
+            *last = v.tick;
+            let excluded = 100u64 << (*repeats - 1).min(6);
+            self.blocked.insert(tile(destination), v.tick + excluded);
+            tracing::warn!(player=v.session.player,tick=v.tick,goal=?self.goal,x=destination.x,y=destination.y,repeats=*repeats,excluded,"autonomous route made no progress; temporarily excluded");
             // Login crowds briefly wedge bots on the Nexus spawn; only a stall elsewhere is a loop.
             if v.map.name != "Nexus" {
                 self.plan.record(
