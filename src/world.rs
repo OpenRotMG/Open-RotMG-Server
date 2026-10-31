@@ -829,6 +829,7 @@ pub struct World {
     summon_waits: BTreeSet<i32>,
     reproduction_at: [u64; 20],
     reproduction_bucket: usize,
+    npc_paused_since: BTreeMap<i32, u64>,
     djinn_attacking: BTreeSet<i32>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
@@ -2941,6 +2942,7 @@ impl World {
             summon_waits: BTreeSet::new(),
             reproduction_at: [0; 20],
             reproduction_bucket: 0,
+            npc_paused_since: BTreeMap::new(),
             djinn_attacking: BTreeSet::new(),
             setpieces: vec![],
             ghost_towers: vec![],
@@ -3264,6 +3266,7 @@ impl World {
         }
         self.summon_waits.remove(&id);
         self.djinn_attacking.remove(&id);
+        self.npc_paused_since.remove(&id);
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");

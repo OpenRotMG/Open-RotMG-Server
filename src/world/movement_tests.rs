@@ -865,3 +865,28 @@ fn oryx_culls_excess_away_from_players() {
     assert_eq!(world.population_count(11), 2);
     assert!(world.entities.contains_key(&kept));
 }
+
+#[test]
+fn far_npc_clocks_pause_until_a_player_returns() {
+    let (mut world, _) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 11;
+    }
+    let snake = world
+        .place_population_solo(0x602, Pos { x: 30.5, y: 30.5 })
+        .unwrap();
+    let e = world.entities.get_mut(&snake).unwrap();
+    e.activated = Some(0);
+    e.next_shot = 1000;
+    let far = [Pos { x: 4.5, y: 4.5 }];
+    assert!(!world.npc_candidates(&far).contains(&snake));
+    world.now += 5000;
+    assert!(!world.npc_candidates(&far).contains(&snake));
+    assert!(
+        world
+            .npc_candidates(&[Pos { x: 25.5, y: 25.5 }])
+            .contains(&snake)
+    );
+    assert_eq!(world.entities[&snake].next_shot, 6000);
+    assert_eq!(world.entities[&snake].activated, Some(5000));
+}
