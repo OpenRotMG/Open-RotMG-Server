@@ -24,19 +24,6 @@ impl Family {
     pub(super) fn size(&self) -> usize {
         1 + self.roles.iter().map(|r| r.maximum).sum::<usize>()
     }
-    pub(super) fn initial(&self) -> usize {
-        1 + self
-            .roles
-            .iter()
-            .map(|r| {
-                if self.random_initial {
-                    r.maximum
-                } else {
-                    r.initial
-                }
-            })
-            .sum::<usize>()
-    }
     fn roll_initial(&self, rng: &mut impl Rng) -> Vec<usize> {
         self.roles
             .iter()
@@ -206,7 +193,6 @@ pub(super) const REPRODUCTION: &[(u16, u16, f32, usize, u64)] = &[
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Reproduction {
     Density,
-    Capacity,
     NoSite,
     Born(i32),
 }
@@ -297,9 +283,6 @@ impl World {
         let terrain = self.content.get(kind)?.terrain;
         // Piratess pirates stand in for Kithio's Oryx-table Pirates, not a Piratess Spawn, so reproduced Piratesses arrive alone.
         let family = FAMILIES.iter().find(|f| f.leader == kind && kind != 0x601);
-        if !self.population_space(terrain, family.map_or(1, |f| f.initial()))? {
-            return Ok(Reproduction::Capacity);
-        }
         for _ in 0..10 {
             let angle = self.rng.gen_range(0.0..std::f32::consts::TAU);
             let pos = Pos {
@@ -382,16 +365,6 @@ impl World {
     pub(super) fn population_count(&self, terrain: u8) -> usize {
         self.population_counts[terrain as usize]
     }
-    pub(super) fn population_space(&self, terrain: u8, count: usize) -> Result<bool> {
-        ensure!(
-            (1..=12).contains(&terrain),
-            "population has unsupported terrain {terrain}"
-        );
-        Ok(
-            self.population_count(terrain) + self.pending_fauna_count(terrain) + count
-                <= self.population_regions[terrain as usize].limit,
-        )
-    }
     pub(super) fn family_ground(&self, pos: Pos, terrain: u8) -> bool {
         self.map
             .cell(pos.x, pos.y)
@@ -409,10 +382,6 @@ impl World {
             self.population[slot].kind
         };
         self.population[slot].kind = kind;
-        ensure!(
-            self.population_space(self.camps[camp].family.terrain, 1)?,
-            "family birth exceeds regional budget"
-        );
         let id = self.spawn_entity(kind, pos, vec![])?;
         let home = self.population[self.camps[camp].start].pos;
         let e = self.entities.get_mut(&id).unwrap();
@@ -488,10 +457,6 @@ impl World {
         ensure!(
             positions.len() == family.size(),
             "family footprint does not match reserved capacity"
-        );
-        ensure!(
-            self.population_space(family.terrain, family.initial())?,
-            "initial family exceeds regional budget"
         );
         let initials = family.roll_initial(&mut self.rng);
         let initial_count = 1 + initials.iter().sum::<usize>();
@@ -601,11 +566,6 @@ impl World {
                 if self.now >= deadline {
                     self.camps[camp].next[role] = Some(self.now + interval);
                     if let Some(slot) = (from..to).find(|i| self.population[*i].entity.is_none()) {
-                        if !self.population_space(family.terrain, 1)? {
-                            tracing::debug!(camp, role, "reinforcement refused: regional budget");
-                            from = to;
-                            continue;
-                        }
                         let pos = member_positions(center, family.terrain)
                             .into_iter()
                             .find(|p| {
