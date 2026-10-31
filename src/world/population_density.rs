@@ -347,7 +347,7 @@ fn populated_realms_keep_all_arrivals_connected() -> Result<()> {
                 })
             })
             .collect();
-        assert_eq!(world.map.spawns.len(), 4, "{name}");
+        assert_eq!(world.map.spawns.len(), 12, "{name}");
         let index = |x: f32, y: f32| y as usize * width + x as usize;
         let (x, y) = world.map.spawns[0];
         let start = index(x, y);
