@@ -739,7 +739,8 @@ CREATE TABLE IF NOT EXISTS recovery_codes(account INTEGER PRIMARY KEY REFERENCES
 CREATE TABLE IF NOT EXISTS password_resets(account INTEGER PRIMARY KEY REFERENCES accounts(id),hash TEXT NOT NULL UNIQUE,issued_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS account_lists(account INTEGER NOT NULL REFERENCES accounts(id),list_id INTEGER NOT NULL CHECK(list_id IN (0,1)),target INTEGER NOT NULL REFERENCES accounts(id),PRIMARY KEY(account,list_id,target),CHECK(account<>target));
 CREATE TABLE IF NOT EXISTS update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
+CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);
+CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         let journal: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
         let synchronous: i32 = c.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
         ensure!(
