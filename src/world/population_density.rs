@@ -14,9 +14,9 @@ impl World {
             self.population.is_empty(),
             "cannot reconfigure a live population"
         );
-        // These reconstruct the pinned Trapped area profile, not recovered official server limits.
+        // Kithio's per-terrain area divisors, reindexed to selected XML terrain numbers: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Oryx.cs#L27-L156
         let divisors = [
-            0, 100, 250, 300, 300, 200, 200, 200, 200, 250, 250, 100, 150,
+            0, 100, 250, 300, 300, 300, 150, 150, 200, 200, 200, 100, 150,
         ];
         self.population_regions = std::array::from_fn(|_| Region::default());
         let mut area = [0usize; 13];
@@ -184,7 +184,8 @@ impl World {
                 };
                 if let Some(positions) = positions
                     && positions.iter().all(|pos| {
-                        self.players.values().all(|p| p.pos.distance(*pos) >= 12.)
+                        // Oryx top-ups avoid players by Kithio's AnyPlayerNearby radius: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Utils.cs#L34-L43
+                        self.players.values().all(|p| p.pos.distance(*pos) >= 16.)
                             && self
                                 .map
                                 .spawns
