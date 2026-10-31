@@ -815,27 +815,33 @@ fn server_driven_movement_still_enforces_speed_ingress_and_collision() {
 }
 
 #[test]
-fn lone_snake_reproduces_to_kithio_density() {
+fn snakes_reproduce_back_to_kithio_density() {
     let (mut world, _) = fixture(0x18, false);
     for cell in &mut Arc::make_mut(&mut world.map).cells {
         cell.terrain = 11;
     }
     world.population_regions[11].limit = 100;
-    let parent = world
-        .place_population_solo(0x602, Pos { x: 24.5, y: 24.5 })
-        .unwrap();
-    for _ in 0..10 {
-        world.reproduce(parent, 60000).unwrap();
-        world.reproduce(parent, 0).unwrap();
-    }
-    let snakes: Vec<_> = world.actors().filter(|e| e.kind == 0x602).collect();
-    assert_eq!(
-        snakes.len(),
-        5,
-        "Reproduce stops at densityMax 5 within 10 tiles"
-    );
-    assert!(snakes.iter().all(|e| e.population_slot.is_some()
-        && e.pos.distance(Pos { x: 24.5, y: 24.5 }) < 5.01));
+    let snakes: Vec<_> = [
+        (24.5, 24.5),
+        (25.5, 24.5),
+        (24.5, 25.5),
+        (23.5, 24.5),
+        (24.5, 23.5),
+    ]
+    .map(|(x, y)| world.place_population_solo(0x602, Pos { x, y }).unwrap())
+    .into();
+    let count = |world: &World| world.actors().filter(|e| e.kind == 0x602).count();
+    let cycle = |world: &mut World| {
+        world.now += 60000;
+        world.reproduce_active();
+        world.now += 1000;
+        world.reproduce_active();
+    };
+    cycle(&mut world);
+    assert_eq!(count(&world), 5, "densityMax 5 within 10 tiles is full");
+    world.remove_entity(snakes[0]);
+    cycle(&mut world);
+    assert_eq!(count(&world), 5, "survivors refill the missing Snake");
 }
 
 #[test]

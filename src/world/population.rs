@@ -174,7 +174,7 @@ fn member_positions(center: Pos, terrain: u8) -> Vec<Pos> {
         .collect()
 }
 /// Kithio Reproduce(children, densityRadius, densityMax, coolDown) on ordinary Realm parents: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Reproduce.cs
-// Golem and Swarm entries count themselves against densityMax 1, so they never fire; Djinn's Idle-only entry is not modeled.
+// Golem and Swarm entries count themselves against densityMax 1, so they never fire.
 pub(super) const REPRODUCTION: &[(u16, u16, f32, usize, u64)] = &[
     (0x601, 0x600, 10., 5, 60000),
     (0x601, 0x601, 10., 5, 60000),
@@ -200,6 +200,7 @@ pub(super) const REPRODUCTION: &[(u16, u16, f32, usize, u64)] = &[
     (0x657, 0x657, 10., 3, 60000),
     (0x658, 0x658, 10., 2, 60000),
     (0x659, 0x659, 10., 3, 60000),
+    (0x91a, 0x91a, 10., 4, 60000),
 ];
 
 #[derive(Debug, PartialEq, Eq)]
@@ -216,8 +217,11 @@ impl World {
             .entities
             .get(&id)
             .context("reproducing parent missing")?;
-        // Gray Blob only reproduces in its searching state, before the once-only creep.
-        if e.population_slot.is_none() || e.kind == 0x20d && e.stage == Some(1) {
+        // Gray Blob reproduces only while searching and Djinn only while Idle.
+        if e.population_slot.is_none()
+            || e.kind == 0x20d && e.stage == Some(1)
+            || e.kind == 0x91a && self.djinn_attacking.contains(&id)
+        {
             return Ok(());
         }
         let (kind, center) = (e.kind, e.pos);
@@ -241,6 +245,37 @@ impl World {
             );
         }
         Ok(())
+    }
+
+    pub(super) fn reproduce_active(&mut self) {
+        let delta = self.now - self.reproduction_at;
+        if delta < 1000 {
+            return;
+        }
+        self.reproduction_at = self.now;
+        // Kithio ticks behaviors only in 16-tile chunks within three chunks of a player: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Collision.cs#L187-L213
+        let chunk = |p: Pos| ((p.x / 16.) as i32, (p.y / 16.) as i32);
+        let players: Vec<_> = self.players.values().map(|p| chunk(p.pos)).collect();
+        let parents: Vec<_> = self
+            .population
+            .iter()
+            .filter_map(|slot| slot.entity)
+            .filter(|id| {
+                let e = &self.entities[id];
+                let (x, y) = chunk(e.pos);
+                REPRODUCTION.iter().any(|r| r.0 == e.kind)
+                    && players
+                        .iter()
+                        .any(|(px, py)| (x - px).abs() <= 3 && (y - py).abs() <= 3)
+            })
+            .collect();
+        for id in parents {
+            if self.entities.contains_key(&id)
+                && let Err(error) = self.reproduce(id, delta)
+            {
+                tracing::error!(entity = id, %error, "ordinary reproduction refused");
+            }
+        }
     }
 
     fn try_reproduce(
@@ -281,16 +316,6 @@ impl World {
             let Some(positions) = positions else {
                 continue;
             };
-            if !positions.iter().all(|pos| {
-                self.players.values().all(|p| p.pos.distance(*pos) >= 12.)
-                    && self
-                        .map
-                        .spawns
-                        .iter()
-                        .all(|(x, y)| pos.distance(Pos { x: *x, y: *y }) >= 12.)
-            }) {
-                continue;
-            }
             let id = match family {
                 Some(family) => {
                     let slot = self.population.len();
