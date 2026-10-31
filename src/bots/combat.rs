@@ -1,52 +1,14 @@
 use super::*;
 use crate::world::view::{VisibleObject, VisibleProjectile};
 
+/// How finely a player reads motion; every visible hostile bullet is weighed.
 pub(super) struct Perception {
-    attended: Vec<(i32, u8)>,
     step: f32,
     directions: usize,
 }
 impl Perception {
-    pub(super) fn attend(v: &PlayerView, cognition: &pursuits::Cognition, occupied: bool) -> Self {
-        let budget = if occupied {
-            cognition.attention.saturating_sub(1).max(1)
-        } else {
-            cognition.attention
-        };
-        let mut candidates: Vec<_> = v
-            .projectiles
-            .iter()
-            .filter(|b| hostile(v, b.owner))
-            .collect();
-        if events::shared(&v.map.name) {
-            let approaching = |b: &VisibleProjectile| {
-                (0..=3)
-                    .filter_map(|step| predicted(b, step as f32 * 0.2))
-                    .map(|p| p.distance(v.position))
-                    .fold(f32::INFINITY, f32::min)
-            };
-            candidates.sort_by(|a, b| approaching(a).total_cmp(&approaching(b)));
-        }
-        let attended: Vec<_> = candidates
-            .into_iter()
-            .take(budget)
-            .map(|b| (b.owner, b.id))
-            .collect();
-        if occupied || !attended.is_empty() {
-            tracing::info!(
-                account = v.session.account,
-                player = v.session.player,
-                tick = v.tick,
-                occupied,
-                ?attended,
-                budget,
-                velocity_step = cognition.velocity_step,
-                directions = cognition.directions,
-                "autonomous attended threat estimates"
-            );
-        }
+    pub(super) fn of(cognition: &pursuits::Cognition) -> Self {
         Self {
-            attended,
             step: cognition.velocity_step,
             directions: cognition.directions,
         }
@@ -108,7 +70,7 @@ pub(super) fn speed(v: &PlayerView) -> f32 {
     speed * ground
 }
 
-pub(super) fn clearance(v: &PlayerView, destination: Pos, perception: &Perception) -> f32 {
+pub(super) fn clearance(v: &PlayerView, destination: Pos) -> f32 {
     let speed = speed(v);
     let distance = v.position.distance(destination);
     let mut minimum = 20_f32;
@@ -123,17 +85,49 @@ pub(super) fn clearance(v: &PlayerView, destination: Pos, perception: &Perceptio
             x: v.position.x + (destination.x - v.position.x) * fraction,
             y: v.position.y + (destination.y - v.position.y) * fraction,
         };
-        for bullet in v
-            .projectiles
-            .iter()
-            .filter(|b| perception.attended.contains(&(b.owner, b.id)))
-        {
+        for bullet in v.projectiles.iter().filter(|b| hostile(v, b.owner)) {
             if let Some(pos) = predicted(bullet, seconds) {
                 minimum = minimum.min(player.distance(pos));
             }
         }
     }
     minimum
+}
+
+/// What a hit costs after own defense; shot damage is public in 2012's enemy-shot packet.
+fn cost(v: &PlayerView, raw: i32, piercing: bool) -> i32 {
+    crate::condition::damage(raw, v.character.stats[3], v.character.conditions, piercing)
+}
+/// Damage from visible bullets that reach this spot within half a second if the player stands still.
+pub(super) fn incoming(v: &PlayerView) -> i32 {
+    v.projectiles
+        .iter()
+        .filter(|b| hostile(v, b.owner))
+        .filter(|b| {
+            (0..=10).any(|step| {
+                predicted(b, step as f32 * 0.05).is_some_and(|p| p.distance(v.position) < 0.6)
+            })
+        })
+        .map(|b| cost(v, b.damage, b.armor_piercing))
+        .sum()
+}
+/// The hardest single hit anything nearby can land, from its bullets in flight and its known attacks.
+pub(super) fn biggest_hit(v: &PlayerView, c: &Content, enemies: &[&VisibleObject]) -> i32 {
+    let flying = v
+        .projectiles
+        .iter()
+        .filter(|b| hostile(v, b.owner))
+        .map(|b| cost(v, b.damage, b.armor_piercing));
+    let known = enemies
+        .iter()
+        .filter(|e| e.position.distance(v.position) < 15.)
+        .flat_map(|e| {
+            c.objects[&e.kind]
+                .projectiles
+                .values()
+                .map(|p| cost(v, p.max, p.armor_piercing))
+        });
+    flying.chain(known).max().unwrap_or(0)
 }
 
 pub(super) fn lead(
@@ -428,7 +422,7 @@ pub(super) fn movement(
         if !grid.segment(v.position, point) {
             continue;
         }
-        let safety = clearance(v, point, perception);
+        let safety = clearance(v, point);
         if steering.is_some_and(|s| safety < s.clearance) {
             continue;
         }

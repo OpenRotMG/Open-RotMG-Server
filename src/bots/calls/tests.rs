@@ -207,11 +207,11 @@ fn speed_currency_motive_requires_unfunded_missing_target_and_safe_shared_terms(
 fn stale_world_caller_and_expiry_cannot_dispatch_or_reroll() {
     let (c, mut v, mut b) = fixture();
     pending(&mut b, &v);
-    v.objects.clear();
+    v.player_markers.clear();
     assert_eq!(
         b.call_target(&v, &c).unwrap(),
         None,
-        "marker alone is not a live visible caller"
+        "a caller gone from the minimap cannot be reached"
     );
     assert_eq!(
         b.calls.last.as_ref().unwrap()["reason"],

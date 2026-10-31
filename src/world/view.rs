@@ -190,6 +190,8 @@ pub struct VisibleProjectile {
     pub amplitude: f32,
     pub frequency: f32,
     pub passes_cover: bool,
+    pub damage: i32,
+    pub armor_piercing: bool,
 }
 
 impl Directory {
@@ -326,6 +328,8 @@ impl World {
                 amplitude: b.spec.amplitude,
                 frequency: b.spec.frequency,
                 passes_cover: b.spec.passes_cover,
+                damage: b.damage,
+                armor_piercing: b.spec.armor_piercing,
             })
             .collect();
         let view = PlayerView {

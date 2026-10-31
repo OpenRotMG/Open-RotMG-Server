@@ -240,6 +240,8 @@ struct Scene<'a> {
     passes_cover: bool,
     health: f32,
     threatened: bool,
+    /// Hardest hit faced in the last half minute, after own defense.
+    hit: i32,
     retreat: bool,
     outmatched: bool,
     grid: Arc<Grid>,
@@ -292,6 +294,9 @@ struct Brain {
     nexus_spot: Option<Pos>,
     portal: Option<(i32, u64)>,
     hunting: Option<Pos>,
+    /// Hardest hit seen and when; survives a brief loss of sight of the shooter.
+    danger: (i32, u64),
+    next_train_call: u64,
     /// Last logged Realm quest and whether it was worth joining.
     quest_interest: Option<(i32, bool)>,
     last_encounter: u64,
@@ -371,6 +376,8 @@ impl Brain {
             nexus_spot: None,
             portal: None,
             hunting: None,
+            danger: (0, 0),
+            next_train_call: 0,
             quest_interest: None,
             last_encounter: view.time_ms,
             navigation: None,
@@ -735,7 +742,7 @@ impl Brain {
         }
         let reserved = self.mind.market.reserves_stock();
         let inspecting = self.mind.inspecting(v, content);
-        let perception = combat::Perception::attend(v, &self.mind.cognition, inspecting);
+        let perception = combat::Perception::of(&self.mind.cognition);
         let equipment = if decision.item.is_none() && !reserved {
             self.mind.assess(v, content)?
         } else {
@@ -809,9 +816,27 @@ impl Brain {
             .context("weapon projectile missing")?;
         let range = projectile.speed * projectile.lifetime / 10000.;
         let health = v.character.hp as f32 / v.character.stats[0] as f32;
-        let threatened =
-            combat::clearance(v, v.position, &perception) < self.mind.cognition.pickup_clearance;
-        if health < self.profile.recovery {
+        let threatened = combat::clearance(v, v.position) < self.mind.cognition.pickup_clearance;
+        // Health is judged in hits of what this player faces, so more max HP buys more courage.
+        let seen = combat::biggest_hit(v, content, &enemies);
+        if seen > 0 {
+            self.danger = (seen, v.time_ms);
+        }
+        let hit = if v.time_ms.saturating_sub(self.danger.1) < 30_000 {
+            self.danger.0.max(seen)
+        } else {
+            seen
+        };
+        // A persona's own share of health is the floor; hard hitters raise it by hits in reserve, up to a cap.
+        let (hp, max) = (v.character.hp as f32, v.character.stats[0] as f32);
+        let recovery = self.profile.recovery;
+        let hits = |n: f32| n * hit as f32;
+        let wounded =
+            (max * recovery).max(hits(1.5 + 5. * recovery).min(max * (0.4 + 0.5 * recovery)));
+        let healthy = (wounded + hits(3.))
+            .max(max * (recovery + 0.15))
+            .min(max * 0.95);
+        if hp < wounded {
             self.recover_until = v.tick + 60;
         }
         let outmatched = enemies.iter().any(|enemy| {
@@ -819,8 +844,7 @@ impl Brain {
         });
         let retreat = outmatched
             || v.tick < self.recover_until
-            || (matches!(self.goal, Goal::Recover)
-                && health < (self.profile.recovery + 0.15).min(0.9));
+            || (matches!(self.goal, Goal::Recover) && hp < healthy);
         let avoid: Vec<_> = enemies
             .iter()
             .filter(|enemy| !retreat && !progression::can_fight(v, content, enemy))
@@ -865,6 +889,7 @@ impl Brain {
             passes_cover: projectile.passes_cover,
             health,
             threatened,
+            hit,
             retreat,
             outmatched,
             grid,
@@ -1190,16 +1215,14 @@ impl Brain {
             enemies,
             nearest,
             range,
-            health,
             threatened,
             retreat,
             outmatched,
             remedy,
             ..
         } = s;
-        let (range, health, threatened, retreat, outmatched, nearest, remedy) = (
+        let (range, threatened, retreat, outmatched, nearest, remedy) = (
             *range,
-            *health,
             *threatened,
             *retreat,
             *outmatched,
@@ -1251,13 +1274,15 @@ impl Brain {
                 .iter()
                 .filter(|kind| **kind >= 0)
                 .any(|kind| content.objects[&(*kind as u16)].activate == "Heal");
-            let emergency = self.profile.recovery * 0.5;
-            // A Nexus exit restarts the whole journey, so only critical health or real overmatch justify it.
+            let incoming = combat::incoming(v);
+            // A Nexus exit restarts the whole journey, so only a lethal hit or real overmatch justifies it.
             let escape =
                 if outmatched && nearest.is_some_and(|e| e.position.distance(v.position) < 4.) {
                     Some("near_outmatched")
-                } else if !held_heal && health < emergency {
-                    Some("critical_health")
+                } else if incoming >= v.character.hp {
+                    Some("lethal_volley")
+                } else if !held_heal && v.character.hp <= s.hit {
+                    Some("next_hit_lethal")
                 } else {
                     None
                 };
@@ -1270,7 +1295,8 @@ impl Brain {
                     character = v.session.character,
                     hp = v.character.hp,
                     max_hp = v.character.stats[0],
-                    emergency_threshold = emergency,
+                    incoming,
+                    hit = s.hit,
                     reason,
                     "autonomous recovery escape selected"
                 );
@@ -2074,6 +2100,22 @@ impl Brain {
                         &mut decision,
                     )?;
                 }
+            }
+            // A crowd fighting gods advertises itself, as 2012 trains did with "train here".
+            if let Goal::Fight(id) | Goal::Hunt(id) = decision.goal
+                && v.map.name == "Realm"
+                && v.character.level == 20
+                && decision.chat.is_none()
+                && v.time_ms >= self.next_train_call
+                && enemies.iter().any(|e| {
+                    e.id == id
+                        && content.objects[&e.kind].god
+                        && content.objects[&e.kind].terrain == 1
+                })
+                && self.crowd.near(v, v.position) >= 2
+            {
+                self.next_train_call = v.time_ms + self.rng.gen_range(120_000..300_000);
+                decision.chat = Some("train here");
             }
             return Ok(decision);
         }

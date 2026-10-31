@@ -18,12 +18,13 @@ fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
         nearest: enemies.last().copied(),
         quarry: enemies.last().copied(),
         enemies,
-        perception: combat::Perception::attend(v, &brain.mind.cognition, false),
+        perception: combat::Perception::of(&brain.mind.cognition),
         inspecting: false,
         range: 6.,
         passes_cover: false,
         health: v.character.hp as f32 / v.character.stats[0] as f32,
         threatened: false,
+        hit: 0,
         retreat: false,
         outmatched: false,
         grid: Arc::new(Grid::terrain(v)),
@@ -594,6 +595,8 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
         amplitude: 0.,
         frequency: 0.,
         passes_cover: false,
+        damage: 0,
+        armor_piercing: false,
     });
     let mut brain = Brain::new(ARCHETYPES[1], &v);
     let d = brain.decide(&v, &c).unwrap();
@@ -692,4 +695,37 @@ fn veteran_carrying_tradeable_loot_travels_to_the_nexus_to_trade_it() {
     );
     assert_eq!(brain.plan.owner(), Some(plan::Owner::Trade));
     assert!(brain.mind.market.sought);
+}
+
+#[test]
+fn bot_escapes_a_volley_that_would_kill_it_before_its_health_looks_low() {
+    // Live: Cube God volleys took 100-300 HP at once, so escaping below a quarter of max health came too late.
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.objects.clear();
+    v.character.hp = 300;
+    v.projectiles.push(crate::world::view::VisibleProjectile {
+        owner: 2,
+        id: 1,
+        start: Pos { x: 13.5, y: 10.5 },
+        position: Pos { x: 11., y: 10.5 },
+        angle: std::f32::consts::PI,
+        speed: 100.,
+        lifetime_ms: 2000.,
+        amplitude: 0.,
+        frequency: 0.,
+        passes_cover: false,
+        damage: 400,
+        armor_piercing: false,
+    });
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(matches!(d.journey, Some(Journey::Nexus)), "{:?}", d.goal);
+    assert!(
+        brain
+            .plan
+            .events
+            .iter()
+            .any(|e| e.reason == "lethal_volley")
+    );
 }
