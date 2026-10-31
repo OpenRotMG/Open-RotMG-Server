@@ -1639,6 +1639,7 @@ impl Brain {
             let score = 55. + 5. * crowd.min(6) as f32 + self.profile.companions;
             let distance = marker.position.distance(v.position);
             if !choices.iter().any(|(s, _, _)| *s > score)
+                && crowd >= 2
                 && peaceful
                 && health >= 0.75
                 && distance > 24.

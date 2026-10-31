@@ -48,11 +48,28 @@ fn decide(
 }
 
 #[test]
-fn midlands_player_teleports_to_someone_in_its_own_area_instead_of_exploring() {
+fn midlands_player_teleports_to_a_crowd_in_its_own_area_instead_of_exploring() {
     // Live: 3 of 41 Realm bots below level 20 had another bot within 10 tiles; most explored alone.
+    let pair = || vec![marker(3, 70.5, 10.5), marker(4, 72.5, 10.5)];
+    let d = decide(ARCHETYPES[0], 11, pair(), Some(6));
+    assert!(
+        matches!(d.journey, Some(Journey::Regroup(3 | 4))),
+        "{:?} {:?}",
+        d.goal,
+        d.journey
+    );
+    // A nearby crowd counts as the player's own area even on ground it has not seen.
+    let d = decide(ARCHETYPES[0], 11, pair(), None);
+    assert!(
+        matches!(d.journey, Some(Journey::Regroup(3 | 4))),
+        "{:?} {:?}",
+        d.goal,
+        d.journey
+    );
+    // Live: 233 of 400 gathering teleports went to a lone player, who moved on.
     let d = decide(ARCHETYPES[0], 11, vec![marker(3, 70.5, 10.5)], Some(6));
     assert!(
-        matches!(d.journey, Some(Journey::Regroup(3))),
+        !matches!(d.journey, Some(Journey::Regroup(_))),
         "{:?} {:?}",
         d.goal,
         d.journey
