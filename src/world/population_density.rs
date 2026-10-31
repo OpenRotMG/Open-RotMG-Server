@@ -3,7 +3,6 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Region {
     pub(super) target: usize,
-    pub(super) limit: usize,
     sites: Vec<Pos>,
     kinds: Vec<u16>,
 }
@@ -48,14 +47,6 @@ impl World {
                 .find(|f| f.leader == object.kind)
             {
                 self.validate_family(family)?;
-                let roots = match object.spawn_group {
-                    Some(group) => group.max,
-                    None => 1,
-                };
-                ensure!(
-                    roots * family.initial() <= 32,
-                    "population group exceeds birth headroom"
-                );
             }
             self.population_regions[object.terrain as usize]
                 .kinds
@@ -71,12 +62,6 @@ impl World {
         for terrain in 1..=12 {
             let region = &mut self.population_regions[terrain];
             region.target = area[terrain] / divisors[terrain];
-            // Reserve a complete maximum-size birth burst without allowing unbounded reinforcements.
-            region.limit = if region.target == 0 {
-                0
-            } else {
-                region.target * 3 / 2 + 32
-            };
             ensure!(
                 region.target == 0 || !region.sites.is_empty() && !region.kinds.is_empty(),
                 "terrain {terrain} lacks population sites or species"
@@ -85,7 +70,6 @@ impl World {
                 terrain,
                 area = area[terrain],
                 target = region.target,
-                limit = region.limit,
                 sites = region.sites.len(),
                 species = region.kinds.len(),
                 "Realm population reconstruction configured"
@@ -151,22 +135,13 @@ impl World {
             }
         }
     }
-    fn spawn_population_group(&mut self, terrain: u8, kind: u16) -> Result<bool> {
+    fn spawn_population_group(&mut self, terrain: u8, kind: u16) -> Result<usize> {
         let family = population::FAMILIES.iter().find(|f| f.leader == kind);
         let roots = self.sample_population_group(kind);
-        let cost = roots * family.map_or(1, |f| f.initial());
-        if !self.population_space(terrain, cost)? {
-            return Ok(false);
-        }
         let center = *self.population_regions[terrain as usize]
             .sites
             .choose(&mut self.rng)
             .context("population has no candidate site")?;
-        let clearance = if matches!(kind, 0x604 | 0x953) {
-            64.
-        } else {
-            12.
-        };
         let mut groups = Vec::with_capacity(roots);
         let mut occupied = Vec::new();
         for root in 0..roots {
@@ -190,22 +165,17 @@ impl World {
                     None => Some(vec![pos]),
                 };
                 if let Some(positions) = positions
-                    && positions.iter().all(|pos| {
-                        // Oryx top-ups avoid players by Kithio's AnyPlayerNearby radius: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Utils.cs#L34-L43
-                        self.players.values().all(|p| p.pos.distance(*pos) >= 16.)
-                            && self
-                                .map
-                                .spawns
-                                .iter()
-                                .all(|(x, y)| pos.distance(Pos { x: *x, y: *y }) >= clearance)
-                    })
+                    // Oryx avoids only players, by Kithio's AnyPlayerNearby radius: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Utils.cs#L34-L43
+                    && positions
+                        .iter()
+                        .all(|pos| self.players.values().all(|p| p.pos.distance(*pos) >= 16.))
                 {
                     layout = Some(positions);
                     break;
                 }
             }
             let Some(positions) = layout else {
-                return Ok(false);
+                return Ok(0);
             };
             occupied.extend(positions.iter().copied());
             groups.push(positions);
@@ -219,13 +189,14 @@ impl World {
                 }
             }
         }
-        Ok(true)
+        Ok(roots)
     }
     fn fill_population(&mut self, terrain: u8) -> Result<()> {
         let target = self.population_regions[terrain as usize].target;
         let kinds = self.population_regions[terrain as usize].kinds.clone();
-        let (mut refused, mut stalled, mut groups) = (0, 0, 0);
-        while self.population_count(terrain) < target && stalled < 128 {
+        let needed = target.saturating_sub(self.population_roots(terrain).len());
+        let (mut roots, mut refused, mut stalled, mut groups) = (0, 0, 0, 0);
+        while roots < needed && stalled < 128 {
             // SpawnProb's original selector is lost; relative XML weights are an explicit reconstruction choice.
             let kind = *kinds
                 .choose_weighted(&mut self.rng, |kind| {
@@ -234,27 +205,31 @@ impl World {
                         .expect("validated spawn weight")
                 })
                 .context("invalid population weights")?;
-            if self.spawn_population_group(terrain, kind)? {
-                groups += 1;
-                stalled = 0;
-            } else {
-                refused += 1;
-                stalled += 1;
+            match self.spawn_population_group(terrain, kind)? {
+                0 => {
+                    refused += 1;
+                    stalled += 1;
+                }
+                placed => {
+                    roots += placed;
+                    groups += 1;
+                    stalled = 0;
+                }
             }
         }
         tracing::info!(
             terrain,
             target,
+            needed,
+            roots,
             bodies = self.population_count(terrain),
             groups,
             refused,
             "Realm ordinary population allocated"
         );
         ensure!(
-            self.population_count(terrain) >= target,
-            "terrain {terrain} cannot fill population: {}/{} bodies after {stalled} consecutive refusals",
-            self.population_count(terrain),
-            target
+            roots >= needed,
+            "terrain {terrain} cannot fill population: {roots}/{needed} roots after {stalled} consecutive refusals"
         );
         Ok(())
     }
@@ -325,9 +300,10 @@ impl World {
             for terrain in 1..=12 {
                 let target = self.population_regions[terrain as usize].target;
                 // Kithio culls above 150% and refills below 75%: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Oryx.cs#L298-L357
-                if self.population_count(terrain) * 2 > target * 3 {
+                let roots = self.population_roots(terrain).len();
+                if roots * 2 > target * 3 {
                     self.cull_population(terrain);
-                } else if self.population_count(terrain) * 4 < target * 3 {
+                } else if roots * 4 < target * 3 {
                     self.fill_population(terrain)?;
                 }
             }
@@ -335,15 +311,24 @@ impl World {
         self.reproduce_active();
         self.repopulate_families()
     }
-    pub(super) fn cull_population(&mut self, terrain: u8) {
-        let excess =
-            self.population_count(terrain) - self.population_regions[terrain as usize].target;
-        // Only bodies without a player within 10 tiles leave, so active areas keep their regrowth.
-        let culled: Vec<_> = self
-            .population
+    // Kithio Oryx counts the roots it spawns; eager family members stand in for children its roots summon only once active.
+    pub(super) fn population_roots(&self, terrain: u8) -> Vec<i32> {
+        self.population
             .iter()
-            .filter(|slot| self.population_terrain(slot) == terrain)
-            .filter_map(|slot| slot.entity)
+            .enumerate()
+            .filter(|(i, slot)| {
+                self.population_terrain(slot) == terrain
+                    && slot.camp.is_none_or(|camp| self.camps[camp].start == *i)
+            })
+            .filter_map(|(_, slot)| slot.entity)
+            .collect()
+    }
+    pub(super) fn cull_population(&mut self, terrain: u8) {
+        let roots = self.population_roots(terrain);
+        let excess = roots.len() - self.population_regions[terrain as usize].target;
+        // Only roots without a player within 10 tiles leave, so active areas keep their regrowth.
+        let culled: Vec<_> = roots
+            .into_iter()
             .filter(|id| {
                 let pos = self.entities[id].pos;
                 self.players.values().all(|p| p.pos.distance(pos) >= 10.)
@@ -351,11 +336,18 @@ impl World {
             .take(excess)
             .collect();
         for &id in &culled {
-            self.remove_entity(id);
+            let family: Vec<_> = match self.entities[&id].camp {
+                Some(camp) => self.camp_members(camp).map(|e| e.id).collect(),
+                None => vec![id],
+            };
+            for member in family {
+                self.remove_entity(member);
+            }
         }
         tracing::info!(
             terrain,
             culled = culled.len(),
+            roots = self.population_roots(terrain).len(),
             bodies = self.population_count(terrain),
             "Realm ordinary population culled"
         );
@@ -413,14 +405,6 @@ fn populated_realms_keep_all_arrivals_connected() -> Result<()> {
                 "{name}: arrival {x},{y}"
             );
             assert_eq!(world.map.cells[i].terrain, 11, "{name}: arrival habitat");
-            assert!(
-                world
-                    .entities
-                    .values()
-                    .filter(|e| e.population_slot.is_some())
-                    .all(|e| e.pos.distance(Pos { x, y }) >= 12.),
-                "{name}: arrival population clearance"
-            );
             println!("{name} arrival={x},{y} distance_from_south={}", distance[i]);
         }
         for (label, matches) in [("road", 0xd0), ("rock", 0x60)] {
@@ -483,7 +467,7 @@ fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
                 .filter(|c| c.terrain as usize == terrain)
                 .count();
             let count = world.population_count(terrain as u8);
-            assert!(count >= region.target && count <= region.limit);
+            assert!(world.population_roots(terrain as u8).len() >= region.target);
             let kinds: BTreeSet<_> = world
                 .entities
                 .values()
@@ -494,10 +478,9 @@ fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
                 .map(|e| e.kind)
                 .collect();
             println!(
-                "{name} terrain={terrain} area={area} sites={} target={} limit={} bodies={count} kinds={kinds:?}",
+                "{name} terrain={terrain} area={area} sites={} target={} bodies={count} kinds={kinds:?}",
                 region.sites.len(),
-                region.target,
-                region.limit
+                region.target
             );
             for kind in match terrain {
                 2 => &[0x646, 0x649, 0x903][..],

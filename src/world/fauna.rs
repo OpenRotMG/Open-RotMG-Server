@@ -106,9 +106,6 @@ impl World {
                         self.population[slot].entity.is_none(),
                         "Green Slime split slot already occupied"
                     );
-                    if !self.population_space(6, 1)? {
-                        break;
-                    }
                     self.place_member(camp, slot, dead.pos)?;
                     spawned += 1;
                 }
@@ -244,9 +241,6 @@ impl World {
                             self.population[slot].entity.is_none(),
                             "Lil Sumo slot already occupied"
                         );
-                        if !self.population_space(9, 1)? {
-                            break;
-                        }
                         self.place_member(camp, slot, self.population[slot].pos)?;
                         spawned += 1;
                     }

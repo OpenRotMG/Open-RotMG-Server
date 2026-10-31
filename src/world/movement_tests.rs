@@ -298,7 +298,6 @@ fn goblin_birth_budget_survives_escort_deaths_and_parent_loss() {
     for cell in &mut Arc::make_mut(&mut world.map).cells {
         cell.terrain = 10;
     }
-    world.population_regions[10].limit = 100;
     let family = super::population::FAMILIES
         .iter()
         .find(|f| f.leader == 0x614)
@@ -820,7 +819,6 @@ fn snakes_reproduce_back_to_kithio_density() {
     for cell in &mut Arc::make_mut(&mut world.map).cells {
         cell.terrain = 11;
     }
-    world.population_regions[11].limit = 100;
     let snakes: Vec<_> = [
         (24.5, 24.5),
         (25.5, 24.5),
@@ -850,7 +848,6 @@ fn oryx_culls_excess_away_from_players() {
     for cell in &mut Arc::make_mut(&mut world.map).cells {
         cell.terrain = 11;
     }
-    world.population_regions[11].limit = 100;
     world.population_regions[11].target = 2;
     let near = world.players[&player].pos;
     let kept = world.place_population_solo(0x602, near).unwrap();

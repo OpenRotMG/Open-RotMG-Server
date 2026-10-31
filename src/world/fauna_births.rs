@@ -84,17 +84,6 @@ impl World {
         e.next_aux = self.now + if phase == 2 { 3400 } else { 1000 };
         Ok(())
     }
-    pub(super) fn pending_fauna_count(&self, terrain: u8) -> usize {
-        self.fauna_births
-            .iter()
-            .filter(|b| {
-                self.camps[b.camp].family.terrain == terrain
-                    && self.population[b.slot]
-                        .entity
-                        .is_none_or(|id| !self.entities.contains_key(&id))
-            })
-            .count()
-    }
     pub(super) fn fauna_toss(
         &mut self,
         owner: i32,
@@ -134,13 +123,6 @@ impl World {
                 );
                 continue;
             }
-            if self.population[slot]
-                .entity
-                .is_none_or(|id| !self.entities.contains_key(&id))
-                && !self.population_space(family.terrain, 1)?
-            {
-                break;
-            }
             ensure!(
                 self.fauna_births.len() < 256,
                 "pending fauna birth budget exhausted"
@@ -163,7 +145,7 @@ impl World {
             kind,
             requested = positions.len(),
             admitted,
-            "fauna tosses admitted within owned slot and regional budgets"
+            "fauna tosses admitted within owned slots"
         );
         Ok(admitted)
     }
