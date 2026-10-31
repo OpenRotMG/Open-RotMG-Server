@@ -413,11 +413,22 @@ impl Projection {
 #[test]
 fn unwatched_bot_ticks_are_not_encoded_and_the_first_watched_tick_is_complete() {
     let (mut world, id) = super::movement_tests::fixture(0x18, false);
-    world.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+    // Production bots own an output channel, as autonomous entry provides one.
+    let (packets, mut output) = tokio::sync::mpsc::channel(256);
+    let bot = world.players.get_mut(&id).unwrap();
+    bot.controller = Controller::Autonomous;
+    bot.tx = Some(Output {
+        packets,
+        lost: tokio::sync::watch::channel(None).0,
+    });
     world.updates(id, true).unwrap();
     for _ in 0..6 {
         world.step();
     }
+    assert!(
+        std::iter::from_fn(|| output.try_recv().ok()).all(|packet| packet.id != wire::NEW_TICK),
+        "bot output received a NEW_TICK"
+    );
     assert_eq!(
         world.players[&id].tick_stats.elided, 0,
         "unwatched tick was encoded"
