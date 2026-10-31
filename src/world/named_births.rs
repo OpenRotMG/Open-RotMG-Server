@@ -45,7 +45,7 @@ impl World {
                 self.summon_entities().count()
                     + self.named_births.len()
                     + self.abyss_pending_count()
-                    < 256,
+                    < self.summon_limit(),
                 SummonBudget("shared summon budget exhausted before toss".into())
             );
             if kind != 0xe3b {

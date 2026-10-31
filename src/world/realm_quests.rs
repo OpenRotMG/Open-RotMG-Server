@@ -362,7 +362,7 @@ impl World {
         }
         ensure!(
             self.summon_count() + self.named_births.len() + self.abyss_pending_count() + count
-                <= 256,
+                <= self.summon_limit(),
             SummonBudget("shared summon budget exhausted".into())
         );
         let mut positions = Vec::new();

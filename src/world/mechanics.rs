@@ -192,7 +192,8 @@ impl World {
         if self.name == "Manor of the Immortals" {
             crate::dungeon::manor::SUMMON_LIMIT
         } else {
-            256
+            // Each Realm holds about fifty 32-follower quests; 256 starved concurrent bot fights.
+            1024
         }
     }
 

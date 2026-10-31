@@ -226,10 +226,10 @@ mod tests {
         let holder = w
             .spawn_entity(0x223, Pos { x: 60., y: 60. }, vec![])
             .unwrap();
-        for i in 0..256 {
+        for i in 0..w.summon_limit() {
             let pos = Pos {
-                x: 1.5 + (i % 60) as f32,
-                y: 50.5 + (i / 60) as f32,
+                x: 0.5 + (i % 64) as f32,
+                y: 40.5 + (i / 64) as f32,
             };
             let filler = w.spawn_entity(0x223, pos, vec![]).unwrap();
             w.entities

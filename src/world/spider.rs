@@ -51,7 +51,7 @@ impl World {
                     + self.named_births.len()
                     + self.abyss_pending_count()
                     + positions.len()
-                    <= 256,
+                    <= self.summon_limit(),
                 SummonBudget("Spider Den summon budget exhausted".into())
             );
             ensure!(
