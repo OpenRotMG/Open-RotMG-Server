@@ -2134,7 +2134,7 @@ type TilePoint = (i16, i16);
 mod movement;
 use movement::Grid;
 
-mod runtime;
+pub(crate) mod runtime;
 pub(crate) const OUTPUT_CAPACITY: usize = 512;
 pub use runtime::start;
 pub fn persona_count() -> usize {

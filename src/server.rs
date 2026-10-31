@@ -105,6 +105,7 @@ pub(crate) type PersonaDepartureGate = (
 #[derive(Clone)]
 pub struct App {
     pub started: std::time::Instant,
+    pub thinking: tokio::runtime::Handle,
     pub testing: Option<testing::Testing>,
     pub diagnostics: Arc<diagnostics::Diagnostics>,
     pub store: Store,

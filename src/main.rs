@@ -28,7 +28,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(serve(args));
+    let thinking = bots::runtime::thinking_runtime()?;
+    let result = runtime.block_on(serve(args, thinking.handle().clone()));
+    thinking.shutdown_timeout(std::time::Duration::from_secs(5));
     runtime.shutdown_timeout(std::time::Duration::from_secs(5));
     result
 }
@@ -41,7 +43,7 @@ fn validate_client_assets(client: &std::path::Path) -> Result<()> {
     }
     Ok(())
 }
-async fn serve(args: Vec<String>) -> Result<()> {
+async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()> {
     if backup::run(&args).await? {
         return Ok(());
     }
@@ -157,6 +159,7 @@ async fn serve(args: Vec<String>) -> Result<()> {
     };
     let app = server::App {
         started,
+        thinking,
         testing,
         diagnostics: Arc::new(server::diagnostics::Diagnostics::open(
             state.join("bug-reports"),

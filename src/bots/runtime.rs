@@ -10,6 +10,26 @@ use crate::{
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
+// On 2 vCPUs, equal-priority bot AI made Realm ticks start late; world threads must win the CPU.
+pub(crate) fn thinking_runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .thread_name("bot-ai")
+        .on_thread_start(|| {
+            let tid = unsafe { libc::gettid() } as libc::id_t;
+            let current = unsafe { libc::getpriority(libc::PRIO_PROCESS, tid) };
+            let lowered =
+                unsafe { libc::setpriority(libc::PRIO_PROCESS, tid, (current + 10).min(19)) };
+            assert_eq!(
+                lowered,
+                0,
+                "lower bot thinking priority: {}",
+                std::io::Error::last_os_error()
+            );
+        })
+        .enable_all()
+        .build()?)
+}
+
 // The inclusive interval also awaits policy/Store; these elapsed (not CPU) subspans leave clone/log/bookkeeping outside.
 fn record_decision_phase_elapsed<T>(
     window: &mut crate::performance::Window,
@@ -885,7 +905,7 @@ pub(super) async fn launch(
         .expect("adventure registry poisoned")
         .register(account, lists);
     let app = app.clone();
-    tokio::spawn(async move {
+    app.thinking.clone().spawn(async move {
         let _entry = entry;
         let mut owner = Some(owner);
         let mut shutdown = app.shutdown.subscribe();
@@ -1408,6 +1428,22 @@ fn close_controller(
 
 #[cfg(test)]
 mod composer_tests;
+#[test]
+fn bot_thinking_runs_below_world_priority() {
+    let nice = || unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) };
+    let world = nice();
+    let thinking = thinking_runtime().unwrap();
+    let (bot, name) = thinking
+        .block_on(
+            thinking
+                .spawn(async move { (nice(), std::thread::current().name().map(str::to_owned)) }),
+        )
+        .unwrap();
+    assert_eq!(
+        (bot, name.as_deref()),
+        ((world + 10).min(19), Some("bot-ai"))
+    );
+}
 #[cfg(test)]
 mod input_tests;
 #[cfg(test)]
