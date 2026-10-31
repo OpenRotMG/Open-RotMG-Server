@@ -605,7 +605,7 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
 }
 
 #[test]
-fn explorer_joins_a_crowded_realm_event_by_teleporting_into_the_crowd() {
+fn explorer_joins_a_crowded_realm_event_by_teleporting_outside_the_fight() {
     // Live: level 20s kept exploring past their quest and routed around any event they could not solo, even in a crowd.
     let (c, mut v) = fixture();
     v.character.level = 20;
@@ -619,17 +619,23 @@ fn explorer_joins_a_crowded_realm_event_by_teleporting_into_the_crowd() {
             name: format!("P{id}"),
             position: Pos {
                 x: 8.5 + id as f32,
-                y: 79.5,
+                y: 85.5,
             },
         })
         .collect();
+    v.player_markers.push(PlayerMarker {
+        id: 7,
+        account: 7,
+        name: "Outside".into(),
+        position: Pos { x: 10.5, y: 66.5 },
+    });
     let mut brain = Brain::new(ARCHETYPES[0], &v);
     brain.goal = Goal::Explore(20, 10);
     brain.travel = Some((Goal::Explore(20, 10), u64::MAX));
     let d = brain.decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Hunt(2));
     assert!(
-        matches!(d.journey, Some(Journey::Regroup(3))),
+        matches!(d.journey, Some(Journey::Regroup(7))),
         "{:?}",
         d.journey
     );
