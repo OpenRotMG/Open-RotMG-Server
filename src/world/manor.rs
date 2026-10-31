@@ -26,7 +26,7 @@ impl World {
         if self.walkable(position) {
             ensure!(
                 self.summon_occupancy() < self.summon_limit(),
-                "Manor toss exceeds summon budget"
+                SummonBudget("Manor toss exceeds summon budget".into())
             );
             self.manor_births.push(Toss {
                 parent,
@@ -75,7 +75,7 @@ impl World {
     ) -> Result<i32> {
         ensure!(
             self.summon_occupancy() < self.summon_limit(),
-            "Manor summon budget exhausted"
+            SummonBudget("Manor summon budget exhausted".into())
         );
         ensure!(
             self.walkable(pos),
@@ -127,7 +127,7 @@ impl World {
                 if part == 2 {
                     ensure!(
                         self.summon_occupancy() + 49 <= self.summon_limit(),
-                        "Ruthven bat formation exceeds summon budget"
+                        SummonBudget("Ruthven bat formation exceeds summon budget".into())
                     );
                     let mut sites = vec![];
                     let mut cells = BTreeSet::new();
@@ -205,7 +205,7 @@ impl World {
                 let landed = sites.iter().filter(|p| self.walkable(**p)).count();
                 ensure!(
                     self.summon_occupancy() + landed <= self.summon_limit(),
-                    "Ruthven coffin formation exceeds summon budget"
+                    SummonBudget("Ruthven coffin formation exceeds summon budget".into())
                 );
                 // The period corridor tactic relies on wall-bound throws failing, not being relocated.
                 // https://www.reddit.com/r/RotMG/comments/u6lp3/damn_those_lil_feratu/
@@ -383,7 +383,7 @@ impl World {
             );
             ensure!(
                 self.summon_occupancy() + count <= self.summon_limit(),
-                "Coffin Creature brood exceeds summon budget"
+                SummonBudget("Coffin Creature brood exceeds summon budget".into())
             );
             for i in 0..count {
                 let pos = sites[i * sites.len() / count];

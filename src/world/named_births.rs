@@ -46,7 +46,7 @@ impl World {
                     + self.named_births.len()
                     + self.abyss_pending_count()
                     < 256,
-                "shared summon budget exhausted before toss"
+                SummonBudget("shared summon budget exhausted before toss".into())
             );
             if kind != 0xe3b {
                 self.telegraph_throw(owner, position, 0xffffbf00);

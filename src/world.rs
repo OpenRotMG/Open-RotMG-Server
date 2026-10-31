@@ -99,6 +99,7 @@ mod jungle;
 mod cooperative;
 
 mod mechanics;
+use mechanics::SummonBudget;
 
 mod native_hits;
 
@@ -825,6 +826,7 @@ pub struct World {
     population_counts: [usize; 13],
     population_next: u64,
     reproduction: BTreeMap<(i32, usize), u64>,
+    summon_waits: BTreeSet<i32>,
     reproduction_at: [u64; 20],
     reproduction_bucket: usize,
     djinn_attacking: BTreeSet<i32>,
@@ -2936,6 +2938,7 @@ impl World {
             population_counts: [0; 13],
             population_next: 10000,
             reproduction: BTreeMap::new(),
+            summon_waits: BTreeSet::new(),
             reproduction_at: [0; 20],
             reproduction_bucket: 0,
             djinn_attacking: BTreeSet::new(),
@@ -3259,6 +3262,7 @@ impl World {
         for entry in 0..population::REPRODUCTION.len() {
             self.reproduction.remove(&(id, entry));
         }
+        self.summon_waits.remove(&id);
         self.djinn_attacking.remove(&id);
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
@@ -6491,9 +6495,21 @@ impl World {
                 .activated
                 .get_or_insert(self.now);
             let elapsed = self.now - activated;
-            if let Err(error) = self.encounter_mechanics(id, target, elapsed) {
-                tracing::error!(entity=id, kind, %error, "encounter mechanic refused");
-                continue;
+            match self.encounter_mechanics(id, target, elapsed) {
+                Ok(()) => {
+                    if self.summon_waits.remove(&id) {
+                        tracing::info!(entity = id, kind, "encounter summon room restored");
+                    }
+                }
+                Err(error) if error.is::<SummonBudget>() => {
+                    if self.summon_waits.insert(id) {
+                        tracing::warn!(entity = id, kind, %error, "encounter waits for summon room");
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(entity=id, kind, %error, "encounter mechanic refused");
+                    continue;
+                }
             }
             let Some(current) = self.entities.get(&id) else {
                 continue;

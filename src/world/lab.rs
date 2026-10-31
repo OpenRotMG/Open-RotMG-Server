@@ -77,7 +77,7 @@ impl World {
         crate::loot::validate(&self.content, kind)?;
         ensure!(
             self.summon_count() + self.lab_tosses.len() < 256,
-            "Lab shared summon budget exhausted"
+            SummonBudget("Lab shared summon budget exhausted".into())
         );
         let id = self.spawn_entity(kind, position, vec![])?;
         // TossObject's admitted 1500ms landing survives its thrower's death.
@@ -212,7 +212,7 @@ impl World {
                         self.actors().filter(|e| e.parent == Some(id)).count()
                             + self.lab_tosses.iter().filter(|t| t.owner == id).count()
                             < 128,
-                        "Dr Terrible owned summon budget exhausted"
+                        SummonBudget("Dr Terrible owned summon budget exhausted".into())
                     );
                     ensure!(self.walkable(position), "Lab toss target blocked");
                     self.telegraph_throw(id, position, 0xffffbf00);
