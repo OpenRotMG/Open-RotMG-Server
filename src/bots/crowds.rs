@@ -54,10 +54,18 @@ impl Crowd {
                 (*p, crowd)
             })
             .filter(|(p, crowd)| {
-                p.position.distance(v.position) > 7.
+                let distance = p.position.distance(v.position);
+                // Live: lone targets moved on, so bots chained after each other instead of clustering.
+                let crowded = *crowd >= 2;
+                // A crowd nearby is usually in the player's own area, even on ground it has not seen.
+                let own_area = crowded && distance <= 60. && self.bands.survivable(v, p.position);
+                distance > 7.
+                    && (crowded || distance <= 40.)
                     && eligible(p.position)
                     && self.bands.worthwhile(p.position)
-                    && (self.bands.teleportable(v, p.position) || ambitious && *crowd >= 3)
+                    && (self.bands.teleportable(v, p.position)
+                        || own_area
+                        || ambitious && *crowd >= 3)
             })
             .max_by(|(a, x), (b, y)| {
                 // Bigger crowds first, then the player's own area, then the nearer one.
