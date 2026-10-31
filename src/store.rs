@@ -1219,6 +1219,43 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         };
         Ok(account.characters.swap_remove(index))
     }
+    /// Adds a persona's level-20 alt, only while the account has no living level 20 and a free slot.
+    pub(crate) async fn persona_alt(
+        &self,
+        account: i32,
+        mut alt: Character,
+    ) -> Result<Option<i32>> {
+        ensure!(
+            alt.alive && alt.level == 20,
+            "persona alt must be a living level 20"
+        );
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            let living = tx
+                .prepare("SELECT stats FROM characters WHERE account=?1 AND alive=1")?
+                .query_map([account], |r| r.get::<_, String>(0))?
+                .map(|raw| decode_character(&raw?, [0; 8]))
+                .collect::<Result<Vec<_>>>()?;
+            if living.len() as i32 >= character_slots::read(&tx, account)?
+                || living.iter().any(|ch| ch.level == 20)
+            {
+                return Ok(None);
+            }
+            alt.account = account;
+            alt.name = tx.query_row("SELECT name FROM accounts WHERE id=?1", [account], |r| {
+                r.get(0)
+            })?;
+            tx.execute(
+                "INSERT INTO characters(account,stats,items,alive) VALUES(?1,?2,?3,1)",
+                params![account, serde_json::to_string(&alt)?, serde_json::to_string(&alt.items)?],
+            )?;
+            let id = i32::try_from(tx.last_insert_rowid())?;
+            tx.commit()?;
+            tracing::info!(account, character = id, class = alt.class, fame = alt.fame, items = ?alt.items, "persona level-20 alt provisioned (synthetic, once per persona)");
+            Ok(Some(id))
+        })
+        .await
+    }
     pub(crate) async fn persona_name_available(&self, account: i32, name: String) -> Result<()> {
         self.call(move |db| {
             let taken = accounts::human_name_taken(db, &name, account)?;
