@@ -139,7 +139,8 @@ impl World {
             })
             .count();
         ensure!(
-            owned + self.named_births.len() + (if producer.is_some() { count } else { 0 }) <= 256,
+            owned + self.named_births.len() + (if producer.is_some() { count } else { 0 })
+                <= self.summon_limit(),
             SummonBudget("Tomb summon budget exhausted".into())
         );
         let positions: Vec<_> = (0..count)

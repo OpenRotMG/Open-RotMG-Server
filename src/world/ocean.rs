@@ -47,7 +47,8 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         ensure!(
-            self.summon_count() + self.named_births.len() + self.abyss_pending_count() < 256,
+            self.summon_count() + self.named_births.len() + self.abyss_pending_count()
+                < self.summon_limit(),
             SummonBudget("ocean summon budget exhausted".into())
         );
         ensure!(
@@ -117,7 +118,7 @@ impl World {
                 + self.named_births.len()
                 + self.abyss_pending_count()
                 + positions.len()
-                <= 256,
+                <= self.summon_limit(),
             SummonBudget("Hermit wave exceeds summon budget".into())
         );
         ensure!(
@@ -186,7 +187,7 @@ impl World {
         }
         ensure!(
             self.summon_count() + self.named_births.len() + self.abyss_pending_count() + count
-                <= 256,
+                <= self.summon_limit(),
             SummonBudget("ocean toss exceeds summon budget".into())
         );
         for position in positions {
