@@ -825,6 +825,8 @@ pub struct World {
     population_counts: [usize; 13],
     population_next: u64,
     reproduction: BTreeMap<(i32, usize), u64>,
+    reproduction_at: u64,
+    djinn_attacking: BTreeSet<i32>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
     event_sites: Vec<realm_setpieces::EventSite>,
@@ -2933,6 +2935,8 @@ impl World {
             population_counts: [0; 13],
             population_next: 10000,
             reproduction: BTreeMap::new(),
+            reproduction_at: 0,
+            djinn_attacking: BTreeSet::new(),
             setpieces: vec![],
             ghost_towers: vec![],
             event_sites: vec![],
@@ -3253,6 +3257,7 @@ impl World {
         for entry in 0..population::REPRODUCTION.len() {
             self.reproduction.remove(&(id, entry));
         }
+        self.djinn_attacking.remove(&id);
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
@@ -6465,9 +6470,14 @@ impl World {
                 self.suspend_npc(id, delta);
                 continue;
             }
-            if let Err(error) = self.reproduce(id, delta) {
-                tracing::error!(entity = id, kind, %error, "ordinary reproduction refused");
-                continue;
+            if kind == 0x91a {
+                // Kithio Djinn leaves Idle with a player within 8 tiles and returns once none is within 13.
+                let near = |r: f32| self.players.values().any(|p| p.pos.distance(pos) < r);
+                if near(8.) {
+                    self.djinn_attacking.insert(id);
+                } else if !near(13.) {
+                    self.djinn_attacking.remove(&id);
+                }
             }
             let activated = *self
                 .entities

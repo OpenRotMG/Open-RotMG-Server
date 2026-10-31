@@ -332,6 +332,7 @@ impl World {
                 }
             }
         }
+        self.reproduce_active();
         self.repopulate_families()
     }
     pub(super) fn cull_population(&mut self, terrain: u8) {
