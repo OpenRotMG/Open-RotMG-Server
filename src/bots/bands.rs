@@ -23,7 +23,8 @@ fn tier(terrain: u8) -> u8 {
 }
 fn suitable(v: &PlayerView, c: &Content) -> u8 {
     match v.character.level {
-        20 if events::ready(v, c) => 4,
+        // Mana comes and goes with casting; gear decides whether the Godlands is survivable.
+        20 if events::equipped(v, c) => 4,
         15.. => 3,
         10.. => 2,
         _ => 1,
@@ -74,6 +75,10 @@ impl Bands {
     /// Walking may enter unobserved ground; `None` orders below every band.
     pub fn survivable(&self, v: &PlayerView, p: Pos) -> bool {
         v.map.name != "Realm" || self.known(p) <= Some(self.limit)
+    }
+    /// Ground at most one band below this character's own still pays; unobserved ground may.
+    pub fn worthwhile(&self, p: Pos) -> bool {
+        self.known(p).is_none_or(|band| band + 1 >= self.limit)
     }
     /// A far marker may stand among enemies never seen, so low levels only teleport onto observed ground.
     pub fn teleportable(&self, v: &PlayerView, p: Pos) -> bool {

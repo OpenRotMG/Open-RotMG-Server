@@ -118,7 +118,7 @@ async fn decide_before_social(
     if let Some(report) = timings.report() {
         tracing::info!(name=brain.mind.market.name.as_str(),world=%view.map.name,world_id=view.session.world,player=view.session.player,
             known_tiles=view.tiles.len(),cover_tiles=brain.cover.len(),visited_tiles=brain.visits.len(),
-            blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),crowd_contacts=brain.crowd.len(),
+            blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),
             navigation_rebuilds=brain.navigation_rebuilds,navigation_reuses=brain.navigation_reuses,
             navigation=%serde_json::json!(brain.navigation.as_ref().map(|g|g.metrics())),timings=%report,"bot performance");
     }
@@ -1039,7 +1039,6 @@ pub(super) async fn launch(
                         app.cctv.heard(name.as_str(), id, &packet)?;
                         let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.player_view(id).await?) } else { None };
                         let social_view = settled_view.as_ref().unwrap_or(&received_view);
-                        brain.crowd.receive(&packet, social_view, &app.content)?;
                         let event_before = brain.mind.events.clone();
                         brain.mind.events.receive(&packet, social_view, name.as_str())?;
                         if brain.mind.events != event_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }

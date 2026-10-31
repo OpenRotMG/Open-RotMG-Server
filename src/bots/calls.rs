@@ -164,8 +164,11 @@ impl Brain {
                 (self.profile.companions >= 6. || self.mind.social.known(caller))
                     && progression::ready(v, c, 0x717)
             }
+            // Fame trains draw ambitious players of any level, not only level 20s.
             Activity::Gods | Activity::Demon => {
-                v.map.name == "Realm" && v.character.level == 20 && progression::ready(v, c, 0x718)
+                v.map.name == "Realm"
+                    && (v.character.level == 20 && progression::ready(v, c, 0x718)
+                        || self.ambitious())
             }
             Activity::Sphinx => v.map.name == "Realm" && events::ready(v, c),
             Activity::Snake => v.map.name == "Realm" && progression::ready(v, c, 0x718),
@@ -285,7 +288,9 @@ impl Brain {
             Some("another_call_pending")
         } else if peer.position.distance(v.position) <= 7. {
             Some("already_near_caller")
-        } else if !self.crowd.bands.teleportable(v, peer.position) {
+        } else if !(self.crowd.bands.teleportable(v, peer.position)
+            || self.ambitious() && self.crowd.near(v, peer.position) >= 3)
+        {
             Some("unsafe_realm_destination")
         } else {
             self.call_rejection(v, c, activity, caller)?
@@ -333,7 +338,8 @@ impl Brain {
         let rejection = if o.world != v.session.world
             || target.is_none_or(|p| {
                 p.position.distance(v.position) <= 7.
-                    || !self.crowd.bands.teleportable(v, p.position)
+                    || !(self.crowd.bands.teleportable(v, p.position)
+                        || self.ambitious() && self.crowd.near(v, p.position) >= 3)
             }) {
             Some("identity_safety_or_distance_changed")
         } else {
