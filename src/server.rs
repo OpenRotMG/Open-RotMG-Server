@@ -2459,10 +2459,10 @@ async fn connection_io<S, I>(
                         let result={
                             let handling=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packets,&mut session,&tx,&lost));
                             tokio::pin!(handling);
-                            // Commands can wait on a lagging world; the world keeps queueing updates meanwhile.
+                            // In-game commands can wait on a lagging world while it keeps queueing updates; loads still reply only after entry.
                             loop { tokio::select!{ biased;
                                 result=&mut handling=>break result,
-                                Some(packet)=rx.recv(), if closed.is_none() && !reconnect_sent=>{
+                                Some(packet)=rx.recv(), if session_player.is_some() && closed.is_none() && !reconnect_sent=>{
                                     let (id, queued, sending)=(packet.id, rx.len()+1, std::time::Instant::now());
                                     let nonce=(id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
                                     let frame=codec.frame(id,packet.body);

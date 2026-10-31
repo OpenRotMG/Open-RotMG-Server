@@ -534,11 +534,6 @@ async fn slow_command_keeps_delivering_queued_output() {
         .unwrap();
     let mut socket = NativeSocket::connect(port, &a.origin).await;
     let id = socket_load(&mut socket, &dir, "slow-command", ch.id).await;
-    lifecycle::account(&a, vec![account], "slow_command_load_settled", |_| async {
-        Ok(())
-    })
-    .await
-    .unwrap();
     let (out, pos) = a
         .world
         .for_player(id)
