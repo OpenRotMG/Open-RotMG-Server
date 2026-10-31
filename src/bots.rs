@@ -297,6 +297,8 @@ struct Brain {
     /// Hardest hit seen and when; survives a brief loss of sight of the shooter.
     danger: (i32, u64),
     next_train_call: u64,
+    /// When this session first wanted to end, so a fight in company can delay logging off only briefly.
+    finishing_since: Option<u64>,
     /// Last logged Realm quest and whether it was worth joining.
     quest_interest: Option<(i32, bool)>,
     last_encounter: u64,
@@ -378,6 +380,7 @@ impl Brain {
             hunting: None,
             danger: (0, 0),
             next_train_call: 0,
+            finishing_since: None,
             quest_interest: None,
             last_encounter: view.time_ms,
             navigation: None,
@@ -693,6 +696,10 @@ impl Brain {
                 .item_target(),
         )
     }
+    /// Bold personas trust a crowd above their level, the way fame trains drew in low levels.
+    fn ambitious(&self) -> bool {
+        self.profile.recovery < 0.45
+    }
     fn quest_appeal(
         &self,
         v: &PlayerView,
@@ -896,11 +903,7 @@ impl Brain {
             remedy,
         };
         if self.reflex(v, content, &s, &mut decision)? {
-            self.crowd.release(v, "safety");
             return Ok((Activity::Survive, decision));
-        }
-        if self.committed(v) {
-            self.crowd.release(v, "explicit_commitment");
         }
         // Consent and receipts outrank every errand; an advertised quote does not preempt a started one.
         if self.mind.market.locked()
@@ -1361,8 +1364,7 @@ impl Brain {
     ) -> Result<Decision> {
         let steering = self.steering.take();
         let (enemies, grid, perception) = (&s.enemies, &s.grid, &s.perception);
-        let (nearest, quarry, range, inspecting, health) =
-            (s.nearest, s.quarry, s.range, s.inspecting, s.health);
+        let (nearest, quarry, range, health) = (s.nearest, s.quarry, s.range, s.health);
         let mut choices = Vec::new();
         let event_area = self.mind.events.area(v);
         if let Some(area) = event_area {
@@ -1623,76 +1625,40 @@ impl Brain {
                 choices.push((score, Goal::Follow(player.id), player.position));
             }
         }
-        self.crowd
-            .attend(v, content, &self.mind.cognition, inspecting);
-        let recent_company = self
-            .crowd
-            .cooperator(v, |position| !self.blocked.contains_key(&tile(position)));
-        let cooperative_goal = if !committed
-            && crowds::cooperative_available(&choices, v.position, range, |position| {
-                !self.blocked.contains_key(&tile(position))
-            })
-            && let Some(peer) = &recent_company
-            && crowds::can_approach(v.session.world, v.session.account, peer.account)
-            && peer.position.distance(v.position) > 7.
-        {
-            choices.push((
-                80. + self.profile.companions,
-                Goal::Follow(peer.id),
-                peer.position,
-            ));
-            Some(peer.id)
-        } else {
-            None
-        };
+        // Players go where the people are; exploring alone is what is left when nobody suitable is on the minimap.
         if !committed
-            && recent_company.is_none()
-            && !choices
-                .iter()
-                .any(|(_, goal, _)| matches!(goal, Goal::Venture))
-            && crowds::cooperative_available(&choices, v.position, range, |position| {
+            // Approaching the quest's fight is the quest logic's job, landing well outside it.
+            && let Some((marker, crowd)) = self.crowd.gathering(v, self.ambitious(), |position| {
                 !self.blocked.contains_key(&tile(position))
+                    && enemies
+                        .iter()
+                        .filter(|e| v.quest == Some(e.id))
+                        .all(|e| e.position.distance(position) >= 20.)
             })
-            && let Some(marker) = self.crowd.destination(
-                v,
-                self.group.as_ref(),
-                |account| self.mind.social.known(account),
-                |position| {
-                    !self.blocked.contains_key(&tile(position))
-                        && self.crowd.bands.survivable(v, position)
-                },
-            )
         {
+            let score = 55. + 5. * crowd.min(6) as f32 + self.profile.companions;
             let distance = marker.position.distance(v.position);
-            if distance > 7. {
-                let score = if self.crowd.keeping_company(marker.id) {
-                    80.
-                } else {
-                    64.
-                } + self.profile.companions;
-                if !choices.iter().any(|(s, _, _)| *s > score)
-                    && peaceful
-                    && distance > 24.
-                    && v.map.allow_teleport
-                    && v.time_ms >= self.next_teleport
-                    && self.crowd.bands.teleportable(v, marker.position)
-                {
-                    self.next_teleport = v.time_ms + 10000;
-                    decision.goal = Goal::Follow(marker.id);
-                    decision.journey = Some(Journey::Regroup(marker.id));
-                    tracing::info!(
-                        account = v.session.account,
-                        target = marker.id,
-                        world = v.session.world,
-                        reason = "seek_nearby_activity",
-                        "autonomous attended crowd travel"
-                    );
-                    let peer = marker.id;
-                    self.crowd.approach_selected(peer);
-                    return Ok(decision);
-                }
-                choices.push((score, Goal::Follow(marker.id), marker.position));
+            if !choices.iter().any(|(s, _, _)| *s > score)
+                && peaceful
+                && health >= 0.75
+                && distance > 24.
+                && v.map.allow_teleport
+                && v.time_ms >= self.next_teleport
+            {
+                tracing::info!(
+                    account = v.session.account,
+                    target = marker.id,
+                    crowd,
+                    distance,
+                    world = v.session.world,
+                    "autonomous gathering teleport"
+                );
+                self.next_teleport = v.time_ms + 10000;
+                decision.goal = Goal::Follow(marker.id);
+                decision.journey = Some(Journey::Regroup(marker.id));
+                return Ok(decision);
             }
+            choices.push((score, Goal::Follow(marker.id), marker.position));
         }
         // Revisiting an emptied room must not compete with progressing through the dungeon.
         if v.map.name == "Realm"
@@ -1828,7 +1794,7 @@ impl Brain {
                     self.crowd.nearest_to(v, destination, clear)
                 } else {
                     self.crowd
-                        .shortcut(v, self.group.as_ref(), destination)
+                        .shortcut(v, destination)
                         .filter(|p| clear(p.position))
                 }
                 .map(|p| p.id)
@@ -1997,7 +1963,6 @@ impl Brain {
                 }
             }
             if let Goal::Follow(id) = goal
-                && cooperative_goal != Some(id)
                 && v.position.distance(destination) > 8.
                 && v.time_ms >= self.next_teleport
                 && decision.item.is_none()
@@ -2012,39 +1977,14 @@ impl Brain {
                 decision.journey = Some(Journey::Regroup(id));
                 self.next_teleport = v.time_ms + 10000;
             }
-            if !committed
-                && let Goal::Follow(id) = goal
-                && cooperative_goal != Some(id)
-            {
-                if self.goal != goal {
-                    tracing::info!(
-                        account = v.session.account,
-                        target = id,
-                        reason = if self.crowd.keeping_company(id) {
-                            "continue_temporary_outing"
-                        } else {
-                            "seek_nearby_activity"
-                        },
-                        "autonomous crowd approach selected"
-                    );
-                }
-                self.crowd.approach_selected(id);
-            }
-            if self.goal != goal
-                && let Some(peer) = &recent_company
-                && (matches!(goal, Goal::Loot(_))
-                    || cooperative_goal == Some(peer.id) && goal == Goal::Follow(peer.id))
+            if let Goal::Follow(id) = goal
+                && self.goal != goal
             {
                 tracing::info!(
                     account = v.session.account,
-                    target = peer.id,
-                    peer = peer.account,
-                    reason = if matches!(goal, Goal::Loot(_)) {
-                        "useful_loot_pause"
-                    } else {
-                        "visible_catch_up"
-                    },
-                    "autonomous temporary company activity changed"
+                    target = id,
+                    world = v.session.world,
+                    "autonomous follow selected"
                 );
             }
             self.travel = travel(&goal, destination).then(|| match self.travel.take() {
