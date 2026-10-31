@@ -777,3 +777,30 @@ fn bot_standing_in_lava_steps_out_and_dodges_a_shown_bomb() {
         d.movement
     );
 }
+
+#[test]
+fn level_twenty_passes_lowland_trash_on_the_way_to_its_arrow() {
+    // Live: after following their arrows, level 20s still made 66% of their kills on lowland mobs met on the way.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.objects.push(VisibleObject {
+        id: 3,
+        account: None,
+        kind: 0x617,
+        name: "Hobbit Mage".into(),
+        position: Pos { x: 13.5, y: 10.5 },
+        hp: 100,
+        max_hp: 100,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    });
+    let d = Brain::new(ARCHETYPES[0], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    v.character.level = 12;
+    let d = Brain::new(ARCHETYPES[0], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Fight(3));
+}
