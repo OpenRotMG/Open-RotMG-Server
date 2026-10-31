@@ -284,6 +284,14 @@ mod tests {
                 }
             }
         }
+        // Hiscores never decode bot characters; production keeps tens of thousands of them.
+        store
+            .call(move |db| {
+                db.execute("UPDATE characters SET stats='{' WHERE account=?1", [bot])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         // Live world state wins over saved fame, and bots stay out even when online.
         let scores = store.hiscores(live.clone()).await.unwrap();
         let characters = scores["characters"].as_array().unwrap();
