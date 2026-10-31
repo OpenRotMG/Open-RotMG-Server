@@ -12,6 +12,7 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
             super::super::diagnostics::Diagnostics::open(dir.join("bug-reports")).unwrap(),
         ),
         started: std::time::Instant::now(),
+        thinking: tokio::runtime::Handle::current(),
         testing: None,
         society: Arc::default(),
         cctv: Arc::default(),
