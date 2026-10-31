@@ -61,6 +61,13 @@ impl World {
                 .kinds
                 .push(object.kind);
         }
+        for &(parent, child, ..) in population::REPRODUCTION {
+            let terrain = self.content.get(parent)?.terrain;
+            ensure!(
+                terrain > 0 && self.content.get(child)?.terrain == terrain,
+                "reproduction {parent:#x}->{child:#x} crosses Realm habitats"
+            );
+        }
         for terrain in 1..=12 {
             let region = &mut self.population_regions[terrain];
             region.target = area[terrain] / divisors[terrain];

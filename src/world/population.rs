@@ -65,7 +65,7 @@ macro_rules! family {
     };
 }
 pub(super) const FAMILIES: &[Family] = &[
-    family!(0x601,11; 0x600,5,2,10000; 0x601,4,0,10000),
+    family!(@once 0x601,11; 0x600,2),
     family!(0x604,11; 0x603,10,5,10000),
     family!(0x953,11; 0x954,5,3,8000),
     family!(0x60d,8; 0x60a,2,2,10000; 0x60c,3,3,8000),
@@ -128,7 +128,6 @@ pub(super) const FAMILIES: &[Family] = &[
     family!(@random 0x947,6; 0x949,2,1,10000; 0x948,5,2,10000),
     family!(@once 0x945,7; 0x946,1),
     family!(@random 0x637,7; 0x635,3,1,10000; 0x636,2,1,10000; 0x639,2,1,10000),
-    family!(0x202,7; 0x202,2,0,45000),
     family!(0x206,4; 0x206,2,0,60000),
     family!(@script 0x20e,6; 0x20f,5),
     family!(@script 0x950,6; 0x951,5),
@@ -174,14 +173,34 @@ fn member_positions(center: Pos, terrain: u8) -> Vec<Pos> {
         })
         .collect()
 }
-// Only unconditional Mountain Reproduce states are supported here; Djinn's Idle state is separate.
-fn god_density_max(kind: u16) -> Option<usize> {
-    match kind {
-        0x652 | 0x658 => Some(2),
-        0x651 | 0x654..=0x657 | 0x659 => Some(3),
-        _ => None,
-    }
-}
+/// Kithio Reproduce(children, densityRadius, densityMax, coolDown) on ordinary Realm parents: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Reproduce.cs
+// Golem and Swarm entries count themselves against densityMax 1, so they never fire; Djinn's Idle-only entry is not modeled.
+pub(super) const REPRODUCTION: &[(u16, u16, f32, usize, u64)] = &[
+    (0x601, 0x600, 10., 5, 60000),
+    (0x601, 0x601, 10., 5, 60000),
+    (0x602, 0x602, 10., 5, 60000),
+    (0x604, 0x604, 40., 2, 60000),
+    (0x60e, 0x60e, 10., 5, 60000),
+    (0x60f, 0x60f, 10., 5, 60000),
+    (0x610, 0x610, 10., 5, 60000),
+    (0x624, 0x624, 10., 2, 60000),
+    (0x625, 0x625, 10., 2, 60000),
+    (0x626, 0x626, 10., 2, 60000),
+    (0x205, 0x205, 10., 5, 60000),
+    (0x20d, 0x20d, 10., 5, 60000),
+    (0x20e, 0x20e, 10., 5, 60000),
+    (0x204, 0x204, 20., 5, 20000),
+    (0x202, 0x202, 15., 3, 45000),
+    (0x649, 0x649, 10., 2, 60000),
+    (0x651, 0x651, 10., 3, 60000),
+    (0x652, 0x652, 10., 2, 60000),
+    (0x654, 0x654, 10., 3, 60000),
+    (0x655, 0x655, 10., 3, 60000),
+    (0x656, 0x656, 10., 3, 60000),
+    (0x657, 0x657, 10., 3, 60000),
+    (0x658, 0x658, 10., 2, 60000),
+    (0x659, 0x659, 10., 3, 60000),
+];
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Reproduction {
@@ -192,59 +211,65 @@ pub(super) enum Reproduction {
 }
 
 impl World {
-    pub(super) fn reproduce_god(&mut self, id: i32, delta: u64) -> Result<Option<Reproduction>> {
-        let e = self.entities.get(&id).context("reproducing god missing")?;
-        let Some(maximum) = god_density_max(e.kind).filter(|_| e.population_slot.is_some()) else {
-            return Ok(None);
-        };
-        let (kind, center) = (e.kind, e.pos);
-        let remaining = self.god_reproduction.entry(id).or_insert(60000);
-        // Reproduce checks the stored clock before subtracting the active tick, with no catch-up bursts.
-        if *remaining > 0 {
-            *remaining = remaining.saturating_sub(delta);
-            return Ok(None);
+    pub(super) fn reproduce(&mut self, id: i32, delta: u64) -> Result<()> {
+        let e = self
+            .entities
+            .get(&id)
+            .context("reproducing parent missing")?;
+        // Gray Blob only reproduces in its searching state, before the once-only creep.
+        if e.population_slot.is_none() || e.kind == 0x20d && e.stage == Some(1) {
+            return Ok(());
         }
-        *remaining = 60000;
-        let outcome = self.try_reproduce_god(kind, center, maximum)?;
-        tracing::debug!(
-            entity = id,
-            kind,
-            ?outcome,
-            "ordinary god reproduction evaluated"
-        );
-        Ok(Some(outcome))
+        let (kind, center) = (e.kind, e.pos);
+        for (entry, &(_, child, radius, maximum, cooldown)) in
+            REPRODUCTION.iter().enumerate().filter(|(_, r)| r.0 == kind)
+        {
+            let remaining = self.reproduction.entry((id, entry)).or_insert(cooldown);
+            // Reproduce checks the stored clock before subtracting the active tick, with no catch-up bursts.
+            if *remaining > 0 {
+                *remaining = remaining.saturating_sub(delta);
+                continue;
+            }
+            *remaining = cooldown;
+            let outcome = self.try_reproduce(child, center, radius, maximum)?;
+            tracing::debug!(
+                entity = id,
+                kind,
+                child,
+                ?outcome,
+                "ordinary reproduction evaluated"
+            );
+        }
+        Ok(())
     }
 
-    fn try_reproduce_god(
+    fn try_reproduce(
         &mut self,
         kind: u16,
         center: Pos,
+        radius: f32,
         maximum: usize,
     ) -> Result<Reproduction> {
         // CountEntity includes the parent and every same-type enemy, not just its camp or spawn group.
         if self
-            .actors_near(center, 10.)
+            .actors_near(center, radius)
             .filter(|e| e.kind == kind)
             .count()
             >= maximum
         {
             return Ok(Reproduction::Density);
         }
-        let object = self.content.get(kind)?;
-        ensure!(
-            object.god && object.terrain == 1,
-            "reproduction contradicts selected god habitat"
-        );
-        let terrain = object.terrain;
-        let family = FAMILIES.iter().find(|f| f.leader == kind);
+        let terrain = self.content.get(kind)?.terrain;
+        // Piratess pirates stand in for Kithio's Oryx-table Pirates, not a Piratess Spawn, so reproduced Piratesses arrive alone.
+        let family = FAMILIES.iter().find(|f| f.leader == kind && kind != 0x601);
         if !self.population_space(terrain, family.map_or(1, |f| f.initial()))? {
             return Ok(Reproduction::Capacity);
         }
         for _ in 0..10 {
             let angle = self.rng.gen_range(0.0..std::f32::consts::TAU);
             let pos = Pos {
-                x: center.x + 5. * angle.cos(),
-                y: center.y + 5. * angle.sin(),
+                x: center.x + radius / 2. * angle.cos(),
+                y: center.y + radius / 2. * angle.sin(),
             };
             if !self.family_ground(pos, terrain) {
                 continue;
@@ -272,7 +297,7 @@ impl World {
                     self.place_camp(family, positions)?;
                     self.population[slot]
                         .entity
-                        .context("new god family lacks its root")?
+                        .context("new family lacks its root")?
                 }
                 None => self.place_population_solo(kind, pos)?,
             };

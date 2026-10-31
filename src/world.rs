@@ -824,7 +824,7 @@ pub struct World {
     population_regions: [population_density::Region; 13],
     population_counts: [usize; 13],
     population_next: u64,
-    god_reproduction: BTreeMap<i32, u64>,
+    reproduction: BTreeMap<(i32, usize), u64>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
     event_sites: Vec<realm_setpieces::EventSite>,
@@ -2932,7 +2932,7 @@ impl World {
             population_regions: std::array::from_fn(|_| population_density::Region::default()),
             population_counts: [0; 13],
             population_next: 10000,
-            god_reproduction: BTreeMap::new(),
+            reproduction: BTreeMap::new(),
             setpieces: vec![],
             ghost_towers: vec![],
             event_sites: vec![],
@@ -3250,7 +3250,9 @@ impl World {
         self.abyss_flamer_ids.remove(&id);
         self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
-        self.god_reproduction.remove(&id);
+        for entry in 0..population::REPRODUCTION.len() {
+            self.reproduction.remove(&(id, entry));
+        }
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
@@ -6463,8 +6465,8 @@ impl World {
                 self.suspend_npc(id, delta);
                 continue;
             }
-            if let Err(error) = self.reproduce_god(id, delta) {
-                tracing::error!(entity = id, kind, %error, "ordinary god reproduction refused");
+            if let Err(error) = self.reproduce(id, delta) {
+                tracing::error!(entity = id, kind, %error, "ordinary reproduction refused");
                 continue;
             }
             let activated = *self
