@@ -93,7 +93,8 @@ impl Store {
             let mut characters = std::collections::BTreeMap::new();
             {
                 // Tombstones prevent stale world snapshots from restoring dead or deleted scores.
-                let mut q=tx.prepare("SELECT id,alive,stats FROM characters")?;
+                // Bot characters were 96% of rows and made each call cost ~0.7 s of CPU beside the simulation.
+                let mut q=tx.prepare("SELECT c.id,c.alive,c.stats FROM characters c JOIN competitors k ON k.account=c.account WHERE NOT EXISTS(SELECT 1 FROM shore_bots b WHERE b.account=c.account)")?;
                 for row in q.query_map([],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,bool>(1)?,r.get::<_,String>(2)?)))? {
                     let (id,alive,raw)=row?;
                     let mut c=decode_character(&raw,base)?; c.id=id; c.alive=alive;
@@ -284,6 +285,14 @@ mod tests {
                 }
             }
         }
+        // Hiscores never decode bot characters; production keeps tens of thousands of them.
+        store
+            .call(move |db| {
+                db.execute("UPDATE characters SET stats='{' WHERE account=?1", [bot])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         // Live world state wins over saved fame, and bots stay out even when online.
         let scores = store.hiscores(live.clone()).await.unwrap();
         let characters = scores["characters"].as_array().unwrap();
