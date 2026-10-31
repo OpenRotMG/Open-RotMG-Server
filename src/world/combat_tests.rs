@@ -808,8 +808,11 @@ fn reported_native_enemy_hits_land_once_within_projectile_reach() {
         w.entities.get_mut(&target).unwrap().hp = hp;
     }
     w.updates(id, false).unwrap();
+    let p = w.players.get_mut(&id).unwrap();
+    p.character.shots = 2;
+    p.character.lifetime.shots = 2;
     // Aimed away from every target: the server's own collision can never land these shots.
-    let mut fire = |w: &mut World, bullet| {
+    let fire = |w: &mut World, bullet| {
         let mut b = shot(w, id, 0xa14, 0);
         b.friendly = true;
         b.id = bullet;
