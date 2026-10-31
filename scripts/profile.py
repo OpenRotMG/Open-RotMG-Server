@@ -108,6 +108,9 @@ def incident(line, pid):
     span = sample['execution']
     if not (span['tid'] > 0 and 0 < span['start_ns'] <= span['end_ns'] <= time.monotonic_ns()):
         raise RuntimeError('Invalid incident execution interval')
+    # Request waits are consequences of slow ticks; capturing them aimed the recorder at the wrong thread.
+    if sample['kind'] != 'tick':
+        return None
     return {'logged_at': record['timestamp'], 'world': fields.get('world'), 'sample': sample}
 
 
