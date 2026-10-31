@@ -12,10 +12,9 @@ pub(super) struct Check {
 impl Check {
     fn select(&self, v: &PlayerView, c: &Content) -> Result<Option<Candidate>> {
         let mut policy = self.policy.clone();
-        let perception = combat::Perception::attend(v, &self.cognition, false);
         policy.available &= v.tick >= self.recover_until
             && v.character.hp as f32 / v.character.stats[0] as f32 >= self.recovery
-            && combat::clearance(v, v.position, &perception) >= self.cognition.pickup_clearance
+            && combat::clearance(v, v.position) >= self.cognition.pickup_clearance
             && v.objects.iter().all(|o| {
                 !c.objects[&o.kind].enemy || o.hp <= 0 || v.position.distance(o.position) > 12.
             });
