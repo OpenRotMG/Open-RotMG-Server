@@ -534,6 +534,18 @@ async fn enter_admitted(
     }
     brain.mind.future_class = Some(view.character.class);
     brain.mind.bind(&view)?;
+    // Live Oct 2026: event deaths used up veterans' level 20s; each persona gets its roster's level 20 back once.
+    if !brain.mind.veteran_alt && !profile.is_guest() {
+        brain.mind.veteran_alt = true;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(persona::seed(profile.identity));
+        let (roster, _) = persona::life(&profile, &app.content, &mut rng)?;
+        if let Some(alt) = roster.into_iter().find(|ch| ch.alive && ch.level == 20)
+            && let Some(id) = app.store.persona_alt(view.session.account, alt).await?
+        {
+            // The alt is the next life this persona plays.
+            brain.mind.character = Some(id);
+        }
+    }
     brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
     Ok((id, output, sender, brain))
 }

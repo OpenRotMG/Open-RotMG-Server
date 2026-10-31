@@ -45,6 +45,9 @@ pub(crate) struct Mind {
     // The living character a named persona resumes in its next session.
     #[serde(default)]
     pub character: Option<i32>,
+    /// A veteran's level-20 alt was topped up once; later deaths are permanent as usual.
+    #[serde(default)]
+    pub veteran_alt: bool,
 }
 impl Mind {
     pub(crate) fn new(account: i32) -> Self {
@@ -60,6 +63,7 @@ impl Mind {
             social: social::Life::default(),
             events: events::Events::default(),
             character: None,
+            veteran_alt: false,
         }
     }
     pub(crate) fn validate(&self) -> Result<()> {
