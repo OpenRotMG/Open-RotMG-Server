@@ -890,3 +890,25 @@ fn far_npc_clocks_pause_until_a_player_returns() {
     assert_eq!(world.entities[&snake].next_shot, 6000);
     assert_eq!(world.entities[&snake].activated, Some(5000));
 }
+
+#[test]
+fn oryx_counts_family_members_once_summoned() {
+    let (mut world, _) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 11;
+    }
+    let family = super::population::FAMILIES
+        .iter()
+        .find(|f| f.leader == 0x601)
+        .unwrap();
+    let positions = world
+        .family_layout(Pos { x: 24.5, y: 24.5 }, family, &[])
+        .unwrap();
+    world.place_camp(family, positions).unwrap();
+    assert_eq!(world.oryx_counted(11).len(), 1, "inactive leader only");
+    let leader = world.camp_members(0).find(|e| e.kind == 0x601).unwrap().id;
+    world.entities.get_mut(&leader).unwrap().activated = Some(0);
+    assert_eq!(world.oryx_counted(11).len(), 3, "active leader summoned");
+    world.remove_entity(leader);
+    assert_eq!(world.oryx_counted(11).len(), 2, "orphans still count");
+}
