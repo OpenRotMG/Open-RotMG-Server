@@ -827,6 +827,7 @@ pub struct World {
     reproduction: BTreeMap<(i32, usize), u64>,
     reproduction_at: [u64; 20],
     reproduction_bucket: usize,
+    npc_paused_since: BTreeMap<i32, u64>,
     djinn_attacking: BTreeSet<i32>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
@@ -2938,6 +2939,7 @@ impl World {
             reproduction: BTreeMap::new(),
             reproduction_at: [0; 20],
             reproduction_bucket: 0,
+            npc_paused_since: BTreeMap::new(),
             djinn_attacking: BTreeSet::new(),
             setpieces: vec![],
             ghost_towers: vec![],
@@ -3260,6 +3262,7 @@ impl World {
             self.reproduction.remove(&(id, entry));
         }
         self.djinn_attacking.remove(&id);
+        self.npc_paused_since.remove(&id);
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");

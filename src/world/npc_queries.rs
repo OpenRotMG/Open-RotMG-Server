@@ -66,22 +66,28 @@ impl World {
         } else {
             candidates.len()
         };
-        let mut dormant = Vec::new();
+        let (mut dormant, mut paused) = (Vec::new(), Vec::new());
         let mut select = |e: &Entity| {
             if e.population_slot.is_some()
-                && e.activated.is_none()
-                && e.stage.is_none()
                 && e.expires.is_none()
-                && e.next_shot <= self.now
-                && e.next_aux == 0
-                && e.reaction_until == 0
-                && e.blocked_since.is_none()
-                && e.charge.is_none()
                 && e.script.is_none()
                 && audience.iter().all(|p| e.pos.distance(*p) >= 20.)
             {
-                dormant.push(e.id);
-                return false;
+                let pristine = e.activated.is_none()
+                    && e.stage.is_none()
+                    && e.next_shot <= self.now
+                    && e.next_aux == 0
+                    && e.reaction_until == 0
+                    && e.blocked_since.is_none()
+                    && e.charge.is_none();
+                // A Shield Orc must still burst when its far key expires.
+                if pristine || e.kind != 0x900 {
+                    if !pristine {
+                        paused.push(e.id);
+                    }
+                    dormant.push(e.id);
+                    return false;
+                }
             }
             let object = &self.content.objects[&e.kind];
             object.class != "Wall"
@@ -95,8 +101,17 @@ impl World {
             candidates
                 .retain(|id| select(self.entities.get(id).expect("NPC candidate entity missing")));
         }
-        for id in dormant {
+        for &id in &dormant {
             self.npc_global_ids.remove(&id);
+        }
+        // Far clocked NPCs leave the per-tick scan and are suspended in one step when a player returns.
+        for &id in &paused {
+            self.npc_paused_since.entry(id).or_insert(self.now);
+        }
+        for &id in &candidates {
+            if let Some(since) = self.npc_paused_since.remove(&id) {
+                self.suspend_npc(id, self.now - since);
+            }
         }
         if !all_global {
             self.npc_global_ids.extend(candidates.iter().copied());
@@ -108,6 +123,7 @@ impl World {
             ("npc_query_cells", cells),
             ("npc_query_requested_cells", requested),
             ("npc_selected", candidates.len()),
+            ("npc_dormant", dormant.len()),
         ] {
             performance.count(name, amount as u64);
         }
