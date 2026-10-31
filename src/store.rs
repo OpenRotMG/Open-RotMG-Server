@@ -1857,6 +1857,7 @@ CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);")?;
         .await
     }
 }
+const PRESENTATION_CHARACTERS: &str = "SELECT c.id,CASE WHEN d.character IS NULL THEN json_set(c.stats,'$.id',c.id,'$.account',c.account) ELSE d.snapshot END,d.receipt FROM characters c LEFT JOIN deaths d ON d.character=c.id WHERE c.account=?1";
 fn read_presentation(
     db: &Connection,
     account: i32,
@@ -1878,7 +1879,7 @@ fn read_presentation(
     );
     let mut best_fame = BTreeMap::<u16, i32>::new();
     // SQL owns live identities; a committed death's immutable snapshot remains authoritative.
-    let mut q = db.prepare("SELECT c.id,CASE WHEN d.character IS NULL THEN json_set(c.stats,'$.id',c.id,'$.account',c.account) ELSE d.snapshot END,d.receipt FROM characters c LEFT JOIN deaths d ON d.character=c.id WHERE c.account=?1")?;
+    let mut q = db.prepare(PRESENTATION_CHARACTERS)?;
     for row in q.query_map([account], |r| {
         Ok((
             r.get::<_, i32>(0)?,
