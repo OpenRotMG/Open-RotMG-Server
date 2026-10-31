@@ -5448,16 +5448,19 @@ impl World {
         p.progress_started = false;
         p.progress_snapshot = None;
         p.level_assists_prepared.clear();
-        tracing::info!(
-            player = id,
-            level = p.character.level,
-            experience = p.character.exp,
-            fame = p.character.fame,
-            stars = p.presentation.stars(),
-            bonus_experience = p.character.xp_boost.bonus_exp,
-            xp_boost = p.character.xp_boost.active,
-            "progress committed"
-        );
+        // Bot commits were 40% of journal volume and pushed lag evidence out of retention.
+        if p.controller != Controller::Autonomous {
+            tracing::info!(
+                player = id,
+                level = p.character.level,
+                experience = p.character.exp,
+                fame = p.character.fame,
+                stars = p.presentation.stars(),
+                bonus_experience = p.character.xp_boost.bonus_exp,
+                xp_boost = p.character.xp_boost.active,
+                "progress committed"
+            );
+        }
         // Period wording, published only after durable progress: https://media.gdcvault.com/gdceurope2012/Presentations/Social%20%26%20Online%20Games%20Summit/Ethan_Levy_Social%26Online_GameDesignIs.pdf#page=54
         if let Some(text) = announcement {
             let recipients = self.broadcast_text("", &text);

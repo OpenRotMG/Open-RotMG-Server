@@ -43,8 +43,28 @@ const STAGES: [&str; 7] = [
 ];
 const EXAMPLES: usize = 4;
 static NEXT: AtomicU64 = AtomicU64::new(1);
-static LAST_INCIDENT_NS: AtomicU64 = AtomicU64::new(0);
-static COALESCED_INCIDENTS: AtomicU64 = AtomicU64::new(0);
+// Per kind, so frequent request waits cannot crowd out the slow ticks that cause them.
+static LAST_INCIDENT_NS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static COALESCED_INCIDENTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+
+fn kind_index(kind: &str) -> usize {
+    match kind {
+        "tick" => 0,
+        "job" => 1,
+        "directory_loan" => 2,
+        _ => panic!("unknown attribution kind {kind}"),
+    }
+}
+
+fn admit(last: &[AtomicU64; 3], coalesced: &[AtomicU64; 3], kind: &str, now: u64) -> Option<u64> {
+    let index = kind_index(kind);
+    if claim_incident(&last[index], now) {
+        Some(coalesced[index].swap(0, Ordering::Relaxed))
+    } else {
+        coalesced[index].fetch_add(1, Ordering::Relaxed);
+        None
+    }
+}
 
 fn claim_incident(last: &AtomicU64, now: u64) -> bool {
     last.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
@@ -176,13 +196,16 @@ impl Sample {
             && self.total() > Duration::from_millis(50)
         {
             // Per-event storms can block CPU-worker completion and suppress unrelated journal diagnostics (#1250).
-            if !claim_incident(&LAST_INCIDENT_NS, execution.end_ns) {
-                COALESCED_INCIDENTS.fetch_add(1, Ordering::Relaxed);
+            let Some(coalesced_incidents) = admit(
+                &LAST_INCIDENT_NS,
+                &COALESCED_INCIDENTS,
+                self.kind,
+                execution.end_ns,
+            ) else {
                 return;
-            }
-            let coalesced_incidents = COALESCED_INCIDENTS.swap(0, Ordering::Relaxed);
+            };
             tracing::warn!(pid=std::process::id(), world, clock="CLOCK_MONOTONIC", coalesced_incidents,
-                max_incidents_per_second=1, sample=%self.snapshot(), "latency incident");
+                max_incidents_per_second_per_kind=1, sample=%self.snapshot(), "latency incident");
         }
     }
     fn total(&self) -> Duration {
@@ -270,13 +293,7 @@ impl Attribution {
         if let Some(cpu) = sample.publish_cpu {
             operation.publish_cpu.record(cpu);
         }
-        let index = match sample.kind {
-            "tick" => 0,
-            "job" => 1,
-            "directory_loan" => 2,
-            _ => panic!("unknown attribution kind"),
-        };
-        let examples = &mut self.examples[index];
+        let examples = &mut self.examples[kind_index(sample.kind)];
         if examples.len() < EXAMPLES {
             examples.push((total, sample));
         } else {
@@ -363,6 +380,20 @@ mod tests {
             }
         });
         assert_eq!(claims.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn request_waits_cannot_crowd_out_a_slow_tick() {
+        let last = [const { AtomicU64::new(0) }; 3];
+        let coalesced = [const { AtomicU64::new(0) }; 3];
+        assert_eq!(admit(&last, &coalesced, "job", 10), Some(0));
+        assert_eq!(admit(&last, &coalesced, "job", 20), None);
+        assert_eq!(
+            admit(&last, &coalesced, "tick", 30),
+            Some(0),
+            "slow tick suppressed"
+        );
+        assert_eq!(admit(&last, &coalesced, "job", 1_000_000_010), Some(1));
     }
 
     struct Lines(Arc<AtomicU64>);
