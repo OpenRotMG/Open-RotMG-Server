@@ -3,10 +3,10 @@ use crate::{condition, encounter};
 
 pub(super) struct Grenade {
     kind: u16,
-    position: Pos,
-    radius: f32,
-    damage: i32,
-    deadline: u64,
+    pub(super) position: Pos,
+    pub(super) radius: f32,
+    pub(super) damage: i32,
+    pub(super) deadline: u64,
 }
 
 /// A full budget defers a summon; its encounter keeps acting and retries next tick.

@@ -206,6 +206,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
         tiles: Arc::new(tiles),
         player_markers: vec![],
         projectiles: vec![],
+        throws: vec![],
         dungeon_entries: vec![],
         objects: vec![VisibleObject {
             id: 2,
@@ -727,5 +728,52 @@ fn bot_escapes_a_volley_that_would_kill_it_before_its_health_looks_low() {
             .events
             .iter()
             .any(|e| e.reason == "lethal_volley")
+    );
+}
+
+#[test]
+fn bot_standing_in_lava_steps_out_and_dodges_a_shown_bomb() {
+    // Live: lava killed 16 and Medusa 17 level 20s a day; neither the ground nor the bomb's landing circle was avoided.
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.objects.clear();
+    let lava = |x: i16, y: i16| (8..=11).contains(&x) && (9..=11).contains(&y);
+    let geometry = crate::navigation::Geometry::new(
+        (128, 128),
+        (0..128 * 128)
+            .map(|i| {
+                if lava((i % 128) as i16, (i / 128) as i16) {
+                    0xf4
+                } else {
+                    1
+                }
+            })
+            .collect(),
+        &BTreeMap::from([(1, 1.), (0xf4, 0.666)]),
+    );
+    v.tiles = Arc::new(crate::navigation::Tiles::new(
+        geometry,
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
+    let out = d.movement.expect("movement out of lava");
+    assert!(!lava(tile(out).0, tile(out).1), "{out:?}");
+    assert!(out.distance(v.position) <= 2., "{out:?}");
+
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.objects.clear();
+    v.throws.push(crate::world::view::VisibleThrow {
+        position: Pos { x: 11.5, y: 10.5 },
+        radius: 4.,
+        damage: 150,
+        lands_ms: v.time_ms + 1000,
+    });
+    let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Dodge);
+    assert!(
+        d.movement.is_some_and(|m| m.x < v.position.x),
+        "{:?}",
+        d.movement
     );
 }
