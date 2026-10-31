@@ -323,14 +323,41 @@ impl World {
             self.population_next = self.now + 60000;
             self.compact_population()?;
             for terrain in 1..=12 {
-                if self.population_count(terrain) * 4
-                    < self.population_regions[terrain as usize].target * 3
-                {
+                let target = self.population_regions[terrain as usize].target;
+                // Kithio culls above 150% and refills below 75%: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Oryx.cs#L298-L357
+                if self.population_count(terrain) * 2 > target * 3 {
+                    self.cull_population(terrain);
+                } else if self.population_count(terrain) * 4 < target * 3 {
                     self.fill_population(terrain)?;
                 }
             }
         }
         self.repopulate_families()
+    }
+    pub(super) fn cull_population(&mut self, terrain: u8) {
+        let excess =
+            self.population_count(terrain) - self.population_regions[terrain as usize].target;
+        // Only bodies without a player within 10 tiles leave, so active areas keep their regrowth.
+        let culled: Vec<_> = self
+            .population
+            .iter()
+            .filter(|slot| self.population_terrain(slot) == terrain)
+            .filter_map(|slot| slot.entity)
+            .filter(|id| {
+                let pos = self.entities[id].pos;
+                self.players.values().all(|p| p.pos.distance(pos) >= 10.)
+            })
+            .take(excess)
+            .collect();
+        for &id in &culled {
+            self.remove_entity(id);
+        }
+        tracing::info!(
+            terrain,
+            culled = culled.len(),
+            bodies = self.population_count(terrain),
+            "Realm ordinary population culled"
+        );
     }
 }
 
