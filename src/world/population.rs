@@ -234,11 +234,11 @@ impl World {
     }
 
     pub(super) fn reproduce_active(&mut self) {
-        let delta = self.now - self.reproduction_at;
-        if delta < 1000 {
-            return;
-        }
-        self.reproduction_at = self.now;
+        // Each tick advances one twentieth of the parents, so the per-second pass never lands on one tick.
+        let bucket = self.reproduction_bucket;
+        self.reproduction_bucket = (bucket + 1) % self.reproduction_at.len();
+        let delta = self.now - self.reproduction_at[bucket];
+        self.reproduction_at[bucket] = self.now;
         // Kithio ticks behaviors only in 16-tile chunks within three chunks of a player: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Collision.cs#L187-L213
         let chunk = |p: Pos| ((p.x / 16.) as i32, (p.y / 16.) as i32);
         let players: Vec<_> = self.players.values().map(|p| chunk(p.pos)).collect();
@@ -246,6 +246,7 @@ impl World {
             .population
             .iter()
             .filter_map(|slot| slot.entity)
+            .filter(|id| id.rem_euclid(20) as usize == bucket)
             .filter(|id| {
                 let e = &self.entities[id];
                 let (x, y) = chunk(e.pos);

@@ -829,11 +829,16 @@ fn snakes_reproduce_back_to_kithio_density() {
     .map(|(x, y)| world.place_population_solo(0x602, Pos { x, y }).unwrap())
     .into();
     let count = |world: &World| world.actors().filter(|e| e.kind == 0x602).count();
+    let pass = |world: &mut World| {
+        for _ in 0..20 {
+            world.now += 50;
+            world.reproduce_active();
+        }
+    };
     let cycle = |world: &mut World| {
         world.now += 60000;
-        world.reproduce_active();
-        world.now += 1000;
-        world.reproduce_active();
+        pass(world);
+        pass(world);
     };
     cycle(&mut world);
     assert_eq!(count(&world), 5, "densityMax 5 within 10 tiles is full");

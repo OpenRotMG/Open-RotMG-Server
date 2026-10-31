@@ -71,6 +71,20 @@ async fn fill(
             continue;
         }
         let stars = if let Some(account) = app.store.shore_account(profile.identity.into()).await? {
+            // Live: a session whose completion failed stays fenced; admitting it again crashed the worker.
+            if app
+                .owners
+                .lock()
+                .expect("ownership registry poisoned")
+                .contains_key(&account)
+            {
+                tracing::warn!(
+                    account,
+                    name = profile.name,
+                    "persona account still held by an earlier session; remaining offline"
+                );
+                continue;
+            }
             app.store.account_stars(account).await?
         } else {
             profile.stars

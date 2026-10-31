@@ -172,6 +172,29 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn account_presentation_reads_characters_by_index() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("presentation-plan-{}.db", rand::random::<u64>()));
+        let store = Store::open(&path, &content).unwrap();
+        let plan: Vec<String> = store
+            .call(|db| {
+                let mut q = db.prepare(&format!("EXPLAIN QUERY PLAN {PRESENTATION_CHARACTERS}"))?;
+                let plan = q
+                    .query_map([1], |r| r.get(3))?
+                    .collect::<rusqlite::Result<_>>()?;
+                Ok(plan)
+            })
+            .await
+            .unwrap();
+        // Hiscores run this per competitor; a table scan cost ~0.7 s of CPU per call in production.
+        assert!(
+            plan.iter().all(|step| !step.starts_with("SCAN")),
+            "{plan:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn collection_ownership_counts_all_competitors_once_and_excludes_bots_and_outsiders() {
         let content = Content::load(Path::new("data")).unwrap();
         let path =

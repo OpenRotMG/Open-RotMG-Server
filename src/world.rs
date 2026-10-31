@@ -827,7 +827,8 @@ pub struct World {
     population_next: u64,
     reproduction: BTreeMap<(i32, usize), u64>,
     summon_waits: BTreeSet<i32>,
-    reproduction_at: u64,
+    reproduction_at: [u64; 20],
+    reproduction_bucket: usize,
     djinn_attacking: BTreeSet<i32>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
@@ -2938,7 +2939,8 @@ impl World {
             population_next: 10000,
             reproduction: BTreeMap::new(),
             summon_waits: BTreeSet::new(),
-            reproduction_at: 0,
+            reproduction_at: [0; 20],
+            reproduction_bucket: 0,
             djinn_attacking: BTreeSet::new(),
             setpieces: vec![],
             ghost_towers: vec![],
@@ -4235,8 +4237,12 @@ impl World {
     }
     #[cfg(test)]
     pub(crate) fn regress_native_ingress_for_test(&mut self, id: i32) -> Pos {
+        self.players.get_mut(&id).unwrap().last_move_at = u64::MAX;
+        self.accept_native_move_for_test(id)
+    }
+    #[cfg(test)]
+    pub(crate) fn accept_native_move_for_test(&mut self, id: i32) -> Pos {
         let p = self.players.get_mut(&id).unwrap();
-        p.last_move_at = u64::MAX;
         p.tick = p.tick.max(1);
         p.pos
     }
@@ -6339,12 +6345,25 @@ impl World {
         }
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
-        let audience: Vec<_> = self
+        // Player conditions are read once per tick, not once per NPC and player pair.
+        let seen: Vec<_> = self
             .players
             .values()
             .filter(|p| p.character.alive && !p.death_pending && !p.departing && !p.paused)
-            .map(|p| p.pos)
-            .chain(self.decoy_positions())
+            .map(|p| {
+                let conditions = p.conditions(self.now);
+                (
+                    p.pos,
+                    conditions & crate::condition::bit(crate::condition::INVISIBLE) != 0,
+                    conditions & crate::condition::bit(crate::condition::PARALYZED) != 0,
+                )
+            })
+            .collect();
+        let decoys: Vec<_> = self.decoy_positions().collect();
+        let audience: Vec<_> = seen
+            .iter()
+            .map(|(pos, ..)| *pos)
+            .chain(decoys.iter().copied())
             .collect();
         let ids = self.npc_candidates(&audience);
         'entities: for id in ids {
@@ -6376,31 +6395,21 @@ impl World {
                 self.suspend_npc(id, delta);
                 continue;
             }
-            let nearest = self
-                .players
-                .values()
-                .filter(|p| {
-                    p.character.alive
-                        && !p.death_pending
-                        && !p.departing
-                        && !p.paused
-                        && (matches!(kind, 0x6d8 | crate::dungeon::manor::MINE)
-                            || p.conditions(self.now)
-                                & crate::condition::bit(crate::condition::INVISIBLE)
-                                == 0)
+            let nearest = seen
+                .iter()
+                .filter(|(_, invisible, _)| {
+                    matches!(kind, 0x6d8 | crate::dungeon::manor::MINE) || !invisible
                 })
-                .map(|p| {
+                .map(|&(p, _, paralyzed)| {
                     (
                         kind == crate::dungeon::davy::BOSS
                             && entity.reaction_until > self.now
-                            && pos.distance(p.pos) < 12.
-                            && p.conditions(self.now)
-                                & crate::condition::bit(crate::condition::PARALYZED)
-                                != 0,
-                        p.pos,
+                            && pos.distance(p) < 12.
+                            && paralyzed,
+                        p,
                     )
                 })
-                .chain(self.decoy_positions().map(|p| (false, p)))
+                .chain(decoys.iter().map(|p| (false, *p)))
                 .min_by(|(ap, a), (bp, b)| {
                     bp.cmp(ap)
                         .then_with(|| pos.distance(*a).total_cmp(&pos.distance(*b)))
@@ -6455,13 +6464,9 @@ impl World {
                 } else {
                     radius.max(20.)
                 };
-            let nearby = self.players.values().any(|p| {
-                p.character.alive
-                    && !p.death_pending
-                    && !p.departing
-                    && !p.paused
-                    && pos.distance(p.pos) < simulation_radius
-            });
+            let nearby = seen
+                .iter()
+                .any(|(p, ..)| pos.distance(*p) < simulation_radius);
             let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind) || kind == 0x925)
                 && entity.activated.is_some();
             if !burst

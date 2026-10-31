@@ -2453,7 +2453,39 @@ async fn connection_io<S, I>(
                         let handling = std::time::Instant::now();
                         let queued=a.world.clock.now().saturating_duration_since(received);
                         let requests=Arc::new(Mutex::new(crate::performance::Requests::default()));
-                        let result=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packets,&mut session,&tx,&lost)).await;
+                        let (cancel,session_player)=(session.account.as_ref().and_then(|o| o.cancel.clone()),session.player);
+                        let testing=a.testing.clone();
+                        let (mut sent, mut closed)=(Vec::new(), None);
+                        let result={
+                            let handling=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packets,&mut session,&tx,&lost));
+                            tokio::pin!(handling);
+                            // In-game commands can wait on a lagging world while it keeps queueing updates; loads still reply only after entry.
+                            loop { tokio::select!{ biased;
+                                result=&mut handling=>break result,
+                                Some(packet)=rx.recv(), if session_player.is_some() && closed.is_none() && !reconnect_sent=>{
+                                    let (id, queued, sending)=(packet.id, rx.len()+1, std::time::Instant::now());
+                                    let nonce=(id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
+                                    let frame=codec.frame(id,packet.body);
+                                    if let (Some(testing),Some(player),Some(nonce))=(&testing,session_player,nonce) { testing.note_native_frame(nonce,player,&frame); }
+                                    match send_frame(&mut wsout,Message::Binary(frame.into()),&mut lost_rx,&mut shutdown,cancel.clone(),&mut drain).await {
+                                        Ok(())=>{
+                                            sent.push((id, queued, sending.elapsed(), std::time::Instant::now()));
+                                            if id==39 {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));}
+                                        }
+                                        Err(reason)=>closed=Some(reason),
+                                    }
+                                },
+                            }}
+                        };
+                        for (id, queued, sending, at) in sent {
+                            session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(queued);
+                            session.diagnostics.packets_out += 1;
+                            if let Some(gap)=session.diagnostics.queued_packet_sent(id,at) {
+                                tracing::warn!(target:"lag",player=session.player,world=session.diagnostics.world,gap_ms=gap.as_secs_f64()*1000.,"player update stall");
+                            }
+                            session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.as_secs_f64()*1000.0);
+                        }
+                        if let Some(reason)=closed { close_reason=reason; break 'connection; }
                         session.diagnostics.handled(diagnostics::CommandSample {packet:id,queued,handling:handling.elapsed(),queue_before,queue_after:incoming.len(),failed:result.is_err(),requests:requests.lock().expect("request timings poisoned").clone()});
                         if let Err(e)=result {
                             let rejected = lifecycle::rule_rejection(&e);
