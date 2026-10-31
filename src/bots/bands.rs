@@ -12,7 +12,7 @@ pub(super) struct Bands {
 }
 
 /// Danger tier of a content terrain band: shore 0, low 1, mid 2, high 3, godlands 4.
-fn tier(terrain: u8) -> u8 {
+pub(super) fn tier(terrain: u8) -> u8 {
     match terrain {
         1 => 4,
         2..=4 => 3,

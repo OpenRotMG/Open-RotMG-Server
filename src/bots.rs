@@ -1457,8 +1457,13 @@ impl Brain {
                 continue;
             }
             let protected = !progression::vulnerable(enemy);
+            // Live: level 20s stopped for every Hobbit on the way to their arrow; they shoot it in passing instead.
+            let trash = veteran_realm
+                && content.objects[&enemy.kind].terrain != 0
+                && bands::tier(content.objects[&enemy.kind].terrain) <= 1;
             let score = 45. - d * 2.
                 + if d < range
+                    && !trash
                     && (!dungeon
                         || !rushing && content.objects[&enemy.kind].xp_multiplier > 0.
                         || v.quest == Some(enemy.id))
