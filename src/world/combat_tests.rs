@@ -797,3 +797,46 @@ fn selected_rng_keeps_equal_bounds_and_half_open_damage_draws() {
         assert_eq!(p.seed, seed);
     }
 }
+
+#[test]
+fn reported_native_enemy_hits_land_once_within_projectile_reach() {
+    let (mut w, id) = fixture(0x18, false);
+    w.now = 1000;
+    let [near, far, weak] = [(12.5, 8.5), (25.5, 8.5), (11.5, 6.5)]
+        .map(|(x, y)| w.spawn_entity(0x21b, Pos { x, y }, vec![]).unwrap());
+    for (target, hp) in [(near, 2000), (far, 2000), (weak, 20)] {
+        w.entities.get_mut(&target).unwrap().hp = hp;
+    }
+    w.updates(id, false).unwrap();
+    // Aimed away from every target: the server's own collision can never land these shots.
+    let mut fire = |w: &mut World, bullet| {
+        let mut b = shot(w, id, 0xa14, 0);
+        b.friendly = true;
+        b.id = bullet;
+        b.angle = -std::f32::consts::FRAC_PI_2;
+        b.damage = 30;
+        w.bullets.push(b);
+    };
+    fire(&mut w, 1);
+    w.native_enemy_hit(id, 1, far, false).unwrap();
+    assert_eq!(
+        w.entities[&far].hp, 2000,
+        "hit beyond the projectile's reach"
+    );
+    w.native_enemy_hit(id, 1, near, false).unwrap();
+    assert_eq!(w.entities[&near].hp, 1970, "reported hit was not applied");
+    w.native_enemy_hit(id, 1, near, false).unwrap();
+    assert_eq!(w.entities[&near].hp, 1970, "one bullet hit twice");
+    fire(&mut w, 2);
+    w.native_enemy_hit(id, 2, weak, true).unwrap();
+    for _ in 0..12 {
+        w.step();
+    }
+    assert!(
+        !w.entities.contains_key(&weak),
+        "predicted kill did not land"
+    );
+    assert!(w.players[&id].predicted_deaths.is_empty());
+    assert_eq!(w.entities[&near].hp, 1970);
+    assert_eq!(w.players[&id].character.lifetime.projectile_hits, 2);
+}

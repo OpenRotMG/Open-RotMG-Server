@@ -134,7 +134,20 @@ impl World {
             .filter(|e| e.hp > 0 && self.content.objects[&e.kind].enemy)
     }
 
-    pub fn native_predicted_enemy_death(&mut self, id: i32, bullet: u8, target: i32) -> Result<()> {
+    pub fn native_enemy_hit(
+        &mut self,
+        id: i32,
+        bullet: u8,
+        target: i32,
+        killed: bool,
+    ) -> Result<()> {
+        if killed {
+            self.native_predicted_enemy_death(id, bullet, target)?;
+        }
+        Ok(())
+    }
+
+    fn native_predicted_enemy_death(&mut self, id: i32, bullet: u8, target: i32) -> Result<()> {
         self.players
             .get(&id)
             .context("enemy death report player missing")?;
