@@ -4231,8 +4231,12 @@ impl World {
     }
     #[cfg(test)]
     pub(crate) fn regress_native_ingress_for_test(&mut self, id: i32) -> Pos {
+        self.players.get_mut(&id).unwrap().last_move_at = u64::MAX;
+        self.accept_native_move_for_test(id)
+    }
+    #[cfg(test)]
+    pub(crate) fn accept_native_move_for_test(&mut self, id: i32) -> Pos {
         let p = self.players.get_mut(&id).unwrap();
-        p.last_move_at = u64::MAX;
         p.tick = p.tick.max(1);
         p.pos
     }
