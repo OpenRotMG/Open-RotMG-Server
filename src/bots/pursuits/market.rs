@@ -1524,7 +1524,19 @@ fn fair(q: &[Goods; 2], c: &Content) -> bool {
         Ok(true)
     )
 }
+/// What 2012 traders paid with: permanent stat potions, plus Paramount Defense rings, Resurrection
+/// amulets and Wine Cellar Incantations, the only gear quoted like money in the trade footage.
+fn money(c: &Content, kind: i32) -> bool {
+    matches!(kind, 0xac0 | 0xb3e | 0x722)
+        || c.objects
+            .get(&(kind as u16))
+            .is_some_and(|o| o.stat_increase.is_some())
+}
 fn bounded_quote(give: &Goods, want: &Goods, c: &Content) -> Option<[Goods; 2]> {
+    // Nobody offered ordinary gear as payment for other gear.
+    if !money(c, give.kind) && !money(c, want.kind) {
+        return None;
+    }
     // Zero spread: smallest whole supplied basket, then smallest requested basket whose
     // researched intervals overlap. No midpoint, fractional item or outside-range rounding.
     for supplied in 1..=give.quantity.min(8) {
