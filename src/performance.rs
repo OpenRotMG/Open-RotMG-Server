@@ -89,6 +89,53 @@ fn thread_cpu() -> Option<Duration> {
     None
 }
 
+pub(crate) const TICK_BUDGET: Duration = Duration::from_millis(50);
+
+#[cfg(target_os = "linux")]
+pub(crate) fn cpu_wait() -> Option<Duration> {
+    let text = std::fs::read_to_string("/proc/thread-self/schedstat")
+        .expect("per-thread scheduler statistics unavailable");
+    let waited = text
+        .split_whitespace()
+        .nth(1)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| panic!("invalid schedstat: {text:?}"));
+    Some(Duration::from_nanos(waited))
+}
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn cpu_wait() -> Option<Duration> {
+    None
+}
+
+pub(crate) fn tick_miss(
+    lateness: Duration,
+    step: Measurement,
+    wait: Option<Duration>,
+) -> (&'static str, Value) {
+    let ms = |d: Duration| d.as_secs_f64() * 1000.;
+    let (Some(cpu), Some(wait)) = (step.cpu, wait) else {
+        return (
+            "missed_unmeasured",
+            json!({"cause":"unmeasured","lateness_ms":ms(lateness),"wall_ms":ms(step.wall)}),
+        );
+    };
+    let blocked = step.wall.saturating_sub(cpu + wait);
+    let (counter, cause, _) = [
+        ("missed_late_start", "late_start", lateness),
+        ("missed_work", "work", cpu),
+        ("missed_contention", "contention", wait),
+        ("missed_blocked", "blocked", blocked),
+    ]
+    .into_iter()
+    .max_by_key(|(_, _, d)| *d)
+    .expect("tick causes");
+    (
+        counter,
+        json!({"cause":cause,"lateness_ms":ms(lateness),"wall_ms":ms(step.wall),"cpu_ms":ms(cpu),
+            "cpu_wait_ms":ms(wait),"blocked_ms":ms(blocked)}),
+    )
+}
+
 #[derive(Default)]
 struct Samples {
     recent: VecDeque<u64>,
@@ -134,6 +181,20 @@ impl Window {
     }
     pub(crate) fn end_capture(&mut self) -> Vec<(&'static str, Measurement)> {
         self.capture.take().expect("tick capture missing")
+    }
+    pub(crate) fn slowest_phases(&self) -> Value {
+        let mut phases: Vec<_> = self
+            .capture
+            .iter()
+            .flatten()
+            .filter(|(name, _)| !matches!(*name, "scheduling_lateness" | "step"))
+            .collect();
+        phases.sort_by_key(|(_, m)| std::cmp::Reverse(m.wall));
+        phases
+            .iter()
+            .take(4)
+            .map(|(name, m)| json!({"phase":name,"wall_ms":m.wall.as_secs_f64()*1000.,"cpu_ms":m.cpu.map(|c|c.as_secs_f64()*1000.)}))
+            .collect()
     }
     pub fn work(&mut self, name: &'static str, measure: Measure) {
         self.completed(name, measure.finish());
@@ -229,5 +290,95 @@ pub fn memory() -> Value {
     match read() {
         Ok(value) => value,
         Err(error) => json!({"unavailable":error.to_string()}),
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tick_miss_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn pin_to_one_cpu() {
+        unsafe {
+            let mut set: libc::cpu_set_t = std::mem::zeroed();
+            let size = std::mem::size_of_val(&set);
+            assert_eq!(libc::sched_getaffinity(0, size, &mut set), 0);
+            let cpu = (0..libc::CPU_SETSIZE as usize)
+                .find(|&cpu| libc::CPU_ISSET(cpu, &set))
+                .expect("no allowed CPU");
+            libc::CPU_ZERO(&mut set);
+            libc::CPU_SET(cpu, &mut set);
+            assert_eq!(libc::sched_setaffinity(0, size, &set), 0);
+        }
+    }
+
+    fn spin(cpu: Duration) {
+        let start = thread_cpu().unwrap();
+        while thread_cpu().unwrap() - start < cpu {
+            std::hint::black_box(0u64);
+        }
+    }
+
+    fn tick(body: impl FnOnce()) -> (&'static str, Value) {
+        let waited = cpu_wait();
+        let measure = Measure::start();
+        body();
+        let step = measure.finish();
+        let wait = cpu_wait().unwrap() - waited.unwrap();
+        tick_miss(Duration::ZERO, step, Some(wait))
+    }
+
+    #[test]
+    fn deadline_misses_name_work_contention_blocking_and_late_start() {
+        let (work, contention, blocked) = std::thread::spawn(|| {
+            pin_to_one_cpu();
+            let work = tick(|| spin(Duration::from_millis(60)));
+            let blocked = tick(|| {
+                spin(Duration::from_millis(5));
+                std::thread::sleep(Duration::from_millis(60));
+            });
+            let stop = AtomicBool::new(false);
+            let contention = std::thread::scope(|s| {
+                for _ in 0..2 {
+                    s.spawn(|| {
+                        while !stop.load(Ordering::Relaxed) {
+                            std::hint::black_box(0u64);
+                        }
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(20));
+                let result = tick(|| spin(Duration::from_millis(20)));
+                stop.store(true, Ordering::Relaxed);
+                result
+            });
+            (work, contention, blocked)
+        })
+        .join()
+        .unwrap();
+        println!(
+            "work {}\ncontention {}\nblocked {}",
+            work.1, contention.1, blocked.1
+        );
+        assert_eq!(work.0, "missed_work", "{}", work.1);
+        assert_eq!(contention.0, "missed_contention", "{}", contention.1);
+        assert_eq!(blocked.0, "missed_blocked", "{}", blocked.1);
+        let late = Measurement {
+            wall: Duration::from_millis(10),
+            cpu: Some(Duration::from_millis(9)),
+        };
+        let (counter, miss) = tick_miss(Duration::from_millis(80), late, Some(Duration::ZERO));
+        assert_eq!(counter, "missed_late_start", "{miss}");
+        assert_eq!(
+            tick_miss(
+                Duration::ZERO,
+                Measurement {
+                    wall: late.wall,
+                    cpu: None
+                },
+                None
+            )
+            .0,
+            "missed_unmeasured"
+        );
     }
 }
