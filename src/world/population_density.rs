@@ -194,7 +194,7 @@ impl World {
     fn fill_population(&mut self, terrain: u8) -> Result<()> {
         let target = self.population_regions[terrain as usize].target;
         let kinds = self.population_regions[terrain as usize].kinds.clone();
-        let needed = target.saturating_sub(self.population_roots(terrain).len());
+        let needed = target.saturating_sub(self.oryx_counted(terrain).len());
         let (mut roots, mut refused, mut stalled, mut groups) = (0, 0, 0, 0);
         while roots < needed && stalled < 128 {
             // SpawnProb's original selector is lost; relative XML weights are an explicit reconstruction choice.
@@ -300,10 +300,10 @@ impl World {
             for terrain in 1..=12 {
                 let target = self.population_regions[terrain as usize].target;
                 // Kithio culls above 150% and refills below 75%: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Oryx.cs#L298-L357
-                let roots = self.population_roots(terrain).len();
-                if roots * 2 > target * 3 {
+                let counted = self.oryx_counted(terrain).len();
+                if counted * 2 > target * 3 {
                     self.cull_population(terrain);
-                } else if roots * 4 < target * 3 {
+                } else if counted * 4 < target * 3 {
                     self.fill_population(terrain)?;
                 }
             }
@@ -311,23 +311,31 @@ impl World {
         self.reproduce_active();
         self.repopulate_families()
     }
-    // Kithio Oryx counts the roots it spawns; eager family members stand in for children its roots summon only once active.
-    pub(super) fn population_roots(&self, terrain: u8) -> Vec<i32> {
+    // Kithio counts every enemy on the terrain, but a root only summons its children once active.
+    // Eager family members therefore count after their leader has been active, or once it is gone.
+    pub(super) fn oryx_counted(&self, terrain: u8) -> Vec<i32> {
         self.population
             .iter()
             .enumerate()
             .filter(|(i, slot)| {
                 self.population_terrain(slot) == terrain
-                    && slot.camp.is_none_or(|camp| self.camps[camp].start == *i)
+                    && slot.camp.is_none_or(|camp| {
+                        let start = self.camps[camp].start;
+                        *i == start
+                            || self.population[start]
+                                .entity
+                                .and_then(|id| self.entities.get(&id))
+                                .is_none_or(|leader| leader.activated.is_some())
+                    })
             })
             .filter_map(|(_, slot)| slot.entity)
             .collect()
     }
     pub(super) fn cull_population(&mut self, terrain: u8) {
-        let roots = self.population_roots(terrain);
-        let excess = roots.len() - self.population_regions[terrain as usize].target;
-        // Only roots without a player within 10 tiles leave, so active areas keep their regrowth.
-        let culled: Vec<_> = roots
+        let counted = self.oryx_counted(terrain);
+        let excess = counted.len() - self.population_regions[terrain as usize].target;
+        // Only bodies without a player within 10 tiles leave, so active areas keep their regrowth.
+        let culled: Vec<_> = counted
             .into_iter()
             .filter(|id| {
                 let pos = self.entities[id].pos;
@@ -336,9 +344,19 @@ impl World {
             .take(excess)
             .collect();
         for &id in &culled {
-            let family: Vec<_> = match self.entities[&id].camp {
-                Some(camp) => self.camp_members(camp).map(|e| e.id).collect(),
-                None => vec![id],
+            let Some(e) = self.entities.get(&id) else {
+                continue;
+            };
+            // A never-active leader takes its uncounted, not-yet-summoned family with it.
+            let family: Vec<_> = match e.camp {
+                Some(camp)
+                    if e.activated.is_none()
+                        && self.camps[camp].start
+                            == e.population_slot.expect("population body lacks its slot") =>
+                {
+                    self.camp_members(camp).map(|e| e.id).collect()
+                }
+                _ => vec![id],
             };
             for member in family {
                 self.remove_entity(member);
@@ -347,7 +365,7 @@ impl World {
         tracing::info!(
             terrain,
             culled = culled.len(),
-            roots = self.population_roots(terrain).len(),
+            counted = self.oryx_counted(terrain).len(),
             bodies = self.population_count(terrain),
             "Realm ordinary population culled"
         );
@@ -467,7 +485,7 @@ fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
                 .filter(|c| c.terrain as usize == terrain)
                 .count();
             let count = world.population_count(terrain as u8);
-            assert!(world.population_roots(terrain as u8).len() >= region.target);
+            assert!(world.oryx_counted(terrain as u8).len() >= region.target);
             let kinds: BTreeSet<_> = world
                 .entities
                 .values()
