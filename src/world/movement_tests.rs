@@ -837,3 +837,23 @@ fn lone_snake_reproduces_to_kithio_density() {
     assert!(snakes.iter().all(|e| e.population_slot.is_some()
         && e.pos.distance(Pos { x: 24.5, y: 24.5 }) < 5.01));
 }
+
+#[test]
+fn oryx_culls_excess_away_from_players() {
+    let (mut world, player) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 11;
+    }
+    world.population_regions[11].limit = 100;
+    world.population_regions[11].target = 2;
+    let near = world.players[&player].pos;
+    let kept = world.place_population_solo(0x602, near).unwrap();
+    for x in [20.5, 23.5, 26.5, 29.5] {
+        world
+            .place_population_solo(0x602, Pos { x, y: 24.5 })
+            .unwrap();
+    }
+    world.cull_population(11);
+    assert_eq!(world.population_count(11), 2);
+    assert!(world.entities.contains_key(&kept));
+}
