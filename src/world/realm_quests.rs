@@ -1406,7 +1406,7 @@ mod tests {
                 let world = &directory.worlds[&id];
                 assert_eq!(world.realm_layout.as_deref(), Some(name));
                 assert_eq!((world.map.width, world.map.height), (side, side));
-                assert_eq!(world.map.spawns.len(), 4);
+                assert_eq!(world.map.spawns.len(), 12);
                 assert_eq!(world.actors().filter(|e| e.kind == 0x91f).count(), groves);
                 assert_eq!(world.actors().filter(|e| e.kind == 0xdc2).count(), coils);
                 assert!(liches.contains(&world.actors().filter(|e| e.kind == 0x91b).count()));
