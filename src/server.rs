@@ -1320,10 +1320,7 @@ fn input(
                 lifecycle::protocol("invalid predicted enemy death flag")
             );
             let id = character("enemy hit report before character")?;
-            if killed == 0 {
-                return Ok(None);
-            }
-            Box::new(move |w| w.native_predicted_enemy_death(id, bullet, target))
+            Box::new(move |w| w.native_enemy_hit(id, bullet, target, killed == 1))
         }
         48 => {
             r.done()?;

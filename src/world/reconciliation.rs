@@ -134,7 +134,56 @@ impl World {
             .filter(|e| e.hp > 0 && self.content.objects[&e.kind].enemy)
     }
 
-    pub fn native_predicted_enemy_death(&mut self, id: i32, bullet: u8, target: i32) -> Result<()> {
+    pub fn native_enemy_hit(
+        &mut self,
+        id: i32,
+        bullet: u8,
+        target: i32,
+        killed: bool,
+    ) -> Result<()> {
+        if killed {
+            self.native_predicted_enemy_death(id, bullet, target)?;
+        }
+        // Client-seen hits land with the server's shared damage roll, as Kithio's ForceHit does; lag must not turn visible hits into misses: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/networking/handlers/EnemyHitPacketHandler.cs
+        let Some(e) = self.predicted_death_target(id, target) else {
+            return Ok(());
+        };
+        let Some(index) = self.bullets.iter().position(|b| {
+            b.friendly
+                && b.owner == id
+                && b.id == bullet
+                && !b.hit.contains(&-1)
+                && (b.spec.multi_hit || b.hit.is_empty())
+                && self.hittable(b, e)
+        }) else {
+            return Ok(());
+        };
+        let b = &self.bullets[index];
+        let reach = b.spec.speed * b.spec.lifetime / 10000.
+            + b.spec.amplitude.abs()
+            + b.spec.magnitude
+            + 2.;
+        if b.start.distance(e.pos) > reach {
+            tracing::warn!(
+                player = id,
+                target,
+                bullet,
+                distance = b.start.distance(e.pos),
+                reach,
+                "native enemy hit beyond projectile reach ignored"
+            );
+            return Ok(());
+        }
+        let mut bullets = std::mem::take(&mut self.bullets);
+        self.detached_bullets = bullets.len();
+        self.bullet_hit(&mut bullets[index], target);
+        bullets.append(&mut self.bullets);
+        self.bullets = bullets;
+        self.detached_bullets = 0;
+        Ok(())
+    }
+
+    fn native_predicted_enemy_death(&mut self, id: i32, bullet: u8, target: i32) -> Result<()> {
         self.players
             .get(&id)
             .context("enemy death report player missing")?;
