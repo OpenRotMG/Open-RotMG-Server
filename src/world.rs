@@ -7496,7 +7496,7 @@ impl World {
                     continue;
                 }
                 let p = &self.players[&id];
-                if p.tx.is_some()
+                if p.controller != Controller::Autonomous
                     || p.spectators
                         .as_ref()
                         .is_some_and(|s| s.receiver_count() > 0)
@@ -7532,7 +7532,7 @@ impl World {
                     }
                     send(&self.players[&id], wire::NEW_TICK, o.0);
                 } else {
-                    // Unwatched bots discard their ticks; the first watched tick must then carry every stat.
+                    // Bot runtimes ignore NEW_TICK; after skipping, the first spectator tick must carry every stat.
                     self.players.get_mut(&id).unwrap().tick_stats.forget();
                 }
                 let p = self.players.get_mut(&id).unwrap();
