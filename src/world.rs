@@ -7400,16 +7400,7 @@ impl World {
                 if b.friendly {
                     let targets: Vec<_> = self
                         .near_entities(old, b.pos)
-                        .filter(|e| {
-                            e.hp > 0
-                                && e.conditions(self.now)
-                                    & (crate::condition::bit(crate::condition::STASIS)
-                                        | crate::condition::bit(crate::condition::INVINCIBLE))
-                                    == 0
-                                && self.content.objects[&e.kind].destructible
-                                && !b.hit.contains(&e.id)
-                                && inside_box(e.pos, b.pos)
-                        })
+                        .filter(|e| self.hittable(b, e) && inside_box(e.pos, b.pos))
                         .map(|e| e.id)
                         .collect();
                     if let Some(target) = targets.iter().min_by(|a, b_id| {
@@ -7417,36 +7408,9 @@ impl World {
                             .pos
                             .distance(b.pos)
                             .total_cmp(&self.entities[b_id].pos.distance(b.pos))
-                    }) {
-                        if self.players.get(&b.owner).is_some_and(|p| p.paused) {
-                            b.hit.insert(*target);
-                            break;
-                        }
-                        if !b.hit_enemy && self.content.objects[&self.entities[target].kind].enemy {
-                            b.hit_enemy = true;
-                            if let Some(p) = self
-                                .players
-                                .get_mut(&b.owner)
-                                .filter(|p| p.character.alive && !p.death_started && !p.departing)
-                            {
-                                p.character.lifetime.projectile_hits = p
-                                    .character
-                                    .lifetime
-                                    .projectile_hits
-                                    .checked_add(1)
-                                    .expect("lifetime projectile hit overflow");
-                            }
-                        }
-                        self.damage_enemy(
-                            b.owner,
-                            *target,
-                            b.damage,
-                            b.spec.armor_piercing,
-                            &b.spec.effects,
-                            Some(b.id),
-                        )
-                        .expect("validated enemy damage");
-                        b.hit.insert(*target);
+                    }) && self.bullet_hit(b, *target)
+                    {
+                        break;
                     }
                 } else if !self.safe {
                     for id in &ids {
@@ -7594,6 +7558,50 @@ impl World {
         }
     }
 }
+impl World {
+    pub(super) fn hittable(&self, b: &Bullet, e: &Entity) -> bool {
+        e.hp > 0
+            && e.conditions(self.now)
+                & (crate::condition::bit(crate::condition::STASIS)
+                    | crate::condition::bit(crate::condition::INVINCIBLE))
+                == 0
+            && self.content.objects[&e.kind].destructible
+            && !b.hit.contains(&e.id)
+    }
+    /// Returns whether the owner was paused, which consumes the bullet without damage.
+    pub(super) fn bullet_hit(&mut self, b: &mut Bullet, target: i32) -> bool {
+        b.hit.insert(target);
+        if self.players.get(&b.owner).is_some_and(|p| p.paused) {
+            return true;
+        }
+        if !b.hit_enemy && self.content.objects[&self.entities[&target].kind].enemy {
+            b.hit_enemy = true;
+            if let Some(p) = self
+                .players
+                .get_mut(&b.owner)
+                .filter(|p| p.character.alive && !p.death_started && !p.departing)
+            {
+                p.character.lifetime.projectile_hits = p
+                    .character
+                    .lifetime
+                    .projectile_hits
+                    .checked_add(1)
+                    .expect("lifetime projectile hit overflow");
+            }
+        }
+        self.damage_enemy(
+            b.owner,
+            target,
+            b.damage,
+            b.spec.armor_piercing,
+            &b.spec.effects,
+            Some(b.id),
+        )
+        .expect("validated enemy damage");
+        false
+    }
+}
+
 fn inside_box(a: Pos, b: Pos) -> bool {
     (a.x - b.x).abs() <= 0.5 && (a.y - b.y).abs() <= 0.5
 }
