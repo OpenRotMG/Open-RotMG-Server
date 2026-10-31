@@ -71,7 +71,8 @@ pub(super) fn appeal(
     };
     // Realm events are the quest gods; heroes such as Ent Ancients are quests but not events.
     let event = c.objects[&kind].god;
-    let score = 40.
+    // Live: level 20s spent 64% of their kills in the lowlands; in 2012 a level 20's place was its arrow, not the beach.
+    let score = INTERESTING
         + (value * 2.).min(40.)
         + if event { 20. } else { 0. }
         + crowd.min(8) as f32 * p.companions / 2.

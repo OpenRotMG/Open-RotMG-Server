@@ -98,9 +98,10 @@ pub(super) fn clearance(v: &PlayerView, destination: Pos) -> f32 {
 fn cost(v: &PlayerView, raw: i32, piercing: bool) -> i32 {
     crate::condition::damage(raw, v.character.stats[3], v.character.conditions, piercing)
 }
-/// Damage from visible bullets that reach this spot within half a second if the player stands still.
+/// Damage from visible bullets and bombs that reach this spot within half a second if the player stands still.
 pub(super) fn incoming(v: &PlayerView) -> i32 {
-    v.projectiles
+    let bullets = v
+        .projectiles
         .iter()
         .filter(|b| hostile(v, b.owner))
         .filter(|b| {
@@ -108,8 +109,17 @@ pub(super) fn incoming(v: &PlayerView) -> i32 {
                 predicted(b, step as f32 * 0.05).is_some_and(|p| p.distance(v.position) < 0.6)
             })
         })
-        .map(|b| cost(v, b.damage, b.armor_piercing))
-        .sum()
+        .map(|b| cost(v, b.damage, b.armor_piercing));
+    let bombs = v
+        .throws
+        .iter()
+        .filter(|t| t.lands_ms <= v.time_ms + 500 && bombed(t, v.position))
+        .map(|t| cost(v, t.damage, false));
+    bullets.chain(bombs).sum()
+}
+/// Inside a pending bomb's landing circle, with half a tile for the player's own size.
+pub(super) fn bombed(t: &crate::world::view::VisibleThrow, p: Pos) -> bool {
+    t.position.distance(p) < t.radius + 0.5
 }
 /// The hardest single hit anything nearby can land, from its bullets in flight and its known attacks.
 pub(super) fn biggest_hit(v: &PlayerView, c: &Content, enemies: &[&VisibleObject]) -> i32 {
@@ -426,6 +436,12 @@ pub(super) fn movement(
         if steering.is_some_and(|s| safety < s.clearance) {
             continue;
         }
+        // Live: Medusa bombs killed 17 level 20s a day; their landing circle is shown before impact.
+        let bombs: f32 = v
+            .throws
+            .iter()
+            .map(|t| (t.radius + 0.5 - t.position.distance(point)).max(0.) * -20.)
+            .sum();
         let separation = enemies
             .iter()
             .map(|e| point.distance(e.position))
@@ -439,7 +455,7 @@ pub(super) fn movement(
         };
         // Retain safe steering, not physical inertia; urgent avoidance stays first: https://www.red3d.com/cwr/steer/gdc99/
         let continuity = steering.map_or(0., |s| (direction - s.heading).cos() * 3.);
-        let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing + continuity;
+        let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing + continuity + bombs;
         if best.is_none_or(|(prior, _)| score > prior) {
             best = Some((score, point));
         }

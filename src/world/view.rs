@@ -104,6 +104,7 @@ pub struct PlayerView {
     pub objects: Vec<VisibleObject>,
     pub player_markers: Vec<PlayerMarker>,
     pub projectiles: Vec<VisibleProjectile>,
+    pub throws: Vec<VisibleThrow>,
     pub dungeon_entries: Vec<ObservedDungeonEntry>,
 }
 #[derive(Serialize)]
@@ -177,6 +178,14 @@ pub struct VisibleObject {
     pub usable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub condition_mask: Option<i32>,
+}
+/// A lobbed bomb's landing circle, shown to 2012 players by the throw effect before it lands.
+#[derive(Clone, Serialize)]
+pub struct VisibleThrow {
+    pub position: Pos,
+    pub radius: f32,
+    pub damage: i32,
+    pub lands_ms: u64,
 }
 #[derive(Serialize)]
 pub struct VisibleProjectile {
@@ -332,6 +341,17 @@ impl World {
                 armor_piercing: b.spec.armor_piercing,
             })
             .collect();
+        let throws = w
+            .grenades
+            .iter()
+            .filter(|g| g.position.distance(p.pos) < 20.)
+            .map(|g| VisibleThrow {
+                position: g.position,
+                radius: g.radius,
+                damage: g.damage,
+                lands_ms: g.deadline,
+            })
+            .collect();
         let view = PlayerView {
             inputs: p.inputs.clone().filter(|_| p.active() && !p.pending),
             session: Session {
@@ -397,6 +417,7 @@ impl World {
                 })
                 .collect(),
             projectiles,
+            throws,
             dungeon_entries: p
                 .dungeon_entries
                 .iter()

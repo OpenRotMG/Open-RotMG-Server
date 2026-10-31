@@ -63,6 +63,7 @@ impl Profile {
         self.identity.starts_with("guest:v1:")
     }
 }
+
 #[cfg(test)]
 const ARCHETYPES: [Profile; 6] = [
     Profile {
@@ -467,6 +468,8 @@ impl Brain {
                 }
             }
         }
+        // Live: lava killed 16 level 20s a day; bots routed through it like ordinary slow ground.
+        blockers.extend(hazards_near(v, content, 12).filter(|p| *p != tile(v.position)));
         if self.mind.events.knows_blue && v.map.name == "Mad Lab" {
             for pool in v.objects.iter().filter(|p| {
                 p.kind == crate::dungeon::lab::HEXXER
@@ -833,7 +836,8 @@ impl Brain {
             .context("weapon projectile missing")?;
         let range = projectile.speed * projectile.lifetime / 10000.;
         let health = v.character.hp as f32 / v.character.stats[0] as f32;
-        let threatened = combat::clearance(v, v.position) < self.mind.cognition.pickup_clearance;
+        let threatened = combat::clearance(v, v.position) < self.mind.cognition.pickup_clearance
+            || v.throws.iter().any(|t| combat::bombed(t, v.position));
         // Health is judged in hits of what this player faces, so more max HP buys more courage.
         let seen = combat::biggest_hit(v, content, &enemies);
         if seen > 0 {
@@ -1243,6 +1247,22 @@ impl Brain {
             *remedy,
         );
         let (grid, perception) = (&s.grid, &s.perception);
+        let here = tile(v.position);
+        if hazards_near(v, content, 0).next().is_some() {
+            let hazards: BTreeSet<_> = hazards_near(v, content, 8).collect();
+            let shore = (here.0 - 8..=here.0 + 8)
+                .flat_map(|x| (here.1 - 8..=here.1 + 8).map(move |y| (x, y)))
+                .filter(|p| grid.walkable.contains(p) && !hazards.contains(p))
+                .min_by(|a, b| {
+                    center(*a)
+                        .distance(v.position)
+                        .total_cmp(&center(*b).distance(v.position))
+                })
+                .context("standing in damaging ground with no known safe tile within 8")?;
+            decision.goal = Goal::Dodge;
+            decision.movement = Some(center(shore));
+            return Ok(true);
+        }
         if retreat || threatened {
             decision.goal = if retreat {
                 Goal::Recover
@@ -1639,11 +1659,14 @@ impl Brain {
         if !committed
             // Approaching the quest's fight is the quest logic's job, landing well outside it.
             && let Some((marker, crowd)) = self.crowd.gathering(v, self.ambitious(), |position| {
+                let quest = enemies.iter().find(|e| v.quest == Some(e.id));
+                // Live: level 20s joined lowland crowds on unseen ground and farmed Hobbit Mages in groups of eight.
+                let veteran_ground = v.character.level < 20
+                    || quest.is_some_and(|q| q.position.distance(position) < 45.)
+                    || self.crowd.bands.known(position).is_some_and(|band| band >= 3);
                 !self.blocked.contains_key(&tile(position))
-                    && enemies
-                        .iter()
-                        .filter(|e| v.quest == Some(e.id))
-                        .all(|e| e.position.distance(position) >= 20.)
+                    && quest.is_none_or(|q| q.position.distance(position) >= 20.)
+                    && veteran_ground
             })
         {
             let score = 55. + 5. * crowd.min(6) as f32 + self.profile.companions;
@@ -2131,6 +2154,21 @@ fn own(v: &PlayerView, slot: usize) -> Slot {
     }
 }
 type TilePoint = (i16, i16);
+/// Known damaging tiles within `radius` of the player, which a 2012 player sees as lava.
+fn hazards_near<'a>(
+    v: &'a PlayerView,
+    content: &'a Content,
+    radius: i16,
+) -> impl Iterator<Item = TilePoint> + 'a {
+    let (x, y) = tile(v.position);
+    (x - radius..=x + radius)
+        .flat_map(move |x| (y - radius..=y + radius).map(move |y| (x, y)))
+        .filter(|p| {
+            v.tiles
+                .ground(*p)
+                .is_some_and(|g| content.hazards.contains_key(&g))
+        })
+}
 mod movement;
 use movement::Grid;
 
