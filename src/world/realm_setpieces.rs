@@ -913,6 +913,7 @@ impl World {
                     | "classic-world-05-reconstruction"
                     | "classic-world-06-reconstruction"
                     | "classic-world-07-reconstruction"
+                    | "classic-world-08-reconstruction"
                     | "classic-world-09-reconstruction"
                     | "classic-world-10-reconstruction"
                     | "classic-world-11-reconstruction"
