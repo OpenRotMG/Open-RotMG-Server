@@ -50,6 +50,46 @@ fn spider_den_teleport_requires_an_eligible_observed_target() {
 }
 
 #[test]
+fn manor_advertises_player_teleport_in_mapinfo() {
+    let (mut world, _) = movement_tests::fixture(0x18, false);
+    world.name = "Manor of the Immortals".into();
+    let packet = world.map_info();
+    let mut reader = wire::Reader::new(&packet);
+    reader.i32().unwrap();
+    reader.i32().unwrap();
+    assert_eq!(reader.utf().unwrap(), world.name);
+    reader.i32().unwrap();
+    reader.i32().unwrap();
+    assert_eq!(reader.u8().unwrap(), 1, "Manor MAPINFO teleport permission");
+}
+
+#[test]
+fn manor_permits_teleport_to_observed_player_destination() {
+    let (mut world, sender) = movement_tests::fixture(0x18, false);
+    world.name = "Manor of the Immortals".into();
+    let mut character = world.players[&sender].character.clone();
+    character.id = 2;
+    character.account = 2;
+    let target = world.enter(character, None).unwrap();
+    world.players.get_mut(&sender).unwrap().known.insert(target);
+    let destination = Pos { x: 12.25, y: 9.75 };
+    world.players.get_mut(&target).unwrap().pos = destination;
+    let content = world.content.clone();
+    let mut directory =
+        Directory::test_with_seed(std::path::Path::new("data"), content, 16, 1059).unwrap();
+    directory.worlds.insert(-2, world);
+    let received = Instant::now();
+    assert_eq!(
+        directory
+            .teleport(sender, target, received)
+            .unwrap()
+            .position
+            .distance(destination),
+        0.
+    );
+}
+
+#[test]
 fn teleport_to_progress_save_target_preserves_its_reservation_and_commit() {
     for controller in [Controller::Human, Controller::Autonomous] {
         let (mut world, sender) = movement_tests::fixture(0x18, false);
