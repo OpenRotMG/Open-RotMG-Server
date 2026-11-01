@@ -297,10 +297,12 @@ impl World {
         if self.now >= self.population_next {
             self.population_next = self.now + 60000;
             self.compact_population()?;
+            // Each terrain only fills or culls its own slots, so one pass serves all twelve checks.
+            let counts = self.oryx_counts();
             for terrain in 1..=12 {
                 let target = self.population_regions[terrain as usize].target;
                 // Kithio culls above 150% and refills below 75%: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Oryx.cs#L298-L357
-                let counted = self.oryx_counted(terrain).len();
+                let counted = counts[terrain as usize];
                 if counted * 2 > target * 3 {
                     self.cull_population(terrain);
                 } else if counted * 4 < target * 3 {
@@ -313,23 +315,34 @@ impl World {
     }
     // Kithio counts every enemy on the terrain, but a root only summons its children once active.
     // Eager family members therefore count after their leader has been active, or once it is gone.
+    fn oryx_counts_slot(&self, i: usize, slot: &Spawn) -> bool {
+        slot.camp.is_none_or(|camp| {
+            let start = self.camps[camp].start;
+            i == start
+                || self.population[start]
+                    .entity
+                    .and_then(|id| self.entities.get(&id))
+                    .is_none_or(|leader| leader.activated.is_some())
+        })
+    }
     pub(super) fn oryx_counted(&self, terrain: u8) -> Vec<i32> {
         self.population
             .iter()
             .enumerate()
             .filter(|(i, slot)| {
-                self.population_terrain(slot) == terrain
-                    && slot.camp.is_none_or(|camp| {
-                        let start = self.camps[camp].start;
-                        *i == start
-                            || self.population[start]
-                                .entity
-                                .and_then(|id| self.entities.get(&id))
-                                .is_none_or(|leader| leader.activated.is_some())
-                    })
+                self.population_terrain(slot) == terrain && self.oryx_counts_slot(*i, slot)
             })
             .filter_map(|(_, slot)| slot.entity)
             .collect()
+    }
+    pub(super) fn oryx_counts(&self) -> [usize; 13] {
+        let mut counts = [0; 13];
+        for (i, slot) in self.population.iter().enumerate() {
+            if slot.entity.is_some() && self.oryx_counts_slot(i, slot) {
+                counts[self.population_terrain(slot) as usize] += 1;
+            }
+        }
+        counts
     }
     pub(super) fn cull_population(&mut self, terrain: u8) {
         let counted = self.oryx_counted(terrain);
