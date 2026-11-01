@@ -5482,6 +5482,11 @@ impl World {
             || snapshot.beaches > p.character.beaches
             || snapshot.davy_lockers > p.character.davy_lockers
             || snapshot.tombs > p.character.tombs;
+        let goal = p
+            .presentation
+            .next_quest(p.character.class, p.character.fame);
+        let class_quest_completed = goal > 0 && snapshot.fame >= goal;
+        let position = p.pos;
         let leveled = snapshot.level > p.character.level;
         let announcement = (leveled && snapshot.level == 20)
             .then(|| format!("{} achieved level 20", p.character.name));
@@ -5529,6 +5534,22 @@ impl World {
                 bonus_experience = p.character.xp_boost.bonus_exp,
                 xp_boost = p.character.xp_boost.active,
                 "progress committed"
+            );
+        }
+        // Compare the prior goal so the terminal quest also completes: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.Leveling.cs#L174-L184
+        if class_quest_completed {
+            let mut out = Writer::new();
+            out.i32(id).utf("Class Quest Complete!").u32(0xff00ff00);
+            for (observer, p) in &self.players {
+                if (*observer == id || p.known.contains(&id)) && p.pos.distance(position) < 25. {
+                    send(p, wire::NOTIFICATION, out.0.clone());
+                }
+            }
+            tracing::debug!(
+                player = id,
+                goal,
+                fame = snapshot.fame,
+                "class quest completed"
             );
         }
         // Period wording, published only after durable progress: https://media.gdcvault.com/gdceurope2012/Presentations/Social%20%26%20Online%20Games%20Summit/Ethan_Levy_Social%26Online_GameDesignIs.pdf#page=54
@@ -7759,6 +7780,8 @@ mod assassin_tests;
 #[cfg(test)]
 mod mystic_tests;
 
+#[cfg(test)]
+mod class_quest_tests;
 #[cfg(test)]
 mod ghost_ship_tests;
 #[cfg(test)]
