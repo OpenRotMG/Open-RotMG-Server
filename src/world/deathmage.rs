@@ -247,8 +247,8 @@ mod tests {
         }))
         .unwrap();
         let player = w.enter(character, None).unwrap();
-        // The exact 10-tile boundary lets random idle movement decide whether the attack fires.
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 29., y: 20. };
+        // Keep the target inside the 10-tile attack range even during movement around its home.
+        w.players.get_mut(&player).unwrap().pos = Pos { x: 22., y: 20. };
         for _ in 0..100 {
             w.now += 50;
             w.npc_step();
