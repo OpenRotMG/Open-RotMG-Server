@@ -128,8 +128,31 @@ impl Store {
                     let (id,count)=row?;if let Some(row)=records.get_mut(&id) {row["collection"]=count.into();}
                 }
             }
+            // Guilds are public in the game (the name over each member's head, the guild hall), so
+            // each player's guild and every guild's standing are shared; the guild board stays
+            // private. Only guilds with a competing player in them are listed, like players.
+            let mut guilds = Vec::new();
+            {
+                let mut members = std::collections::BTreeMap::<i32, u32>::new();
+                let mut q=tx.prepare("SELECT m.account,g.id,g.name,m.rank,m.fame FROM guild_members m JOIN guilds g ON g.id=m.guild")?;
+                for row in q.query_map([],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,i32>(1)?,r.get::<_,String>(2)?,r.get::<_,i32>(3)?,r.get::<_,i32>(4)?)))? {
+                    let (account,id,name,rank,fame)=row?;
+                    if let Some(row)=records.get_mut(&account) {
+                        row["guild"]=serde_json::json!({"id":id,"name":name,"rank":rank,"fame":fame});
+                        *members.entry(id).or_default()+=1;
+                    }
+                }
+                drop(q);
+                let mut q=tx.prepare("SELECT id,name,level,fame,earned FROM guilds ORDER BY id")?;
+                for row in q.query_map([],|r|Ok((r.get::<_,i32>(0)?,r.get::<_,String>(1)?,r.get::<_,i32>(2)?,r.get::<_,i32>(3)?,r.get::<_,i32>(4)?)))? {
+                    let (id,name,level,fame,earned)=row?;
+                    if let Some(&count)=members.get(&id) {
+                        guilds.push(serde_json::json!({"id":id,"name":name,"level":level,"fame":fame,"earned":earned,"members":count}));
+                    }
+                }
+            }
             tx.commit()?;
-            Ok(serde_json::json!({"updated_at":now()?,"players":records.into_values().collect::<Vec<_>>(),"characters":living}))
+            Ok(serde_json::json!({"updated_at":now()?,"players":records.into_values().collect::<Vec<_>>(),"characters":living,"guilds":guilds}))
         }).await
     }
     /// Player deaths from `since` (inclusive), oldest first, at most 500; bots and non-competitors never appear.
@@ -332,5 +355,87 @@ mod tests {
         assert_eq!(deaths[0]["stats"].as_array().unwrap().len(), 8);
         let later = store.graveyard(i64::MAX).await.unwrap();
         assert!(later["deaths"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn hiscores_share_guild_standing_and_death_fame() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "guild-hiscores-{}-{}.db",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let store = Store::open(&path, &content).unwrap();
+        let mut owners = Vec::new();
+        for name in ["Founder", "Loner", "Outsider"] {
+            let id = store
+                .register(
+                    format!("guild-{name}"),
+                    format!("{name}@example.invalid"),
+                    "fixture-password".into(),
+                )
+                .await
+                .unwrap();
+            store.choose_name(id, name.into()).await.unwrap();
+            if name != "Outsider" {
+                store.compete(id).await.unwrap();
+            }
+            owners.push(id);
+        }
+        for owner in [owners[0], owners[2]] {
+            store
+                .call(move |db| {
+                    db.execute(
+                        "UPDATE account_fame SET balance=1000,earned=1000 WHERE account=?1",
+                        [owner],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        store
+            .change_guild(owners[0], GuildAction::Create("Mad Gods".into()))
+            .await
+            .unwrap();
+        store
+            .change_guild(owners[2], GuildAction::Create("Hidden".into()))
+            .await
+            .unwrap();
+        // A member's death pays its full fame to the guild, as it does to the account.
+        let mut ch = store
+            .create(owners[0], content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        ch.level = 20;
+        ch.exp = 20000;
+        ch.fame = 70;
+        store.progress(ch.clone()).await.unwrap();
+        ch.alive = false;
+        ch.hp = 0;
+        store.death(ch, "fixture".into()).await.unwrap();
+        let total = store.graveyard(0).await.unwrap()["deaths"][0]["total_fame"]
+            .as_i64()
+            .unwrap();
+        assert!(total >= 70);
+        let scores = store.hiscores(Vec::new()).await.unwrap();
+        let guilds = scores["guilds"].as_array().unwrap();
+        assert_eq!(
+            guilds.len(),
+            1,
+            "guilds without a competing player stay out"
+        );
+        assert_eq!(guilds[0]["name"], "Mad Gods");
+        assert_eq!(guilds[0]["level"], 1);
+        assert_eq!(guilds[0]["members"], 1);
+        assert_eq!(guilds[0]["earned"], total);
+        assert_eq!(guilds[0]["fame"], total);
+        let players = scores["players"].as_array().unwrap();
+        let founder = players.iter().find(|p| p["account"] == owners[0]).unwrap();
+        assert_eq!(founder["guild"]["name"], "Mad Gods");
+        assert_eq!(founder["guild"]["rank"], 40);
+        assert_eq!(founder["guild"]["fame"], total);
+        let loner = players.iter().find(|p| p["account"] == owners[1]).unwrap();
+        assert!(loner.get("guild").is_none());
     }
 }
