@@ -106,7 +106,7 @@ impl Inputs {
         let [x, y] = self.keys.map(f32::from);
         let length = x.hypot(y);
         if length == 0.
-            || position.distance(waypoint) <= 0.1
+            || position.distance(waypoint) == 0.
             || (waypoint.x - position.x) * x + (waypoint.y - position.y) * y <= 0.
         {
             self.keys = [0, 0];

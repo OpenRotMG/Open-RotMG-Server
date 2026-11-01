@@ -1,5 +1,42 @@
 use super::*;
 
+// Seeded/legacy bot lives lack a provable zero-fame baseline: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1049
+const ELIGIBLE: &str = "(NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=json_extract(snapshot,'$.account')) OR json_extract(snapshot,'$.lifetime.completeness')='complete')";
+
+fn now() -> Result<i64> {
+    Ok(i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs(),
+    )?)
+}
+
+fn ranked(db: &Connection, cutoff: i64, now: i64, limit: i32) -> Result<Vec<(String, String)>> {
+    let mut q = db.prepare(&format!("SELECT snapshot,receipt FROM deaths WHERE died_at>?1 AND died_at<=?2 AND {ELIGIBLE} ORDER BY json_extract(receipt,'$.total') DESC,died_at ASC,character ASC LIMIT ?3"))?;
+    Ok(
+        q.query_map(params![cutoff, now, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?,
+    )
+}
+
+pub(super) fn is_legend_at(
+    db: &Connection,
+    account: i32,
+    now: i64,
+    legacy_base: [i32; 8],
+) -> Result<bool> {
+    let mut legendary = false;
+    for span in ["week", "month", "all"] {
+        for (raw, paid) in ranked(db, now.saturating_sub(window(span)?).max(0), now, 10)? {
+            let receipt = death_awards::decode_receipt(&paid)?;
+            let ch = receipt.character(&raw, legacy_base)?;
+            validate(&ch)?;
+            legendary |= ch.account == account;
+        }
+    }
+    Ok(legendary)
+}
+
 fn window(span: &str) -> Result<i64> {
     match span {
         "week" => Ok(7 * 86400),
@@ -8,15 +45,19 @@ fn window(span: &str) -> Result<i64> {
         _ => anyhow::bail!("timespan must be week, month or all"),
     }
 }
+fn validate(character: &Character) -> Result<()> {
+    ensure!(
+        character.fame >= 0 && character.items.len() == 12 && !character.alive && character.hp == 0,
+        "invalid Legends death snapshot"
+    );
+    Ok(())
+}
 fn entry(
     tag: &str,
     character: &Character,
     receipt: &death_awards::DeathFameReceipt,
 ) -> Result<String> {
-    ensure!(
-        character.fame >= 0 && character.items.len() == 12 && !character.alive && character.hp == 0,
-        "invalid Legends death snapshot"
-    );
+    validate(character)?;
     Ok(format!(
         "<{tag} accountId=\"{}\" charId=\"{}\"><Name>{}</Name><ObjectType>{}</ObjectType><Tex1>{}</Tex1><Tex2>{}</Tex2><Equipment>{}</Equipment><TotalFame>{}</TotalFame></{tag}>",
         character.account,
@@ -35,13 +76,14 @@ fn entry(
     ))
 }
 impl Store {
+    pub async fn is_legend(&self, account: i32) -> Result<bool> {
+        let now = now()?;
+        let base = self.legacy_base;
+        self.call(move |db| is_legend_at(db, account, now, base))
+            .await
+    }
     pub async fn legends(&self, span: String, account: i32, character: i32) -> Result<String> {
-        let now = i64::try_from(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs(),
-        )?;
-        self.legends_at(span, account, character, now).await
+        self.legends_at(span, account, character, now()?).await
     }
     async fn legends_at(
         &self,
@@ -57,12 +99,8 @@ impl Store {
             let tx = db.transaction()?;
             let mut xml = format!("<FameList timespan=\"{span}\">");
             let mut mine_listed = false;
-            // Seeded/legacy bot lives lack a provable zero-fame baseline: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1049
-            let eligible = "(NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=json_extract(snapshot,'$.account')) OR json_extract(snapshot,'$.lifetime.completeness')='complete')";
             {
-                let mut q = tx.prepare(&format!("SELECT snapshot,receipt FROM deaths WHERE died_at>?1 AND died_at<=?2 AND {eligible} ORDER BY json_extract(receipt,'$.total') DESC,died_at ASC,character ASC LIMIT 20"))?;
-                for row in q.query_map(params![cutoff,now],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))? {
-                    let (raw, paid) = row?;
+                for (raw, paid) in ranked(&tx, cutoff, now, 20)? {
                     let receipt=death_awards::decode_receipt(&paid)?;
                     let c = receipt.character(&raw,legacy_base)?;
                     mine_listed |= c.account == account && c.id == character;
@@ -70,7 +108,7 @@ impl Store {
                 }
             }
             if !mine_listed && account > 0 && character > 0 {
-                let mut q = tx.prepare(&format!("SELECT snapshot,receipt FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2 AND died_at>?3 AND died_at<=?4 AND {eligible}"))?;
+                let mut q = tx.prepare(&format!("SELECT snapshot,receipt FROM deaths JOIN characters ON characters.id=deaths.character WHERE characters.account=?1 AND deaths.character=?2 AND died_at>?3 AND died_at<=?4 AND {ELIGIBLE}"))?;
                 for row in q.query_map(params![account,character,cutoff,now],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))? {
                     let (raw, paid) = row?;
                     let receipt=death_awards::decode_receipt(&paid)?;
@@ -175,6 +213,13 @@ mod tests {
             seeded.push(id);
         }
         let now = 2_000_000_000;
+        let base = store.legacy_base;
+        assert!(
+            !store
+                .call(move |db| is_legend_at(db, bot, now, base))
+                .await
+                .unwrap()
+        );
         let mut earned = store
             .create(bot, content.get(WIZARD).unwrap())
             .await
@@ -214,6 +259,18 @@ mod tests {
             })
             .await
             .unwrap();
+        assert!(
+            store
+                .call(move |db| is_legend_at(db, bot, now, base))
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .call(move |db| is_legend_at(db, human.account, now, base))
+                .await
+                .unwrap()
+        );
         let archived = store.fame(bot, seeded[0]).await.unwrap();
         for span in ["week", "month", "all"] {
             let xml = store

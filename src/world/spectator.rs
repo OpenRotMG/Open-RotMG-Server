@@ -325,7 +325,7 @@ impl Projection {
             } else {
                 field.i32(r.i32()?);
             }
-            let public = matches!(key,0..=7 | 20..=22 | 26..=33 | 46..=53 | 56..=58 | 62..=65);
+            let public = matches!(key,0..=7 | 20..=22 | 26..=33 | 46..=53 | 56..=59 | 62..=65);
             let player = self.player_types.get(&actor).copied();
             let appearance = player == Some(false) && matches!(key, 34 | 36..=37 | 40..=45 | 55);
             let inventory =
@@ -422,12 +422,27 @@ fn unwatched_bot_ticks_are_not_encoded_and_the_first_watched_tick_is_complete() 
         lost: tokio::sync::watch::channel(None).0,
     });
     world.updates(id, true).unwrap();
+    let pos = world.players[&id].pos;
+    let near = world
+        .spawn_entity(
+            0x602,
+            Pos {
+                x: pos.x + 2.,
+                y: pos.y,
+            },
+            vec![],
+        )
+        .unwrap();
     for _ in 0..6 {
         world.step();
     }
     assert!(
         std::iter::from_fn(|| output.try_recv().ok()).all(|packet| packet.id != wire::NEW_TICK),
         "bot output received a NEW_TICK"
+    );
+    assert!(
+        world.players[&id].known.contains(&near),
+        "unwatched bot stopped seeing"
     );
     assert_eq!(
         world.players[&id].tick_stats.elided, 0,

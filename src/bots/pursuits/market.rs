@@ -541,6 +541,12 @@ impl Market {
             _ => None,
         }))
     }
+    /// The last look at the own Vault found no free slot.
+    pub(in crate::bots) fn vault_full(&self) -> bool {
+        self.vault
+            .as_ref()
+            .is_some_and(|vault| vault.iter().all(|k| *k >= 0))
+    }
     pub(in crate::bots) fn locked(&self) -> bool {
         self.reserved_bargain() || self.incoming.is_some() || self.trade.is_some()
     }
