@@ -22,7 +22,7 @@ fn observe(b: &mut Brain, v: &mut PlayerView, c: &Content, terrain: u8, spots: &
         enemy.id = 50 + i as i32;
         enemy.position = *spot;
         v.objects = vec![enemy];
-        b.crowd.bands.observe(v, c, &mut b.mind.godlands);
+        b.crowd.bands.observe(v, c, &mut b.mind.godlands, false);
     }
     v.objects.clear();
 }
