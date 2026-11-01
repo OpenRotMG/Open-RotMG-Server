@@ -50,6 +50,14 @@ fn teleport_to_progress_save_target_preserves_its_reservation_and_commit() {
 
 #[test]
 fn progress_save_target_teleport_keeps_all_other_refusals_and_quarantine() {
+    let (template, _) = movement_tests::fixture(0x18, false);
+    let mut d = Directory::test_with_seed(
+        std::path::Path::new("data"),
+        template.content.clone(),
+        16,
+        910,
+    )
+    .unwrap();
     for state in [
         "sender_pending",
         "sender_progress",
@@ -149,7 +157,13 @@ fn progress_save_target_teleport_keeps_all_other_refusals_and_quarantine() {
             _ => unreachable!(),
         }
         let start = w.players[&sender].pos;
-        assert!(w.teleport_destination(sender, target).is_err(), "{state}");
+        d.worlds.insert(-2, w);
+        assert!(
+            d.teleport(sender, target, Instant::now()).is_err(),
+            "{state}"
+        );
+        assert!(d.teleports.is_empty(), "{state}");
+        let w = &d.worlds[&-2];
         assert_eq!(w.players[&sender].pos.distance(start), 0., "{state}");
         if state != "inventory_pending" {
             w.players[&target]

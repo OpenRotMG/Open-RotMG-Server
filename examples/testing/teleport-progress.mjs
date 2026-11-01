@@ -14,14 +14,15 @@ export async function run(game) {
   const client=await connect({...browser,url:config.origin+'/',helper:config.browserTools});
   let captured=false,failure;
   const action=game.act([
-    [{actor:game.actor,input:{keys:[],duration_ms:600}},{actor:peer.actor,input:{keys:['d'],duration_ms:600}}],
-    {actor:game.actor,input:{keys:[],duration_ms:3900}},
+    [{actor:game.actor,input:{keys:[],duration_ms:1000}},{actor:peer.actor,input:{keys:['d','s'],duration_ms:1000}}],
+    {actor:game.actor,input:{keys:[],duration_ms:3500}},
   ],{name:'teleport-progress-ordinary-native',when:()=>captured}).then(()=>({ok:true}),error=>({ok:false,error}));
   try {
     let target;
     for(let i=0;;i++) {
       target=await peer.observe();
-      if(!target.paused&&!target.lifecycle.busy&&target.game_ms>=before.game_ms+1000&&!(await game.observe()).lifecycle.busy)break;
+      const movedCell=Math.floor(target.position.x)!==Math.floor(inspected.view.position.x)||Math.floor(target.position.y)!==Math.floor(inspected.view.position.y);
+      if(!target.paused&&!target.lifecycle.busy&&movedCell&&!(await game.observe()).lifecycle.busy)break;
       assert(i<150,'Ordinary native target walk did not settle');await delay(20);
     }
     game.check('ordinary native target walk explores new terrain',Math.hypot(target.position.x-inspected.view.position.x,target.position.y-inspected.view.position.y)>.5);
@@ -41,7 +42,10 @@ export async function run(game) {
     game.check('both living character identities survive the command',during.lifecycle.alive&&targetDuring.lifecycle.alive&&during.session.character===before.session.character&&targetDuring.session.character===inspected.view.session.character);
     await writeFile(join(root,'teleport-progress-observed.json'),JSON.stringify({scope:'ordinary Human-target native compatibility, not a progress-pending race or autonomous-native proof',before,target,during,targetDuring,receipt},null,2));
     captured=true;
-  } catch(error) {failure=error;}
+  } catch(error) {
+    failure=error;
+    await writeFile(join(root,'teleport-progress-failure.json'),JSON.stringify({error:String(error),sender:await game.observe(),target:await peer.observe()},null,2));
+  }
   finally {
     try {
       const result=await action;
