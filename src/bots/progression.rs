@@ -95,7 +95,8 @@ pub(super) fn pickup(
                 0
             },
         );
-        if value == 0 {
+        // Owner, 2012: a poor player takes nearly anything; a rich one only what it needs or the best bags.
+        if value == 0 || value < 60 && market.is_some_and(|m| m.beneath(v, content, *kind)) {
             continue;
         }
         for to in 4..v.character.items.len() {

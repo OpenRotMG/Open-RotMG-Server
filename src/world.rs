@@ -833,6 +833,7 @@ pub struct World {
     djinn_attacking: BTreeSet<i32>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
+    phoenix_pyres: Vec<realm_setpieces::Area>,
     event_sites: Vec<realm_setpieces::EventSite>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
@@ -2946,6 +2947,7 @@ impl World {
             djinn_attacking: BTreeSet::new(),
             setpieces: vec![],
             ghost_towers: vec![],
+            phoenix_pyres: vec![],
             event_sites: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
@@ -6198,7 +6200,7 @@ impl World {
             object.god && object.terrain == 1
         };
         let home = self.entities[&id].home;
-        let started_inside = godlands && self.inside_ghost_tower(old);
+        let started_inside = godlands && self.inside_god_exclusion(old);
         let mut resolved = old;
         for i in 1..=samples {
             let next = if slide {
@@ -6225,7 +6227,7 @@ impl World {
                     && self.jungle_walkable(kind, pos))
                     || self.ocean_walkable(kind, pos);
                 open && (!godlands
-                    || !self.inside_ghost_tower(pos)
+                    || !self.inside_god_exclusion(pos)
                     || (started_inside && pos.distance(home) + 0.05 < old.distance(home)))
             };
             let x_clear = clear(horizontal);
