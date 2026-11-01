@@ -97,5 +97,4 @@ async fn lock_command_persists_offline_account_and_publishes_only_to_owner() {
     drop(socket);
     server.abort();
     drop(app);
-    std::fs::remove_dir_all(dir).unwrap();
 }

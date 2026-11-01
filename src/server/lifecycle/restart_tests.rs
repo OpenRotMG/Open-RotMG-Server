@@ -16,5 +16,4 @@ async fn restart_does_not_hide_incident_write_errors() {
         .await
         .unwrap();
     assert_eq!(failure.component, "fixture-write-error");
-    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -98,13 +98,12 @@ async fn fatal_world_and_persistence_workers_stop_real_server_and_preserve_incid
             crate::supervision::Supervisor::recovered(dir.join("incident.json"), &app.store)
                 .is_ok()
         );
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn realm_progress_starts_each_owned_save_before_waiting_for_other_accounts() {
-    let (dir, app) = fixture();
+    let (_, app) = fixture();
     let mut avatars = Vec::new();
     for name in ["save-first", "save-second", "save-third"] {
         avatars.push(avatar(&app, name).await);
@@ -162,7 +161,6 @@ async fn realm_progress_starts_each_owned_save_before_waiting_for_other_accounts
             .await
             .unwrap();
     }
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -213,5 +211,4 @@ async fn failed_shutdown_drain_records_incident_and_restart_admits_the_account()
     let restarted =
         crate::supervision::Supervisor::recovered(dir.join("incident.json"), &store).unwrap();
     assert!(restarted.ensure_running().is_ok());
-    std::fs::remove_dir_all(dir).unwrap();
 }
