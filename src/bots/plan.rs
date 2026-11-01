@@ -242,6 +242,10 @@ impl Plan {
             }
         }
     }
+    /// Changes whenever `public` could: every event bumps seq, and progress moves last_progress.
+    pub(super) fn revision(&self) -> (u64, u64) {
+        (self.seq, self.last_progress)
+    }
     pub(super) fn public(&self, now: u64) -> Value {
         json!({"flag":self.flag(now),"last_progress_at":self.last_progress,"step":self.step,
             "events":self.events.iter().rev().take(10).collect::<Vec<_>>()})
