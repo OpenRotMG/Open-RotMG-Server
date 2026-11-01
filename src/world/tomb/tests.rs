@@ -1,7 +1,6 @@
 use super::*;
 
-#[test]
-fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reentry() {
+fn fixture() -> (World, i32) {
     let (mut world, player) = super::super::movement_tests::fixture(0xa0, false);
     let character = world.leave(player).unwrap();
     let map = Arc::new(d::generate(&world.content, 12).unwrap());
@@ -9,6 +8,12 @@ fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reent
     world.name = "Tomb of the Ancients".into();
     world.encounter = true;
     let player = world.enter(character, None).unwrap();
+    (world, player)
+}
+
+#[test]
+fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reentry() {
+    let (mut world, player) = fixture();
     let objectives: Vec<_> = world
         .actors()
         .filter(|e| e.kind == d::SARCOPHAGUS)
@@ -100,4 +105,31 @@ fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reent
             .count(),
         9
     );
+}
+
+#[test]
+fn mummy_proximity_fires_before_suicide_and_keeps_both_scarab_waves() {
+    let (mut world, player) = fixture();
+    let mummy = world.actors().find(|e| e.kind == 0xd1a).unwrap().id;
+    let pos = world.entities[&mummy].pos;
+    world.players.get_mut(&player).unwrap().pos = Pos {
+        x: pos.x - 1.5,
+        y: pos.y,
+    };
+    world.npc_step();
+    assert_eq!(world.entities[&mummy].stage, Some(1));
+    assert_eq!(world.entities[&mummy].hp, 3000);
+    assert_eq!(
+        world.bullets.iter().filter(|b| b.owner == mummy).count(),
+        36
+    );
+    assert_eq!(world.tomb_owned(mummy, 0xd1b).len(), 5);
+    world.step();
+    assert!(!world.entities.contains_key(&mummy));
+    assert!((10..=13).contains(&world.tomb_owned(mummy, 0xd1b).len()));
+    assert_eq!(
+        world.bullets.iter().filter(|b| b.owner == mummy).count(),
+        36
+    );
+    assert_eq!(world.players[&player].character.tombs, 0);
 }
