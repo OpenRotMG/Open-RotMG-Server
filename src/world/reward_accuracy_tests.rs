@@ -335,10 +335,14 @@ fn septavius_stages_a_realm_exit_until_clear_commit() {
     assert!(!world.actors().any(|e| e.kind == 0x71d));
 }
 
+#[test]
+fn mad_lab_portal_drop_uses_ten_percent_balance_policy() {
+    assert_eq!(crate::dungeon::portal_drop(0x657), Some((0x890, 0.1)));
+}
+
 #[tokio::test]
 async fn flying_brain_death_requests_only_the_realm_lab_portal() {
     let (mut w, _store, _owners) = reward_world().await;
-    assert_eq!(crate::dungeon::portal_drop(0x657), Some((0x890, 0.17)));
     let mut successes = 0;
     for name in ["Realm", "Tutorial"] {
         w.name = name.into();
@@ -351,10 +355,14 @@ async fn flying_brain_death_requests_only_the_realm_lab_portal() {
                 w.rng = rand::rngs::StdRng::seed_from_u64(seed);
                 let expected = name == "Realm"
                     && kind == 0x657
-                    && rand::rngs::StdRng::seed_from_u64(seed).gen_bool(0.17);
+                    && rand::rngs::StdRng::seed_from_u64(seed).gen_bool(0.1);
                 w.defeat_entity(id).unwrap();
                 assert!(!w.entities.contains_key(&id));
-                assert_eq!(w.portal_requests.len(), usize::from(expected));
+                assert_eq!(
+                    w.portal_requests.len(),
+                    usize::from(expected),
+                    "world={name}, kind={kind:#x}, seed={seed}"
+                );
                 if expected {
                     successes += 1;
                     assert_eq!(w.portal_requests[0].0, 0x890);
