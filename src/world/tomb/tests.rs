@@ -22,7 +22,13 @@ fn each_generated_sarcophagus_owns_eight_worshippers() {
                     && e.tomb.as_ref().unwrap().anchor == Some(sarcophagus.id)
             })
             .collect();
-        assert_eq!(guards.len(), 8, "sarcophagus {}", sarcophagus.id);
+        assert_eq!(
+            guards.len(),
+            8,
+            "sarcophagus {} at {:?}",
+            sarcophagus.id,
+            sarcophagus.pos
+        );
         assert_eq!(guards.iter().filter(|e| e.kind == 0xd2a).count(), 4);
         assert_eq!(guards.iter().filter(|e| e.kind == 0xd2b).count(), 4);
     }
