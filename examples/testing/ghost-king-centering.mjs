@@ -20,7 +20,8 @@ export async function prepare(api) {
     equipment:[0xb0b,0xc0f,0xafc,0xacd],backpack:Array(8).fill(-1),stats:[770,252,50,40,50,50,75,50]};
 }
 export async function run(game) {
-  const {root} = JSON.parse(await readFile(join(out,'generated-tower.json'),'utf8'));
+  const {root,piece} = JSON.parse(await readFile(join(out,'generated-tower.json'),'utf8'));
+  game.check('generated King home is centered without changing the tower bounds',root.x===piece.x+13&&root.y===piece.y+13);
   const records = [];
   const entity = (state,id)=>state.diagnostic.entities.find(e=>e.id===id);
   async function save(label) {

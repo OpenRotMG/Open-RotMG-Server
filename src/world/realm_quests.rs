@@ -1096,9 +1096,17 @@ mod tests {
         let home = world.place_named_setpiece(0x928, &[4]).unwrap();
         world.spawn_named_quest(0x928, home).unwrap();
         let root = *world.quest_ids.iter().next().unwrap();
+        world
+            .position_entity(
+                root,
+                Pos {
+                    x: home.x + 3.,
+                    y: home.y,
+                },
+            )
+            .unwrap();
         let king = world.entities.get_mut(&root).unwrap();
         king.activated = Some(0);
-        king.pos.x += 3.;
         king.hp -= 4;
         assert!(world.walkable(Pos {
             x: home.x + 7.,
