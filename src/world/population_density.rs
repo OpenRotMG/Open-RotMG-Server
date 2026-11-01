@@ -61,7 +61,8 @@ impl World {
         }
         for terrain in 1..=12 {
             let region = &mut self.population_regions[terrain];
-            region.target = area[terrain] / divisors[terrain];
+            // Owner playtests found full Kithio density too crowded; keep its proportions at two thirds.
+            region.target = area[terrain] * 2 / (divisors[terrain] * 3);
             ensure!(
                 region.target == 0 || !region.sites.is_empty() && !region.kinds.is_empty(),
                 "terrain {terrain} lacks population sites or species"
