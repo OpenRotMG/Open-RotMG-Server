@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -23,6 +24,17 @@ class ProfileTests(unittest.TestCase):
             return json.dumps({'_PID': '42', 'MESSAGE': json.dumps({'timestamp': 'now', 'fields': fields})})
         self.assertIsNone(profile.incident(line('job'), 42))
         self.assertEqual(profile.incident(line('tick'), 42)['sample']['kind'], 'tick')
+
+    def test_over_budget_start_fails_before_creating_a_session(self):
+        # A session created by a start that cannot fit is retained on failure, so the next start fails too.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / 'profiles'
+            root.mkdir(mode=0o700)
+            with patch.object(profile, 'enforce_storage_limit', side_effect=RuntimeError('over budget')), \
+                    patch.object(profile.subprocess, 'check_output', side_effect=AssertionError('session started')):
+                with self.assertRaisesRegex(RuntimeError, 'over budget'):
+                    profile.run('openrotmg', root)
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ['.lock', 'owner.json'])
 
 if __name__ == '__main__':
     unittest.main()
