@@ -1,6 +1,8 @@
 // Behavior follows a reconstruction, not recovered official code: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Tomb.cs; selected 123.5.1 XML takes precedence.
 use super::*;
 mod ai;
+#[cfg(test)]
+mod tests;
 
 use crate::encounter::tomb as weapons;
 use crate::{
