@@ -24,12 +24,14 @@ export async function run(game){
     }
     throw Error('Observed native approach did not reach '+JSON.stringify(point));
   }
-  await walk({x:16.5,y:40.5});await walk({x:14.5,y:43});
+  await walk({x:16.5,y:40.5});await walk({x:14.5,y:43.5});
   const arrived=await save('fire-observation-start'),start=arrived.view.time_ms;
+  const turret=arrived.view.objects.find(o=>o.kind===0xd31&&o.hp===0);
+  assert(turret&&Math.hypot(arrived.view.position.x-turret.position.x,arrived.view.position.y-turret.position.y)<4.9,'Fire Turret not in native range');
   await game.act({keys:[],duration_ms:700},{name:'tomb-fire-armor-break',when:v=>v.world==='Tomb of the Ancients'&&v.lifecycle.alive&&v.game_ms>=start+300&&(v.character.conditions&(1<<26))!==0});
   const attacked=await save('ordinary-fire-attack');
   await game.act({keys:['Insert'],duration_ms:300});const after=await save('ordinary-nexus-escape');
-  game.check('native movement reaches the generated Fire Turret',Math.hypot(arrived.view.position.x-14.5,arrived.view.position.y-43)<0.7);
+  game.check('native movement reaches the generated Fire Turret',Math.hypot(arrived.view.position.x-14.5,arrived.view.position.y-43.5)<0.7);
   game.check('ordinary incoming fire actually inflicts Armor Broken and damage',(attacked.view.character.conditions&(1<<26))!==0&&attacked.view.character.hp<arrived.view.character.hp);
   game.check('no primary shots or ability use replaced ordinary movement',records.phases.every(p=>p.state.diagnostic.character.shots===0&&p.state.view.character.mp===before.view.character.mp));
   game.check('the same living Knight returns without kills or Tomb credit',after.view.map.name==='Nexus'&&after.view.lifecycle.alive&&after.view.session.character===before.view.session.character&&after.diagnostic.character.kills===0&&after.diagnostic.character.tombs===0);
