@@ -82,19 +82,20 @@ fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reent
     assert_ne!(lost, replacement);
     for &(id, producer, anchor, _) in &artifacts {
         assert!(world.entities.contains_key(&id));
+        world.tomb_mechanics(id, Some(position)).unwrap();
         assert_eq!(
             world.entities[&id].tomb.as_ref().unwrap().producer,
             Some(producer)
         );
         if anchor == lost {
-            assert_eq!(
-                world.entities[&id].tomb.as_ref().unwrap().anchor,
-                Some(lost)
-            );
             assert!(matches!(
                 world.tomb_movement(id, Some(position)).unwrap().0,
                 Motion::Chase { .. }
             ));
+            assert_eq!(
+                world.entities[&id].tomb.as_ref().unwrap().anchor,
+                Some(lost)
+            );
         }
     }
     assert_eq!(world.players[&reentered].character.tombs, 0);
