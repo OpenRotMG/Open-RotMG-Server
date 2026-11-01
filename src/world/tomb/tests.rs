@@ -127,6 +127,10 @@ fn equipped_orb_stasises_indestructible_edge_turrets_but_not_center_turrets() {
         };
         assert!(d::immortal(kind));
         assert_eq!(world.entities[&target].hp, 0);
+        world.npc_step();
+        let fired = world.bullets.iter().filter(|b| b.owner == target).count();
+        assert!(fired > 0, "turret {kind:#x} must fire before the orb");
+        world.now += 350;
         assert!(
             world
                 .use_item(
@@ -147,6 +151,12 @@ fn equipped_orb_stasises_indestructible_edge_turrets_but_not_center_turrets() {
             flags & condition::bit(condition::STASIS) != 0,
             kind <= 0xd33,
             "turret {kind:#x}"
+        );
+        world.npc_step();
+        assert_eq!(
+            world.bullets.iter().filter(|b| b.owner == target).count() > fired,
+            kind > 0xd33,
+            "only center turret {kind:#x} may continue firing during Stasis"
         );
         assert_eq!(world.entities[&target].hp, 0);
     }
