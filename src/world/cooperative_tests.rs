@@ -2,6 +2,168 @@ use super::*;
 use std::time::Duration;
 
 #[test]
+fn teleport_to_progress_save_target_preserves_its_reservation_and_commit() {
+    for controller in [Controller::Human, Controller::Autonomous] {
+        let (mut world, sender) = movement_tests::fixture(0x18, false);
+        world.name = "Nexus".into();
+        let mut ch = world.players[&sender].character.clone();
+        ch.id = 2;
+        ch.account = 2;
+        let (packets, _rx) = tokio::sync::mpsc::channel(128);
+        let (lost, _) = tokio::sync::watch::channel(None);
+        let target = world.enter(ch, Some(Output { packets, lost })).unwrap();
+        world.players.get_mut(&sender).unwrap().known.insert(target);
+        let q = world.players.get_mut(&target).unwrap();
+        q.controller = controller;
+        q.pos = Pos { x: 12.25, y: 9.75 };
+        q.queue_experience(10, None, false).unwrap();
+        let plans = world.pending_progress_where(|id, _| id == target);
+        assert_eq!(plans.len(), 1);
+        let snapshot = plans[0].1.clone();
+        let q = &world.players[&target];
+        q.validate_progress_reservation(&snapshot).unwrap();
+        let before = q.character.clone();
+        let destination = q.pos;
+        let content = world.content.clone();
+        let mut d =
+            Directory::test_with_seed(std::path::Path::new("data"), content, 16, 910).unwrap();
+        d.worlds.insert(-2, world);
+        let received = Instant::now();
+        let receipt = d.teleport(sender, target, received).unwrap();
+        assert_eq!(
+            (receipt.player, receipt.character, receipt.target),
+            (sender, 1, target)
+        );
+        assert_eq!(receipt.position.distance(destination), 0.);
+        let w = d.worlds.get_mut(&-2).unwrap();
+        let q = &w.players[&target];
+        assert_eq!(q.character, before);
+        assert_eq!(q.pos.distance(destination), 0.);
+        q.validate_progress_reservation(&snapshot).unwrap();
+        assert!(!cooperative::ready(q));
+        w.finish_progress(target, snapshot.clone()).unwrap();
+        assert!(cooperative::ready(&w.players[&target]));
+        assert_eq!(w.players[&target].character.exp, snapshot.exp);
+        assert!(w.finish_progress(target, snapshot).is_err());
+    }
+}
+
+#[test]
+fn progress_save_target_teleport_keeps_all_other_refusals_and_quarantine() {
+    for state in [
+        "sender_pending",
+        "sender_progress",
+        "inventory_pending",
+        "hp",
+        "dead",
+        "death_pending",
+        "departing",
+        "quarantined",
+        "output_lost",
+        "output_closed",
+        "paused",
+        "invisible",
+        "unknown",
+        "blocked",
+        "correcting",
+    ] {
+        let (mut w, sender) = movement_tests::fixture(0x18, false);
+        w.name = "Nexus".into();
+        let mut ch = w.players[&sender].character.clone();
+        ch.id = 2;
+        ch.account = 2;
+        let target = w.enter(ch, None).unwrap();
+        w.players.get_mut(&sender).unwrap().known.insert(target);
+        w.players
+            .get_mut(&target)
+            .unwrap()
+            .queue_experience(10, None, false)
+            .unwrap();
+        let snapshot = w
+            .pending_progress_where(|id, _| id == target)
+            .pop()
+            .unwrap()
+            .1;
+        let mut output_rx = None;
+        let q = w.players.get_mut(&target).unwrap();
+        match state {
+            "sender_pending" => w.players.get_mut(&sender).unwrap().pending = true,
+            "sender_progress" => {
+                w.players
+                    .get_mut(&sender)
+                    .unwrap()
+                    .queue_experience(10, None, false)
+                    .unwrap();
+                assert_eq!(w.pending_progress_where(|id, _| id == sender).len(), 1);
+            }
+            "inventory_pending" => {
+                w.finish_progress(target, snapshot.clone()).unwrap();
+                let kind = w.players[&target].character.items[0];
+                w.drop_item(
+                    target,
+                    Slot {
+                        object: target,
+                        slot: 0,
+                        kind,
+                    },
+                )
+                .unwrap();
+                assert!(w.players[&target].pending && !w.players[&target].progress_started);
+            }
+            "hp" => q.character.hp = 0,
+            "dead" => q.character.alive = false,
+            "death_pending" => q.death_pending = true,
+            "departing" => q.departing = true,
+            "quarantined" => {
+                assert!(
+                    w.committed::<()>(
+                        target,
+                        Err(anyhow::anyhow!("injected progress commit failure"))
+                    )
+                    .is_err()
+                );
+            }
+            "output_lost" | "output_closed" => {
+                let (packets, rx) = tokio::sync::mpsc::channel(16);
+                let (lost, _) = tokio::sync::watch::channel(None);
+                if state == "output_lost" {
+                    lose(&lost, "injected_output_loss");
+                }
+                q.tx = Some(Output { packets, lost });
+                if state == "output_lost" {
+                    output_rx = Some(rx);
+                }
+            }
+            "paused" => q.paused = true,
+            "invisible" => q.lab_conditions = crate::condition::bit(crate::condition::INVISIBLE),
+            "unknown" => {
+                w.players.get_mut(&sender).unwrap().known.remove(&target);
+            }
+            "blocked" => q.pos.x = -1.,
+            "correcting" => w
+                .players
+                .get_mut(&sender)
+                .unwrap()
+                .goto_acks
+                .push_back((true, Instant::now())),
+            _ => unreachable!(),
+        }
+        let start = w.players[&sender].pos;
+        assert!(w.teleport_destination(sender, target).is_err(), "{state}");
+        assert_eq!(w.players[&sender].pos.distance(start), 0., "{state}");
+        if state != "inventory_pending" {
+            w.players[&target]
+                .validate_progress_reservation(&snapshot)
+                .unwrap();
+        }
+        if state == "quarantined" {
+            assert!(w.players[&target].persistence_failure.is_some());
+        }
+        drop(output_rx);
+    }
+}
+
+#[test]
 fn teleport_refusals_preserve_cooldown_and_success_uses_current_target_position() {
     let (mut world, sender) = movement_tests::fixture(0x18, false);
     world.name = "Nexus".into();
