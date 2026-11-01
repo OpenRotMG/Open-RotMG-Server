@@ -18,6 +18,47 @@ spec.loader.exec_module(update)
 
 class UpdateTest(unittest.TestCase):
 
+    def test_superseded_restart_cancels_only_an_advertised_countdown(self):
+        config = {'bind': '127.0.0.1:18923'}
+        metadata = {'revision': 'a' * 40, 'manifest': {}}
+        notice = 'Server restart postponed. This countdown is cancelled.'
+        stale = 'Main advanced during restart warning; no cutover performed'
+        for warned, revision, reply, error in [
+                (True, 'b' * 40, {'players': 2}, stale),
+                (False, 'b' * 40, {'players': 2}, stale),
+                (True, 'a' * 40, {'players': 2}, 'cutover reached'),
+                (True, 'b' * 40, OSError('transport unavailable'), stale + '; restart postponement announcement failed: transport unavailable'),
+                (True, 'b' * 40, None, stale + '; restart postponement announcement failed: Running server did not acknowledge restart postponement')]:
+            with self.subTest(warned=warned, revision=revision, reply=reply), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                lock = root / 'backup.lock'
+                lock.touch()
+                with patch.object(update, 'LAST_BACKUP', root / 'last-success.json'), \
+                        patch.object(update, 'run'), patch.object(update, 'rehearse'), \
+                        patch.object(update, 'install_backups'), patch.object(update, 'files', return_value={}), \
+                        patch.object(update, 'main_revision', side_effect=['a' * 40, revision]), \
+                        patch.object(update, 'warn_restart', return_value=warned), \
+                        patch.object(update, 'announce', side_effect=reply if isinstance(reply, Exception) else None, return_value=reply) as announce, \
+                        patch.object(update, 'outcome', side_effect=RuntimeError('cutover reached')) as outcome, \
+                        patch.object(update, 'stop_prepared') as stop, patch.object(update, 'drain_process') as drain, \
+                        patch.object(update, 'exchange') as exchange, contextlib.redirect_stdout(io.StringIO()) as output:
+                    with self.assertRaises(RuntimeError) as raised:
+                        update.deploy(root / 'stage', root, metadata, config)
+                    self.assertEqual(str(raised.exception), error)
+                if warned and revision != metadata['revision']:
+                    announce.assert_called_once_with(config, notice)
+                else:
+                    announce.assert_not_called()
+                if revision == metadata['revision']:
+                    outcome.assert_called_once_with(root, 'cutover', root / 'stage')
+                else:
+                    outcome.assert_not_called()
+                if warned and revision != metadata['revision'] and isinstance(reply, dict):
+                    self.assertEqual(json.loads(output.getvalue()), {'restart_postponed': notice, 'players': 2})
+                stop.assert_not_called()
+                drain.assert_not_called()
+                exchange.assert_not_called()
+
     def test_helper_install_tracks_release_and_rejects_invalid_source(self):
         with tempfile.TemporaryDirectory() as directory:
             installed, source = Path(directory) / 'update.py', Path(directory) / 'source.py'
