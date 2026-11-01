@@ -5784,14 +5784,33 @@ impl World {
         Ok(())
     }
     fn god_loot_bags(&mut self, pos: Pos, loot: crate::loot::GodLoot) -> Result<()> {
+        // Keep Kithio's half-tile scatter selectable and inside the corpse tile; cosmetic RNG must not change rewards: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L142-L146
+        let mut placement =
+            rand::rngs::StdRng::seed_from_u64(self.ids.load(Ordering::Relaxed) as u64);
+        let mut scatter = || {
+            let mut coordinate = |value: f32| {
+                placement.gen_range(
+                    (value - 0.5).max(value.floor())..(value + 0.5).min(value.floor() + 1.),
+                )
+            };
+            Pos {
+                x: coordinate(pos.x),
+                y: coordinate(pos.y),
+            }
+        };
         for (owner, items) in loot.private {
             let items: Vec<_> = items.into_iter().map(i32::from).collect();
-            self.loot_bags(pos, Some(owner), &items)?;
+            for chunk in items.chunks(8) {
+                self.loot_bags(scatter(), Some(owner), chunk)?;
+            }
         }
         if !loot.shared_owners.is_empty() {
             for chunk in loot.shared.chunks(8) {
-                let bag =
-                    self.loot_bag(pos, None, chunk.iter().copied().map(i32::from).collect())?;
+                let bag = self.loot_bag(
+                    scatter(),
+                    None,
+                    chunk.iter().copied().map(i32::from).collect(),
+                )?;
                 let entity = self.entities.get_mut(&bag).unwrap();
                 // Period purple sacks were owner-only, unlike Kithio's shared gear: https://forums.anandtech.com/threads/realm-of-the-mad-god.2228194/post-33073282
                 let owner = (entity.kind != 0x500)
