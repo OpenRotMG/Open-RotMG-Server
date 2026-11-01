@@ -1050,7 +1050,7 @@ pub(super) async fn launch(
                         } else { None };
                         if let Some(reason) = reason { dialogue::end_agreement(&app, &mut brain, reason).await; }
                     }
-                    if brain.crowd.bands.observe(&view, &app.content, &mut brain.mind.godlands, brain.profile.knows_blue) { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
+                    if brain.crowd.bands.observe(&view, &app.content, &mut brain.mind.godlands, brain.profile.knows_minimap) { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
                     while let Some((packet, received_view)) = deferred_market.take().or_else(||output.try_recv().ok().map(|p|(p,view.clone()))) {
                         if packet.id == crate::wire::GOTO {
                             app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;
