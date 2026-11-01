@@ -114,6 +114,8 @@ impl World {
                 | "Sprite World"
                 | "Undead Lair"
                 | "Abyss of Demons"
+                // Manor follows the ordinary-world permission: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/World.cs#L35
+                | "Manor of the Immortals"
                 // Trench groups teleport to rushers: https://www.realmeye.com/wiki/ocean-trench#tips-and-strategies
                 | "Ocean Trench"
                 // Tomb parties teleport to rushers: https://web.archive.org/web/20130502034124id_/http://forums.wildshadow.com/wiki/realm-mad-god/tomb-ancients
