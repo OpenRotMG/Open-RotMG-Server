@@ -283,5 +283,4 @@ async fn native_password_change_is_durable_atomic_and_preserves_account_state() 
     // The rejected transaction rolled back atomically, so the account is immediately usable.
     assert!(app.claim(account).is_ok());
     server.abort();
-    std::fs::remove_dir_all(dir).unwrap();
 }

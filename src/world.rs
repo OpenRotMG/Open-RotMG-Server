@@ -768,6 +768,8 @@ pub struct World {
     pub map: Arc<Map>,
     navigation_geometry: Box<std::cell::RefCell<view::GeometryCache>>,
     pub(crate) realm_layout: Option<String>,
+    /// Where this Realm map's Godlands lie, as a veteran who played it before remembers.
+    pub(crate) godlands: Arc<Vec<Pos>>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
@@ -1286,6 +1288,7 @@ impl Directory {
                 ids.clone(),
             )?;
             world.realm_layout = source.as_ref().map(|source| source.name().to_owned());
+            world.godlands = Arc::new(godlands(&world.map, &world.content));
             world.clock = clock.clone();
             world.attack_epoch = clock.now();
             world.new_tick_at = clock.now();
@@ -2885,11 +2888,17 @@ impl World {
             .copied()
             .filter(|id| (0x802..=0x805).contains(&entities[id].kind))
             .collect();
+        let npc_global_ids = actor_ids
+            .iter()
+            .copied()
+            .filter(|id| Self::npc_kind(&content, entities[id].kind))
+            .collect();
         let mut world = Self {
             content,
             map,
             navigation_geometry: Box::default(),
             realm_layout: None,
+            godlands: Arc::default(),
             timed_ids: BTreeSet::new(),
             quest_ids: BTreeSet::new(),
             gun_ids,
@@ -2910,7 +2919,7 @@ impl World {
                 .collect(),
             entities,
             non_population_ids: actor_ids.clone(),
-            npc_global_ids: actor_ids.clone(),
+            npc_global_ids,
             actor_ids,
             quests_by_level,
             players: BTreeMap::new(),
@@ -3230,7 +3239,9 @@ impl World {
         if kind == 0x90b {
             self.abyss_flamer_ids.insert(id);
         }
-        self.npc_global_ids.insert(id);
+        if Self::npc_kind(&self.content, kind) {
+            self.npc_global_ids.insert(id);
+        }
         self.non_population_ids.insert(id);
         if definition.quest {
             self.quests_by_level
@@ -5812,14 +5823,33 @@ impl World {
         Ok(())
     }
     fn god_loot_bags(&mut self, pos: Pos, loot: crate::loot::GodLoot) -> Result<()> {
+        // Keep Kithio's half-tile scatter selectable and inside the corpse tile; cosmetic RNG must not change rewards: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L142-L146
+        let mut placement =
+            rand::rngs::StdRng::seed_from_u64(self.ids.load(Ordering::Relaxed) as u64);
+        let mut scatter = || {
+            let mut coordinate = |value: f32| {
+                placement.gen_range(
+                    (value - 0.5).max(value.floor())..(value + 0.5).min(value.floor() + 1.),
+                )
+            };
+            Pos {
+                x: coordinate(pos.x),
+                y: coordinate(pos.y),
+            }
+        };
         for (owner, items) in loot.private {
             let items: Vec<_> = items.into_iter().map(i32::from).collect();
-            self.loot_bags(pos, Some(owner), &items)?;
+            for chunk in items.chunks(8) {
+                self.loot_bags(scatter(), Some(owner), chunk)?;
+            }
         }
         if !loot.shared_owners.is_empty() {
             for chunk in loot.shared.chunks(8) {
-                let bag =
-                    self.loot_bag(pos, None, chunk.iter().copied().map(i32::from).collect())?;
+                let bag = self.loot_bag(
+                    scatter(),
+                    None,
+                    chunk.iter().copied().map(i32::from).collect(),
+                )?;
                 let entity = self.entities.get_mut(&bag).unwrap();
                 // Period purple sacks were owner-only, unlike Kithio's shared gear: https://forums.anandtech.com/threads/realm-of-the-mad-god.2228194/post-33073282
                 let owner = (entity.kind != 0x500)
@@ -7727,3 +7757,58 @@ mod quest_tests;
 
 #[cfg(test)]
 mod map_tests;
+
+/// The biggest Mountains areas, one spot per 24-tile square, at most as many as a bot remembers.
+fn godlands(map: &Map, content: &Content) -> Vec<Pos> {
+    let mut squares: BTreeMap<(i32, i32), Vec<Pos>> = BTreeMap::new();
+    for (i, cell) in map.cells.iter().enumerate() {
+        if cell.terrain == 1 && content.grounds[&cell.ground] > 0. {
+            let (x, y) = (i as i32 % map.width, i as i32 / map.width);
+            let pos = Pos {
+                x: x as f32 + 0.5,
+                y: y as f32 + 0.5,
+            };
+            squares.entry((x / 24, y / 24)).or_default().push(pos);
+        }
+    }
+    let mut spots: Vec<_> = squares
+        .into_values()
+        .filter(|cells| cells.len() >= 150)
+        .map(|cells| {
+            let n = cells.len() as f32;
+            let middle = Pos {
+                x: cells.iter().map(|p| p.x).sum::<f32>() / n,
+                y: cells.iter().map(|p| p.y).sum::<f32>() / n,
+            };
+            let spot = *cells
+                .iter()
+                .min_by(|a, b| a.distance(middle).total_cmp(&b.distance(middle)))
+                .expect("a counted square has cells");
+            (cells.len(), spot)
+        })
+        .collect();
+    spots.sort_by(|a, b| b.0.cmp(&a.0));
+    spots
+        .into_iter()
+        .take(crate::bots::REMEMBERED_GODLANDS)
+        .map(|(_, p)| p)
+        .collect()
+}
+
+#[cfg(test)]
+#[test]
+fn both_live_realm_maps_have_godlands_spots() {
+    let content = Content::load(std::path::Path::new("data")).unwrap();
+    for layout in [
+        "classic-world-02-reconstruction",
+        "classic-world-10-reconstruction",
+    ] {
+        let bytes = std::fs::read(format!("data/realms/{layout}.wmap")).unwrap();
+        let map = Map::decode_realm_cells(&bytes, &content, [2100, 2100]).unwrap();
+        let spots = godlands(&map, &content);
+        assert!(spots.len() >= 4, "{layout}: {spots:?}");
+        for p in spots {
+            assert_eq!(map.cell(p.x, p.y).unwrap().terrain, 1, "{layout} {p:?}");
+        }
+    }
+}

@@ -179,6 +179,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
             height: 128,
             allow_teleport: true,
             layout: None,
+            godlands: Arc::default(),
         },
         character: OwnCharacter {
             conditions: 0,
@@ -494,7 +495,10 @@ fn band_edge_journeys_do_not_preempt_each_other() {
             .kind;
         v.objects[0].position = Pos { x: 2.5, y: 10.5 };
         let mut brain = Brain::new(ARCHETYPES[0], &v);
-        brain.crowd.bands.observe(&v, &c, &mut brain.mind.godlands);
+        brain
+            .crowd
+            .bands
+            .observe(&v, &c, &mut brain.mind.godlands, false);
         v.objects.clear();
         brain.heading = 0.;
         brain.hunting = revisit;
@@ -801,7 +805,13 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
         condition_mask: Some(0),
     });
     let godlands = Pos { x: 100.5, y: 100.5 };
-    for (remembered, goal) in [(true, Goal::Venture), (false, Goal::Fight(3))] {
+    v.map.godlands = Arc::new(vec![godlands]);
+    // Live: 76% of Realm entries remembered nothing; a veteran knows a map it has played before.
+    for (remembered, veteran, goal) in [
+        (true, false, Goal::Venture),
+        (false, true, Goal::Venture),
+        (false, false, Goal::Fight(3)),
+    ] {
         let mut brain = Brain::new(ARCHETYPES[0], &v);
         if remembered {
             brain.mind.godlands.insert(
@@ -809,10 +819,13 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
                 BTreeSet::from([tile(godlands)]),
             );
         }
-        brain.crowd.bands.observe(&v, &c, &mut brain.mind.godlands);
+        brain
+            .crowd
+            .bands
+            .observe(&v, &c, &mut brain.mind.godlands, veteran);
         let d = brain.decide(&v, &c).unwrap();
-        assert_eq!(d.goal, goal);
-        if remembered {
+        assert_eq!(d.goal, goal, "remembered {remembered} veteran {veteran}");
+        if goal == Goal::Venture {
             let step = d.movement.expect("heading for the Godlands");
             assert!(step.distance(godlands) < v.position.distance(godlands));
         }

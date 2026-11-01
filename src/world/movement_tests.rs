@@ -1027,3 +1027,41 @@ fn oryx_counts_family_members_once_summoned() {
     world.remove_entity(leader);
     assert_eq!(world.oryx_counted(11).len(), 2, "orphans still count");
 }
+
+#[test]
+fn walls_never_wait_in_the_per_tick_npc_scan() {
+    let (mut world, player) = fixture(0x18, false);
+    let pos = world.players[&player].pos;
+    let wall = world
+        .content
+        .objects
+        .values()
+        .find(|o| o.class == "Wall" && !o.passive_destructible())
+        .unwrap()
+        .kind;
+    let wall = world
+        .spawn_entity(
+            wall,
+            Pos {
+                x: pos.x + 2.,
+                y: pos.y,
+            },
+            vec![],
+        )
+        .unwrap();
+    let snake = world
+        .spawn_entity(
+            0x602,
+            Pos {
+                x: pos.x - 2.,
+                y: pos.y,
+            },
+            vec![],
+        )
+        .unwrap();
+    assert!(world.actor_ids.contains(&wall));
+    assert!(!world.npc_global_ids.contains(&wall));
+    let selected = world.npc_candidates(&[pos]);
+    assert!(selected.contains(&snake) && !selected.contains(&wall));
+    assert!(!world.npc_global_ids.contains(&wall));
+}

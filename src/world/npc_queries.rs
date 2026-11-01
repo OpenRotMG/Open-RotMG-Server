@@ -1,6 +1,13 @@
 use super::*;
 
 impl World {
+    // Kinds never become NPCs, so Realm walls and plants (~99% of the old global set) stay out of the per-tick scan.
+    pub(super) fn npc_kind(content: &Content, kind: u16) -> bool {
+        let object = &content.objects[&kind];
+        object.class != "Wall"
+            && !matches!(kind, 0xd5f | 0xd60 | 0x802..=0x805)
+            && (object.enemy || matches!(kind, 0x173 | 0xd7d))
+    }
     pub(super) fn npc_candidates(&mut self, audience: &[Pos]) -> Vec<i32> {
         assert!(
             audience.iter().all(|p| p.x.is_finite() && p.y.is_finite()),
@@ -89,10 +96,7 @@ impl World {
                     return false;
                 }
             }
-            let object = &self.content.objects[&e.kind];
-            object.class != "Wall"
-                && !matches!(e.kind, 0xd5f | 0xd60 | 0x802..=0x805)
-                && (object.enemy || matches!(e.kind, 0x173 | 0xd7d))
+            Self::npc_kind(&self.content, e.kind)
         };
         // Fully awake worlds need the fused traversal, not an extra materialized ID pass.
         if all_global {

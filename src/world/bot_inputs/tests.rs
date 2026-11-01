@@ -223,6 +223,44 @@ fn eight_keys_normalize_speed_and_release_at_waypoints() {
     }
 }
 
+#[test]
+fn sub_tenth_held_inputs_arrive_exactly_and_zero_targets_stay_stopped() {
+    let start = Pos { x: 10.5, y: 10.5 };
+    for (x, y) in [(1., 0.), (0., 1.), (-1., 0.), (0., -1.)] {
+        let target = Pos {
+            x: start.x + x * 0.03,
+            y: start.y + y * 0.03,
+        };
+        let mut input = Inputs::default();
+        input.observe(start, Some(target), None, 6);
+        let first = input.movement(start, 0.01).expect("tiny hold must start");
+        assert!(start.distance(first) <= 0.01001);
+        let arrived = input
+            .movement(first, 0.3)
+            .expect("remaining distance clamps the step");
+        assert_eq!((arrived.x, arrived.y), (target.x, target.y));
+        for _ in 0..20 {
+            assert!(input.movement(arrived, 0.3).is_none());
+            input.observe(arrived, Some(target), None, 6);
+            assert!(input.movement(arrived, 0.3).is_none());
+            assert_eq!(input.keys, [0, 0]);
+        }
+        input.observe(start, Some(target), None, 6);
+        assert!(
+            input
+                .movement(
+                    Pos {
+                        x: target.x + x * 0.01,
+                        y: target.y + y * 0.01
+                    },
+                    0.3
+                )
+                .is_none(),
+            "directional stop still prevents backtracking"
+        );
+    }
+}
+
 fn held_walk(open: fn(usize, usize) -> bool, start: Pos, target: Pos) -> (Pos, Inputs) {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let cells = (0..24 * 24)

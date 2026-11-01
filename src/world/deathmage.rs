@@ -247,7 +247,8 @@ mod tests {
         }))
         .unwrap();
         let player = w.enter(character, None).unwrap();
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 30., y: 20. };
+        // Keep the target inside the 10-tile attack range even during movement around its home.
+        w.players.get_mut(&player).unwrap().pos = Pos { x: 22., y: 20. };
         for _ in 0..100 {
             w.now += 50;
             w.npc_step();

@@ -431,7 +431,7 @@ mod tests {
     #[tokio::test]
     async fn drain_entry_cancellation_cannot_relabel_admitted_http_claim_or_stale_generation_errors()
      {
-        let (dir, app) = crate::server::test_app();
+        let (_, app) = crate::server::test_app();
         let accepted = entry(&app).unwrap();
         let prepared = prepare(&app);
         let entries = app.admission.state.lock().unwrap().entries;
@@ -474,6 +474,5 @@ mod tests {
         );
         assert_eq!(app.admission.state.lock().unwrap().entries, 0);
         drop(app);
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }

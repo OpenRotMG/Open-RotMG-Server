@@ -179,5 +179,4 @@ async fn character_deletion_http_is_owned_once_only_and_durable_without_death_re
     assert!(store.load(account, character.id).await.is_err());
     drop(db);
     drop(store);
-    std::fs::remove_dir_all(dir).unwrap();
 }
