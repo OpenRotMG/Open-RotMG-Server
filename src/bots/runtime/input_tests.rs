@@ -73,6 +73,137 @@ fn off_axis_known_corner_admits_actual_safe_keys_and_makes_progress() {
 }
 
 #[test]
+fn full_occupy_wall_route_reaches_goal_through_ordinary_held_inputs() {
+    use crate::{
+        content::{Cell, Map},
+        world::{Controller, World},
+    };
+    let (content, mut view) = super::super::quest_tests::fixture();
+    view.objects.clear();
+    let mut cells = vec![
+        Cell {
+            ground: 1,
+            object: None,
+            config: String::new(),
+            terrain: 0,
+            region: 0,
+        };
+        128 * 128
+    ];
+    cells[10 * 128 + 12].object = Some(0x120);
+    let mut wall = super::super::quest_tests::fixture().1.objects.remove(0);
+    wall.kind = 0x120;
+    wall.position = Pos { x: 12.5, y: 10.5 };
+    wall.blocks = true;
+    view.objects.push(wall);
+    for start in [
+        Pos { x: 10.1, y: 10.1 },
+        Pos { x: 10.5, y: 9.9 },
+        Pos { x: 10.9, y: 10.1 },
+        Pos { x: 10.9, y: 10.9 },
+        Pos { x: 11.1, y: 9.1 },
+    ] {
+        for goal in [
+            Pos { x: 14.5, y: 10.1 },
+            Pos { x: 14.5, y: 10.9 },
+            Pos { x: 14.5, y: 11.9 },
+        ] {
+            view.position = start;
+            let mut brain = Brain::new(ARCHETYPES[1], &view);
+            let grid = brain.navigation_grid(&view, &content, &[]);
+            let mut world = World::new(
+                Arc::new(content.clone()),
+                Arc::new(Map {
+                    width: 128,
+                    height: 128,
+                    cells: cells.clone(),
+                    spawns: vec![(start.x, start.y)],
+                }),
+            )
+            .unwrap();
+            let mut character =
+                Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+            character.id = 1;
+            character.account = 1;
+            character.base[4] = 25;
+            let id = world.enter(character, None).unwrap();
+            world.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+            let mut positions = Vec::new();
+            for _ in 0..80 {
+                let position = world.players[&id].pos;
+                positions.push(position);
+                if position.distance(goal) < 0.7 {
+                    break;
+                }
+                let waypoint = grid
+                    .next(position, goal)
+                    .expect("known route around the wall");
+                let movement = held_movement(&grid, position, waypoint, combat::speed(&view) * 0.3);
+                execute_inputs(&mut world, (id, 1, 1), movement, None, None, 6).unwrap();
+                for _ in 0..6 {
+                    world.step();
+                }
+            }
+            assert!(
+                world.players[&id].pos.distance(goal) < 0.7,
+                "wall route {start:?} -> {goal:?} did not arrive: {positions:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn full_occupy_half_cell_boundaries_and_remembered_cover_match_observations() {
+    let (content, mut view) = super::super::quest_tests::fixture();
+    let wall = &mut view.objects[0];
+    wall.kind = 0x120;
+    wall.position = Pos { x: 12.5, y: 10.5 };
+    wall.blocks = true;
+    let mut brain = Brain::new(ARCHETYPES[1], &view);
+    let grid = brain.navigation_grid(&view, &content, &[]);
+    for (from, to) in [
+        (Pos { x: 11.49, y: 10.5 }, Pos { x: 11.51, y: 10.5 }),
+        (Pos { x: 13.51, y: 10.5 }, Pos { x: 13.49, y: 10.5 }),
+        (Pos { x: 12.5, y: 9.49 }, Pos { x: 12.5, y: 9.51 }),
+        (Pos { x: 12.5, y: 11.51 }, Pos { x: 12.5, y: 11.49 }),
+        (Pos { x: 11.49, y: 9.49 }, Pos { x: 11.51, y: 9.51 }),
+    ] {
+        assert!(
+            !grid.segment(from, to),
+            "FullOccupy half-cell edge {from:?} -> {to:?}"
+        );
+    }
+    assert!(grid.segment(Pos { x: 11.5, y: 9.5 }, Pos { x: 13.5, y: 9.5 }));
+    assert!(grid.segment(Pos { x: 11.5, y: 9.5 }, Pos { x: 11.5, y: 11.5 }));
+    view.position = Pos { x: 50.5, y: 50.5 };
+    view.objects.clear();
+    assert!(
+        brain
+            .navigation_grid(&view, &content, &[])
+            .full_occupy
+            .contains(&(12, 10)),
+        "out-of-view cover retains its observed clearance"
+    );
+    view.position = Pos { x: 10.5, y: 10.5 };
+    let mut tree = super::super::quest_tests::fixture().1.objects.remove(0);
+    tree.kind = 0x100;
+    tree.position = Pos { x: 12.5, y: 10.5 };
+    tree.blocks = true;
+    view.objects.push(tree);
+    let ordinary = brain.navigation_grid(&view, &content, &[]);
+    assert!(
+        !Arc::ptr_eq(&grid, &ordinary),
+        "same-cell FullOccupy change invalidates navigation"
+    );
+    assert!(ordinary.segment(Pos { x: 11.49, y: 10.5 }, Pos { x: 11.99, y: 10.5 }));
+    assert!(!ordinary.segment(Pos { x: 11.5, y: 10.5 }, Pos { x: 12.5, y: 10.5 }));
+    view.objects.clear();
+    let cleared = brain.navigation_grid(&view, &content, &[]);
+    assert!(cleared.full_occupy.is_empty());
+    assert!(cleared.segment(Pos { x: 11.5, y: 10.5 }, Pos { x: 12.5, y: 10.5 }));
+}
+
+#[test]
 fn tight_known_passage_admits_short_safe_hold_instead_of_waiting_forever() {
     let (_, view) = super::super::quest_tests::fixture();
     let mut grid = Grid::terrain(&view);

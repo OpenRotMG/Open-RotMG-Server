@@ -281,7 +281,7 @@ struct Brain {
     blocked: BTreeMap<(i16, i16), u64>,
     /// Stalls per destination tile and the last one, so a tile that keeps failing stays excluded longer.
     stalls: BTreeMap<(i16, i16), (u32, u64)>,
-    cover: BTreeSet<(i16, i16)>,
+    cover: BTreeMap<TilePoint, bool>,
     visits: BTreeMap<(i16, i16), u64>,
     companion: Option<i32>,
     calls: calls::Calls,
@@ -362,7 +362,7 @@ impl Brain {
             destination: None,
             blocked: BTreeMap::new(),
             stalls: BTreeMap::new(),
-            cover: BTreeSet::new(),
+            cover: BTreeMap::new(),
             visits: BTreeMap::new(),
             companion: None,
             calls: calls::Calls::default(),
@@ -435,19 +435,31 @@ impl Brain {
 
     fn navigation_grid(&mut self, v: &PlayerView, content: &Content, avoid: &[Pos]) -> Arc<Grid> {
         let measuring = crate::performance::Measure::start();
-        let observed: BTreeSet<_> = v
+        let observed: BTreeMap<_, _> = v
             .objects
             .iter()
             .filter(|o| o.blocks && !content.objects[&o.kind].enemy)
-            .map(|o| tile(o.position))
+            .map(|o| (tile(o.position), content.objects[&o.kind].full_occupy))
             .collect();
         // Only nearby observed absence clears remembered cover, not an out-of-view removal.
-        self.cover
-            .retain(|point| center(*point).distance(v.position) >= 19. || observed.contains(point));
+        self.cover.retain(|point, _| {
+            center(*point).distance(v.position) >= 19. || observed.contains_key(point)
+        });
         self.cover.extend(observed);
-        let mut blockers: BTreeSet<_> = self
+        let full_occupy: BTreeSet<_> = self
             .cover
             .iter()
+            .filter_map(|(point, full)| full.then_some(*point))
+            .chain(
+                v.objects
+                    .iter()
+                    .filter(|o| content.objects[&o.kind].full_occupy)
+                    .map(|o| tile(o.position)),
+            )
+            .collect();
+        let mut blockers: BTreeSet<_> = self
+            .cover
+            .keys()
             .chain(self.blocked.keys())
             .filter(|point| **point != tile(v.position))
             .copied()
@@ -493,6 +505,12 @@ impl Brain {
             .as_ref()
             .is_some_and(|grid| !terrain_changed && grid.dimensions == (v.map.width, v.map.height));
         let equivalent = terrain_reusable
+            && self
+                .navigation
+                .as_ref()
+                .expect("reusable navigation missing")
+                .full_occupy
+                == full_occupy
             && (!obstacles_changed || {
                 let grid = self
                     .navigation
@@ -534,6 +552,7 @@ impl Brain {
             Arc::new(Grid::terrain(v))
         };
         let g = Arc::make_mut(&mut grid);
+        g.full_occupy = full_occupy;
         g.performance = self.performance.clone();
         self.navigation_removed.clear();
         for point in &blockers {
