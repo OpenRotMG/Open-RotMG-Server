@@ -676,6 +676,7 @@ fn ocean_trench_advertises_player_teleports_without_enabling_restricted_worlds()
     let (mut world, _) = fixture(0x18, false);
     for (name, allowed) in [
         ("Ocean Trench", true),
+        ("Spider Den", true),
         ("Tomb of the Ancients", true),
         ("Vault", false),
         ("Tutorial", false),
