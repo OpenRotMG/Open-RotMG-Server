@@ -17,7 +17,7 @@ export async function run(game){
     game.check('two living native players share the prepared Manor entrance',start.view.map.name==='Manor of the Immortals'&&target.view.session.world===start.view.session.world&&start.view.lifecycle.alive&&target.view.lifecycle.alive);
     await game.act({keys:[],duration_ms:2000},{name:'manor-before-teleport',when:v=>v.game_ms>=start.view.time_ms+1800});
     const before=await game.inspect();
-    const action=game.act({keys:[],duration_ms:2500},{name:'manor-teleport-result',when:v=>v.game_ms>=before.view.time_ms+2200});
+    const action=game.act({keys:[],duration_ms:1900},{name:'manor-teleport-result',when:v=>v.game_ms>=before.view.time_ms+1600});
     const typing=(async()=>{
       for(let n=0;(await game.observe()).paused;n++){assert(n<250,'Native action did not unpause');await delay(20);}
       async function enter(){try{await clients[0].call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});}finally{await clients[0].call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});}}
@@ -27,8 +27,9 @@ export async function run(game){
     const after=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,'manor-teleport.json'),JSON.stringify({start,target,before,after}));
     game.check('Manor MAPINFO advertises player teleport',after.view.map.allow_teleport);
     game.check('ordinary native chat teleport reaches the observed Manor peer',distance(after.view,target.view)<.2);
-    await game.act({keys:['a','s'],duration_ms:200});
+    await game.act({keys:['a','s'],duration_ms:800});
     const moved=await game.observe(),other=await peer.inspect();
+    await writeFile(join(process.env.QA_RESULTS_DIR,'manor-post-teleport.json'),JSON.stringify({moved,other}));
     game.check('native movement resumes after the teleport acknowledgement',distance(moved,after.view)>.5);
     game.check('teleport preserves both living identities and inventories without Manor completion',moved.lifecycle.alive&&other.view.lifecycle.alive&&moved.session.character===start.view.session.character&&other.view.session.character===target.view.session.character&&JSON.stringify(moved.character.items)===JSON.stringify(start.view.character.items)&&JSON.stringify(other.view.character.items)===JSON.stringify(target.view.character.items)&&after.diagnostic.character.manors===0);
   }finally{for(const client of clients)client.close();}
