@@ -178,6 +178,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
             width: 128,
             height: 128,
             allow_teleport: true,
+            layout: None,
         },
         character: OwnCharacter {
             conditions: 0,
@@ -493,7 +494,7 @@ fn band_edge_journeys_do_not_preempt_each_other() {
             .kind;
         v.objects[0].position = Pos { x: 2.5, y: 10.5 };
         let mut brain = Brain::new(ARCHETYPES[0], &v);
-        brain.crowd.observe(&v, &c);
+        brain.crowd.bands.observe(&v, &c, &mut brain.mind.godlands);
         v.objects.clear();
         brain.heading = 0.;
         brain.hunting = revisit;
@@ -779,10 +780,11 @@ fn bot_standing_in_lava_steps_out_and_dodges_a_shown_bomb() {
 }
 
 #[test]
-fn level_twenty_passes_lowland_trash_on_the_way_to_its_arrow() {
-    // Live: after following their arrows, level 20s still made 66% of their kills on lowland mobs met on the way.
+fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
+    // Live: level 20s entered each Realm knowing nothing of its Godlands, followed midland arrows and stopped for every enemy in range.
     let (c, mut v) = fixture();
     v.character.level = 20;
+    v.map.layout = Some("classic-world-02-reconstruction".into());
     v.objects.push(VisibleObject {
         id: 3,
         account: None,
@@ -798,9 +800,21 @@ fn level_twenty_passes_lowland_trash_on_the_way_to_its_arrow() {
         usable: false,
         condition_mask: Some(0),
     });
-    let d = Brain::new(ARCHETYPES[0], &v).decide(&v, &c).unwrap();
-    assert_eq!(d.goal, Goal::Hunt(2));
-    v.character.level = 12;
-    let d = Brain::new(ARCHETYPES[0], &v).decide(&v, &c).unwrap();
-    assert_eq!(d.goal, Goal::Fight(3));
+    let godlands = Pos { x: 100.5, y: 100.5 };
+    for (remembered, goal) in [(true, Goal::Venture), (false, Goal::Fight(3))] {
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        if remembered {
+            brain.mind.godlands.insert(
+                "classic-world-02-reconstruction".into(),
+                BTreeSet::from([tile(godlands)]),
+            );
+        }
+        brain.crowd.bands.observe(&v, &c, &mut brain.mind.godlands);
+        let d = brain.decide(&v, &c).unwrap();
+        assert_eq!(d.goal, goal);
+        if remembered {
+            let step = d.movement.expect("heading for the Godlands");
+            assert!(step.distance(godlands) < v.position.distance(godlands));
+        }
+    }
 }

@@ -2,12 +2,15 @@
 use super::*;
 
 const REGION: f32 = 8.;
+/// Godlands sightings kept per Realm layout, each at least `SPACING` tiles from the others.
+pub(super) const REMEMBERED: usize = 16;
+const SPACING: f32 = 24.;
 
 #[derive(Default)]
 pub(super) struct Bands {
     world: Option<i32>,
     regions: BTreeMap<TilePoint, (u8, Pos)>,
-    limit: u8,
+    pub limit: u8,
     pub snake_source: Option<Pos>,
 }
 
@@ -34,17 +37,36 @@ fn region(p: Pos) -> TilePoint {
     ((p.x / REGION).floor() as i16, (p.y / REGION).floor() as i16)
 }
 impl Bands {
-    pub fn observe(&mut self, v: &PlayerView, c: &Content) {
+    /// Returns whether `godlands` learned a new place on this layout.
+    pub fn observe(
+        &mut self,
+        v: &PlayerView,
+        c: &Content,
+        godlands: &mut BTreeMap<String, BTreeSet<TilePoint>>,
+    ) -> bool {
         if self.world != Some(v.session.world) {
             *self = Self {
                 world: Some(v.session.world),
                 ..Self::default()
             };
+            if let Some(layout) = &v.map.layout {
+                let remembered = godlands.get(layout).map_or(0, BTreeSet::len);
+                for t in godlands.get(layout).into_iter().flatten() {
+                    self.regions.insert(region(center(*t)), (4, center(*t)));
+                }
+                tracing::info!(
+                    account = v.session.account,
+                    layout,
+                    remembered,
+                    "autonomous realm godlands recalled"
+                );
+            }
         }
         self.limit = suitable(v, c);
         if v.map.name != "Realm" {
-            return;
+            return false;
         }
+        let mut learned = false;
         for enemy in v
             .objects
             .iter()
@@ -61,7 +83,29 @@ impl Bands {
             if crate::dungeon::portal_drop(enemy.kind).is_some_and(|(portal, _)| portal == 0x718) {
                 self.snake_source = Some(enemy.position);
             }
+            if tier == 4
+                && let Some(layout) = &v.map.layout
+                && godlands.get(layout).is_none_or(|known| {
+                    known.len() < REMEMBERED
+                        && known
+                            .iter()
+                            .all(|t| center(*t).distance(enemy.position) >= SPACING)
+                })
+            {
+                godlands
+                    .entry(layout.clone())
+                    .or_default()
+                    .insert(tile(enemy.position));
+                tracing::info!(
+                    account = v.session.account,
+                    layout,
+                    position = ?enemy.position,
+                    "autonomous realm godlands remembered"
+                );
+                learned = true;
+            }
         }
+        learned
     }
     /// Highest band remembered around a position; `None` is unobserved ground.
     pub fn known(&self, p: Pos) -> Option<u8> {
@@ -130,14 +174,14 @@ mod tests {
         v.objects.push(enemy);
         let mut bands = Bands::default();
         v.character.level = 5;
-        bands.observe(&v, &c);
+        bands.observe(&v, &c, &mut BTreeMap::new());
         assert!(!bands.survivable(&v, far));
         assert!(
             bands.survivable(&v, v.position),
             "unobserved ground is not refused"
         );
         v.character.level = 15;
-        bands.observe(&v, &c);
+        bands.observe(&v, &c, &mut BTreeMap::new());
         assert!(bands.survivable(&v, far));
         assert_eq!(bands.venture(&v).map(|p| (p.x, p.y)), Some((far.x, far.y)));
     }

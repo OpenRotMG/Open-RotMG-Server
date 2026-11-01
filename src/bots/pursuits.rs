@@ -48,6 +48,9 @@ pub(crate) struct Mind {
     /// A veteran's level-20 alt was topped up once; later deaths are permanent as usual.
     #[serde(default)]
     pub veteran_alt: bool,
+    /// Godlands tiles this account saw on each Realm layout, as 2012 veterans knew the maps.
+    #[serde(default)]
+    pub godlands: BTreeMap<String, BTreeSet<TilePoint>>,
 }
 impl Mind {
     pub(crate) fn new(account: i32) -> Self {
@@ -64,6 +67,7 @@ impl Mind {
             events: events::Events::default(),
             character: None,
             veteran_alt: false,
+            godlands: BTreeMap::new(),
         }
     }
     pub(crate) fn validate(&self) -> Result<()> {
@@ -76,7 +80,15 @@ impl Mind {
                 && self.character.is_none_or(|c| c > 0),
             "invalid account mind binding/schema"
         );
-        ensure!(self.facts.len() <= 64, "account mind exceeds bounds");
+        ensure!(
+            self.facts.len() <= 64
+                && self.godlands.len() <= 32
+                && self
+                    .godlands
+                    .values()
+                    .all(|tiles| tiles.len() <= bands::REMEMBERED),
+            "account mind exceeds bounds"
+        );
         ensure!(
             self.facts
                 .iter()
