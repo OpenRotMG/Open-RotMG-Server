@@ -1021,11 +1021,14 @@ fn oryx_counts_family_members_once_summoned() {
         .unwrap();
     world.place_camp(family, positions).unwrap();
     assert_eq!(world.oryx_counted(11).len(), 1, "inactive leader only");
+    assert_eq!(world.oryx_counts()[11], world.oryx_counted(11).len());
     let leader = world.camp_members(0).find(|e| e.kind == 0x601).unwrap().id;
     world.entities.get_mut(&leader).unwrap().activated = Some(0);
     assert_eq!(world.oryx_counted(11).len(), 3, "active leader summoned");
+    assert_eq!(world.oryx_counts()[11], world.oryx_counted(11).len());
     world.remove_entity(leader);
     assert_eq!(world.oryx_counted(11).len(), 2, "orphans still count");
+    assert_eq!(world.oryx_counts()[11], world.oryx_counted(11).len());
 }
 
 #[test]
