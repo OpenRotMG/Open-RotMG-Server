@@ -98,8 +98,8 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
         0x640 | 0x645 | 0x646 | 0x649 | 0x650 => Some((0x718, 0.17)),
         0x653 => Some((0x70c, 0.25)),
         0x659 => Some((0x71a, 0.17)),
-        // Flying Brain matches the retained 123.5.0 announcement; 17% is from the later pinned comparator.
-        0x657 => Some((0x890, 0.17)),
+        // 10% is project balance, not an authenticated 123.5.1 rate: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1069
+        0x657 => Some((0x890, 0.1)),
         _ => None,
     }
 }
