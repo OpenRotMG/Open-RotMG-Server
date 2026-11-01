@@ -454,6 +454,43 @@ impl World {
 mod tests {
     use super::*;
     use crate::condition::{BERSERK, SICK, bit};
+    #[test]
+    fn bot_view_reuses_the_ticks_visibility() {
+        let (mut world, player) = super::super::movement_tests::fixture(0x18, false);
+        let pos = world.players[&player].pos;
+        let near = world
+            .spawn_entity(
+                0x602,
+                Pos {
+                    x: pos.x + 2.,
+                    y: pos.y,
+                },
+                vec![],
+            )
+            .unwrap();
+        world
+            .spawn_entity(
+                0x602,
+                Pos {
+                    x: pos.x + 22.,
+                    y: pos.y,
+                },
+                vec![],
+            )
+            .unwrap();
+        world.updates(player, true).unwrap();
+        let seen = |w: &World| -> Vec<i32> {
+            w.player_view(1, player, 0)
+                .unwrap()
+                .objects
+                .iter()
+                .map(|o| o.id)
+                .collect()
+        };
+        assert_eq!(seen(&world), vec![near]);
+        world.remove_entity(near);
+        assert!(seen(&world).is_empty());
+    }
 
     #[tokio::test]
     async fn local_support_public_conditions_and_actual_ability_benefits() {
