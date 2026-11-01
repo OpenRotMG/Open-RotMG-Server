@@ -689,9 +689,9 @@ impl Piece {
             p.boss = (20, 20);
         }
         if kind == 0x928 {
-            // The selected primary assigns its spawn-only marker after rotating the tiles.
-            p.boss = (19, 13);
-            p.set(19, 13, 0);
+            // Collision-safe adaptation: Kithio's +6 offset can toss the Master into a wall; centered comparator: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/Tower.cs#L79
+            p.boss = (13, 13);
+            p.set(13, 13, 0);
         } else if !matches!(
             kind,
             0x91b
