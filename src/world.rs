@@ -7563,16 +7563,18 @@ impl World {
                 .max(100);
             self.new_tick_at = now;
             for id in ids {
-                if let Err(e) = self.updates(id, false) {
+                let p = &self.players[&id];
+                let watched = p.controller != Controller::Autonomous
+                    || p.spectators
+                        .as_ref()
+                        .is_some_and(|s| s.receiver_count() > 0);
+                // Unwatched bots refreshed visibility after combat this tick; a second pass was ~1/3 of bot visibility CPU.
+                if watched && let Err(e) = self.updates(id, false) {
                     tracing::error!(player=id,error=%e,"visibility update failed");
                     continue;
                 }
                 let p = &self.players[&id];
-                if p.controller != Controller::Autonomous
-                    || p.spectators
-                        .as_ref()
-                        .is_some_and(|s| s.receiver_count() > 0)
-                {
+                if watched {
                     let dynamic: Vec<_> = p
                         .known
                         .iter()
