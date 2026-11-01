@@ -1277,6 +1277,7 @@ async fn realm_death_credit_survives_portal_reward_failure() {
             Some(transfer.output),
             None,
             store.presentation(account.id).await.unwrap(),
+            store.is_legend(account.id).await.unwrap(),
             Some(transfer.key.clone()),
             Controller::Human,
         )

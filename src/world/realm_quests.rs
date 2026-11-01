@@ -1074,6 +1074,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn generated_ghost_king_tower_keeps_eastern_master_spawnable() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let map = Map {
+            width: 160,
+            height: 160,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x18,
+                    object: None,
+                    config: String::new(),
+                    terrain: 4,
+                    region: 0,
+                };
+                160 * 160
+            ],
+            spawns: vec![(0.5, 0.5)],
+        };
+        let mut world = World::new(content, Arc::new(map)).unwrap();
+        world.rng = rand::SeedableRng::seed_from_u64(1296);
+        let home = world.place_named_setpiece(0x928, &[4]).unwrap();
+        world.spawn_named_quest(0x928, home).unwrap();
+        let root = *world.quest_ids.iter().next().unwrap();
+        world
+            .position_entity(
+                root,
+                Pos {
+                    x: home.x + 3.,
+                    y: home.y,
+                },
+            )
+            .unwrap();
+        let king = world.entities.get_mut(&root).unwrap();
+        king.activated = Some(0);
+        king.hp -= 4;
+        assert!(world.walkable(Pos {
+            x: home.x + 7.,
+            y: home.y
+        }));
+        world.quest_mechanics(root).unwrap();
+        assert_eq!(world.entities[&root].stage, Some(1));
+        world.now = 2500;
+        world.quest_mechanics(root).unwrap();
+        world.now = 8500;
+        world.quest_mechanics(root).unwrap();
+        assert_eq!(world.entities[&root].stage, Some(3));
+        assert_eq!(world.pending_named(root, Some(0x929)), 1);
+        world.now += 1500;
+        world.named_birth_step();
+        let masters = world.quest_members(root, &[0x929]);
+        assert_eq!(masters.len(), 1);
+        let master = masters[0];
+        assert_eq!(world.entities[&master].pos.x, home.x + 7.);
+        assert_eq!(world.entities[&master].quest, Some(root));
+        assert_eq!(world.entities[&master].home.x, home.x);
+        world.entities.get_mut(&master).unwrap().hp = 93999;
+        world.quest_mechanics(master).unwrap();
+        assert!(!world.entities.contains_key(&root));
+        let actual = world.entities.values().find(|e| e.kind == 0x92d).unwrap();
+        assert_eq!(actual.quest, Some(root));
+        assert_eq!((actual.home.x, actual.home.y), (home.x, home.y));
+    }
+
+    #[test]
     fn ghost_waves_keep_retired_class_escorts_out_of_the_replacement_roster() {
         for (tier, company, expected) in [
             (0, false, [1, 4, 0, 0]),
