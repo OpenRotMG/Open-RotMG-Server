@@ -807,11 +807,21 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
     let godlands = Pos { x: 100.5, y: 100.5 };
     v.map.godlands = Arc::new(vec![godlands]);
     // Live: 76% of Realm entries remembered nothing; a veteran knows a map it has played before.
-    for (remembered, veteran, goal) in [
-        (true, false, Goal::Venture),
-        (false, true, Goal::Venture),
-        (false, false, Goal::Fight(3)),
+    let geared = v.character.items[0];
+    // Live: a level 20 with a tier-3 weapon never set out, though its own band lies on the way to the Godlands.
+    let weak = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == c.objects[&(geared as u16)].slot_type && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    for (remembered, veteran, weapon, goal) in [
+        (true, false, geared, Goal::Venture),
+        (false, true, geared, Goal::Venture),
+        (false, true, weak, Goal::Venture),
+        (false, false, geared, Goal::Fight(3)),
     ] {
+        v.character.items[0] = weapon;
         let mut brain = Brain::new(ARCHETYPES[0], &v);
         if remembered {
             brain.mind.godlands.insert(
@@ -829,5 +839,30 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
             let step = d.movement.expect("heading for the Godlands");
             assert!(step.distance(godlands) < v.position.distance(godlands));
         }
+    }
+}
+
+#[test]
+fn full_bag_does_not_leave_the_realm_to_bank_into_a_full_vault() {
+    // Live: 59 of 70 level-20 banking trips came back with the same full bag, every five minutes.
+    let falchion = 0xa6e;
+    for full in [false, true] {
+        let (c, mut v) = fixture();
+        v.quest = None;
+        v.objects.clear();
+        v.character.items[4..].copy_from_slice(&[falchion; 8]);
+        let (_, mut vault) = fixture();
+        vault.map.name = "Vault".into();
+        vault.objects[0].kind = 0x504;
+        vault.objects[0].contents = vec![if full { falchion } else { -1 }; 8];
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        brain.mind.market.observe(&vault);
+        let d = brain.decide(&v, &c).unwrap();
+        assert_eq!(
+            matches!(d.journey, Some(Journey::Nexus)),
+            !full,
+            "full Vault {full}: {:?}",
+            d.goal
+        );
     }
 }
