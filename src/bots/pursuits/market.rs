@@ -319,6 +319,11 @@ impl Market {
         } else {
             0
         };
+        let desired = if kind == DEFENSE && self.cramped() {
+            desired.max(self.count(v, kind) + 1)
+        } else {
+            desired
+        };
         Ok(desired.saturating_sub(self.count(v, kind)).min(16) as u8)
     }
     fn spare(&self, v: &PlayerView, c: &Content, future: Option<u16>, kind: i32) -> Result<u8> {
@@ -849,16 +854,30 @@ impl Market {
         if self.target.is_none() && !self.preparing {
             counters.extend(self.quotes(v, c, future)?);
         }
-        if let Some(counter) = counters.into_iter().find(|o| {
-            related(o)
-                && v.character
-                    .items
-                    .iter()
-                    .skip(4)
-                    .filter(|k| **k == o[0].kind)
-                    .count()
-                    >= usize::from(o[0].quantity)
-        }) && let Some(account) = peer.account
+        let carried = |o: &[Goods; 2]| {
+            v.character
+                .items
+                .iter()
+                .skip(4)
+                .filter(|k| **k == o[0].kind)
+                .count()
+                >= usize::from(o[0].quantity)
+        };
+        if let Some(counter) = counters.iter().find(|o| {
+            related(o) && !carried(o) && self.count(v, o[0].kind) >= usize::from(o[0].quantity)
+        }) && counters.iter().all(|o| !(related(o) && carried(o)))
+            && !self.preparing
+            && self.session.is_none()
+        {
+            // Owner, 2012: "I have a tier 11 staff in my vault" — the seller fetches it for the buyer.
+            tracing::info!(account = v.session.account, peer = peer.account, quote = ?counter, "market fetching vault stock for a buyer");
+            self.quote = Some(counter.clone());
+            self.sought = true;
+            self.session_used = false;
+            return Ok(true);
+        }
+        if let Some(counter) = counters.into_iter().find(|o| related(o) && carried(o))
+            && let Some(account) = peer.account
         {
             // Incoming requests inherit this quote; preparation keeps the quote it is banking for.
             if !self.preparing {
@@ -897,18 +916,21 @@ impl Market {
         }
         Ok(())
     }
-    /// A veteran carrying priced spares worth a Defense potion, with an exchange of its own in mind, goes to the Nexus.
+    /// Selling is worth a trip when the carried spares matter against what the player already owns, or the Vault is full.
     pub(in crate::bots) fn trip_due(
         &self,
         v: &PlayerView,
         c: &Content,
         future: Option<u16>,
     ) -> Result<bool> {
-        if v.character.level < 20 || self.locked() || !super::settled(v) {
+        if self.locked() || !super::settled(v) {
             return Ok(false);
         }
         if self.quote(v, c, future)?.is_none() {
             return Ok(false);
+        }
+        if self.cramped() {
+            return Ok(true);
         }
         let carried: Vec<i32> = v.character.items[4..]
             .iter()
@@ -922,7 +944,30 @@ impl Market {
                 units += range.min * u64::from(self.spare(v, c, future, kind)?).min(count);
             }
         }
-        Ok(units >= 12)
+        Ok(units >= 12.max(self.wealth(v, c) / 8))
+    }
+    pub(in crate::bots) fn beneath(&self, v: &PlayerView, c: &Content, kind: i32) -> bool {
+        c.item_values
+            .quote_range(kind)
+            .map_or(0, |r| (r.min + r.max) / 2)
+            * 40
+            < self.wealth(v, c)
+    }
+    /// Owned value in catalog units; a rich player does not cross the map for what a poor one would.
+    fn wealth(&self, v: &PlayerView, c: &Content) -> u64 {
+        v.character
+            .items
+            .iter()
+            .chain(self.vault.iter().flatten())
+            .filter_map(|k| c.item_values.quote_range(*k).ok())
+            .map(|r| (r.min + r.max) / 2)
+            .sum()
+    }
+    /// Owner, 2012: a nearly full Vault is traded up, four Speed into one Defense, to save space.
+    fn cramped(&self) -> bool {
+        self.vault
+            .as_ref()
+            .is_some_and(|vault| vault.iter().filter(|k| **k < 0).count() <= 1)
     }
     fn end_session(&mut self, v: &PlayerView, reason: &str) {
         self.preparing = false;
@@ -1330,7 +1375,11 @@ impl Market {
             if !admitted {
                 return Ok(None);
             }
-            let duration_ms = rng.gen_range(60..=240) * 1000u64;
+            let duration_ms = if purposeful || sought || self.trader {
+                rng.gen_range(300..=1200)
+            } else {
+                rng.gen_range(60..=240)
+            } * 1000u64;
             self.session = Some(MarketSession {
                 anchor: grid
                     .walkable

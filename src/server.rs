@@ -2193,7 +2193,19 @@ async fn reconnect(
                         );
                         return Ok(None);
                     }
-                    d.destination(id, portal)?
+                    match d.destination(id, portal) {
+                        Ok(destination) => destination,
+                        Err(error) if lifecycle::rule_rejection(&error) => {
+                            let message = crate::world::chat_error(&error.to_string());
+                            crate::world::send(
+                                &d.worlds[&d.location(id)?].players[&id],
+                                message.id,
+                                message.body,
+                            );
+                            return Ok(None);
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             };
             let world = &d.worlds[&destination];
@@ -3427,3 +3439,5 @@ async fn shutdown_signal() -> Result<()> {
 mod lifecycle_finalize_tests;
 #[cfg(test)]
 mod lock_command_tests;
+#[cfg(test)]
+mod portal_reach_tests;

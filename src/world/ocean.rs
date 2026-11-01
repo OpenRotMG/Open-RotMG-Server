@@ -37,9 +37,10 @@ impl World {
             "ocean encounter phase entered"
         );
     }
-    fn ocean_children(&self, id: i32, kind: u16) -> Vec<i32> {
-        self.actors()
-            .filter(|e| e.parent == Some(id) && e.kind == kind)
+    pub(super) fn ocean_children(&self, id: i32, kind: u16) -> Vec<i32> {
+        // Hermit and Thessal poll this every tick; scanning every Realm actor cost ~11% of world CPU.
+        self.summoned_children(id, kind)
+            .filter(|e| self.actor_ids.contains(&e.id))
             .map(|e| e.id)
             .collect()
     }

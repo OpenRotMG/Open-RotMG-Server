@@ -30,7 +30,8 @@ impl Owner {
         [Self::Trade, Self::Event, Self::Bank, Self::Call, Self::Gift];
     fn budget_ms(self) -> u64 {
         match self {
-            Self::Trade => 10 * 60_000,
+            // Owner, 2012: shopping or selling a valuable drop could take 20 minutes in the Nexus.
+            Self::Trade => 25 * 60_000,
             Self::Bank => 3 * 60_000,
             Self::Event => 15 * 60_000,
             Self::Call => 30_000,
@@ -241,6 +242,10 @@ impl Plan {
                 self.record(now, Kind::Progress, None, reason);
             }
         }
+    }
+    /// Changes whenever `public` could: every event bumps seq, and progress moves last_progress.
+    pub(super) fn revision(&self) -> (u64, u64) {
+        (self.seq, self.last_progress)
     }
     pub(super) fn public(&self, now: u64) -> Value {
         json!({"flag":self.flag(now),"last_progress_at":self.last_progress,"step":self.step,

@@ -258,15 +258,17 @@ impl Tiles {
                 .tile(p)
         })
     }
-    /// Ground of a tile this player has seen; unseen ground stays unknown.
-    pub(crate) fn ground(&self, p: Point) -> Option<u8> {
+    /// A tile this player has seen; unseen tiles stay unknown.
+    pub(crate) fn tile(&self, p: Point) -> Option<Tile> {
         self.contains(&p).then(|| {
             self.geometry
                 .as_ref()
                 .expect("known terrain has no geometry")
                 .tile(p)
-                .ground
         })
+    }
+    pub(crate) fn ground(&self, p: Point) -> Option<u8> {
+        self.tile(p).map(|t| t.ground)
     }
     pub(crate) fn dimensions(&self) -> (i32, i32) {
         self.geometry
