@@ -55,9 +55,10 @@ import sys,json
 from PIL import Image
 r=json.load(open(sys.argv[2]));im=Image.open(sys.argv[1]).convert('RGB')
 box=(int(r['x'])+260,int(r['y'])+250,int(r['x'])+340,int(r['y'])+325)
-red=sum(r>100 and g<r*.3 and b<r*.3 for r,g,b in im.crop(box).getdata())
-print(json.dumps({'player_crop':box,'red_pixels':red}))
+# The outline adds red to the blue-grey floor; the wizard's brown sprite has B<G.
+red=sum(r>g+20 and r>b+20 and b>=g for r,g,b in im.crop(box).getdata())
+print(json.dumps({'player_crop':box,'additive_red_pixels':red}))
 `,join(out(),'legend-glow.png'),join(out(),'canvas-rect.json')],{encoding:'utf8'}));
   await writeFile(join(out(),'glow-observations.json'),JSON.stringify({before,after,pixels},null,2));
-  game.check('selected native client renders a red outline on the ranked account',pixels.red_pixels>12);
+  game.check('selected native client renders a red outline on the ranked account',pixels.additive_red_pixels>12);
 }
