@@ -244,10 +244,15 @@ impl World {
         let started = crate::performance::Measure::start();
         let w = self;
         let p = w.players.get(&id).context("view player missing")?;
-        let visible = w.visible(id);
-        let objects = visible
-            .intersection(&p.known)
+        // `known` already holds this tick's visibility; recomputing it for every bot poll cost ~13% of world CPU.
+        let objects = p
+            .known
+            .iter()
             .filter(|entity| **entity != id)
+            .filter(|entity| match w.players.get(entity) {
+                Some(q) => q.pos.distance(p.pos) < 20.,
+                None => w.entities.contains_key(entity),
+            })
             .map(|entity| {
                 Ok(if let Some(q) = w.players.get(entity) {
                     VisibleObject {
