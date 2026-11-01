@@ -866,13 +866,14 @@ pub(crate) async fn spawn(a: &App, t: &Testing, spec: Spawn) -> Result<Value> {
         },
         Controller::Direct => {
             let presentation = a.store.presentation(ch.account).await?;
+            let legendary = a.store.is_legend(ch.account).await?;
             let bind = super::lifecycle::binding(&a, ch.account)?;
             super::lifecycle::stage(Stage::Publication);
             let id = a
                 .world
                 .in_world(world)
                 .call(move |w| {
-                    let id = w.enter_at(ch, None, Some(pos), presentation)?;
+                    let id = w.enter_at(ch, None, Some(pos), presentation, legendary)?;
                     bind(id)?;
                     Ok(id)
                 })

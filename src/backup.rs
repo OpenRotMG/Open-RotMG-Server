@@ -595,7 +595,13 @@ async fn exercise_vault(database: &Path, data: &Path) -> Result<()> {
         pos.distance(other) < 3.,
         "fixture chest transfer exceeds native reach"
     );
-    let player = world.enter_at(ch, None, Some(pos), store.presentation(account).await?)?;
+    let player = world.enter_at(
+        ch,
+        None,
+        Some(pos),
+        store.presentation(account).await?,
+        store.is_legend(account).await?,
+    )?;
     for ((from, source), (to, target)) in [
         ((first, 0), (second, 0)),
         ((second, 0), (player, 4)),

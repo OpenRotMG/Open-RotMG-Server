@@ -403,6 +403,63 @@ fn white_demon_gear(content: &Content, seed: u64) -> Vec<i32> {
 }
 
 #[tokio::test]
+async fn god_potion_and_equipment_bags_do_not_stack() {
+    let (mut w, _store, owners) = reward_world().await;
+    let (account, character) = owners[0];
+    let seed = 650;
+    let mut expected_rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let expected = crate::loot::god_loot(&w.content, 0x651, &[(account, 1000)], &mut expected_rng);
+    let mut expected_items: Vec<_> = expected
+        .shared
+        .iter()
+        .chain(expected.private.values().flatten())
+        .copied()
+        .map(i32::from)
+        .collect();
+    expected_items.sort_unstable();
+    for chunk in expected.shared.chunks(8) {
+        if chunk
+            .iter()
+            .any(|item| w.content.objects[item].bag_type != 0)
+        {
+            expected.shared_owners.choose(&mut expected_rng).unwrap();
+        }
+    }
+    let pos = Pos { x: 3.5, y: 3.5 };
+    let root = w.spawn_entity(0x651, pos, vec![]).unwrap();
+    w.entities
+        .get_mut(&root)
+        .unwrap()
+        .damage
+        .insert(character, 1000);
+    w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+    w.defeat_entity(root).unwrap();
+    let bags: Vec<_> = w.bag_expiry.keys().map(|id| &w.entities[id]).collect();
+    assert_eq!(bags.len(), 2, "seed={seed}");
+    assert!(bags.iter().any(|bag| bag.items.contains(&0xa1f)));
+    assert!(
+        bags.iter()
+            .all(|bag| bag.accessible(account) && !bag.accessible(owners[1].0))
+    );
+    assert!(
+        bags[0].pos.distance(bags[1].pos) > 0.1,
+        "seed={seed}: bags overlap at {:?}",
+        bags[0].pos
+    );
+    let mut actual_items: Vec<_> = bags
+        .iter()
+        .flat_map(|b| b.items.iter().copied())
+        .filter(|i| *i >= 0)
+        .collect();
+    actual_items.sort_unstable();
+    assert_eq!(actual_items, expected_items);
+    assert_eq!(
+        rand::RngCore::next_u64(&mut w.rng),
+        rand::RngCore::next_u64(&mut expected_rng)
+    );
+}
+
+#[tokio::test]
 async fn god_gear_death_roll_is_once_per_candidate_with_private_colored_bags() {
     let (mut w, _store, owners) = reward_world().await;
     let mut seeds = vec![0, 1, 2, 3];
@@ -453,5 +510,75 @@ async fn god_gear_death_roll_is_once_per_candidate_with_private_colored_bags() {
             );
             assert_eq!(actual.iter().collect::<BTreeSet<_>>().len(), actual.len());
         }
+    }
+}
+
+#[tokio::test]
+async fn god_loot_chunks_scatter_inside_corpse_tile_without_changing_owners_or_rng() {
+    let (mut w, _store, owners) = reward_world().await;
+    let shared_owners = vec![owners[0].0, owners[1].0];
+    for pos in [
+        Pos { x: 3.001, y: 3.001 },
+        Pos { x: 3.999, y: 3.999 },
+        Pos { x: 3., y: 4. },
+    ] {
+        clear_bags(&mut w);
+        let mut expected_rng = w.rng.clone();
+        let expected_gear_owners: Vec<_> = (0..2)
+            .map(|_| *shared_owners.choose(&mut expected_rng).unwrap())
+            .collect();
+        let loot = crate::loot::GodLoot {
+            private: BTreeMap::from([
+                (owners[0].0, vec![0xa1f; 17]),
+                (owners[1].0, vec![0xa20; 2]),
+            ]),
+            shared: vec![0xa9f; 9],
+            shared_owners: shared_owners.clone(),
+        };
+        w.god_loot_bags(pos, loot).unwrap();
+        let bags: Vec<_> = w.bag_expiry.keys().map(|id| &w.entities[id]).collect();
+        assert_eq!(bags.len(), 6);
+        let positions: BTreeSet<_> = bags
+            .iter()
+            .map(|b| (b.pos.x.to_bits(), b.pos.y.to_bits()))
+            .collect();
+        assert_eq!(positions.len(), bags.len());
+        for bag in &bags {
+            assert_eq!(bag.pos.x.floor(), pos.x.floor());
+            assert_eq!(bag.pos.y.floor(), pos.y.floor());
+            assert!((bag.pos.x - pos.x).abs() <= 0.5 && (bag.pos.y - pos.y).abs() <= 0.5);
+            assert!(w.walkable(bag.pos));
+            assert_eq!(bag.items.len(), 8);
+            assert_eq!(
+                bag.drop_slots,
+                (0..bag.items.iter().filter(|i| **i >= 0).count()).collect::<BTreeSet<_>>()
+            );
+            assert_eq!(w.bag_expiry[&bag.id], w.now + 60_000);
+            assert_eq!(bag.size, 80);
+            assert!(!bag.accessible(owners[5].0));
+            let owner = if bag.items.contains(&0xa1f) {
+                owners[0].0
+            } else if bag.items.contains(&0xa20) {
+                owners[1].0
+            } else {
+                expected_gear_owners
+                    [usize::from(bag.items.iter().filter(|i| **i >= 0).count() == 1)]
+            };
+            assert_eq!(bag.extra_stats, [(54, owner)]);
+            assert!(bag.bag_owners.is_empty());
+        }
+        for (item, count) in [(0xa1f, 17), (0xa20, 2), (0xa9f, 9)] {
+            assert_eq!(
+                bags.iter()
+                    .flat_map(|b| &b.items)
+                    .filter(|i| **i == item)
+                    .count(),
+                count
+            );
+        }
+        assert_eq!(
+            rand::RngCore::next_u64(&mut w.rng),
+            rand::RngCore::next_u64(&mut expected_rng)
+        );
     }
 }

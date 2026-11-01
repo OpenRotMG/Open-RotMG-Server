@@ -165,6 +165,17 @@ impl Bands {
                 a.cmp(b)
                     .then_with(|| q.distance(v.position).total_cmp(&p.distance(v.position)))
             })
+            .or_else(|| {
+                // Live: level 20s below Godlands gear remembered only Godlands and fought beach mobs; their band lies on the way up.
+                self.regions
+                    .values()
+                    .filter(|(tier, p)| {
+                        *tier > goal && here < Some(goal) && p.distance(v.position) > 8.
+                    })
+                    .min_by(|(_, p), (_, q)| {
+                        p.distance(v.position).total_cmp(&q.distance(v.position))
+                    })
+            })
             .map(|(_, p)| *p)
     }
 }
