@@ -606,7 +606,6 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
     });
     let mut brain = Brain::new(ARCHETYPES[1], &v);
     let d = brain.decide(&v, &c).unwrap();
-    assert_eq!(brain.activity, Activity::Survive);
     assert!(
         d.journey.is_none(),
         "a visible supply is not a reason to leave"
@@ -775,7 +774,6 @@ fn bot_standing_in_lava_steps_out_and_dodges_a_shown_bomb() {
         lands_ms: v.time_ms + 1000,
     });
     let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
-    assert_eq!(d.goal, Goal::Dodge);
     assert!(
         d.movement.is_some_and(|m| m.x < v.position.x),
         "{:?}",
@@ -865,4 +863,49 @@ fn full_bag_does_not_leave_the_realm_to_bank_into_a_full_vault() {
             d.goal
         );
     }
+}
+
+#[test]
+fn dodging_keeps_the_trip_and_still_makes_progress() {
+    // Live: 35-40% of level-20 decisions were "Dodge", which replaced the trip to the Godlands and stalled it.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.quest = None;
+    v.objects.clear();
+    v.map.layout = Some("classic-world-02-reconstruction".into());
+    let godlands = Pos { x: 100.5, y: 100.5 };
+    v.projectiles.push(crate::world::view::VisibleProjectile {
+        owner: 2,
+        id: 1,
+        start: Pos { x: 13.5, y: 10.5 },
+        position: Pos { x: 11.5, y: 10.5 },
+        angle: std::f32::consts::PI,
+        speed: 40.,
+        lifetime_ms: 2000.,
+        amplitude: 0.,
+        frequency: 0.,
+        passes_cover: false,
+        damage: 10,
+        armor_piercing: false,
+    });
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.mind.godlands.insert(
+        "classic-world-02-reconstruction".into(),
+        BTreeSet::from([tile(godlands)]),
+    );
+    brain
+        .crowd
+        .bands
+        .observe(&v, &c, &mut brain.mind.godlands, false);
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Venture);
+    let step = d.movement.expect("a dodging step");
+    assert!(
+        step.distance(godlands) < v.position.distance(godlands),
+        "{step:?}"
+    );
+    assert!(
+        combat::clearance(&v, step) > combat::clearance(&v, v.position),
+        "{step:?}"
+    );
 }
