@@ -629,8 +629,18 @@ def deploy(stage, work, metadata, config):
     require(main_revision() == metadata['revision'], 'Main advanced during rehearsal; no cutover performed')
     with LAST_BACKUP.with_name('backup.lock').open('rb') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        warn_restart(config)
-        require(main_revision() == metadata['revision'], 'Main advanced during restart warning; no cutover performed')
+        warned = warn_restart(config)
+        current = main_revision() == metadata['revision']
+        # A safely rejected stale cutover must not leave players expecting the advertised restart: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1026
+        if warned and not current:
+            notice = 'Server restart postponed. This countdown is cancelled.'
+            try:
+                result = announce(config, notice)
+                require(result is not None, 'Running server did not acknowledge restart postponement')
+            except Exception as error:
+                raise RuntimeError('Main advanced during restart warning; no cutover performed; restart postponement announcement failed: ' + str(error)) from error
+            print(json.dumps({'restart_postponed': notice, **result}), flush=True)
+        require(current, 'Main advanced during restart warning; no cutover performed')
         outcome(work, 'cutover', stage)
         cutover = 'stop'
         try:
