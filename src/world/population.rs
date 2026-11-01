@@ -572,9 +572,9 @@ impl World {
                             .find(|p| {
                                 self.family_ground(*p, family.terrain)
                                     && self.players.values().all(|q| q.pos.distance(*p) >= 0.75)
+                                    // Per candidate, a whole-world actor scan made reinforcements 25-40 ms tick spikes.
                                     && self
-                                        .actors()
-                                        .filter(|e| e.camp == Some(camp))
+                                        .camp_members(camp)
                                         .all(|e| e.pos.distance(*p) >= 0.75)
                             });
                         if let Some(pos) = pos {
@@ -603,4 +603,30 @@ impl World {
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+#[test]
+fn camp_members_are_every_live_entity_of_their_camp() {
+    let (mut world, _) = super::movement_tests::fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 10;
+    }
+    let family = FAMILIES.iter().find(|f| f.leader == 0x614).unwrap();
+    let positions = world
+        .family_layout(Pos { x: 16.5, y: 8.5 }, family, &[])
+        .unwrap();
+    world.place_camp(family, positions).unwrap();
+    let scanned = |w: &World| -> Vec<i32> {
+        w.entities
+            .values()
+            .filter(|e| e.camp == Some(0))
+            .map(|e| e.id)
+            .collect()
+    };
+    let slotted = |w: &World| -> Vec<i32> { w.camp_members(0).map(|e| e.id).collect() };
+    assert!(scanned(&world).len() > 1);
+    assert_eq!(slotted(&world), scanned(&world));
+    world.remove_entity(slotted(&world)[1]);
+    assert_eq!(slotted(&world), scanned(&world));
 }
