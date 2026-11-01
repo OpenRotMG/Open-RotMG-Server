@@ -318,6 +318,7 @@ fn native_entry_uses_ingress_time_and_keeps_monotonic_moves() {
             player.tx,
             None,
             player.presentation,
+            player.legendary,
             None,
             Controller::Autonomous,
         )

@@ -1645,6 +1645,7 @@ async fn handle_inner(
             };
             let lists = a.store.account_lists(account).await?;
             let presentation = a.store.presentation(account).await?;
+            let legendary = a.store.is_legend(account).await?;
             let prepared = a
                 .testing
                 .as_ref()
@@ -1678,6 +1679,7 @@ async fn handle_inner(
                             Some(output),
                             prepared.map(|(_, pos)| pos),
                             presentation,
+                            legendary,
                             ticket,
                             crate::world::Controller::Human,
                         )?;
@@ -2826,12 +2828,13 @@ async fn bot_create(
             let destination = a.world.directory(move |d| d.initial(input.world)).await?;
             lifecycle::stage(Stage::Store);
             let presentation = a.store.presentation(acc.id).await?;
+            let legendary = a.store.is_legend(acc.id).await?;
             lifecycle::stage(Stage::Publication);
             let id = a
                 .world
                 .in_world(destination)
                 .call(move |w| {
-                    let id = w.enter_at(ch, None, None, presentation)?;
+                    let id = w.enter_at(ch, None, None, presentation, legendary)?;
                     bind(id)?;
                     Ok(id)
                 })

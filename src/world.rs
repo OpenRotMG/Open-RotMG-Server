@@ -355,6 +355,7 @@ pub struct Player {
     pub departing: bool,
     account_lists: AccountLists,
     pub(crate) presentation: AccountPresentation,
+    legendary: bool,
     paused: bool,
     pub(crate) controller: Controller,
     pub(crate) native_update_acked: bool,
@@ -3372,6 +3373,7 @@ impl World {
                 fame: 0,
                 best_fame: BTreeMap::new(),
             },
+            false,
         )
     }
 
@@ -3381,13 +3383,14 @@ impl World {
         tx: Option<Output>,
         position: Option<Pos>,
         presentation: AccountPresentation,
+        legendary: bool,
     ) -> Result<i32> {
         let controller = if tx.is_some() {
             Controller::Human
         } else {
             Controller::Qa
         };
-        self.enter_admitted(ch, tx, position, presentation, None, controller)
+        self.enter_admitted(ch, tx, position, presentation, legendary, None, controller)
     }
     pub(crate) fn reserved_slots(&self) -> usize {
         self.admissions
@@ -3395,12 +3398,14 @@ impl World {
             .filter(|a| a.expires > self.now)
             .count()
     }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn enter_admitted(
         &mut self,
         ch: Character,
         tx: Option<Output>,
         position: Option<Pos>,
         presentation: AccountPresentation,
+        legendary: bool,
         admission: Option<Vec<u8>>,
         controller: Controller,
     ) -> Result<i32> {
@@ -3486,6 +3491,7 @@ impl World {
                 departing: false,
                 account_lists: AccountLists::default(),
                 presentation,
+                legendary,
                 paused: false,
                 native_update_acked: false,
                 controller,
@@ -3598,7 +3604,7 @@ impl World {
             o.i32(id)
                 .f32(p.pos.x)
                 .f32(p.pos.y)
-                .i16(45 + 4 * i16::from(id == recipient));
+                .i16(46 + 4 * i16::from(id == recipient));
             for (k, v) in [
                 (0, values[0]),
                 (1, p.character.hp),
@@ -3660,6 +3666,8 @@ impl World {
                 p.presentation
                     .next_quest(p.character.class, p.character.fame),
             );
+            // The selected client treats every value except -1 as red: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as#L785
+            stat(&mut o, 59, if p.legendary { 1 } else { -1 });
             text_stat(
                 &mut o,
                 62,
@@ -7690,6 +7698,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
     (a.x - b.x).abs() <= 0.5 && (a.y - b.y).abs() <= 0.5
 }
 
+#[cfg(test)]
+mod legends_glow_tests;
 #[cfg(test)]
 mod shop_tests;
 

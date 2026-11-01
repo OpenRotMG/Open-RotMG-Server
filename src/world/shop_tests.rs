@@ -42,6 +42,7 @@ async fn vault_purchase_rollback_capacity_and_death_preserve_account_storage() {
             None,
             None,
             store.presentation(account).await.unwrap(),
+            store.is_legend(account).await.unwrap(),
         )
         .unwrap();
     let write = |plan: &InventoryPlan| InventoryWrite {

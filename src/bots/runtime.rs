@@ -483,6 +483,7 @@ async fn enter_admitted(
     let sender = packets.clone();
     let (lost, _) = watch::channel(None);
     let presentation = app.store.presentation(character.account).await?;
+    let legendary = app.store.is_legend(character.account).await?;
     let own_name = character.name.clone();
     let bind = server::lifecycle::binding(app, character.account)?;
     let id = app
@@ -511,6 +512,7 @@ async fn enter_admitted(
                 Some(Output { packets, lost }),
                 position,
                 presentation,
+                legendary,
                 admission,
                 crate::world::Controller::Autonomous,
             )?;
