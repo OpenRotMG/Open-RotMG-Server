@@ -90,3 +90,29 @@ fn oxygen_pockets_do_not_stack_and_empty_air_attributes_lethal_damage() {
     assert!(p.death_pending);
     assert_eq!(p.killer, "suffocation");
 }
+
+#[test]
+fn ocean_children_are_the_live_owned_children_of_that_kind() {
+    let (mut w, player) = super::movement_tests::fixture(0x2e, false);
+    let pos = w.players[&player].pos;
+    let boss = w.spawn_entity(trench::THESSAL, pos, vec![]).unwrap();
+    let other = w.spawn_entity(trench::THESSAL, pos, vec![]).unwrap();
+    let mut owned = Vec::new();
+    for (parent, kind) in [
+        (boss, 0x1707),
+        (other, 0x1707),
+        (boss, 0x1702),
+        (boss, 0x1707),
+    ] {
+        let id = w.spawn_entity(kind, pos, vec![]).unwrap();
+        let e = w.entities.get_mut(&id).unwrap();
+        e.parent.set(Some(parent), id, &mut w.timed_ids);
+        if (parent, kind) == (boss, 0x1707) {
+            owned.push(id);
+        }
+    }
+    w.spawn_entity(0x1707, pos, vec![]).unwrap();
+    assert_eq!(w.ocean_children(boss, 0x1707), owned);
+    w.remove_entity(owned[0]);
+    assert_eq!(w.ocean_children(boss, 0x1707), owned[1..]);
+}

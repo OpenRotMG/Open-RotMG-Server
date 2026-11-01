@@ -69,8 +69,8 @@ pub(super) fn appeal(
     } else {
         None
     };
-    // Realm events are the quest gods; heroes such as Ent Ancients are quests but not events.
-    let event = c.objects[&kind].god;
+    // Live: 93 of 97 level-20 quest follows were Red Demon, a god-tagged hero; only Oryx's events draw crowds.
+    let event = c.objects[&kind].encounter;
     // In a 2012 realm of 70 only 5-8 players did midland quests; most level 20s farmed the Godlands.
     let score = 40.
         + (value * 2.).min(40.)
@@ -83,6 +83,22 @@ pub(super) fn appeal(
         crowd,
         habit,
     }
+}
+
+#[cfg(test)]
+#[test]
+fn red_demon_is_a_hero_not_an_event() {
+    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let mut p = super::ARCHETYPES[1];
+    p.knows_blue = false;
+    p.role = persona::Role::Grinder;
+    let score = |kind| appeal(&p, &c, kind, 0, plan::now()).score;
+    assert_eq!(
+        score(0x668),
+        score(0x678),
+        "Red Demon scores like Oasis Giant"
+    );
+    assert_eq!(score(0xd59), score(0x678) + 20., "Cube God is an event");
 }
 
 #[cfg(test)]

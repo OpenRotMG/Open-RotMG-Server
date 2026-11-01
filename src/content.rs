@@ -180,6 +180,8 @@ pub struct Object {
     pub cooldown_ms: u64,
     pub enemy: bool,
     pub god: bool,
+    /// Oryx's announced Realm events, as opposed to god-tagged setpiece heroes like Red Demon.
+    pub encounter: bool,
     pub cube: bool,
     pub oryx: bool,
     pub stasis_immune: bool,
@@ -479,6 +481,7 @@ impl Content {
                     .try_into()?,
                 enemy: child(n, "Enemy").is_some(),
                 god: child(n, "God").is_some(),
+                encounter: child(n, "Encounter").is_some(),
                 cube: child(n, "Cube").is_some(),
                 oryx: child(n, "Oryx").is_some(),
                 stasis_immune: child(n, "StasisImmune").is_some(),
