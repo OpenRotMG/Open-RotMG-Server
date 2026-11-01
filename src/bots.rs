@@ -1146,8 +1146,10 @@ impl Brain {
             }
             plan::Owner::Bank => {
                 let started = self.plan.owner() == Some(owner);
+                // Live: 59 of 70 banking trips from the Realm came back with the same full bag; the Vault was full.
                 let due = started
                     || !self.mind.market.reserves_stock()
+                        && !self.mind.market.vault_full()
                         && self.agreement.is_none()
                         && progression::stash(v, content)?;
                 match v.map.name.as_str() {
