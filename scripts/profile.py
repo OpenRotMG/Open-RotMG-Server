@@ -141,6 +141,8 @@ def run(service, root):
     fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     retire(root, 'session-*', 1)
     retire(root, 'incident-*', 8)
+    # A failed session is retained, so checking only at rotation made one over-budget start block every later one.
+    enforce_storage_limit(root)
     pid = int(subprocess.check_output(['systemctl', 'show', service, '-p', 'MainPID', '--value'], text=True))
     if pid <= 0:
         raise RuntimeError('Profiling requires a running service process')
