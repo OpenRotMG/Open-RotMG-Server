@@ -617,16 +617,16 @@ fn camp_members_are_every_live_entity_of_their_camp() {
         .family_layout(Pos { x: 16.5, y: 8.5 }, family, &[])
         .unwrap();
     world.place_camp(family, positions).unwrap();
-    let scanned = |w: &World| -> Vec<i32> {
+    let scanned = |w: &World| -> BTreeSet<i32> {
         w.entities
             .values()
             .filter(|e| e.camp == Some(0))
             .map(|e| e.id)
             .collect()
     };
-    let slotted = |w: &World| -> Vec<i32> { w.camp_members(0).map(|e| e.id).collect() };
+    let slotted = |w: &World| -> BTreeSet<i32> { w.camp_members(0).map(|e| e.id).collect() };
     assert!(scanned(&world).len() > 1);
     assert_eq!(slotted(&world), scanned(&world));
-    world.remove_entity(slotted(&world)[1]);
+    world.remove_entity(*slotted(&world).iter().nth(1).unwrap());
     assert_eq!(slotted(&world), scanned(&world));
 }
