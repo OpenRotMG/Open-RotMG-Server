@@ -26,6 +26,7 @@ mod events;
 mod intentions;
 
 mod bands;
+pub(crate) use bands::REMEMBERED as REMEMBERED_GODLANDS;
 mod persona;
 mod plan;
 mod progression;

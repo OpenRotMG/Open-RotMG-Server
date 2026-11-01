@@ -70,7 +70,7 @@ async fn provider(
 }
 #[tokio::test]
 async fn native_forgot_password_is_non_enumerating_and_received_link_resets_without_discord() {
-    let (dir, mut app) = super::super::test_app();
+    let (_, mut app) = super::super::test_app();
     let owner = app
         .store
         .register(
@@ -161,12 +161,11 @@ async fn native_forgot_password_is_non_enumerating_and_received_link_resets_with
     .unwrap();
     assert_eq!(sent.lock().unwrap().len(), 1);
     task.abort();
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]
 async fn authenticated_native_resend_and_explicit_browser_confirmation_share_durable_state() {
-    let (dir, mut app) = super::super::test_app();
+    let (_, mut app) = super::super::test_app();
     let account_id = app
         .store
         .register(
@@ -256,7 +255,6 @@ async fn authenticated_native_resend_and_explicit_browser_confirmation_share_dur
     assert_eq!(sent.lock().unwrap().len(), 1);
     task.abort();
     drop(app);
-    std::fs::remove_dir_all(dir).unwrap();
 }
 #[tokio::test]
 async fn reset_delivery_failure_and_unknown_account_have_the_same_ack_and_never_release_quota() {
@@ -306,7 +304,6 @@ async fn reset_delivery_failure_and_unknown_account_have_the_same_ack_and_never_
     );
     assert!(!app.store.email_verified(1).await.unwrap());
     task.abort();
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]
@@ -318,7 +315,7 @@ async fn delivery_failures_never_report_success_or_release_the_reserved_budget()
         ),
         (StatusCode::OK, serde_json::json!({})),
     ] {
-        let (dir, mut app) = super::super::test_app();
+        let (_, mut app) = super::super::test_app();
         app.store
             .register(
                 "failed-owner".into(),
@@ -350,6 +347,5 @@ async fn delivery_failures_never_report_success_or_release_the_reserved_budget()
         );
         task.abort();
         drop(app);
-        std::fs::remove_dir_all(dir).unwrap();
     }
 }

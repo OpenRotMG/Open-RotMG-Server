@@ -1265,6 +1265,7 @@ mod tests {
                 | "classic-world-13-reconstruction" => [0, 0, 2, 0],
                 "classic-world-06-reconstruction"
                 | "classic-world-07-reconstruction"
+                | "classic-world-08-reconstruction"
                 | "classic-world-09-reconstruction"
                 | "classic-world-12-reconstruction" => [0; 4],
                 "realm-fsod-1" | "realm-fsod-2" | "realm-fsod-3" => [0; 4],
@@ -1325,6 +1326,7 @@ mod tests {
                     | "classic-world-06-reconstruction"
                     | "classic-world-10-reconstruction" => 5,
                     "classic-world-07-reconstruction" => 10,
+                    "classic-world-08-reconstruction" => 6,
                     "classic-world-09-reconstruction" => 3,
                     "classic-world-11-reconstruction" => 9,
                     "classic-world-12-reconstruction" => 8,
@@ -1360,6 +1362,7 @@ mod tests {
                     "classic-world-05-reconstruction" | "classic-world-13-reconstruction" => 22,
                     "classic-world-06-reconstruction" => 14,
                     "classic-world-07-reconstruction" => 21,
+                    "classic-world-08-reconstruction" => 11,
                     "classic-world-10-reconstruction" => 17,
                     "classic-world-11-reconstruction" => 25,
                     "classic-world-12-reconstruction" => 8,
@@ -1427,6 +1430,7 @@ mod tests {
                 21,
                 10..=10,
             ),
+            ("classic-world-08-reconstruction", 2000, 581, 17, 11, 6..=6),
             ("classic-world-09-reconstruction", 2100, 426, 14, 16, 4..=6),
             ("classic-world-10-reconstruction", 2000, 460, 16, 17, 5..=6),
             ("classic-world-11-reconstruction", 2100, 577, 20, 25, 9..=9),

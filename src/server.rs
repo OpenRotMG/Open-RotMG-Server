@@ -3352,6 +3352,8 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
             persistence_tick(&deaths).await?;
         }
     });
+    // Deploy rehearsals send SIGTERM as soon as /health answers.
+    let stop_requested = shutdown_signal()?;
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
         format!("cannot listen on {bind}; another server may already use this port. Stop it and rerun ./run.sh")
     })?;
@@ -3375,7 +3377,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
     )
     .with_graceful_shutdown(async move {
         let result: Result<()> = async {
-            shutdown_signal().await?;
+            stop_requested.await?;
             tracing::info!("saving active characters before shutdown");
             lifecycle::drain::prepare(&shutdown);
             shutdown.shutdown.send_replace(true);
@@ -3424,15 +3426,21 @@ async fn failed_shutdown(a: &App, error: anyhow::Error) -> Result<()> {
     a.world.supervisor.failed().await;
     Err(error)
 }
-async fn shutdown_signal() -> Result<()> {
-    #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! {v=tokio::signal::ctrl_c()=>v?,_=term.recv()=>{}};
-    }
-    #[cfg(not(unix))]
-    tokio::signal::ctrl_c().await?;
-    Ok(())
+#[cfg(unix)]
+fn shutdown_signal() -> Result<impl std::future::Future<Output = Result<()>>> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (mut term, mut interrupt) = (
+        signal(SignalKind::terminate())?,
+        signal(SignalKind::interrupt())?,
+    );
+    Ok(async move {
+        tokio::select! {_=term.recv()=>{},_=interrupt.recv()=>{}};
+        Ok(())
+    })
+}
+#[cfg(not(unix))]
+fn shutdown_signal() -> Result<impl std::future::Future<Output = Result<()>>> {
+    Ok(async { Ok(tokio::signal::ctrl_c().await?) })
 }
 
 #[cfg(test)]
