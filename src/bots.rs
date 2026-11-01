@@ -1402,16 +1402,6 @@ impl Brain {
             choices.push((97., Goal::Survey(x, y), area));
         }
         let speed = self.mind.intentions.as_ref().is_some_and(|i| i.speed());
-        if v.map.name == "Realm" && health >= (self.profile.recovery + 0.1).max(0.75) {
-            let snakes = self
-                .crowd
-                .bands
-                .snake_source
-                .filter(|p| speed && self.crowd.bands.survivable(v, *p));
-            if let Some(ground) = snakes.or_else(|| self.crowd.bands.venture(v)) {
-                choices.push((60. + self.profile.resources, Goal::Venture, ground));
-            }
-        }
         // Level 20s weigh whether a Realm quest is worth it; lower levels keep following their leveling quests.
         let veteran_realm = v.map.name == "Realm" && v.character.level == 20;
         let realm_quest = if let Some(quest) = enemies.iter().find(|e| v.quest == Some(e.id))
@@ -1438,6 +1428,22 @@ impl Brain {
         } else {
             None
         };
+        // A quest worth following is where this player goes; otherwise it heads for its own band, a level 20's Godlands.
+        if v.map.name == "Realm"
+            && realm_quest.is_none()
+            && health >= (self.profile.recovery + 0.1).max(0.75)
+        {
+            let snakes = self
+                .crowd
+                .bands
+                .snake_source
+                .filter(|p| speed && self.crowd.bands.survivable(v, *p));
+            if let Some(ground) = snakes.or_else(|| self.crowd.bands.venture(v)) {
+                choices.push((60. + self.profile.resources, Goal::Venture, ground));
+            }
+        }
+        // Live: level 20s heading for the Godlands or their arrow stopped for every enemy in range until the trip timed out.
+        let heading = realm_quest.is_some() || choices.iter().any(|(_, g, _)| *g == Goal::Venture);
         // Grated rooms cannot stay cleared; geared players push past snakes: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
         let dungeon =
             !matches!(v.map.name.as_str(), "Realm" | "Nexus" | "Vault") && v.quest.is_some();
@@ -1457,13 +1463,13 @@ impl Brain {
                 continue;
             }
             let protected = !progression::vulnerable(enemy);
-            // Live: level 20s stopped for every Hobbit on the way to their arrow; they shoot it in passing instead.
-            let trash = veteran_realm
+            // Travellers shoot what is below their band in passing instead of stopping for it.
+            let passing = heading
                 && content.objects[&enemy.kind].terrain != 0
-                && bands::tier(content.objects[&enemy.kind].terrain) <= 1;
+                && bands::tier(content.objects[&enemy.kind].terrain) < self.crowd.bands.limit;
             let score = 45. - d * 2.
                 + if d < range
-                    && !trash
+                    && !passing
                     && (!dungeon
                         || !rushing && content.objects[&enemy.kind].xp_multiplier > 0.
                         || v.quest == Some(enemy.id))
