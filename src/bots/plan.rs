@@ -30,7 +30,8 @@ impl Owner {
         [Self::Trade, Self::Event, Self::Bank, Self::Call, Self::Gift];
     fn budget_ms(self) -> u64 {
         match self {
-            Self::Trade => 10 * 60_000,
+            // Owner, 2012: shopping or selling a valuable drop could take 20 minutes in the Nexus.
+            Self::Trade => 25 * 60_000,
             Self::Bank => 3 * 60_000,
             Self::Event => 15 * 60_000,
             Self::Call => 30_000,
