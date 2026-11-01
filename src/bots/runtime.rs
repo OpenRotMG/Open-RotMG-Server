@@ -160,7 +160,7 @@ fn held_movement(grid: &Grid, from: Pos, goal: Pos, distance: f32) -> Option<Pos
             })
         })
         .filter(|point| {
-            from.distance(*point) > 0.1
+            from.distance(*point) > 0.
                 && point.distance(goal) < from.distance(goal)
                 && grid.segment(from, *point)
         })
