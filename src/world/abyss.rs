@@ -296,8 +296,9 @@ impl Runtime {
 
 impl World {
     pub(super) fn abyss_pending_count(&self) -> usize {
-        self.actors()
-            .map(|e| match &e.abyss {
+        self.abyss_boss_ids
+            .iter()
+            .map(|id| match &self.entities[id].abyss {
                 Some(Runtime::Boss(b)) => b.landings.len(),
                 _ => 0,
             })
