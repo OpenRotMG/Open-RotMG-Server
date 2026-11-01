@@ -110,6 +110,8 @@ impl World {
             "Nexus"
                 | "Realm"
                 | "Pirate Cave"
+                // Period dungeon groups teleport to clearers: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
+                | "Spider Den"
                 | "Snake Pit"
                 | "Sprite World"
                 | "Undead Lair"
