@@ -15,9 +15,6 @@ impl Crowd {
             bands: bands::Bands::default(),
         }
     }
-    pub fn observe(&mut self, v: &PlayerView, content: &Content) {
-        self.bands.observe(v, content);
-    }
     /// Other players this player can locate: the whole minimap for those who read it, otherwise the screen.
     fn markers<'a>(&self, v: &'a PlayerView) -> impl Iterator<Item = &'a PlayerMarker> {
         let minimap = self.knows_minimap;

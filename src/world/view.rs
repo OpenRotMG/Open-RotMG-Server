@@ -113,6 +113,8 @@ pub struct MapInfo {
     pub width: i32,
     pub height: i32,
     pub allow_teleport: bool,
+    /// Which Realm map this is; 2012 players recognized each one.
+    pub layout: Option<String>,
 }
 #[derive(Serialize)]
 pub struct OwnCharacter {
@@ -371,6 +373,7 @@ impl World {
                 width: w.map.width,
                 height: w.map.height,
                 allow_teleport: w.allow_teleport(),
+                layout: w.realm_layout.clone(),
             },
             character: OwnCharacter {
                 conditions: p.conditions(w.now) | if p.paused { 1 << 20 } else { 0 },
