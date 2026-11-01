@@ -1610,7 +1610,21 @@ impl Directory {
                 .get(&id)
                 .ok_or_else(|| protocol("portal missing"))?;
             ensure!(e.published, protocol("portal not published"));
-            ensure!(p.pos.distance(e.pos) <= 2., protocol("portal out of reach"));
+            // The client sends only a portal ID, so a reach refusal is not a malformed packet: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/net/_1f.as#L509-L513
+            let distance = p.pos.distance(e.pos);
+            ensure!(distance <= 2., {
+                tracing::info!(
+                    player,
+                    portal = id,
+                    player_x = p.pos.x,
+                    player_y = p.pos.y,
+                    portal_x = e.pos.x,
+                    portal_y = e.pos.y,
+                    distance,
+                    "portal transfer refused: out of reach"
+                );
+                controller("portal out of reach")
+            });
             e.kind
         } else {
             0x712
@@ -4244,6 +4258,10 @@ impl World {
     pub(crate) fn regress_native_ingress_for_test(&mut self, id: i32) -> Pos {
         self.players.get_mut(&id).unwrap().last_move_at = u64::MAX;
         self.accept_native_move_for_test(id)
+    }
+    #[cfg(test)]
+    pub(crate) fn set_admission_open_for_test(&mut self, open: bool) {
+        self.admission_open = open;
     }
     #[cfg(test)]
     pub(crate) fn accept_native_move_for_test(&mut self, id: i32) -> Pos {
