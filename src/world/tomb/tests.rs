@@ -109,6 +109,50 @@ fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reent
 }
 
 #[test]
+fn equipped_orb_stasises_indestructible_edge_turrets_but_not_center_turrets() {
+    for kind in 0xd31..=0xd36 {
+        let (mut world, player) = fixture();
+        let mut character = world.leave(player).unwrap();
+        character.class = 0x323;
+        character.base = [670, 385, 60, 25, 60, 50, 40, 75];
+        character.hp = 670;
+        character.mp = 440;
+        character.items[..4].copy_from_slice(&[-1, 0xb2d, 0xb05, 0xac8]);
+        let player = world.enter(character, None).unwrap();
+        let target = world.actors().find(|e| e.kind == kind).unwrap().id;
+        let pos = world.entities[&target].pos;
+        world.players.get_mut(&player).unwrap().pos = Pos {
+            x: pos.x,
+            y: pos.y + 1.,
+        };
+        assert!(d::immortal(kind));
+        assert_eq!(world.entities[&target].hp, 0);
+        assert!(
+            world
+                .use_item(
+                    player,
+                    Slot {
+                        object: player,
+                        slot: 1,
+                        kind: 0xb2d
+                    },
+                    pos
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(world.players[&player].character.mp, 355);
+        let flags = world.entities[&target].conditions(world.now);
+        assert_eq!(
+            flags & condition::bit(condition::STASIS) != 0,
+            kind <= 0xd33,
+            "turret {kind:#x}"
+        );
+        assert_eq!(world.entities[&target].hp, 0);
+    }
+}
+
+#[test]
 fn mummy_proximity_fires_before_suicide_and_keeps_both_scarab_waves() {
     let (mut world, player) = fixture();
     let mummy = world.actors().find(|e| e.kind == 0xd1a).unwrap().id;
