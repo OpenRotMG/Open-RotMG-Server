@@ -6060,6 +6060,8 @@ impl World {
                         | 0xd90
                         | crate::dungeon::abyss::MALPHAS
                         | crate::dungeon::snake::BOSS
+                        // Spider Den is included in period Realm-portal completion guidance: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
+                        | crate::dungeon::spider::BOSS
                         | crate::dungeon::jungle::BOSS
                         | crate::dungeon::beach::BOSS
                         | crate::dungeon::davy::BOSS
