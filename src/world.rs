@@ -783,6 +783,8 @@ pub struct World {
     pentaract_ids: BTreeSet<i32>,
     // Terminal deadlines run in every world, including Realms without any Flamers.
     abyss_flamer_ids: BTreeSet<i32>,
+    // Only Malphas carries Abyss landings; scanning every Realm actor for them cost 7-8 ms per spawn check.
+    abyss_boss_ids: BTreeSet<i32>,
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
     npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
@@ -2907,6 +2909,11 @@ impl World {
                 .copied()
                 .filter(|id| entities[id].kind == 0x90b)
                 .collect(),
+            abyss_boss_ids: actor_ids
+                .iter()
+                .copied()
+                .filter(|id| entities[id].kind == crate::dungeon::abyss::MALPHAS)
+                .collect(),
             pentaract_ids: entities
                 .values()
                 .filter(|e| e.kind == 0xd5f)
@@ -3239,6 +3246,9 @@ impl World {
         if kind == 0x90b {
             self.abyss_flamer_ids.insert(id);
         }
+        if kind == crate::dungeon::abyss::MALPHAS {
+            self.abyss_boss_ids.insert(id);
+        }
         if Self::npc_kind(&self.content, kind) {
             self.npc_global_ids.insert(id);
         }
@@ -3287,6 +3297,7 @@ impl World {
         self.gun_ids.remove(&id);
         self.pentaract_ids.remove(&id);
         self.abyss_flamer_ids.remove(&id);
+        self.abyss_boss_ids.remove(&id);
         self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
         for entry in 0..population::REPRODUCTION.len() {
