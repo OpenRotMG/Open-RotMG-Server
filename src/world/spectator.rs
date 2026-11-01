@@ -325,7 +325,7 @@ impl Projection {
             } else {
                 field.i32(r.i32()?);
             }
-            let public = matches!(key,0..=7 | 20..=22 | 26..=33 | 46..=53 | 56..=58 | 62..=65);
+            let public = matches!(key,0..=7 | 20..=22 | 26..=33 | 46..=53 | 56..=59 | 62..=65);
             let player = self.player_types.get(&actor).copied();
             let appearance = player == Some(false) && matches!(key, 34 | 36..=37 | 40..=45 | 55);
             let inventory =

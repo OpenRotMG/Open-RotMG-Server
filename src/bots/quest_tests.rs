@@ -179,6 +179,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
             height: 128,
             allow_teleport: true,
             layout: None,
+            godlands: Arc::default(),
         },
         character: OwnCharacter {
             conditions: 0,
@@ -494,7 +495,10 @@ fn band_edge_journeys_do_not_preempt_each_other() {
             .kind;
         v.objects[0].position = Pos { x: 2.5, y: 10.5 };
         let mut brain = Brain::new(ARCHETYPES[0], &v);
-        brain.crowd.bands.observe(&v, &c, &mut brain.mind.godlands);
+        brain
+            .crowd
+            .bands
+            .observe(&v, &c, &mut brain.mind.godlands, false);
         v.objects.clear();
         brain.heading = 0.;
         brain.hunting = revisit;
@@ -801,7 +805,23 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
         condition_mask: Some(0),
     });
     let godlands = Pos { x: 100.5, y: 100.5 };
-    for (remembered, goal) in [(true, Goal::Venture), (false, Goal::Fight(3))] {
+    v.map.godlands = Arc::new(vec![godlands]);
+    // Live: 76% of Realm entries remembered nothing; a veteran knows a map it has played before.
+    let geared = v.character.items[0];
+    // Live: a level 20 with a tier-3 weapon never set out, though its own band lies on the way to the Godlands.
+    let weak = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == c.objects[&(geared as u16)].slot_type && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    for (remembered, veteran, weapon, goal) in [
+        (true, false, geared, Goal::Venture),
+        (false, true, geared, Goal::Venture),
+        (false, true, weak, Goal::Venture),
+        (false, false, geared, Goal::Fight(3)),
+    ] {
+        v.character.items[0] = weapon;
         let mut brain = Brain::new(ARCHETYPES[0], &v);
         if remembered {
             brain.mind.godlands.insert(
@@ -809,12 +829,40 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
                 BTreeSet::from([tile(godlands)]),
             );
         }
-        brain.crowd.bands.observe(&v, &c, &mut brain.mind.godlands);
+        brain
+            .crowd
+            .bands
+            .observe(&v, &c, &mut brain.mind.godlands, veteran);
         let d = brain.decide(&v, &c).unwrap();
-        assert_eq!(d.goal, goal);
-        if remembered {
+        assert_eq!(d.goal, goal, "remembered {remembered} veteran {veteran}");
+        if goal == Goal::Venture {
             let step = d.movement.expect("heading for the Godlands");
             assert!(step.distance(godlands) < v.position.distance(godlands));
         }
+    }
+}
+
+#[test]
+fn full_bag_does_not_leave_the_realm_to_bank_into_a_full_vault() {
+    // Live: 59 of 70 level-20 banking trips came back with the same full bag, every five minutes.
+    let falchion = 0xa6e;
+    for full in [false, true] {
+        let (c, mut v) = fixture();
+        v.quest = None;
+        v.objects.clear();
+        v.character.items[4..].copy_from_slice(&[falchion; 8]);
+        let (_, mut vault) = fixture();
+        vault.map.name = "Vault".into();
+        vault.objects[0].kind = 0x504;
+        vault.objects[0].contents = vec![if full { falchion } else { -1 }; 8];
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        brain.mind.market.observe(&vault);
+        let d = brain.decide(&v, &c).unwrap();
+        assert_eq!(
+            matches!(d.journey, Some(Journey::Nexus)),
+            !full,
+            "full Vault {full}: {:?}",
+            d.goal
+        );
     }
 }

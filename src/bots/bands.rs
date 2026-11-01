@@ -3,7 +3,7 @@ use super::*;
 
 const REGION: f32 = 8.;
 /// Godlands sightings kept per Realm layout, each at least `SPACING` tiles from the others.
-pub(super) const REMEMBERED: usize = 16;
+pub(crate) const REMEMBERED: usize = 16;
 const SPACING: f32 = 24.;
 
 #[derive(Default)]
@@ -43,13 +43,32 @@ impl Bands {
         v: &PlayerView,
         c: &Content,
         godlands: &mut BTreeMap<String, BTreeSet<TilePoint>>,
+        veteran: bool,
     ) -> bool {
+        let mut learned = false;
         if self.world != Some(v.session.world) {
             *self = Self {
                 world: Some(v.session.world),
                 ..Self::default()
             };
             if let Some(layout) = &v.map.layout {
+                // Live: 76% of Realm entries remembered no Godlands, though veterans had played these maps for years.
+                if veteran
+                    && godlands.get(layout).is_none_or(BTreeSet::is_empty)
+                    && !v.map.godlands.is_empty()
+                {
+                    godlands.insert(
+                        layout.clone(),
+                        v.map.godlands.iter().map(|p| tile(*p)).collect(),
+                    );
+                    tracing::info!(
+                        account = v.session.account,
+                        layout,
+                        known = v.map.godlands.len(),
+                        "autonomous realm godlands known from earlier play"
+                    );
+                    learned = true;
+                }
                 let remembered = godlands.get(layout).map_or(0, BTreeSet::len);
                 for t in godlands.get(layout).into_iter().flatten() {
                     self.regions.insert(region(center(*t)), (4, center(*t)));
@@ -66,7 +85,6 @@ impl Bands {
         if v.map.name != "Realm" {
             return false;
         }
-        let mut learned = false;
         for enemy in v
             .objects
             .iter()
@@ -147,6 +165,17 @@ impl Bands {
                 a.cmp(b)
                     .then_with(|| q.distance(v.position).total_cmp(&p.distance(v.position)))
             })
+            .or_else(|| {
+                // Live: level 20s below Godlands gear remembered only Godlands and fought beach mobs; their band lies on the way up.
+                self.regions
+                    .values()
+                    .filter(|(tier, p)| {
+                        *tier > goal && here < Some(goal) && p.distance(v.position) > 8.
+                    })
+                    .min_by(|(_, p), (_, q)| {
+                        p.distance(v.position).total_cmp(&q.distance(v.position))
+                    })
+            })
             .map(|(_, p)| *p)
     }
 }
@@ -174,14 +203,14 @@ mod tests {
         v.objects.push(enemy);
         let mut bands = Bands::default();
         v.character.level = 5;
-        bands.observe(&v, &c, &mut BTreeMap::new());
+        bands.observe(&v, &c, &mut BTreeMap::new(), false);
         assert!(!bands.survivable(&v, far));
         assert!(
             bands.survivable(&v, v.position),
             "unobserved ground is not refused"
         );
         v.character.level = 15;
-        bands.observe(&v, &c, &mut BTreeMap::new());
+        bands.observe(&v, &c, &mut BTreeMap::new(), false);
         assert!(bands.survivable(&v, far));
         assert_eq!(bands.venture(&v).map(|p| (p.x, p.y)), Some((far.x, far.y)));
     }

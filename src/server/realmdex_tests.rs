@@ -144,5 +144,4 @@ async fn realmdex_counts_only_live_humans_across_worlds_and_reports_failure() {
     server.abort();
     drop(outputs);
     drop(app);
-    std::fs::remove_dir_all(dir).unwrap();
 }

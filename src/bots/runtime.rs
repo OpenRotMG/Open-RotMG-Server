@@ -160,7 +160,7 @@ fn held_movement(grid: &Grid, from: Pos, goal: Pos, distance: f32) -> Option<Pos
             })
         })
         .filter(|point| {
-            from.distance(*point) > 0.1
+            from.distance(*point) > 0.
                 && point.distance(goal) < from.distance(goal)
                 && grid.segment(from, *point)
         })
@@ -483,6 +483,7 @@ async fn enter_admitted(
     let sender = packets.clone();
     let (lost, _) = watch::channel(None);
     let presentation = app.store.presentation(character.account).await?;
+    let legendary = app.store.is_legend(character.account).await?;
     let own_name = character.name.clone();
     let bind = server::lifecycle::binding(app, character.account)?;
     let id = app
@@ -511,6 +512,7 @@ async fn enter_admitted(
                 Some(Output { packets, lost }),
                 position,
                 presentation,
+                legendary,
                 admission,
                 crate::world::Controller::Autonomous,
             )?;
@@ -1050,7 +1052,7 @@ pub(super) async fn launch(
                         } else { None };
                         if let Some(reason) = reason { dialogue::end_agreement(&app, &mut brain, reason).await; }
                     }
-                    if brain.crowd.bands.observe(&view, &app.content, &mut brain.mind.godlands) { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
+                    if brain.crowd.bands.observe(&view, &app.content, &mut brain.mind.godlands, brain.profile.knows_minimap) { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
                     while let Some((packet, received_view)) = deferred_market.take().or_else(||output.try_recv().ok().map(|p|(p,view.clone()))) {
                         if packet.id == crate::wire::GOTO {
                             app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;

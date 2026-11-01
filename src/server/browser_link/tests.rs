@@ -170,7 +170,7 @@ async fn provider(discord: &str) -> (String, tokio::task::JoinHandle<()>) {
 
 #[tokio::test]
 async fn forwarded_link_cannot_give_the_issuers_discord_recovery_of_a_victims_game() {
-    let (dir, mut a) = super::super::account_actions::tests::fixture();
+    let (_, mut a) = super::super::account_actions::tests::fixture();
     let (origin, provider) = provider("12345678901234567").await;
     configure(&mut a, &origin);
     a.store
@@ -199,12 +199,11 @@ async fn forwarded_link_cannot_give_the_issuers_discord_recovery_of_a_victims_ga
             .is_err()
     );
     provider.abort();
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]
 async fn logout_reset_cookie_state_and_challenge_rotation_invalidate_approval() {
-    let (dir, mut a) = super::super::account_actions::tests::fixture();
+    let (_, mut a) = super::super::account_actions::tests::fixture();
     let (origin, provider) = provider("12345678901234567").await;
     configure(&mut a, &origin);
     let account = a
@@ -243,5 +242,4 @@ async fn logout_reset_cookie_state_and_challenge_rotation_invalidate_approval() 
             .is_err()
     );
     provider.abort();
-    std::fs::remove_dir_all(dir).unwrap();
 }
