@@ -200,7 +200,6 @@ async fn portal_out_of_reach_refuses_and_closed_realm_preserves_session_then_all
     drop(socket);
     server.abort();
     drop(app);
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]
@@ -243,5 +242,4 @@ async fn portal_missing_remains_a_fatal_protocol_error() {
     drop(socket);
     server.abort();
     drop(app);
-    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -193,7 +193,7 @@ impl Socket {
 #[tokio::test]
 async fn protocol_ready_switch_reconnect_and_control_close_cancel_bootstrap() {
     tokio::time::timeout(Duration::from_secs(20), async {
-        let (dir, mut app) = crate::server::test_app();
+        let (_, mut app) = crate::server::test_app();
         app.cctv = Cctv::test_catalogue();
         app.behind_proxy = true;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -252,13 +252,12 @@ async fn protocol_ready_switch_reconnect_and_control_close_cancel_bootstrap() {
         app.shutdown.send(true).unwrap();
         server.await.unwrap();
         drop(app);
-        std::fs::remove_dir_all(dir).unwrap();
-    }).await.unwrap();
+        }).await.unwrap();
 }
 
 #[tokio::test]
 async fn attachment_notifications_coalesce_during_a_fast_switch() {
-    let (dir, mut app) = crate::server::test_app();
+    let (_, mut app) = crate::server::test_app();
     let (cctv, owner, mut replies) = fixture();
     app.cctv = cctv;
     let mut first = owner.view.acquire(owner.view.ip).unwrap();
@@ -288,7 +287,6 @@ async fn attachment_notifications_coalesce_during_a_fast_switch() {
         Some(json!({"type":"attached","bot":"B","generation":1,"player":2,"character":202}))
     );
     drop((first, replacement, owner, app));
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
