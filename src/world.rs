@@ -99,6 +99,7 @@ mod jungle;
 mod cooperative;
 
 mod mechanics;
+use mechanics::SummonBudget;
 
 mod native_hits;
 
@@ -824,7 +825,12 @@ pub struct World {
     population_regions: [population_density::Region; 13],
     population_counts: [usize; 13],
     population_next: u64,
-    god_reproduction: BTreeMap<i32, u64>,
+    reproduction: BTreeMap<(i32, usize), u64>,
+    summon_waits: BTreeSet<i32>,
+    reproduction_at: [u64; 20],
+    reproduction_bucket: usize,
+    npc_paused_since: BTreeMap<i32, u64>,
+    djinn_attacking: BTreeSet<i32>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
     event_sites: Vec<realm_setpieces::EventSite>,
@@ -2932,7 +2938,12 @@ impl World {
             population_regions: std::array::from_fn(|_| population_density::Region::default()),
             population_counts: [0; 13],
             population_next: 10000,
-            god_reproduction: BTreeMap::new(),
+            reproduction: BTreeMap::new(),
+            summon_waits: BTreeSet::new(),
+            reproduction_at: [0; 20],
+            reproduction_bucket: 0,
+            npc_paused_since: BTreeMap::new(),
+            djinn_attacking: BTreeSet::new(),
             setpieces: vec![],
             ghost_towers: vec![],
             event_sites: vec![],
@@ -3250,7 +3261,12 @@ impl World {
         self.abyss_flamer_ids.remove(&id);
         self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
-        self.god_reproduction.remove(&id);
+        for entry in 0..population::REPRODUCTION.len() {
+            self.reproduction.remove(&(id, entry));
+        }
+        self.summon_waits.remove(&id);
+        self.djinn_attacking.remove(&id);
+        self.npc_paused_since.remove(&id);
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
@@ -4224,8 +4240,12 @@ impl World {
     }
     #[cfg(test)]
     pub(crate) fn regress_native_ingress_for_test(&mut self, id: i32) -> Pos {
+        self.players.get_mut(&id).unwrap().last_move_at = u64::MAX;
+        self.accept_native_move_for_test(id)
+    }
+    #[cfg(test)]
+    pub(crate) fn accept_native_move_for_test(&mut self, id: i32) -> Pos {
         let p = self.players.get_mut(&id).unwrap();
-        p.last_move_at = u64::MAX;
         p.tick = p.tick.max(1);
         p.pos
     }
@@ -5448,16 +5468,19 @@ impl World {
         p.progress_started = false;
         p.progress_snapshot = None;
         p.level_assists_prepared.clear();
-        tracing::info!(
-            player = id,
-            level = p.character.level,
-            experience = p.character.exp,
-            fame = p.character.fame,
-            stars = p.presentation.stars(),
-            bonus_experience = p.character.xp_boost.bonus_exp,
-            xp_boost = p.character.xp_boost.active,
-            "progress committed"
-        );
+        // Bot commits were 40% of journal volume and pushed lag evidence out of retention.
+        if p.controller != Controller::Autonomous {
+            tracing::info!(
+                player = id,
+                level = p.character.level,
+                experience = p.character.exp,
+                fame = p.character.fame,
+                stars = p.presentation.stars(),
+                bonus_experience = p.character.xp_boost.bonus_exp,
+                xp_boost = p.character.xp_boost.active,
+                "progress committed"
+            );
+        }
         // Period wording, published only after durable progress: https://media.gdcvault.com/gdceurope2012/Presentations/Social%20%26%20Online%20Games%20Summit/Ethan_Levy_Social%26Online_GameDesignIs.pdf#page=54
         if let Some(text) = announcement {
             let recipients = self.broadcast_text("", &text);
@@ -6014,33 +6037,7 @@ impl World {
             self.loot_bags(defeated.pos, None, &[0xc25])?;
         }
         let private = crate::loot::private(defeated.kind);
-        // A flat 100-damage officer threshold exceeds the selected officers' entire HP.
-        let threshold = if defeated.kind == crate::dungeon::trench::HERMIT {
-            // The comparator's 0.01 threshold tests integer damage, not an HP fraction: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs#L106
-            0
-        } else if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
-            100
-        } else if crate::loot::potion_damage(defeated.kind).is_some() {
-            0
-        } else if matches!(defeated.kind, 0xd56 | 0xd59) {
-            self.content.objects[&defeated.kind].hp / 20
-        } else if matches!(
-            defeated.kind,
-            0xd50 | 0xe37 | 0xd5a | 0xd60 | crate::dungeon::tomb::SPHINX | 0x1705
-        ) || matches!(
-            defeated.kind,
-            crate::dungeon::tomb::TREASURE | crate::dungeon::tomb::SARCOPHAGUS
-        ) {
-            self.content.objects[&defeated.kind].hp / 100
-        } else if defeated.kind == crate::dungeon::manor::BOSS {
-            100
-        } else if defeated.kind == crate::dungeon::manor::COFFIN {
-            800
-        } else if matches!(defeated.kind, 0x927 | crate::dungeon::davy::BOSS) {
-            100
-        } else {
-            (self.content.objects[&defeated.kind].hp / 10).max(1)
-        };
+        let threshold = crate::loot::damage_threshold(&self.content, defeated.kind);
         let mut eligible: Vec<_> = self
             .players
             .values()
@@ -6075,27 +6072,7 @@ impl World {
             return self.god_loot_bags(defeated.pos, loot);
         }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
-        // The older Tomb loot engine shares two rolls instead of guaranteeing Life to every raider.
-        let attempts = if crate::dungeon::tomb::BOSSES.contains(&defeated.kind) {
-            2
-        } else if private {
-            eligible.len()
-        } else if crate::loot::period_dungeon(defeated.kind)
-            || crate::loot::period_surface(defeated.kind)
-            || crate::encounter::tutorial::ROSTER.contains(&defeated.kind)
-            // realm-src Loots.cs Handle rolls public skeleton loot once per death, not per contributor.
-            || matches!(defeated.kind, 0x65a..=0x65d)
-        {
-            1
-        } else {
-            // Reconstructed leader pools need their own attempt counts: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db
-            let multiplier = match defeated.kind {
-                0x609 | 0x60d | 0x614 | 0x617 | 0x61a | 0x6c4 | 0x7f00 => 4,
-                0x62c => 3,
-                _ => 2,
-            };
-            (eligible.len() * multiplier).min(8)
-        };
+        let attempts = crate::loot::attempts(defeated.kind, eligible.len());
         for i in 0..attempts {
             let mut rewards = crate::loot::rewards(&self.content, defeated.kind, &mut self.rng);
             if defeated.kind == crate::dungeon::trench::THESSAL
@@ -6371,12 +6348,25 @@ impl World {
         }
         let delta = self.now.saturating_sub(self.last_npc_step);
         self.last_npc_step = self.now;
-        let audience: Vec<_> = self
+        // Player conditions are read once per tick, not once per NPC and player pair.
+        let seen: Vec<_> = self
             .players
             .values()
             .filter(|p| p.character.alive && !p.death_pending && !p.departing && !p.paused)
-            .map(|p| p.pos)
-            .chain(self.decoy_positions())
+            .map(|p| {
+                let conditions = p.conditions(self.now);
+                (
+                    p.pos,
+                    conditions & crate::condition::bit(crate::condition::INVISIBLE) != 0,
+                    conditions & crate::condition::bit(crate::condition::PARALYZED) != 0,
+                )
+            })
+            .collect();
+        let decoys: Vec<_> = self.decoy_positions().collect();
+        let audience: Vec<_> = seen
+            .iter()
+            .map(|(pos, ..)| *pos)
+            .chain(decoys.iter().copied())
             .collect();
         let ids = self.npc_candidates(&audience);
         'entities: for id in ids {
@@ -6408,31 +6398,21 @@ impl World {
                 self.suspend_npc(id, delta);
                 continue;
             }
-            let nearest = self
-                .players
-                .values()
-                .filter(|p| {
-                    p.character.alive
-                        && !p.death_pending
-                        && !p.departing
-                        && !p.paused
-                        && (matches!(kind, 0x6d8 | crate::dungeon::manor::MINE)
-                            || p.conditions(self.now)
-                                & crate::condition::bit(crate::condition::INVISIBLE)
-                                == 0)
+            let nearest = seen
+                .iter()
+                .filter(|(_, invisible, _)| {
+                    matches!(kind, 0x6d8 | crate::dungeon::manor::MINE) || !invisible
                 })
-                .map(|p| {
+                .map(|&(p, _, paralyzed)| {
                     (
                         kind == crate::dungeon::davy::BOSS
                             && entity.reaction_until > self.now
-                            && pos.distance(p.pos) < 12.
-                            && p.conditions(self.now)
-                                & crate::condition::bit(crate::condition::PARALYZED)
-                                != 0,
-                        p.pos,
+                            && pos.distance(p) < 12.
+                            && paralyzed,
+                        p,
                     )
                 })
-                .chain(self.decoy_positions().map(|p| (false, p)))
+                .chain(decoys.iter().map(|p| (false, *p)))
                 .min_by(|(ap, a), (bp, b)| {
                     bp.cmp(ap)
                         .then_with(|| pos.distance(*a).total_cmp(&pos.distance(*b)))
@@ -6487,13 +6467,9 @@ impl World {
                 } else {
                     radius.max(20.)
                 };
-            let nearby = self.players.values().any(|p| {
-                p.character.alive
-                    && !p.death_pending
-                    && !p.departing
-                    && !p.paused
-                    && pos.distance(p.pos) < simulation_radius
-            });
+            let nearby = seen
+                .iter()
+                .any(|(p, ..)| pos.distance(*p) < simulation_radius);
             let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind) || kind == 0x925)
                 && entity.activated.is_some();
             if !burst
@@ -6506,9 +6482,14 @@ impl World {
                 self.suspend_npc(id, delta);
                 continue;
             }
-            if let Err(error) = self.reproduce_god(id, delta) {
-                tracing::error!(entity = id, kind, %error, "ordinary god reproduction refused");
-                continue;
+            if kind == 0x91a {
+                // Kithio Djinn leaves Idle with a player within 8 tiles and returns once none is within 13.
+                let near = |r: f32| self.players.values().any(|p| p.pos.distance(pos) < r);
+                if near(8.) {
+                    self.djinn_attacking.insert(id);
+                } else if !near(13.) {
+                    self.djinn_attacking.remove(&id);
+                }
             }
             let activated = *self
                 .entities
@@ -6517,9 +6498,21 @@ impl World {
                 .activated
                 .get_or_insert(self.now);
             let elapsed = self.now - activated;
-            if let Err(error) = self.encounter_mechanics(id, target, elapsed) {
-                tracing::error!(entity=id, kind, %error, "encounter mechanic refused");
-                continue;
+            match self.encounter_mechanics(id, target, elapsed) {
+                Ok(()) => {
+                    if self.summon_waits.remove(&id) {
+                        tracing::info!(entity = id, kind, "encounter summon room restored");
+                    }
+                }
+                Err(error) if error.is::<SummonBudget>() => {
+                    if self.summon_waits.insert(id) {
+                        tracing::warn!(entity = id, kind, %error, "encounter waits for summon room");
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(entity=id, kind, %error, "encounter mechanic refused");
+                    continue;
+                }
             }
             let Some(current) = self.entities.get(&id) else {
                 continue;
@@ -7441,16 +7434,7 @@ impl World {
                 if b.friendly {
                     let targets: Vec<_> = self
                         .near_entities(old, b.pos)
-                        .filter(|e| {
-                            e.hp > 0
-                                && e.conditions(self.now)
-                                    & (crate::condition::bit(crate::condition::STASIS)
-                                        | crate::condition::bit(crate::condition::INVINCIBLE))
-                                    == 0
-                                && self.content.objects[&e.kind].destructible
-                                && !b.hit.contains(&e.id)
-                                && inside_box(e.pos, b.pos)
-                        })
+                        .filter(|e| self.hittable(b, e) && inside_box(e.pos, b.pos))
                         .map(|e| e.id)
                         .collect();
                     if let Some(target) = targets.iter().min_by(|a, b_id| {
@@ -7458,36 +7442,9 @@ impl World {
                             .pos
                             .distance(b.pos)
                             .total_cmp(&self.entities[b_id].pos.distance(b.pos))
-                    }) {
-                        if self.players.get(&b.owner).is_some_and(|p| p.paused) {
-                            b.hit.insert(*target);
-                            break;
-                        }
-                        if !b.hit_enemy && self.content.objects[&self.entities[target].kind].enemy {
-                            b.hit_enemy = true;
-                            if let Some(p) = self
-                                .players
-                                .get_mut(&b.owner)
-                                .filter(|p| p.character.alive && !p.death_started && !p.departing)
-                            {
-                                p.character.lifetime.projectile_hits = p
-                                    .character
-                                    .lifetime
-                                    .projectile_hits
-                                    .checked_add(1)
-                                    .expect("lifetime projectile hit overflow");
-                            }
-                        }
-                        self.damage_enemy(
-                            b.owner,
-                            *target,
-                            b.damage,
-                            b.spec.armor_piercing,
-                            &b.spec.effects,
-                            Some(b.id),
-                        )
-                        .expect("validated enemy damage");
-                        b.hit.insert(*target);
+                    }) && self.bullet_hit(b, *target)
+                    {
+                        break;
                     }
                 } else if !self.safe {
                     for id in &ids {
@@ -7542,36 +7499,45 @@ impl World {
                     continue;
                 }
                 let p = &self.players[&id];
-                let dynamic: Vec<_> = p
-                    .known
-                    .iter()
-                    .filter(|entity| {
-                        self.players.contains_key(entity)
-                            || self.companions.contains(entity)
-                            || self.entities.get(entity).is_some_and(|e| {
-                                e.hp > 0
-                                    || !e.items.is_empty()
-                                    || matches!(
-                                        self.content.objects[&e.kind].class.as_str(),
-                                        "Portal" | "Merchant"
-                                    )
-                            })
-                    })
-                    .copied()
-                    .collect();
-                let mut o = Writer::new();
-                o.i32(p.tick).i32(tick_ms).i16(dynamic.len() as i16);
-                for entity in dynamic {
-                    let status = self.stats(entity, id).expect("visible entity must exist");
-                    o.0.extend(
-                        self.players
-                            .get_mut(&id)
-                            .unwrap()
-                            .tick_stats
-                            .encode(entity, status),
-                    );
+                if p.controller != Controller::Autonomous
+                    || p.spectators
+                        .as_ref()
+                        .is_some_and(|s| s.receiver_count() > 0)
+                {
+                    let dynamic: Vec<_> = p
+                        .known
+                        .iter()
+                        .filter(|entity| {
+                            self.players.contains_key(entity)
+                                || self.companions.contains(entity)
+                                || self.entities.get(entity).is_some_and(|e| {
+                                    e.hp > 0
+                                        || !e.items.is_empty()
+                                        || matches!(
+                                            self.content.objects[&e.kind].class.as_str(),
+                                            "Portal" | "Merchant"
+                                        )
+                                })
+                        })
+                        .copied()
+                        .collect();
+                    let mut o = Writer::new();
+                    o.i32(p.tick).i32(tick_ms).i16(dynamic.len() as i16);
+                    for entity in dynamic {
+                        let status = self.stats(entity, id).expect("visible entity must exist");
+                        o.0.extend(
+                            self.players
+                                .get_mut(&id)
+                                .unwrap()
+                                .tick_stats
+                                .encode(entity, status),
+                        );
+                    }
+                    send(&self.players[&id], wire::NEW_TICK, o.0);
+                } else {
+                    // Bot runtimes ignore NEW_TICK; after skipping, the first spectator tick must carry every stat.
+                    self.players.get_mut(&id).unwrap().tick_stats.forget();
                 }
-                send(&self.players[&id], wire::NEW_TICK, o.0);
                 let p = self.players.get_mut(&id).unwrap();
                 let dex = p
                     .effective(&self.content, self.now)
@@ -7603,9 +7569,73 @@ impl World {
                 incremental_terrain_tiles=self.players.values().map(|p|p.view_tiles.borrow().incremental_tiles).sum::<u64>(),
                 cloned_snapshot_tiles=self.players.values().map(|p|p.view_tiles.borrow().cloned_snapshot_tiles).sum::<u64>(),
                 timings=%timings,"world performance");
+            let (humans, bots) = (
+                self.players
+                    .values()
+                    .filter(|p| p.controller == Controller::Human)
+                    .count(),
+                self.players
+                    .values()
+                    .filter(|p| p.controller == Controller::Autonomous)
+                    .count(),
+            );
+            if humans + bots > 0 {
+                let pick = |group: &str, phase: &str| {
+                    let t = &timings[group][phase];
+                    serde_json::json!({"count":t["count"],"p95_us":t["p95_us"],"max_us":t["max_us"]})
+                };
+                let summary = serde_json::json!({"step_hz":timings["achieved_step_hz"],"lateness_over_50ms":timings["missed_tick_deadlines"],
+                    "missed_by_cause":timings["counters"].as_object().map(|c|c.iter().filter(|(k,_)|k.starts_with("missed_")).map(|(k,v)|(k.clone(),v.clone())).collect::<serde_json::Map<_,_>>()),
+                    "step_wall":pick("timings","step"),"step_cpu":pick("thread_cpu","step"),"cpu_wait":pick("timings","cpu_wait"),"lateness":pick("timings","scheduling_lateness")});
+                tracing::info!(target:"lag",world_id,world=%self.name,humans,bots,entities=self.entities.len(),summary=%summary,"world tick summary");
+            }
         }
     }
 }
+impl World {
+    pub(super) fn hittable(&self, b: &Bullet, e: &Entity) -> bool {
+        e.hp > 0
+            && e.conditions(self.now)
+                & (crate::condition::bit(crate::condition::STASIS)
+                    | crate::condition::bit(crate::condition::INVINCIBLE))
+                == 0
+            && self.content.objects[&e.kind].destructible
+            && !b.hit.contains(&e.id)
+    }
+    /// Returns whether the owner was paused, which consumes the bullet without damage.
+    pub(super) fn bullet_hit(&mut self, b: &mut Bullet, target: i32) -> bool {
+        b.hit.insert(target);
+        if self.players.get(&b.owner).is_some_and(|p| p.paused) {
+            return true;
+        }
+        if !b.hit_enemy && self.content.objects[&self.entities[&target].kind].enemy {
+            b.hit_enemy = true;
+            if let Some(p) = self
+                .players
+                .get_mut(&b.owner)
+                .filter(|p| p.character.alive && !p.death_started && !p.departing)
+            {
+                p.character.lifetime.projectile_hits = p
+                    .character
+                    .lifetime
+                    .projectile_hits
+                    .checked_add(1)
+                    .expect("lifetime projectile hit overflow");
+            }
+        }
+        self.damage_enemy(
+            b.owner,
+            target,
+            b.damage,
+            b.spec.armor_piercing,
+            &b.spec.effects,
+            Some(b.id),
+        )
+        .expect("validated enemy damage");
+        false
+    }
+}
+
 fn inside_box(a: Pos, b: Pos) -> bool {
     (a.x - b.x).abs() <= 0.5 && (a.y - b.y).abs() <= 0.5
 }

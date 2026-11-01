@@ -15,7 +15,7 @@ export async function prepare(api){
   const selected=worlds.find(w=>w.info.realm_layout===`classic-world-${layout}-reconstruction`);
   assert(selected,`World ${layout} is absent from this startup's random Realm selection`);
   world=selected.info;worldId=selected.id;
-  assert.equal(world.spawn_points.length,4);
+  assert.equal(world.spawn_points.length,12);
   return {...spec,world:worldId,position:arrival(firstCoast)};
 }
 export async function run(firstClient){

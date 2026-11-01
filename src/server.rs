@@ -105,6 +105,7 @@ pub(crate) type PersonaDepartureGate = (
 #[derive(Clone)]
 pub struct App {
     pub started: std::time::Instant,
+    pub thinking: tokio::runtime::Handle,
     pub testing: Option<testing::Testing>,
     pub diagnostics: Arc<diagnostics::Diagnostics>,
     pub store: Store,
@@ -1320,10 +1321,7 @@ fn input(
                 lifecycle::protocol("invalid predicted enemy death flag")
             );
             let id = character("enemy hit report before character")?;
-            if killed == 0 {
-                return Ok(None);
-            }
-            Box::new(move |w| w.native_predicted_enemy_death(id, bullet, target))
+            Box::new(move |w| w.native_enemy_hit(id, bullet, target, killed == 1))
         }
         48 => {
             r.done()?;
@@ -1811,7 +1809,7 @@ async fn handle_inner(
                     .next()
                     .map(str::to_ascii_lowercase)
                     .as_deref(),
-                Some("/ignore" | "/unignore")
+                Some("/ignore" | "/unignore" | "/lock")
             ) {
                 let result = async {
                     crate::world::validate_chat(&text)?;
@@ -1819,24 +1817,41 @@ async fn handle_inner(
                         .directory(move |d| d.chat_permit(id, received))
                         .await?;
                     let args: Vec<_> = text.split_whitespace().collect();
+                    let lock = args[0].eq_ignore_ascii_case("/lock");
                     ensure!(
                         args.len() == 2,
-                        lifecycle::controller("Usage: /ignore <player> or /unignore <player>")
+                        lifecycle::controller(if lock {
+                            "Usage: /lock <player>"
+                        } else {
+                            "Usage: /ignore <player> or /unignore <player>"
+                        })
                     );
                     let owner = account
                         .as_ref()
                         .context("authenticated session required")?
                         .id;
+                    // Name commands resolve saved accounts, not nearby objects: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/commands/UnrankedCommands.cs#L358-L400
                     let target = a.store.account_named(args[1].into()).await?;
-                    let add = args[0].eq_ignore_ascii_case("/ignore");
+                    let add = !args[0].eq_ignore_ascii_case("/unignore");
+                    let list = i32::from(!lock);
                     lifecycle::stage(Stage::Store);
-                    let lists = a.store.edit_account_list(owner, 1, add, target).await?;
+                    let lists = a.store.edit_account_list(owner, list, add, target).await?;
                     lifecycle::stage(Stage::Publication);
                     a.world
                         .call(move |w| w.sync_account_lists(id, Some(lists)))
                         .await?;
                     lifecycle::stage(Stage::Settled);
-                    Ok::<_, anyhow::Error>(if add {
+                    tracing::info!(
+                        player = id,
+                        owner,
+                        target,
+                        list,
+                        add,
+                        "account list command committed"
+                    );
+                    Ok::<_, anyhow::Error>(if lock {
+                        "Player locked."
+                    } else if add {
                         "Player ignored."
                     } else {
                         "Player unignored."
@@ -2439,7 +2454,39 @@ async fn connection_io<S, I>(
                         let handling = std::time::Instant::now();
                         let queued=a.world.clock.now().saturating_duration_since(received);
                         let requests=Arc::new(Mutex::new(crate::performance::Requests::default()));
-                        let result=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packets,&mut session,&tx,&lost)).await;
+                        let (cancel,session_player)=(session.account.as_ref().and_then(|o| o.cancel.clone()),session.player);
+                        let testing=a.testing.clone();
+                        let (mut sent, mut closed)=(Vec::new(), None);
+                        let result={
+                            let handling=crate::performance::REQUEST.scope(requests.clone(),handle(&mut a,packets,&mut session,&tx,&lost));
+                            tokio::pin!(handling);
+                            // In-game commands can wait on a lagging world while it keeps queueing updates; loads still reply only after entry.
+                            loop { tokio::select!{ biased;
+                                result=&mut handling=>break result,
+                                Some(packet)=rx.recv(), if session_player.is_some() && closed.is_none() && !reconnect_sent=>{
+                                    let (id, queued, sending)=(packet.id, rx.len()+1, std::time::Instant::now());
+                                    let nonce=(id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
+                                    let frame=codec.frame(id,packet.body);
+                                    if let (Some(testing),Some(player),Some(nonce))=(&testing,session_player,nonce) { testing.note_native_frame(nonce,player,&frame); }
+                                    match send_frame(&mut wsout,Message::Binary(frame.into()),&mut lost_rx,&mut shutdown,cancel.clone(),&mut drain).await {
+                                        Ok(())=>{
+                                            sent.push((id, queued, sending.elapsed(), std::time::Instant::now()));
+                                            if id==39 {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));}
+                                        }
+                                        Err(reason)=>closed=Some(reason),
+                                    }
+                                },
+                            }}
+                        };
+                        for (id, queued, sending, at) in sent {
+                            session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(queued);
+                            session.diagnostics.packets_out += 1;
+                            if let Some(gap)=session.diagnostics.queued_packet_sent(id,at) {
+                                tracing::warn!(target:"lag",player=session.player,world=session.diagnostics.world,gap_ms=gap.as_secs_f64()*1000.,"player update stall");
+                            }
+                            session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.as_secs_f64()*1000.0);
+                        }
+                        if let Some(reason)=closed { close_reason=reason; break 'connection; }
                         session.diagnostics.handled(diagnostics::CommandSample {packet:id,queued,handling:handling.elapsed(),queue_before,queue_after:incoming.len(),failed:result.is_err(),requests:requests.lock().expect("request timings poisoned").clone()});
                         if let Err(e)=result {
                             let rejected = lifecycle::rule_rejection(&e);
@@ -2512,7 +2559,8 @@ async fn connection_io<S, I>(
             outgoing=rx.recv()=>{
                 let Some(packet)=outgoing else {break};
                 for (packet, queued) in outgoing_burst(packet, &mut rx) {
-                    let reconnect=packet.id==39;
+                    let id=packet.id;
+                    let reconnect=id==39;
                     session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(queued);
                     let nonce = (packet.id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
                     let frame = codec.frame(packet.id,packet.body);
@@ -2520,7 +2568,9 @@ async fn connection_io<S, I>(
                     let sending = std::time::Instant::now();
                     if send!(Message::Binary(frame.into())).is_err(){break 'connection;}
                     session.diagnostics.packets_out += 1;
-                    session.diagnostics.last_socket_send=Some(std::time::Instant::now());
+                    if let Some(gap)=session.diagnostics.queued_packet_sent(id,std::time::Instant::now()) {
+                        tracing::warn!(target:"lag",player=session.player,world=session.diagnostics.world,gap_ms=gap.as_secs_f64()*1000.,"player update stall");
+                    }
                     session.diagnostics.max_send_ms = session.diagnostics.max_send_ms.max(sending.elapsed().as_secs_f64()*1000.0);
                     // Ruffle can discard unread TCP bytes when the proxy closes before its next frame.
                     if reconnect {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));break;}
@@ -3148,6 +3198,13 @@ fn client_assets(client: &std::path::Path) -> Router<App> {
 }
 
 fn routes(a: &App, client: PathBuf) -> Router {
+    let drops = axum::body::Bytes::from(
+        serde_json::to_vec(&crate::loot::catalogue::snapshot(
+            &a.content,
+            a.diagnostics.source_revision.as_deref(),
+        ))
+        .expect("validated loot catalogue JSON"),
+    );
     let app = Router::new()
         .route(
             "/legacy-api/picture/save",
@@ -3193,6 +3250,21 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route(
             "/internal/discord/updates",
             post(updates::sync).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
+        .route(
+            "/api/drop-rates",
+            get(move || {
+                let body = drops.clone();
+                async move {
+                    (
+                        [
+                            ("content-type", "application/json"),
+                            ("cache-control", "no-cache"),
+                        ],
+                        body,
+                    )
+                }
+            }),
         )
         .route("/api/hiscores", get(hiscores))
         .route("/api/collection/{account}", get(collection))
@@ -3353,3 +3425,5 @@ async fn shutdown_signal() -> Result<()> {
 
 #[cfg(test)]
 mod lifecycle_finalize_tests;
+#[cfg(test)]
+mod lock_command_tests;

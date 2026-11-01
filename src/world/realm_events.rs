@@ -263,7 +263,7 @@ impl World {
                 // Admission is not a reservation: actual initial-group dispatch rechecks its budget.
                 Some(event.root.kind) == self.event_choice
                     && owned + 1 + event.children.len() + mandatory_initial_summons(event.root.kind)
-                        <= 256
+                        <= self.summon_limit()
                     && self.players.values().all(|p| {
                         p.pos.distance(event.root.pos) >= 32.
                             && event.site.area.distance(p.pos) >= 4.

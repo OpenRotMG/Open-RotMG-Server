@@ -10,6 +10,26 @@ use crate::{
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
+// On 2 vCPUs, equal-priority bot AI made Realm ticks start late; world threads must win the CPU.
+pub(crate) fn thinking_runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .thread_name("bot-ai")
+        .on_thread_start(|| {
+            let tid = unsafe { libc::gettid() } as libc::id_t;
+            let current = unsafe { libc::getpriority(libc::PRIO_PROCESS, tid) };
+            let lowered =
+                unsafe { libc::setpriority(libc::PRIO_PROCESS, tid, (current + 10).min(19)) };
+            assert_eq!(
+                lowered,
+                0,
+                "lower bot thinking priority: {}",
+                std::io::Error::last_os_error()
+            );
+        })
+        .enable_all()
+        .build()?)
+}
+
 // The inclusive interval also awaits policy/Store; these elapsed (not CPU) subspans leave clone/log/bookkeeping outside.
 fn record_decision_phase_elapsed<T>(
     window: &mut crate::performance::Window,
@@ -118,7 +138,7 @@ async fn decide_before_social(
     if let Some(report) = timings.report() {
         tracing::info!(name=brain.mind.market.name.as_str(),world=%view.map.name,world_id=view.session.world,player=view.session.player,
             known_tiles=view.tiles.len(),cover_tiles=brain.cover.len(),visited_tiles=brain.visits.len(),
-            blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),crowd_contacts=brain.crowd.len(),
+            blocked_routes=brain.blocked.len(),tracks=brain.tracks.len(),
             navigation_rebuilds=brain.navigation_rebuilds,navigation_reuses=brain.navigation_reuses,
             navigation=%serde_json::json!(brain.navigation.as_ref().map(|g|g.metrics())),timings=%report,"bot performance");
     }
@@ -534,6 +554,18 @@ async fn enter_admitted(
     }
     brain.mind.future_class = Some(view.character.class);
     brain.mind.bind(&view)?;
+    // Live Oct 2026: event deaths used up veterans' level 20s; each persona gets its roster's level 20 back once.
+    if !brain.mind.veteran_alt && !profile.is_guest() {
+        brain.mind.veteran_alt = true;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(persona::seed(profile.identity));
+        let (roster, _) = persona::life(&profile, &app.content, &mut rng)?;
+        if let Some(alt) = roster.into_iter().find(|ch| ch.alive && ch.level == 20)
+            && let Some(id) = app.store.persona_alt(view.session.account, alt).await?
+        {
+            // The alt is the next life this persona plays.
+            brain.mind.character = Some(id);
+        }
+    }
     brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?;
     Ok((id, output, sender, brain))
 }
@@ -873,7 +905,7 @@ pub(super) async fn launch(
         .expect("adventure registry poisoned")
         .register(account, lists);
     let app = app.clone();
-    tokio::spawn(async move {
+    app.thinking.clone().spawn(async move {
         let _entry = entry;
         let mut owner = Some(owner);
         let mut shutdown = app.shutdown.subscribe();
@@ -1027,7 +1059,6 @@ pub(super) async fn launch(
                         app.cctv.heard(name.as_str(), id, &packet)?;
                         let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.player_view(id).await?) } else { None };
                         let social_view = settled_view.as_ref().unwrap_or(&received_view);
-                        brain.crowd.receive(&packet, social_view, &app.content)?;
                         let event_before = brain.mind.events.clone();
                         brain.mind.events.receive(&packet, social_view, name.as_str())?;
                         if brain.mind.events != event_before { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
@@ -1244,10 +1275,12 @@ pub(super) async fn launch(
                                 lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
                                 let previous = view.session.character;
                                 let plan = std::mem::take(&mut brain.plan);
+                                let sought = brain.mind.market.sought;
                                 // A Vault errand belongs to the same Nexus market visit.
                                 let visit = (matches!((view.map.name.as_str(), portal_kind), ("Nexus", Some(0x720)) | ("Vault", None))).then(|| brain.mind.market.clone());
                                 (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
                                 brain.plan = plan;
+                                brain.mind.market.sought = sought;
                                 if let Some(market) = visit { brain.mind.market.continue_visit(&market); }
                                 let current_character = brain.session.2;
                                 let destination = if current_character != previous { -2 } else { destination };
@@ -1395,6 +1428,22 @@ fn close_controller(
 
 #[cfg(test)]
 mod composer_tests;
+#[test]
+fn bot_thinking_runs_below_world_priority() {
+    let nice = || unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) };
+    let world = nice();
+    let thinking = thinking_runtime().unwrap();
+    let (bot, name) = thinking
+        .block_on(
+            thinking
+                .spawn(async move { (nice(), std::thread::current().name().map(str::to_owned)) }),
+        )
+        .unwrap();
+    assert_eq!(
+        (bot, name.as_deref()),
+        ((world + 10).min(19), Some("bot-ai"))
+    );
+}
 #[cfg(test)]
 mod input_tests;
 #[cfg(test)]

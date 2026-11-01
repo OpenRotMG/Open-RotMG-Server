@@ -365,12 +365,19 @@ fn prepare_arrivals(map: &mut Map, content: &Content) -> Result<()> {
         }
     }
     map.spawns.clear();
-    for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
+    // Kithio enters on a random Spawn tile, and its world1 marks 12 around the coast: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.cs#L268-L277
+    // Axis arrivals keep their original indexes because route checks address them.
+    for step in [3, 0, 9, 6, 1, 2, 4, 5, 7, 8, 10, 11] {
+        let (dy, dx) = (step as f32 * std::f32::consts::FRAC_PI_6).sin_cos();
+        let ray = |x: i32, y: i32| {
+            let (rx, ry) = ((x - map.width / 2) as f32, (y - map.height / 2) as f32);
+            (dx * rx + dy * ry, (dx * ry - dy * rx).abs())
+        };
         let (x, y) = (1..map.height - 1)
             .flat_map(|y| (1..map.width - 1).map(move |x| (x, y)))
-            .filter(|(x, y)| {
-                let (rx, ry) = (x - map.width / 2, y - map.height / 2);
-                dx * rx + dy * ry > (dx * ry - dy * rx).abs()
+            .filter(|&(x, y)| {
+                let (along, across) = ray(x, y);
+                across < along * (std::f32::consts::FRAC_PI_6 / 2.).tan()
                     && reachable[(y * map.width + x) as usize]
                     && (y - 1..=y + 1).all(|ny| {
                         (x - 1..=x + 1).all(|nx| {
@@ -379,11 +386,11 @@ fn prepare_arrivals(map: &mut Map, content: &Content) -> Result<()> {
                         })
                     })
             })
-            .min_by_key(|(x, y)| {
-                let (rx, ry) = (x - map.width / 2, y - map.height / 2);
-                ((dx * ry - dy * rx).abs(), -(dx * rx + dy * ry))
+            .min_by_key(|&(x, y)| {
+                let (along, across) = ray(x, y);
+                (across.round() as i32, -(along.round() as i32))
             })
-            .with_context(|| format!("Realm has no connected coastal arrival toward {dx},{dy}"))?;
+            .with_context(|| format!("Realm has no connected coastal arrival at {}°", step * 30))?;
         for ny in y - 1..=y + 1 {
             for nx in x - 1..=x + 1 {
                 let cell = &mut map.cells[(ny * map.width + nx) as usize];

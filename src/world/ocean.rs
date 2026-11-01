@@ -47,8 +47,9 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         ensure!(
-            self.summon_count() + self.named_births.len() + self.abyss_pending_count() < 256,
-            "ocean summon budget exhausted"
+            self.summon_count() + self.named_births.len() + self.abyss_pending_count()
+                < self.summon_limit(),
+            SummonBudget("ocean summon budget exhausted".into())
         );
         ensure!(
             self.ocean_walkable(kind, pos),
@@ -117,8 +118,8 @@ impl World {
                 + self.named_births.len()
                 + self.abyss_pending_count()
                 + positions.len()
-                <= 256,
-            "Hermit wave exceeds summon budget"
+                <= self.summon_limit(),
+            SummonBudget("Hermit wave exceeds summon budget".into())
         );
         ensure!(
             positions.iter().all(|p| self.ocean_walkable(kind, *p)),
@@ -186,8 +187,8 @@ impl World {
         }
         ensure!(
             self.summon_count() + self.named_births.len() + self.abyss_pending_count() + count
-                <= 256,
-            "ocean toss exceeds summon budget"
+                <= self.summon_limit(),
+            SummonBudget("ocean toss exceeds summon budget".into())
         );
         for position in positions {
             self.ocean_spawn(id, kind, position)?;
@@ -229,7 +230,7 @@ impl World {
                     let missing = 20usize.saturating_sub(minions).min(8);
                     ensure!(
                         self.summon_occupancy() + 8 + missing <= self.summon_limit(),
-                        "Hermit initial wave and minions exceed summon budget"
+                        SummonBudget("Hermit initial wave and minions exceed summon budget".into())
                     );
                     // The mandatory wave cannot commit before its companion minions can be admitted.
                     ensure!(

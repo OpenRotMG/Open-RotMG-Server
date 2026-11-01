@@ -372,8 +372,8 @@ impl World {
                     usize::from(spawned < 20)
                 };
                 ensure!(
-                    self.summon_count() + self.named_births.len() + count <= 256,
-                    "Oasis group exceeds shared summon budget"
+                    self.summon_count() + self.named_births.len() + count <= self.summon_limit(),
+                    SummonBudget("Oasis group exceeds shared summon budget".into())
                 );
                 for _ in 0..count {
                     let child = self.rng.gen_range(0x679..=0x67c);

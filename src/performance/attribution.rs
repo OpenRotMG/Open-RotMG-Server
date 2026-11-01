@@ -43,6 +43,36 @@ const STAGES: [&str; 7] = [
 ];
 const EXAMPLES: usize = 4;
 static NEXT: AtomicU64 = AtomicU64::new(1);
+// Per kind, so frequent request waits cannot crowd out the slow ticks that cause them.
+static LAST_INCIDENT_NS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static COALESCED_INCIDENTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+
+fn kind_index(kind: &str) -> usize {
+    match kind {
+        "tick" => 0,
+        "job" => 1,
+        "directory_loan" => 2,
+        _ => panic!("unknown attribution kind {kind}"),
+    }
+}
+
+fn admit(last: &[AtomicU64; 3], coalesced: &[AtomicU64; 3], kind: &str, now: u64) -> Option<u64> {
+    let index = kind_index(kind);
+    if claim_incident(&last[index], now) {
+        Some(coalesced[index].swap(0, Ordering::Relaxed))
+    } else {
+        coalesced[index].fetch_add(1, Ordering::Relaxed);
+        None
+    }
+}
+
+fn claim_incident(last: &AtomicU64, now: u64) -> bool {
+    last.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous| {
+        (previous == 0 || now.saturating_sub(previous) >= 1_000_000_000).then_some(now)
+    })
+    .is_ok()
+}
+
 thread_local! { static CURRENT: Cell<(&'static str, u64)> = const { Cell::new(("coordinator_tick", 0)) }; }
 pub(crate) struct Context(
     (&'static str, u64),
@@ -162,8 +192,20 @@ impl Sample {
         })
     }
     pub(crate) fn incident(&self, world: Option<i32>) {
-        if self.execution.is_some() && self.total() > Duration::from_millis(50) {
-            tracing::warn!(pid=std::process::id(), world, clock="CLOCK_MONOTONIC", sample=%self.snapshot(), "latency incident");
+        if let Some(execution) = &self.execution
+            && self.total() > Duration::from_millis(50)
+        {
+            // Per-event storms can block CPU-worker completion and suppress unrelated journal diagnostics (#1250).
+            let Some(coalesced_incidents) = admit(
+                &LAST_INCIDENT_NS,
+                &COALESCED_INCIDENTS,
+                self.kind,
+                execution.end_ns,
+            ) else {
+                return;
+            };
+            tracing::warn!(pid=std::process::id(), world, clock="CLOCK_MONOTONIC", coalesced_incidents,
+                max_incidents_per_second_per_kind=1, sample=%self.snapshot(), "latency incident");
         }
     }
     fn total(&self) -> Duration {
@@ -251,13 +293,7 @@ impl Attribution {
         if let Some(cpu) = sample.publish_cpu {
             operation.publish_cpu.record(cpu);
         }
-        let index = match sample.kind {
-            "tick" => 0,
-            "job" => 1,
-            "directory_loan" => 2,
-            _ => panic!("unknown attribution kind"),
-        };
-        let examples = &mut self.examples[index];
+        let examples = &mut self.examples[kind_index(sample.kind)];
         if examples.len() < EXAMPLES {
             examples.push((total, sample));
         } else {
@@ -318,5 +354,99 @@ impl Attribution {
         Some(
             json!({"window_seconds":elapsed.as_secs_f64(),"histogram_upper_bounds_us":&BOUNDS_US[..],"histogram_counts":"noncumulative; every completed operation; last bucket is overflow","operations":operations,"slowest_ticks":examples[0],"slowest_jobs":examples[1],"slowest_directory_loans":examples[2],"example_limit_per_kind":EXAMPLES,"phase_scope":"inclusive; do not sum nested phases","total_scope":"sum of measured stages; excludes instrumentation gaps, caller scheduling/network and post-tick coordination; directory_loan work is ownership hold time, not CPU execution","owner_scope":"first Directory owner observed while acquisition blocked, not all intervening owners"}),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{io, sync::Arc};
+
+    #[test]
+    fn incident_claim_is_atomic_and_handles_out_of_order_completion() {
+        let last = AtomicU64::new(0);
+        assert!(claim_incident(&last, 1));
+        assert!(!claim_incident(&last, 1_000_000_000));
+        assert!(claim_incident(&last, 1_000_000_001));
+        assert!(!claim_incident(&last, 900_000_000));
+        let claims = AtomicU64::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..16 {
+                scope.spawn(|| {
+                    if claim_incident(&last, 2_000_000_001) {
+                        claims.fetch_add(1, Ordering::Relaxed);
+                    }
+                });
+            }
+        });
+        assert_eq!(claims.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn request_waits_cannot_crowd_out_a_slow_tick() {
+        let last = [const { AtomicU64::new(0) }; 3];
+        let coalesced = [const { AtomicU64::new(0) }; 3];
+        assert_eq!(admit(&last, &coalesced, "job", 10), Some(0));
+        assert_eq!(admit(&last, &coalesced, "job", 20), None);
+        assert_eq!(
+            admit(&last, &coalesced, "tick", 30),
+            Some(0),
+            "slow tick suppressed"
+        );
+        assert_eq!(admit(&last, &coalesced, "job", 1_000_000_010), Some(1));
+    }
+
+    struct Lines(Arc<AtomicU64>);
+    impl io::Write for Lines {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.fetch_add(
+                bytes.iter().filter(|&&byte| byte == b'\n').count() as u64,
+                Ordering::Relaxed,
+            );
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn incident_output_is_bounded_without_dropping_histograms_or_worst_examples() {
+        let lines = Arc::new(AtomicU64::new(0));
+        let output = lines.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(move || Lines(output.clone()))
+            .finish();
+        let mut attribution = Attribution::default();
+        let started = Instant::now();
+        tracing::subscriber::with_default(subscriber, || {
+            for _ in 0..1_000 {
+                let mut sample = Sample::new("incident_regression");
+                sample.stages[1] = Duration::from_millis(100);
+                sample.execution = Execution::start().map(Execution::finish);
+                sample.incident(Some(1));
+                attribution.record(sample);
+            }
+        });
+        let elapsed = started.elapsed();
+        let emitted = lines.load(Ordering::Relaxed);
+        attribution.started = Some(Instant::now() - Duration::from_secs(60));
+        let report = attribution.report().expect("completed attribution window");
+        assert_eq!(report["operations"][0]["total"]["count"], 1_000);
+        assert_eq!(report["operations"][0]["total"]["max_us"], 100_000);
+        for stage in STAGES {
+            assert_eq!(report["operations"][0]["stages"][stage]["count"], 1_000);
+        }
+        assert_eq!(report["slowest_jobs"].as_array().unwrap().len(), EXAMPLES);
+        println!(
+            "1000 slow operations: {emitted} incident lines in {:.3}s; all histograms and worst examples retained",
+            elapsed.as_secs_f64()
+        );
+        assert!(
+            emitted <= elapsed.as_secs() + 1,
+            "incident output must not exceed one line per process per second"
+        );
     }
 }

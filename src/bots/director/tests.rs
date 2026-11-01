@@ -93,6 +93,27 @@ async fn population_uses_persisted_ranks_and_never_fills_missing_bands_with_vete
 }
 
 #[tokio::test]
+async fn population_skips_a_persona_whose_earlier_session_still_holds_the_account() {
+    let (_dir, mut app) = crate::server::test_app();
+    app.bot_population = 1;
+    let character = runtime::persona_character(&app, persona::PERSONAS[0])
+        .await
+        .unwrap();
+    let held = app.claim(character.account).unwrap();
+    let (done, _departed) = mpsc::channel(1);
+    let mut online = BTreeMap::new();
+    let resting = persona::PERSONAS[1..]
+        .iter()
+        .chain(persona::GUESTS.iter())
+        .map(|p| (p.identity, app.world.clock.now() + Duration::from_secs(60)))
+        .collect();
+    // Live: "account already has an active session" here terminated the bot-population worker.
+    fill(&app, &done, &mut online, &resting).await.unwrap();
+    assert!(online.is_empty());
+    drop(held);
+}
+
+#[tokio::test]
 async fn drain_blocks_population_writes_and_shutdown_is_not_a_critical_exit() {
     let (_dir, mut app) = crate::server::test_app();
     app.bot_population = 1;

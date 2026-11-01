@@ -3,11 +3,21 @@ use crate::{condition, encounter};
 
 pub(super) struct Grenade {
     kind: u16,
-    position: Pos,
-    radius: f32,
-    damage: i32,
-    deadline: u64,
+    pub(super) position: Pos,
+    pub(super) radius: f32,
+    pub(super) damage: i32,
+    pub(super) deadline: u64,
 }
+
+/// A full budget defers a summon; its encounter keeps acting and retries next tick.
+#[derive(Debug)]
+pub(super) struct SummonBudget(pub(super) String);
+impl std::fmt::Display for SummonBudget {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for SummonBudget {}
 
 impl World {
     pub(super) fn heal_enemy(&mut self, healer: i32, target: i32, amount: i32) -> Result<i32> {
@@ -182,7 +192,8 @@ impl World {
         if self.name == "Manor of the Immortals" {
             crate::dungeon::manor::SUMMON_LIMIT
         } else {
-            256
+            // Each Realm holds about fifty 32-follower quests; 256 starved concurrent bot fights.
+            1024
         }
     }
 
@@ -214,7 +225,9 @@ impl World {
         let limit = self.summon_limit();
         ensure!(
             occupied + missing <= limit,
-            "summon budget exhausted: {occupied}+{missing} exceeds {limit}"
+            SummonBudget(format!(
+                "summon budget exhausted: {occupied}+{missing} exceeds {limit}"
+            ))
         );
         let mut positions = self.child_positions(parent, radius)?;
         if self.entities[&parent].kind == 0xd90 {

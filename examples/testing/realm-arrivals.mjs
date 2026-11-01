@@ -5,7 +5,7 @@ let world;
 const arrival=index=>({x:world.spawn_points[index][0],y:world.spawn_points[index][1]});
 export async function prepare(api){
   world=await api({op:'world_info',world:1});
-  if(world.spawn_points.length!==4||!world.realm_layout)throw Error('Expected four arrivals in a registered Realm');
+  if(world.spawn_points.length!==12||!world.realm_layout)throw Error('Expected twelve arrivals in a registered Realm');
   await writeFile(join(process.env.QA_RESULTS_DIR,'realm.json'),JSON.stringify(world));
   return {...spec,position:arrival(0)};
 }

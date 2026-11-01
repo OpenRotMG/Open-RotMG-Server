@@ -32,6 +32,7 @@ mod progression;
 pub(crate) mod pursuits;
 #[cfg(test)]
 mod quest_tests;
+mod quests;
 
 mod realms;
 
@@ -62,6 +63,7 @@ impl Profile {
         self.identity.starts_with("guest:v1:")
     }
 }
+
 #[cfg(test)]
 const ARCHETYPES: [Profile; 6] = [
     Profile {
@@ -239,6 +241,8 @@ struct Scene<'a> {
     passes_cover: bool,
     health: f32,
     threatened: bool,
+    /// Hardest hit faced in the last half minute, after own defense.
+    hit: i32,
     retreat: bool,
     outmatched: bool,
     grid: Arc<Grid>,
@@ -275,6 +279,8 @@ struct Brain {
     stationary: u64,
     destination: Option<Pos>,
     blocked: BTreeMap<(i16, i16), u64>,
+    /// Stalls per destination tile and the last one, so a tile that keeps failing stays excluded longer.
+    stalls: BTreeMap<(i16, i16), (u32, u64)>,
     cover: BTreeSet<(i16, i16)>,
     visits: BTreeMap<(i16, i16), u64>,
     companion: Option<i32>,
@@ -291,6 +297,13 @@ struct Brain {
     nexus_spot: Option<Pos>,
     portal: Option<(i32, u64)>,
     hunting: Option<Pos>,
+    /// Hardest hit seen and when; survives a brief loss of sight of the shooter.
+    danger: (i32, u64),
+    next_train_call: u64,
+    /// When this session first wanted to end, so a fight in company can delay logging off only briefly.
+    finishing_since: Option<u64>,
+    /// Last logged Realm quest and whether it was worth joining.
+    quest_interest: Option<(i32, bool)>,
     last_encounter: u64,
     navigation: Option<Arc<Grid>>,
     navigation_version: Option<(u64, u64)>,
@@ -348,6 +361,7 @@ impl Brain {
             stationary: view.tick,
             destination: None,
             blocked: BTreeMap::new(),
+            stalls: BTreeMap::new(),
             cover: BTreeSet::new(),
             visits: BTreeMap::new(),
             companion: None,
@@ -368,6 +382,10 @@ impl Brain {
             nexus_spot: None,
             portal: None,
             hunting: None,
+            danger: (0, 0),
+            next_train_call: 0,
+            finishing_since: None,
+            quest_interest: None,
             last_encounter: view.time_ms,
             navigation: None,
             navigation_version: None,
@@ -450,6 +468,8 @@ impl Brain {
                 }
             }
         }
+        // Live: lava killed 16 level 20s a day; bots routed through it like ordinary slow ground.
+        blockers.extend(hazards_near(v, content, 12).filter(|p| *p != tile(v.position)));
         if self.mind.events.knows_blue && v.map.name == "Mad Lab" {
             for pool in v.objects.iter().filter(|p| {
                 p.kind == crate::dungeon::lab::HEXXER
@@ -579,8 +599,15 @@ impl Brain {
         if v.tick.saturating_sub(self.stationary) > 30
             && let Some(destination) = self.destination
         {
-            self.blocked.insert(tile(destination), v.tick + 100);
-            tracing::warn!(player=v.session.player,tick=v.tick,goal=?self.goal,x=destination.x,y=destination.y,"autonomous route made no progress; temporarily excluded");
+            // Live: one bot re-chose the same unreachable tile 123 times an hour; repeats back off exponentially.
+            self.stalls
+                .retain(|_, (_, last)| v.tick.saturating_sub(*last) < 12_000);
+            let (repeats, last) = self.stalls.entry(tile(destination)).or_insert((0, 0));
+            *repeats += 1;
+            *last = v.tick;
+            let excluded = 100u64 << (*repeats - 1).min(6);
+            self.blocked.insert(tile(destination), v.tick + excluded);
+            tracing::warn!(player=v.session.player,tick=v.tick,goal=?self.goal,x=destination.x,y=destination.y,repeats=*repeats,excluded,"autonomous route made no progress; temporarily excluded");
             // Login crowds briefly wedge bots on the Nexus spawn; only a stall elsewhere is a loop.
             if v.map.name != "Nexus" {
                 self.plan.record(
@@ -682,6 +709,26 @@ impl Brain {
                 .item_target(),
         )
     }
+    /// Bold personas trust a crowd above their level, the way fame trains drew in low levels.
+    fn ambitious(&self) -> bool {
+        self.profile.recovery < 0.45
+    }
+    fn quest_appeal(
+        &self,
+        v: &PlayerView,
+        content: &Content,
+        quest: &crate::world::view::VisibleObject,
+    ) -> Option<quests::Appeal> {
+        (v.map.name == "Realm" && v.character.level == 20 && v.quest == Some(quest.id)).then(|| {
+            quests::appeal(
+                &self.profile,
+                content,
+                quest.kind,
+                self.crowd.near(v, quest.position),
+                self.plan.last_progress,
+            )
+        })
+    }
     fn set_activity(&mut self, v: &PlayerView, activity: Activity) {
         if activity != self.activity {
             tracing::info!(account=v.session.account,player=v.session.player,from=%self.activity,to=%activity,"autonomous activity changed");
@@ -715,7 +762,7 @@ impl Brain {
         }
         let reserved = self.mind.market.reserves_stock();
         let inspecting = self.mind.inspecting(v, content);
-        let perception = combat::Perception::attend(v, &self.mind.cognition, inspecting);
+        let perception = combat::Perception::of(&self.mind.cognition);
         let equipment = if decision.item.is_none() && !reserved {
             self.mind.assess(v, content)?
         } else {
@@ -789,9 +836,28 @@ impl Brain {
             .context("weapon projectile missing")?;
         let range = projectile.speed * projectile.lifetime / 10000.;
         let health = v.character.hp as f32 / v.character.stats[0] as f32;
-        let threatened =
-            combat::clearance(v, v.position, &perception) < self.mind.cognition.pickup_clearance;
-        if health < self.profile.recovery {
+        let threatened = combat::clearance(v, v.position) < self.mind.cognition.pickup_clearance
+            || v.throws.iter().any(|t| combat::bombed(t, v.position));
+        // Health is judged in hits of what this player faces, so more max HP buys more courage.
+        let seen = combat::biggest_hit(v, content, &enemies);
+        if seen > 0 {
+            self.danger = (seen, v.time_ms);
+        }
+        let hit = if v.time_ms.saturating_sub(self.danger.1) < 30_000 {
+            self.danger.0.max(seen)
+        } else {
+            seen
+        };
+        // A persona's own share of health is the floor; hard hitters raise it by hits in reserve, up to a cap.
+        let (hp, max) = (v.character.hp as f32, v.character.stats[0] as f32);
+        let recovery = self.profile.recovery;
+        let hits = |n: f32| n * hit as f32;
+        let wounded =
+            (max * recovery).max(hits(1.5 + 5. * recovery).min(max * (0.4 + 0.5 * recovery)));
+        let healthy = (wounded + hits(3.))
+            .max(max * (recovery + 0.15))
+            .min(max * 0.95);
+        if hp < wounded {
             self.recover_until = v.tick + 60;
         }
         let outmatched = enemies.iter().any(|enemy| {
@@ -799,11 +865,16 @@ impl Brain {
         });
         let retreat = outmatched
             || v.tick < self.recover_until
-            || (matches!(self.goal, Goal::Recover)
-                && health < (self.profile.recovery + 0.15).min(0.9));
+            || (matches!(self.goal, Goal::Recover) && hp < healthy);
         let avoid: Vec<_> = enemies
             .iter()
             .filter(|enemy| !retreat && !progression::can_fight(v, content, enemy))
+            // A level 20 does not route around the Realm quest it has chosen to take on.
+            .filter(|enemy| {
+                !self
+                    .quest_appeal(v, content, enemy)
+                    .is_some_and(|a| a.joins(false))
+            })
             .map(|e| e.position)
             .collect();
         let grid = self.navigation_grid(v, content, &avoid);
@@ -839,17 +910,14 @@ impl Brain {
             passes_cover: projectile.passes_cover,
             health,
             threatened,
+            hit,
             retreat,
             outmatched,
             grid,
             remedy,
         };
         if self.reflex(v, content, &s, &mut decision)? {
-            self.crowd.release(v, "safety");
             return Ok((Activity::Survive, decision));
-        }
-        if self.committed(v) {
-            self.crowd.release(v, "explicit_commitment");
         }
         // Consent and receipts outrank every errand; an advertised quote does not preempt a started one.
         if self.mind.market.locked()
@@ -1005,6 +1073,22 @@ impl Brain {
                 {
                     return Ok(Yield);
                 }
+                let started = self.plan.owner() == Some(owner);
+                if v.map.name == "Realm"
+                    && s.health >= 0.75
+                    && if started {
+                        self.mind.market.sought
+                    } else {
+                        self.mind
+                            .market
+                            .trip_due(v, content, self.mind.future_class)?
+                    }
+                {
+                    self.mind.market.sought = true;
+                    let mut d = idle();
+                    d.journey = Some(Journey::Nexus);
+                    return Ok(Act(Activity::Trade, d));
+                }
                 match self.mind.market.decide(
                     v,
                     content,
@@ -1148,16 +1232,14 @@ impl Brain {
             enemies,
             nearest,
             range,
-            health,
             threatened,
             retreat,
             outmatched,
             remedy,
             ..
         } = s;
-        let (range, health, threatened, retreat, outmatched, nearest, remedy) = (
+        let (range, threatened, retreat, outmatched, nearest, remedy) = (
             *range,
-            *health,
             *threatened,
             *retreat,
             *outmatched,
@@ -1165,6 +1247,22 @@ impl Brain {
             *remedy,
         );
         let (grid, perception) = (&s.grid, &s.perception);
+        let here = tile(v.position);
+        if hazards_near(v, content, 0).next().is_some() {
+            let hazards: BTreeSet<_> = hazards_near(v, content, 8).collect();
+            let shore = (here.0 - 8..=here.0 + 8)
+                .flat_map(|x| (here.1 - 8..=here.1 + 8).map(move |y| (x, y)))
+                .filter(|p| grid.walkable.contains(p) && !hazards.contains(p))
+                .min_by(|a, b| {
+                    center(*a)
+                        .distance(v.position)
+                        .total_cmp(&center(*b).distance(v.position))
+                })
+                .context("standing in damaging ground with no known safe tile within 8")?;
+            decision.goal = Goal::Dodge;
+            decision.movement = Some(center(shore));
+            return Ok(true);
+        }
         if retreat || threatened {
             decision.goal = if retreat {
                 Goal::Recover
@@ -1209,13 +1307,15 @@ impl Brain {
                 .iter()
                 .filter(|kind| **kind >= 0)
                 .any(|kind| content.objects[&(*kind as u16)].activate == "Heal");
-            let emergency = self.profile.recovery * 0.5;
-            // A Nexus exit restarts the whole journey, so only critical health or real overmatch justify it.
+            let incoming = combat::incoming(v);
+            // A Nexus exit restarts the whole journey, so only a lethal hit or real overmatch justifies it.
             let escape =
                 if outmatched && nearest.is_some_and(|e| e.position.distance(v.position) < 4.) {
                     Some("near_outmatched")
-                } else if !held_heal && health < emergency {
-                    Some("critical_health")
+                } else if incoming >= v.character.hp {
+                    Some("lethal_volley")
+                } else if !held_heal && v.character.hp <= s.hit {
+                    Some("next_hit_lethal")
                 } else {
                     None
                 };
@@ -1228,7 +1328,8 @@ impl Brain {
                     character = v.session.character,
                     hp = v.character.hp,
                     max_hp = v.character.stats[0],
-                    emergency_threshold = emergency,
+                    incoming,
+                    hit = s.hit,
                     reason,
                     "autonomous recovery escape selected"
                 );
@@ -1293,8 +1394,7 @@ impl Brain {
     ) -> Result<Decision> {
         let steering = self.steering.take();
         let (enemies, grid, perception) = (&s.enemies, &s.grid, &s.perception);
-        let (nearest, quarry, range, inspecting, health) =
-            (s.nearest, s.quarry, s.range, s.inspecting, s.health);
+        let (nearest, quarry, range, health) = (s.nearest, s.quarry, s.range, s.health);
         let mut choices = Vec::new();
         let event_area = self.mind.events.area(v);
         if let Some(area) = event_area {
@@ -1312,6 +1412,32 @@ impl Brain {
                 choices.push((60. + self.profile.resources, Goal::Venture, ground));
             }
         }
+        // Level 20s weigh whether a Realm quest is worth it; lower levels keep following their leveling quests.
+        let veteran_realm = v.map.name == "Realm" && v.character.level == 20;
+        let realm_quest = if let Some(quest) = enemies.iter().find(|e| v.quest == Some(e.id))
+            && let Some(appeal) = self.quest_appeal(v, content, quest)
+        {
+            let joined = appeal.joins(progression::can_fight(v, content, quest));
+            if self.quest_interest != Some((quest.id, joined)) {
+                self.quest_interest = Some((quest.id, joined));
+                tracing::info!(
+                    account = v.session.account,
+                    quest = quest.kind,
+                    score = appeal.score,
+                    value = appeal.value,
+                    crowd = appeal.crowd,
+                    habit = ?appeal.habit,
+                    joined,
+                    "autonomous realm quest appeal"
+                );
+            }
+            joined.then(|| {
+                choices.push((appeal.score, Goal::Hunt(quest.id), quest.position));
+                Goal::Hunt(quest.id)
+            })
+        } else {
+            None
+        };
         // Grated rooms cannot stay cleared; geared players push past snakes: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
         let dungeon =
             !matches!(v.map.name.as_str(), "Realm" | "Nexus" | "Vault") && v.quest.is_some();
@@ -1331,8 +1457,13 @@ impl Brain {
                 continue;
             }
             let protected = !progression::vulnerable(enemy);
+            // Live: level 20s stopped for every Hobbit on the way to their arrow; they shoot it in passing instead.
+            let trash = veteran_realm
+                && content.objects[&enemy.kind].terrain != 0
+                && bands::tier(content.objects[&enemy.kind].terrain) <= 1;
             let score = 45. - d * 2.
                 + if d < range
+                    && !trash
                     && (!dungeon
                         || !rushing && content.objects[&enemy.kind].xp_multiplier > 0.
                         || v.quest == Some(enemy.id))
@@ -1371,6 +1502,7 @@ impl Brain {
             }
             // Stheno's shield cannot prevent approaching the quest that wakes her encounter.
             if v.quest == Some(enemy.id)
+                && !veteran_realm
                 && (!protected || v.map.name == "Snake Pit")
                 && (v.character.level >= 3 || d <= 48.)
             {
@@ -1528,76 +1660,44 @@ impl Brain {
                 choices.push((score, Goal::Follow(player.id), player.position));
             }
         }
-        self.crowd
-            .attend(v, content, &self.mind.cognition, inspecting);
-        let recent_company = self
-            .crowd
-            .cooperator(v, |position| !self.blocked.contains_key(&tile(position)));
-        let cooperative_goal = if !committed
-            && crowds::cooperative_available(&choices, v.position, range, |position| {
-                !self.blocked.contains_key(&tile(position))
-            })
-            && let Some(peer) = &recent_company
-            && crowds::can_approach(v.session.world, v.session.account, peer.account)
-            && peer.position.distance(v.position) > 7.
-        {
-            choices.push((
-                80. + self.profile.companions,
-                Goal::Follow(peer.id),
-                peer.position,
-            ));
-            Some(peer.id)
-        } else {
-            None
-        };
+        // Players go where the people are; exploring alone is what is left when nobody suitable is on the minimap.
         if !committed
-            && recent_company.is_none()
-            && !choices
-                .iter()
-                .any(|(_, goal, _)| matches!(goal, Goal::Venture))
-            && crowds::cooperative_available(&choices, v.position, range, |position| {
+            // Approaching the quest's fight is the quest logic's job, landing well outside it.
+            && let Some((marker, crowd)) = self.crowd.gathering(v, self.ambitious(), |position| {
+                let quest = enemies.iter().find(|e| v.quest == Some(e.id));
+                // Live: level 20s joined lowland crowds on unseen ground and farmed Hobbit Mages in groups of eight.
+                let veteran_ground = v.character.level < 20
+                    || quest.is_some_and(|q| q.position.distance(position) < 45.)
+                    || self.crowd.bands.known(position).is_some_and(|band| band >= 3);
                 !self.blocked.contains_key(&tile(position))
+                    && quest.is_none_or(|q| q.position.distance(position) >= 20.)
+                    && veteran_ground
             })
-            && let Some(marker) = self.crowd.destination(
-                v,
-                self.group.as_ref(),
-                |account| self.mind.social.known(account),
-                |position| {
-                    !self.blocked.contains_key(&tile(position))
-                        && self.crowd.bands.survivable(v, position)
-                },
-            )
         {
+            let score = 55. + 5. * crowd.min(6) as f32 + self.profile.companions;
             let distance = marker.position.distance(v.position);
-            if distance > 7. {
-                let score = if self.crowd.keeping_company(marker.id) {
-                    80.
-                } else {
-                    64.
-                } + self.profile.companions;
-                if !choices.iter().any(|(s, _, _)| *s > score)
-                    && peaceful
-                    && distance > 24.
-                    && v.map.allow_teleport
-                    && v.time_ms >= self.next_teleport
-                    && self.crowd.bands.teleportable(v, marker.position)
-                {
-                    self.next_teleport = v.time_ms + 10000;
-                    decision.goal = Goal::Follow(marker.id);
-                    decision.journey = Some(Journey::Regroup(marker.id));
-                    tracing::info!(
-                        account = v.session.account,
-                        target = marker.id,
-                        world = v.session.world,
-                        reason = "seek_nearby_activity",
-                        "autonomous attended crowd travel"
-                    );
-                    let peer = marker.id;
-                    self.crowd.approach_selected(peer);
-                    return Ok(decision);
-                }
-                choices.push((score, Goal::Follow(marker.id), marker.position));
+            if !choices.iter().any(|(s, _, _)| *s > score)
+                && crowd >= 2
+                && peaceful
+                && health >= 0.75
+                && distance > 24.
+                && v.map.allow_teleport
+                && v.time_ms >= self.next_teleport
+            {
+                tracing::info!(
+                    account = v.session.account,
+                    target = marker.id,
+                    crowd,
+                    distance,
+                    world = v.session.world,
+                    "autonomous gathering teleport"
+                );
+                self.next_teleport = v.time_ms + 10000;
+                decision.goal = Goal::Follow(marker.id);
+                decision.journey = Some(Journey::Regroup(marker.id));
+                return Ok(decision);
             }
+            choices.push((score, Goal::Follow(marker.id), marker.position));
         }
         // Revisiting an emptied room must not compete with progressing through the dungeon.
         if v.map.name == "Realm"
@@ -1644,7 +1744,10 @@ impl Brain {
                     "travel deadline passed".into(),
                 );
             } else if offered.is_some() || matches!(kept, Goal::Explore(..)) {
-                choices.retain(|(_, g, p)| *g == kept || !travel(g, *p));
+                // A worthwhile quest is the reason to travel, not one more journey waiting its turn.
+                choices.retain(|(_, g, p)| {
+                    *g == kept || !travel(g, *p) || Some(g) == realm_quest.as_ref()
+                });
             }
         }
         self.unreachable.retain(|_, until| v.time_ms < *until);
@@ -1725,10 +1828,15 @@ impl Brain {
                 && decision.item.is_none()
                 && v.time_ms >= self.next_teleport
             {
-                self.crowd
-                    .shortcut(v, self.group.as_ref(), destination)
-                    .filter(|p| enemies.iter().all(|e| e.position.distance(p.position) > 3.))
-                    .map(|p| p.id)
+                let clear = |p: Pos| enemies.iter().all(|e| e.position.distance(p) > 3.);
+                if Some(&goal) == realm_quest.as_ref() {
+                    self.crowd.nearest_to(v, destination, clear)
+                } else {
+                    self.crowd
+                        .shortcut(v, destination)
+                        .filter(|p| clear(p.position))
+                }
+                .map(|p| p.id)
             } else {
                 None
             };
@@ -1748,7 +1856,8 @@ impl Brain {
                         target,
                         quest,
                         world = v.session.world,
-                        "autonomous dungeon rusher shortcut"
+                        map = v.map.name,
+                        "autonomous quest shortcut"
                     );
                     None
                 }
@@ -1893,7 +2002,6 @@ impl Brain {
                 }
             }
             if let Goal::Follow(id) = goal
-                && cooperative_goal != Some(id)
                 && v.position.distance(destination) > 8.
                 && v.time_ms >= self.next_teleport
                 && decision.item.is_none()
@@ -1908,39 +2016,14 @@ impl Brain {
                 decision.journey = Some(Journey::Regroup(id));
                 self.next_teleport = v.time_ms + 10000;
             }
-            if !committed
-                && let Goal::Follow(id) = goal
-                && cooperative_goal != Some(id)
-            {
-                if self.goal != goal {
-                    tracing::info!(
-                        account = v.session.account,
-                        target = id,
-                        reason = if self.crowd.keeping_company(id) {
-                            "continue_temporary_outing"
-                        } else {
-                            "seek_nearby_activity"
-                        },
-                        "autonomous crowd approach selected"
-                    );
-                }
-                self.crowd.approach_selected(id);
-            }
-            if self.goal != goal
-                && let Some(peer) = &recent_company
-                && (matches!(goal, Goal::Loot(_))
-                    || cooperative_goal == Some(peer.id) && goal == Goal::Follow(peer.id))
+            if let Goal::Follow(id) = goal
+                && self.goal != goal
             {
                 tracing::info!(
                     account = v.session.account,
-                    target = peer.id,
-                    peer = peer.account,
-                    reason = if matches!(goal, Goal::Loot(_)) {
-                        "useful_loot_pause"
-                    } else {
-                        "visible_catch_up"
-                    },
-                    "autonomous temporary company activity changed"
+                    target = id,
+                    world = v.session.world,
+                    "autonomous follow selected"
                 );
             }
             self.travel = travel(&goal, destination).then(|| match self.travel.take() {
@@ -1996,6 +2079,22 @@ impl Brain {
                         &mut decision,
                     )?;
                 }
+            }
+            // A crowd fighting gods advertises itself, as 2012 trains did with "train here".
+            if let Goal::Fight(id) | Goal::Hunt(id) = decision.goal
+                && v.map.name == "Realm"
+                && v.character.level == 20
+                && decision.chat.is_none()
+                && v.time_ms >= self.next_train_call
+                && enemies.iter().any(|e| {
+                    e.id == id
+                        && content.objects[&e.kind].god
+                        && content.objects[&e.kind].terrain == 1
+                })
+                && self.crowd.near(v, v.position) >= 2
+            {
+                self.next_train_call = v.time_ms + self.rng.gen_range(120_000..300_000);
+                decision.chat = Some("train here");
             }
             return Ok(decision);
         }
@@ -2060,10 +2159,25 @@ fn own(v: &PlayerView, slot: usize) -> Slot {
     }
 }
 type TilePoint = (i16, i16);
+/// Known damaging tiles within `radius` of the player, which a 2012 player sees as lava.
+fn hazards_near<'a>(
+    v: &'a PlayerView,
+    content: &'a Content,
+    radius: i16,
+) -> impl Iterator<Item = TilePoint> + 'a {
+    let (x, y) = tile(v.position);
+    (x - radius..=x + radius)
+        .flat_map(move |x| (y - radius..=y + radius).map(move |y| (x, y)))
+        .filter(|p| {
+            v.tiles
+                .ground(*p)
+                .is_some_and(|g| content.hazards.contains_key(&g))
+        })
+}
 mod movement;
 use movement::Grid;
 
-mod runtime;
+pub(crate) mod runtime;
 pub(crate) const OUTPUT_CAPACITY: usize = 512;
 pub use runtime::start;
 pub fn persona_count() -> usize {

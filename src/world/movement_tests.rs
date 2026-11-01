@@ -298,7 +298,6 @@ fn goblin_birth_budget_survives_escort_deaths_and_parent_loss() {
     for cell in &mut Arc::make_mut(&mut world.map).cells {
         cell.terrain = 10;
     }
-    world.population_regions[10].limit = 100;
     let family = super::population::FAMILIES
         .iter()
         .find(|f| f.leader == 0x614)
@@ -812,4 +811,104 @@ fn server_driven_movement_still_enforces_speed_ingress_and_collision() {
         .move_timed(id, Pos { x: 9.46, y: 8.5 }, 1100, 1100)
         .unwrap();
     assert!((world.players[&id].movement_credit - 0.78).abs() < 0.001);
+}
+
+#[test]
+fn snakes_reproduce_back_to_kithio_density() {
+    let (mut world, _) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 11;
+    }
+    let snakes: Vec<_> = [
+        (24.5, 24.5),
+        (25.5, 24.5),
+        (24.5, 25.5),
+        (23.5, 24.5),
+        (24.5, 23.5),
+    ]
+    .map(|(x, y)| world.place_population_solo(0x602, Pos { x, y }).unwrap())
+    .into();
+    let count = |world: &World| world.actors().filter(|e| e.kind == 0x602).count();
+    let pass = |world: &mut World| {
+        for _ in 0..20 {
+            world.now += 50;
+            world.reproduce_active();
+        }
+    };
+    let cycle = |world: &mut World| {
+        world.now += 60000;
+        pass(world);
+        pass(world);
+    };
+    cycle(&mut world);
+    assert_eq!(count(&world), 5, "densityMax 5 within 10 tiles is full");
+    world.remove_entity(snakes[0]);
+    cycle(&mut world);
+    assert_eq!(count(&world), 5, "survivors refill the missing Snake");
+}
+
+#[test]
+fn oryx_culls_excess_away_from_players() {
+    let (mut world, player) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 11;
+    }
+    world.population_regions[11].target = 2;
+    let near = world.players[&player].pos;
+    let kept = world.place_population_solo(0x602, near).unwrap();
+    for x in [20.5, 23.5, 26.5, 29.5] {
+        world
+            .place_population_solo(0x602, Pos { x, y: 24.5 })
+            .unwrap();
+    }
+    world.cull_population(11);
+    assert_eq!(world.population_count(11), 2);
+    assert!(world.entities.contains_key(&kept));
+}
+
+#[test]
+fn far_npc_clocks_pause_until_a_player_returns() {
+    let (mut world, _) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 11;
+    }
+    let snake = world
+        .place_population_solo(0x602, Pos { x: 30.5, y: 30.5 })
+        .unwrap();
+    let e = world.entities.get_mut(&snake).unwrap();
+    e.activated = Some(0);
+    e.next_shot = 1000;
+    let far = [Pos { x: 4.5, y: 4.5 }];
+    assert!(!world.npc_candidates(&far).contains(&snake));
+    world.now += 5000;
+    assert!(!world.npc_candidates(&far).contains(&snake));
+    assert!(
+        world
+            .npc_candidates(&[Pos { x: 25.5, y: 25.5 }])
+            .contains(&snake)
+    );
+    assert_eq!(world.entities[&snake].next_shot, 6000);
+    assert_eq!(world.entities[&snake].activated, Some(5000));
+}
+
+#[test]
+fn oryx_counts_family_members_once_summoned() {
+    let (mut world, _) = fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 11;
+    }
+    let family = super::population::FAMILIES
+        .iter()
+        .find(|f| f.leader == 0x601)
+        .unwrap();
+    let positions = world
+        .family_layout(Pos { x: 24.5, y: 24.5 }, family, &[])
+        .unwrap();
+    world.place_camp(family, positions).unwrap();
+    assert_eq!(world.oryx_counted(11).len(), 1, "inactive leader only");
+    let leader = world.camp_members(0).find(|e| e.kind == 0x601).unwrap().id;
+    world.entities.get_mut(&leader).unwrap().activated = Some(0);
+    assert_eq!(world.oryx_counted(11).len(), 3, "active leader summoned");
+    world.remove_entity(leader);
+    assert_eq!(world.oryx_counted(11).len(), 2, "orphans still count");
 }

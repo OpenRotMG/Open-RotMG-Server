@@ -95,3 +95,21 @@ async fn community_schema17_migrates_canonical16_and_committed_reopen_preserves_
     );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }
+
+#[tokio::test]
+async fn persona_alt_is_added_only_while_no_living_level_twenty_exists() {
+    // Live Oct 2026: 37 of 52 online personas had no living level 20 left after event deaths.
+    let content = Content::load(Path::new("data")).unwrap();
+    let (path, account) = fresh_schema_account(&content).await;
+    let store = Store::open(&path, &content).unwrap();
+    let mut alt = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+    alt.level = 20;
+    let id = store
+        .persona_alt(account, alt.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(store.persona_alt(account, alt).await.unwrap().is_none());
+    let added = store.load(account, id).await.unwrap();
+    assert!(added.alive && added.level == 20 && added.account == account);
+}

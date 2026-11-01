@@ -76,8 +76,8 @@ impl World {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         ensure!(
-            self.summon_count() + self.lab_tosses.len() < 256,
-            "Lab shared summon budget exhausted"
+            self.summon_count() + self.lab_tosses.len() < self.summon_limit(),
+            SummonBudget("Lab shared summon budget exhausted".into())
         );
         let id = self.spawn_entity(kind, position, vec![])?;
         // TossObject's admitted 1500ms landing survives its thrower's death.
@@ -212,7 +212,7 @@ impl World {
                         self.actors().filter(|e| e.parent == Some(id)).count()
                             + self.lab_tosses.iter().filter(|t| t.owner == id).count()
                             < 128,
-                        "Dr Terrible owned summon budget exhausted"
+                        SummonBudget("Dr Terrible owned summon budget exhausted".into())
                     );
                     ensure!(self.walkable(position), "Lab toss target blocked");
                     self.telegraph_throw(id, position, 0xffffbf00);
@@ -479,11 +479,10 @@ impl World {
             .map(|p| p.character.account)
             .collect();
         // The wiki guarantees at least one DEF; retain Lab's per-contributor allocation as reconstruction: https://wikiwiki.jp/rmd/::cmd/source?page=Horrific+Creation
-        let potion = match boss.kind {
-            lab::BOSS => 0xa35,
-            lab::CREATION => 0xa20,
-            _ => bail!("lab loot requested for {:#x}", boss.kind),
-        };
+        let potion = i32::from(
+            crate::loot::participation_reward(boss.kind)
+                .with_context(|| format!("lab loot requested for {:#x}", boss.kind))?,
+        );
         for account in owners {
             let mut rewards: Vec<_> = crate::loot::rewards(&self.content, boss.kind, &mut self.rng)
                 .into_iter()

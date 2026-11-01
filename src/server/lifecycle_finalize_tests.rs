@@ -520,3 +520,56 @@ async fn failed_native_command_does_not_fail_shutdown() {
     drop(socket);
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_command_keeps_delivering_queued_output() {
+    let (dir, a) = account_actions::tests::fixture();
+    a.world.clock.set_paused(true);
+    let (port, server) = socket_server(&a).await;
+    let account = a.store.list("slow-command".into()).await.unwrap().id;
+    let ch = a
+        .store
+        .create(account, a.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let mut socket = NativeSocket::connect(port, &a.origin).await;
+    let id = socket_load(&mut socket, &dir, "slow-command", ch.id).await;
+    let (out, pos) = a
+        .world
+        .for_player(id)
+        .call(move |w| {
+            let pos = w.accept_native_move_for_test(id);
+            Ok((w.players[&id].tx.as_ref().unwrap().packets.clone(), pos))
+        })
+        .await
+        .unwrap();
+    let world = a.world.for_player(id);
+    let busy = tokio::spawn(async move {
+        world
+            .call(|_| {
+                std::thread::sleep(Duration::from_millis(1500));
+                Ok(())
+            })
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut body = Writer::new();
+    body.i32(0).i32(1).f32(pos.x).f32(pos.y).i16(0);
+    socket
+        .send(Packet {
+            id: wire::MOVE,
+            body: body.0,
+        })
+        .await;
+    for nonce in 0..200 {
+        out.try_send(Packet {
+            id: wire::PING,
+            body: i32::to_be_bytes(nonce).to_vec(),
+        })
+        .expect("outbound queue filled while a command waited on its world");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    busy.await.unwrap().unwrap();
+    drop(socket);
+    server.abort();
+}

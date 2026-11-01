@@ -106,13 +106,17 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     for (cx, cy) in hosts.into_iter().take(gods) {
         place(&mut map, cx + 2, cy - 2, 0xd05);
     }
+    let mut ordinary_room = 0;
     for (room, &(cx, cy)) in centers.iter().enumerate() {
         if room == 0 || room == boss {
             continue;
         }
+        // Reconstructed rotation reaches all five kinds without adding spawns or consuming RNG.
         for (n, &(dx, dy)) in [(-2, 0), (2, 1), (0, 2), (-1, -2)].iter().enumerate() {
-            place(&mut map, cx + dx, cy + dy, SPRITES[n % SPRITES.len()]);
+            let kind = SPRITES[(ordinary_room + n) % SPRITES.len()];
+            place(&mut map, cx + dx, cy + dy, kind);
         }
+        ordinary_room += 1;
         for (dx, dy) in [(-3, -3), (3, -3), (-3, 3), (3, 3)] {
             place(
                 &mut map,
@@ -215,7 +219,52 @@ fn place(map: &mut Map, x: i32, y: i32, kind: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::VecDeque;
+    use sha2::{Digest, Sha256};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+    #[test]
+    fn ordinary_sprite_roster_preserves_population_and_layout() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let mut baseline = Sha256::new();
+        let mut missing = Vec::new();
+        for seed in (0..32).chain([12351, u64::MAX]) {
+            let mut map = generate(&content, seed).unwrap();
+            let (sx, sy) = map.spawns[0];
+            let mut rooms = BTreeMap::<Point, Vec<Point>>::new();
+            let mut roster = BTreeSet::new();
+            for (i, cell) in map.cells.iter_mut().enumerate() {
+                if let Some(kind @ 0xd00..=0xd04) = cell.object {
+                    roster.insert(kind);
+                    let (x, y) = (i as i32 % map.width, i as i32 / map.width);
+                    let center = |coordinate: i32, spawn: f32| {
+                        spawn as i32
+                            + (coordinate - spawn as i32 + PITCH / 2).div_euclid(PITCH) * PITCH
+                    };
+                    let (cx, cy) = (center(x, sx), center(y, sy));
+                    rooms.entry((cx, cy)).or_default().push((x - cx, y - cy));
+                    cell.object = Some(0xd00);
+                }
+            }
+            assert!((6..=12).contains(&rooms.len()), "seed {seed}");
+            for offsets in rooms.values_mut() {
+                offsets.sort();
+                assert_eq!(*offsets, [(-2, 0), (-1, -2), (0, 2), (2, 1)], "seed {seed}");
+            }
+            if roster != BTreeSet::from(SPRITES) {
+                missing.push((seed, roster));
+            }
+            baseline.update(serde_json::to_vec(&map).unwrap());
+        }
+        // Only ordinary Sprite identities may differ from the unmodified generator.
+        assert_eq!(
+            format!("{:x}", baseline.finalize()),
+            "14c4b0082ac4e7b62b089e6a4ed5e95b3f3b437a6e3aaa188ff61c85dcfa020b"
+        );
+        assert!(
+            missing.is_empty(),
+            "missing ordinary Sprite kinds: {missing:?}"
+        );
+    }
 
     #[test]
     fn sprite_platforms_remain_connected_through_clearable_trees() {

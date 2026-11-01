@@ -51,8 +51,8 @@ impl World {
                     + self.named_births.len()
                     + self.abyss_pending_count()
                     + positions.len()
-                    <= 256,
-                "Spider Den summon budget exhausted"
+                    <= self.summon_limit(),
+                SummonBudget("Spider Den summon budget exhausted".into())
             );
             ensure!(
                 positions.iter().all(|(_, pos)| self.walkable(*pos)),
@@ -111,8 +111,12 @@ impl World {
             })
             .map(|p| p.character.account)
             .collect();
+        let item = i32::from(
+            crate::loot::participation_reward(boss.kind)
+                .context("Arachna participation reward missing")?,
+        );
         for account in owners {
-            self.loot_bags(boss.pos, Some(account), &[0x707])?;
+            self.loot_bags(boss.pos, Some(account), &[item])?;
         }
         Ok(())
     }

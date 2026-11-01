@@ -108,6 +108,9 @@ def incident(line, pid):
     span = sample['execution']
     if not (span['tid'] > 0 and 0 < span['start_ns'] <= span['end_ns'] <= time.monotonic_ns()):
         raise RuntimeError('Invalid incident execution interval')
+    # Request waits are consequences of slow ticks; capturing them aimed the recorder at the wrong thread.
+    if sample['kind'] != 'tick':
+        return None
     return {'logged_at': record['timestamp'], 'world': fields.get('world'), 'sample': sample}
 
 
@@ -163,7 +166,8 @@ def run(service, root):
     ack_fd = os.open(ack, os.O_RDWR | os.O_NONBLOCK)
     args = ['perf', 'record', '-e', 'cpu-clock:u', '-F', '99', '--clockid', 'mono',
             '--call-graph', 'dwarf,8192', '-m', '1M', '--switch-output=signal', '--switch-max-files=12',
-            '--no-no-buildid', '--buildid-all', '--no-buildid-cache',
+            # Post-switch build-id scans keep every rotated segment mapped, so unlinked files filled the disk.
+            '--buildid-mmap',
             '--control', f'fifo:{control},{ack}', '-p', str(pid), '-o', str(work / 'perf.data')]
     stopped = False
     stop_deadline = None

@@ -362,3 +362,11 @@ fn buy_order_is_answered_from_spare_stock_outside_own_quote() {
     assert_eq!(reply.text, format!("nty {}", wts(&counter, &c)));
     assert!(m.message_current(&reply, &v, &c, None).unwrap());
 }
+
+#[test]
+fn bots_never_offer_ordinary_gear_as_payment_for_gear() {
+    // Live: a bot offered 2 Rings of Superior Health for a Ring of Paramount Health; the footage only shows gear sold for potions or money items.
+    let c = Content::load(Path::new("data")).unwrap();
+    assert!(bounded_quote(&goods(0xabd, 8), &goods(0xac5, 1), &c).is_none());
+    assert!(bounded_quote(&goods(0xabd, 1), &goods(SPEED, 8), &c).is_some());
+}

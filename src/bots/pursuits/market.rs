@@ -113,6 +113,9 @@ pub(crate) struct Market {
     pub(in crate::bots) name: String,
     #[serde(skip)]
     pub(in crate::bots) trader: bool,
+    /// This Nexus visit was made to trade, so it is not a passer-by's coin flip.
+    #[serde(skip)]
+    pub(in crate::bots) sought: bool,
     #[serde(skip)]
     pub(in crate::bots) next_message_ms: u64,
     #[serde(skip)]
@@ -894,6 +897,33 @@ impl Market {
         }
         Ok(())
     }
+    /// A veteran carrying priced spares worth a Defense potion, with an exchange of its own in mind, goes to the Nexus.
+    pub(in crate::bots) fn trip_due(
+        &self,
+        v: &PlayerView,
+        c: &Content,
+        future: Option<u16>,
+    ) -> Result<bool> {
+        if v.character.level < 20 || self.locked() || !super::settled(v) {
+            return Ok(false);
+        }
+        if self.quote(v, c, future)?.is_none() {
+            return Ok(false);
+        }
+        let carried: Vec<i32> = v.character.items[4..]
+            .iter()
+            .copied()
+            .filter(|k| *k >= 0)
+            .collect();
+        let mut units = 0;
+        for kind in carried.iter().copied().collect::<BTreeSet<_>>() {
+            let count = carried.iter().filter(|k| **k == kind).count() as u64;
+            if let Ok(range) = c.item_values.quote_range(kind) {
+                units += range.min * u64::from(self.spare(v, c, future, kind)?).min(count);
+            }
+        }
+        Ok(units >= 12)
+    }
     fn end_session(&mut self, v: &PlayerView, reason: &str) {
         self.preparing = false;
         if let Some(s) = self.session.take() {
@@ -1276,13 +1306,20 @@ impl Market {
         if self.session.is_none() && !self.preparing {
             self.session_used = true;
             let purposeful = self.target.is_some();
-            let admitted = purposeful || self.trader || rng.gen_ratio(1, 5);
+            let admitted = purposeful || self.trader || self.sought || rng.gen_ratio(1, 5);
+            let sought = std::mem::take(&mut self.sought);
             tracing::info!(
                 account = v.session.account,
                 admitted,
-                probability = if purposeful || self.trader { 1.0 } else { 0.2 },
+                probability = if purposeful || self.trader || sought {
+                    1.0
+                } else {
+                    0.2
+                },
                 reason = if purposeful {
                     "affordable_goal_exchange"
+                } else if sought {
+                    "came_to_trade_loot"
                 } else if admitted {
                     "visit_admitted"
                 } else {
@@ -1487,7 +1524,19 @@ fn fair(q: &[Goods; 2], c: &Content) -> bool {
         Ok(true)
     )
 }
+/// What 2012 traders paid with: permanent stat potions, plus Paramount Defense rings, Resurrection
+/// amulets and Wine Cellar Incantations, the only gear quoted like money in the trade footage.
+fn money(c: &Content, kind: i32) -> bool {
+    matches!(kind, 0xac0 | 0xb3e | 0x722)
+        || c.objects
+            .get(&(kind as u16))
+            .is_some_and(|o| o.stat_increase.is_some())
+}
 fn bounded_quote(give: &Goods, want: &Goods, c: &Content) -> Option<[Goods; 2]> {
+    // Nobody offered ordinary gear as payment for other gear.
+    if !money(c, give.kind) && !money(c, want.kind) {
+        return None;
+    }
     // Zero spread: smallest whole supplied basket, then smallest requested basket whose
     // researched intervals overlap. No midpoint, fractional item or outside-range rounding.
     for supplied in 1..=give.quantity.min(8) {

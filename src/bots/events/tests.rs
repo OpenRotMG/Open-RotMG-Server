@@ -141,6 +141,8 @@ fn aftermath_quiet_no_audience_hazards_and_useful_loot_precede_idle_reports() {
         amplitude: 0.,
         frequency: 0.,
         passes_cover: false,
+        damage: 0,
+        armor_piercing: false,
     });
     assert!(decide(&mut e, &v, &c, p).is_none());
     v.projectiles.clear();

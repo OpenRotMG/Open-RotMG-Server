@@ -71,6 +71,20 @@ async fn fill(
             continue;
         }
         let stars = if let Some(account) = app.store.shore_account(profile.identity.into()).await? {
+            // Live: a session whose completion failed stays fenced; admitting it again crashed the worker.
+            if app
+                .owners
+                .lock()
+                .expect("ownership registry poisoned")
+                .contains_key(&account)
+            {
+                tracing::warn!(
+                    account,
+                    name = profile.name,
+                    "persona account still held by an earlier session; remaining offline"
+                );
+                continue;
+            }
             app.store.account_stars(account).await?
         } else {
             profile.stars
@@ -277,7 +291,11 @@ pub(super) fn may_finish(app: &App, brain: &mut Brain, v: &PlayerView) -> bool {
     let mut society = app.society.lock().expect("adventure registry poisoned");
     brain.group = society.group(v.session.account, v.elapsed_ms);
     brain.offered = society.outgoing(v.session.account, v.elapsed_ms);
-    can_finish(brain, v)
+    // Live: a train fell apart when a member logged off mid-fight; finish the fight first, though not forever.
+    let since = *brain.finishing_since.get_or_insert(v.time_ms);
+    let fighting =
+        matches!(brain.goal, Goal::Fight(_) | Goal::Hunt(_)) && brain.crowd.near(v, v.position) > 0;
+    can_finish(brain, v) && (!fighting || v.time_ms.saturating_sub(since) >= 180_000)
 }
 
 fn can_finish(brain: &Brain, v: &PlayerView) -> bool {

@@ -304,7 +304,7 @@ impl World {
             .sum()
     }
     fn abyss_budget_available(&self) -> bool {
-        self.summon_occupancy() < 256
+        self.summon_occupancy() < self.summon_limit()
     }
     pub(super) fn abyss_orphan(e: &Entity) -> bool {
         matches!(e.abyss, Some(Runtime::Protector { owner, orphan: true }) if e.kind == 0x908 && e.parent == Some(owner) && e.orbit.is_none() && e.goal.is_none_or(|goal| goal.distance(e.pos) == 0.))

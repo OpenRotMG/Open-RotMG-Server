@@ -32,11 +32,20 @@ pub(super) fn start(slot: &Arc<Slot>, execution: Execution) -> Result<()> {
                         let run=!world.clock.paused();
                         if run {
                             let _context=crate::supervision::world(id,world.tick+1);
-                            world.performance.borrow_mut().record("scheduling_lateness",scheduled.elapsed());
-                            let started=std::time::Instant::now();
+                            let lateness=scheduled.elapsed();
+                            world.performance.borrow_mut().record("scheduling_lateness",lateness);
+                            let waited=crate::performance::cpu_wait();
+                            let measure=crate::performance::Measure::start();
                             world.step();
-                            let elapsed_us=started.elapsed().as_micros() as u64;
-                            if elapsed_us>25_000 { tracing::warn!(world=id,tick=world.tick,elapsed_us,"slow world simulation tick"); }
+                            let step=measure.finish();
+                            let wait=crate::performance::cpu_wait().zip(waited).map(|(end,start)|end.checked_sub(start).expect("scheduler wait regressed"));
+                            if let Some(wait)=wait { world.performance.borrow_mut().record("cpu_wait",wait); }
+                            if lateness+step.wall>crate::performance::TICK_BUDGET {
+                                let (counter,miss)=crate::performance::tick_miss(lateness,step,wait);
+                                let mut performance=world.performance.borrow_mut();
+                                performance.count(counter,1);
+                                tracing::warn!(target:"lag",world=id,tick=world.tick,miss=%miss,phases=%performance.slowest_phases(),"tick deadline missed");
+                            }
                             world.report_performance(id);
                         }
                         Box::new(move||{let _=finished.send(run);}) as crate::world::Reply

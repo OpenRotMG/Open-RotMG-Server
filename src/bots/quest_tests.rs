@@ -18,12 +18,13 @@ fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
         nearest: enemies.last().copied(),
         quarry: enemies.last().copied(),
         enemies,
-        perception: combat::Perception::attend(v, &brain.mind.cognition, false),
+        perception: combat::Perception::of(&brain.mind.cognition),
         inspecting: false,
         range: 6.,
         passes_cover: false,
         health: v.character.hp as f32 / v.character.stats[0] as f32,
         threatened: false,
+        hit: 0,
         retreat: false,
         outmatched: false,
         grid: Arc::new(Grid::terrain(v)),
@@ -205,6 +206,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
         tiles: Arc::new(tiles),
         player_markers: vec![],
         projectiles: vec![],
+        throws: vec![],
         dungeon_entries: vec![],
         objects: vec![VisibleObject {
             id: 2,
@@ -594,6 +596,8 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
         amplitude: 0.,
         frequency: 0.,
         passes_cover: false,
+        damage: 0,
+        armor_piercing: false,
     });
     let mut brain = Brain::new(ARCHETYPES[1], &v);
     let d = brain.decide(&v, &c).unwrap();
@@ -602,4 +606,201 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
         d.journey.is_none(),
         "a visible supply is not a reason to leave"
     );
+}
+
+#[test]
+fn explorer_joins_a_crowded_realm_event_by_teleporting_outside_the_fight() {
+    // Live: level 20s kept exploring past their quest and routed around any event they could not solo, even in a crowd.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.objects[0].kind = 0xd50;
+    v.objects[0].hp = 70000;
+    v.objects[0].max_hp = 70000;
+    v.player_markers = (3..7)
+        .map(|id| PlayerMarker {
+            id,
+            account: id,
+            name: format!("P{id}"),
+            position: Pos {
+                x: 8.5 + id as f32,
+                y: 85.5,
+            },
+        })
+        .collect();
+    v.player_markers.push(PlayerMarker {
+        id: 7,
+        account: 7,
+        name: "Outside".into(),
+        position: Pos { x: 10.5, y: 66.5 },
+    });
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.goal = Goal::Explore(20, 10);
+    brain.travel = Some((Goal::Explore(20, 10), u64::MAX));
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    assert!(
+        matches!(d.journey, Some(Journey::Regroup(7))),
+        "{:?}",
+        d.journey
+    );
+    // Waiting out the teleport cooldown, the bot walks toward the event instead of around it.
+    v.tick += 10;
+    v.time_ms += 100;
+    v.elapsed_ms += 100;
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    assert!(
+        d.movement.is_some_and(|m| m.y > v.position.y),
+        "{:?}",
+        d.movement
+    );
+}
+
+#[test]
+fn arrow_follower_seeds_an_uncrowded_realm_event() {
+    // Live: Lord of the Lost Lands was skipped 16 times in 25 minutes because nobody would start the crowd.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.objects[0].kind = 0xd50;
+    v.objects[0].hp = 70000;
+    v.objects[0].max_hp = 70000;
+    let mut profile = ARCHETYPES[0];
+    profile.role = persona::Role::Newbie;
+    let d = Brain::new(profile, &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    assert!(
+        d.movement.is_some_and(|m| m.y > v.position.y),
+        "{:?}",
+        d.movement
+    );
+}
+
+#[test]
+fn veteran_carrying_tradeable_loot_travels_to_the_nexus_to_trade_it() {
+    // Live: 1 bot in 58 wanted anything, and loot was only offered when banking happened to pass the Nexus.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.objects.clear();
+    let cap = c.classes[&v.character.class].caps[2];
+    v.character.base_stats[2] = cap;
+    v.character.stats[2] = cap;
+    v.character.items[4] = 0xa1f;
+    v.character.items[5] = 0xa1f;
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(
+        matches!(d.journey, Some(Journey::Nexus)),
+        "{:?} {:?}",
+        d.goal,
+        d.journey
+    );
+    assert_eq!(brain.plan.owner(), Some(plan::Owner::Trade));
+    assert!(brain.mind.market.sought);
+}
+
+#[test]
+fn bot_escapes_a_volley_that_would_kill_it_before_its_health_looks_low() {
+    // Live: Cube God volleys took 100-300 HP at once, so escaping below a quarter of max health came too late.
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.objects.clear();
+    v.character.hp = 300;
+    v.projectiles.push(crate::world::view::VisibleProjectile {
+        owner: 2,
+        id: 1,
+        start: Pos { x: 13.5, y: 10.5 },
+        position: Pos { x: 11., y: 10.5 },
+        angle: std::f32::consts::PI,
+        speed: 100.,
+        lifetime_ms: 2000.,
+        amplitude: 0.,
+        frequency: 0.,
+        passes_cover: false,
+        damage: 400,
+        armor_piercing: false,
+    });
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(matches!(d.journey, Some(Journey::Nexus)), "{:?}", d.goal);
+    assert!(
+        brain
+            .plan
+            .events
+            .iter()
+            .any(|e| e.reason == "lethal_volley")
+    );
+}
+
+#[test]
+fn bot_standing_in_lava_steps_out_and_dodges_a_shown_bomb() {
+    // Live: lava killed 16 and Medusa 17 level 20s a day; neither the ground nor the bomb's landing circle was avoided.
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.objects.clear();
+    let lava = |x: i16, y: i16| (8..=11).contains(&x) && (9..=11).contains(&y);
+    let geometry = crate::navigation::Geometry::new(
+        (128, 128),
+        (0..128 * 128)
+            .map(|i| {
+                if lava((i % 128) as i16, (i / 128) as i16) {
+                    0xf4
+                } else {
+                    1
+                }
+            })
+            .collect(),
+        &BTreeMap::from([(1, 1.), (0xf4, 0.666)]),
+    );
+    v.tiles = Arc::new(crate::navigation::Tiles::new(
+        geometry,
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
+    let out = d.movement.expect("movement out of lava");
+    assert!(!lava(tile(out).0, tile(out).1), "{out:?}");
+    assert!(out.distance(v.position) <= 2., "{out:?}");
+
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.objects.clear();
+    v.throws.push(crate::world::view::VisibleThrow {
+        position: Pos { x: 11.5, y: 10.5 },
+        radius: 4.,
+        damage: 150,
+        lands_ms: v.time_ms + 1000,
+    });
+    let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Dodge);
+    assert!(
+        d.movement.is_some_and(|m| m.x < v.position.x),
+        "{:?}",
+        d.movement
+    );
+}
+
+#[test]
+fn level_twenty_passes_lowland_trash_on_the_way_to_its_arrow() {
+    // Live: after following their arrows, level 20s still made 66% of their kills on lowland mobs met on the way.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.objects.push(VisibleObject {
+        id: 3,
+        account: None,
+        kind: 0x617,
+        name: "Hobbit Mage".into(),
+        position: Pos { x: 13.5, y: 10.5 },
+        hp: 100,
+        max_hp: 100,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    });
+    let d = Brain::new(ARCHETYPES[0], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(2));
+    v.character.level = 12;
+    let d = Brain::new(ARCHETYPES[0], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Fight(3));
 }
