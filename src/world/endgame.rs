@@ -465,7 +465,8 @@ impl Directory {
                     ] {
                         world.oryx_notice(text);
                     }
-                    let quake = cooperative::effect(13, -1, Pos { x: 0., y: 0. });
+                    // The selected client starts camera jitter at 14; 13 needs a target: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/net/_1f.as#L900-L908
+                    let quake = cooperative::effect(14, -1, Pos { x: 0., y: 0. });
                     for p in world.players.values() {
                         send(p, wire::SHOW_EFFECT, quake.clone());
                     }
@@ -1191,13 +1192,25 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     directory.endgame_step(&[-3]);
     let notices: Vec<_> = std::iter::from_fn(|| inbox.try_recv().ok()).collect();
     assert_eq!(notices.iter().filter(|p| p.id == wire::TEXT).count(), 3);
-    assert_eq!(
-        notices.iter().filter(|p| p.id == wire::SHOW_EFFECT).count(),
-        1
-    );
+    let effects: Vec<_> = notices
+        .iter()
+        .filter(|p| p.id == wire::SHOW_EFFECT)
+        .collect();
+    assert_eq!(effects.len(), 1);
+    let mut effect = wire::Reader::new(&effects[0].body);
+    assert_eq!(effect.u8().unwrap(), 14, "selected-client camera jitter");
+    assert_eq!(effect.i32().unwrap(), -1);
+    for _ in 0..4 {
+        assert_eq!(effect.f32().unwrap(), 0.);
+    }
+    assert_eq!(effect.i32().unwrap(), -1);
+    effect.done().unwrap();
     assert!(directory.forced_transfer(player).unwrap().is_none());
+    directory.endgame_step(&[-3]);
+    assert!(inbox.try_recv().is_err(), "earthquake must start only once");
     directory.tick = 2559;
     directory.endgame_step(&[-3]);
+    assert!(inbox.try_recv().is_err());
     assert!(directory.endgame.realms[&-3].castle.is_none());
     directory.tick = 2560;
     for _ in 0..1000 {
