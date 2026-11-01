@@ -148,8 +148,14 @@ impl World {
             .players
             .get(&target)
             .ok_or_else(|| controller("Teleport target is not a live player in this world."))?;
+        // Progress reserves character writes, not the position read by Teleport: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.cs#L346-L379
         ensure!(
-            ready(q),
+            q.active()
+                && q.character.hp > 0
+                && (!q.pending || q.progress_started)
+                && q.tx
+                    .as_ref()
+                    .is_none_or(|tx| !tx.lost.borrow().is_some() && !tx.packets.is_closed()),
             controller("Teleport target is busy, dead, departing or quarantined.")
         );
         ensure!(!q.paused, controller("Cannot teleport to a paused player."));

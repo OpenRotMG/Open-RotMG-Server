@@ -22,6 +22,8 @@ pub(crate) mod gold;
 mod guilds;
 mod hiscores;
 mod legends;
+#[cfg(test)]
+mod legends_glow_tests;
 pub use guilds::{Guild, GuildAction, Membership as GuildMembership};
 pub(crate) mod pictures;
 

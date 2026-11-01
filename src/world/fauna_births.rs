@@ -17,11 +17,8 @@ impl World {
         let pos = e.pos;
         let camp = e.camp.context("fauna wave lacks an owned family")?;
         if kind == 0x950 {
-            let count = self
-                .entities
-                .values()
-                .filter(|e| e.camp == Some(camp) && e.kind == 0x951)
-                .count();
+            // Camp members always own their slots; scanning every entity here cost 7-9 ms per tick per owner.
+            let count = self.camp_members(camp).filter(|e| e.kind == 0x951).count();
             let pending = self.fauna_births.iter().any(|b| b.camp == camp);
             if e.stage.is_none()
                 || self.now >= e.next_aux

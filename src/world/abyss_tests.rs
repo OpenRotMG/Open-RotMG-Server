@@ -59,3 +59,21 @@ fn abyss_optional_rooms_restore_locally_without_main_completion() {
     }
     assert_eq!(counts, BTreeSet::from([0, 1, 2, 3]));
 }
+
+#[test]
+fn abyss_boss_index_follows_malphas() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut w = World::new(
+        content.clone(),
+        Arc::new(abyss::generate(&content, 0).unwrap()),
+    )
+    .unwrap();
+    let boss = w.entities.values().find(|e| e.kind == MALPHAS).unwrap().id;
+    assert_eq!(w.abyss_boss_ids, BTreeSet::from([boss]));
+    let pos = w.entities[&boss].pos;
+    let spawned = w.spawn_entity(MALPHAS, pos, vec![]).unwrap();
+    assert_eq!(w.abyss_boss_ids, BTreeSet::from([boss, spawned]));
+    w.remove_entity(boss);
+    assert_eq!(w.abyss_boss_ids, BTreeSet::from([spawned]));
+    assert_eq!(w.abyss_pending_count(), 0);
+}
