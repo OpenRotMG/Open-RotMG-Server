@@ -432,7 +432,6 @@ impl World {
                         && dungeon_entry::observing(p)
                         && w.owner.is_none()
                         && w.guild.is_none()
-                        && visible.contains(&e.portal)
                         && p.known.contains(&e.portal)
                         && w.entities.get(&e.portal).is_some_and(|portal| {
                             portal.published
