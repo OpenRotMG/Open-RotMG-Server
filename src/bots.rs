@@ -439,8 +439,11 @@ impl Brain {
             .objects
             .iter()
             .filter(|o| o.blocks && !content.objects[&o.kind].enemy)
-            .map(|o| (tile(o.position), content.objects[&o.kind].full_occupy))
-            .collect();
+            .fold(BTreeMap::new(), |mut observed, o| {
+                *observed.entry(tile(o.position)).or_insert(false) |=
+                    content.objects[&o.kind].full_occupy;
+                observed
+            });
         // Only nearby observed absence clears remembered cover, not an out-of-view removal.
         self.cover.retain(|point, _| {
             center(*point).distance(v.position) >= 19. || observed.contains_key(point)

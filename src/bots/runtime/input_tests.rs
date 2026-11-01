@@ -153,12 +153,18 @@ fn full_occupy_wall_route_reaches_goal_through_ordinary_held_inputs() {
 }
 
 #[test]
-fn full_occupy_half_cell_boundaries_and_remembered_cover_match_observations() {
+fn full_occupy_half_cell_boundaries_and_mixed_cover_match_observations() {
     let (content, mut view) = super::super::quest_tests::fixture();
     let wall = &mut view.objects[0];
     wall.kind = 0x120;
     wall.position = Pos { x: 12.5, y: 10.5 };
     wall.blocks = true;
+    let mut tree = super::super::quest_tests::fixture().1.objects.remove(0);
+    tree.id = 3;
+    tree.kind = 0x100;
+    tree.position = wall.position;
+    tree.blocks = true;
+    view.objects.push(tree);
     let mut brain = Brain::new(ARCHETYPES[1], &view);
     let grid = brain.navigation_grid(&view, &content, &[]);
     for (from, to) in [
@@ -176,6 +182,7 @@ fn full_occupy_half_cell_boundaries_and_remembered_cover_match_observations() {
     assert!(grid.segment(Pos { x: 11.5, y: 9.5 }, Pos { x: 13.5, y: 9.5 }));
     assert!(grid.segment(Pos { x: 11.5, y: 9.5 }, Pos { x: 11.5, y: 11.5 }));
     view.position = Pos { x: 50.5, y: 50.5 };
+    let tree = view.objects.pop().unwrap();
     view.objects.clear();
     assert!(
         brain
@@ -185,10 +192,6 @@ fn full_occupy_half_cell_boundaries_and_remembered_cover_match_observations() {
         "out-of-view cover retains its observed clearance"
     );
     view.position = Pos { x: 10.5, y: 10.5 };
-    let mut tree = super::super::quest_tests::fixture().1.objects.remove(0);
-    tree.kind = 0x100;
-    tree.position = Pos { x: 12.5, y: 10.5 };
-    tree.blocks = true;
     view.objects.push(tree);
     let ordinary = brain.navigation_grid(&view, &content, &[]);
     assert!(
