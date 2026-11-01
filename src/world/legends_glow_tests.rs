@@ -2,7 +2,7 @@ use super::*;
 use crate::store::Store;
 
 fn fields(status: &[u8]) -> BTreeMap<u8, i32> {
-    let mut r = Reader::new(status);
+    let mut r = wire::Reader::new(status);
     r.i32().unwrap();
     r.f32().unwrap();
     r.f32().unwrap();
