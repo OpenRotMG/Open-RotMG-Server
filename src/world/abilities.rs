@@ -130,6 +130,8 @@ impl World {
             cooldown_ms = item.cooldown_ms,
             ability_clock_ms = now,
             simulation_time_ms = self.now,
+            target_x = pos.x,
+            target_y = pos.y,
             "ability activated"
         );
         Ok(())
@@ -153,6 +155,9 @@ impl World {
             .collect()
     }
     fn ability_enemies(&self, pos: Pos, radius: f32) -> Vec<i32> {
+        self.ability_targets(pos, radius, &[])
+    }
+    fn ability_targets(&self, pos: Pos, radius: f32, zero_hp_kinds: &[u16]) -> Vec<i32> {
         let mut ids: Vec<_> = self
             .near_entities(
                 Pos {
@@ -165,7 +170,9 @@ impl World {
                 },
             )
             .filter(|e| {
-                e.hp > 0 && self.content.objects[&e.kind].enemy && e.pos.distance(pos) <= radius
+                (e.hp > 0 || e.hp == 0 && zero_hp_kinds.contains(&e.kind))
+                    && self.content.objects[&e.kind].enemy
+                    && e.pos.distance(pos) <= radius
             })
             .map(|e| e.id)
             .collect();
@@ -353,7 +360,8 @@ impl World {
                         },
                         0xffffffff,
                     );
-                    for target in self.ability_enemies(pos, 3.) {
+                    // Zero-HP edge turrets are indestructible, not dead: https://anticosmic.blogspot.com/2013/02/the-mystic-way.html
+                    for target in self.ability_targets(pos, 3., &[0xd31, 0xd32, 0xd33]) {
                         let flags = self.entities[&target].conditions(self.now);
                         if flags
                             & (crate::condition::bit(crate::condition::STASIS)
