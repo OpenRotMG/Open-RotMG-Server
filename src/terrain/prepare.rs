@@ -15,11 +15,7 @@ const GROUNDS: &str = "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9
 
 const SOURCE_LOCAL_IDENTITIES: [(&str, &str, usize); 10] = [
     ("classic-world-04-reconstruction", WORLD04_SOURCE, 2000),
-    (
-        "classic-world-08-reconstruction",
-        "d0a544f4943991aa1265b7ebdfecb3a846215f297c1317ffb718ddd89e8d92bc",
-        2000,
-    ),
+    (WORLD08_ID, WORLD08_SOURCE, 2000),
     (WORLD10_ID, WORLD10_SOURCE, 2000),
     (WORLD13_ID, WORLD13_SOURCE, 2000),
     (WORLD06_ID, WORLD06_SOURCE, 2100),
@@ -63,6 +59,7 @@ impl ReviewedRecipe {
                 WORLD05_ID
                     | WORLD06_ID
                     | WORLD07_ID
+                    | WORLD08_ID
                     | WORLD09_ID
                     | WORLD10_ID
                     | WORLD11_ID
@@ -178,6 +175,11 @@ const WORLD07_SOURCE: &str = "f449de66330c98caf611c8575a2d731baa27b47a2eac96d043
 const WORLD07_LAVA_SUPPORT: &str =
     "dba3f1d3c9cc1c34f7d551e1455aff4720979901034a82cfacaf332e1e74e110";
 
+pub(super) const WORLD08_ID: &str = "classic-world-08-reconstruction";
+const WORLD08_SOURCE: &str = "d0a544f4943991aa1265b7ebdfecb3a846215f297c1317ffb718ddd89e8d92bc";
+const WORLD08_LAVA_SUPPORT: &str =
+    "f835a0febef15c2f776f49923bb42e25ed1e5c8fc3c54c816f0c98931230c30b";
+
 pub(super) const WORLD09_ID: &str = "classic-world-09-reconstruction";
 const WORLD09_SOURCE: &str = "726aa16890f7caaa73dc642b64901e94ed4f44cb974e5001c98897f1b8a89736";
 const WORLD09_LAVA_SUPPORT: &str =
@@ -254,6 +256,7 @@ impl ScopedLava {
         let world05 = policy.get("world05_lava").is_some();
         let world06 = policy.get("world6_lava").is_some();
         let world07 = policy.get("world7_lava").is_some();
+        let world08 = policy.get("world8_lava").is_some();
         let world09 = policy.get("world09_lava").is_some();
         let world10 = policy.get("world10_lava").is_some();
         let world11 = policy.get("world11_lava").is_some();
@@ -266,6 +269,7 @@ impl ScopedLava {
                 + u8::from(world05)
                 + u8::from(world06)
                 + u8::from(world07)
+                + u8::from(world08)
                 + u8::from(world09)
                 + u8::from(world10)
                 + u8::from(world11)
@@ -394,6 +398,23 @@ impl ScopedLava {
                 3,
                 source_local_transform([2100, 2100]),
             )
+        } else if world08 {
+            (
+                Self {
+                    world: 8,
+                    terrain: 0,
+                    side: 2000,
+                    source_side: 2000,
+                    offset: 0,
+                    pixels: 581,
+                    support: WORLD08_LAVA_SUPPORT,
+                },
+                WORLD08_ID,
+                WORLD08_SOURCE,
+                "world8_lava",
+                3,
+                source_local_transform([2000, 2000]),
+            )
         } else if world09 {
             (
                 Self {
@@ -506,7 +527,7 @@ impl ScopedLava {
             choice["rgb"] = serde_json::json!(["d54900"]);
         } else if self.world == 13 {
             choice["rgb"] = serde_json::json!(["d54900", "d44900"]);
-        } else if matches!(self.world, 6 | 12) {
+        } else if matches!(self.world, 6 | 8 | 12) {
             choice["rgb"] = serde_json::json!(["d44a00"]);
         }
         choice
@@ -749,6 +770,7 @@ impl Recipe {
                         r.id.as_str(),
                         WORLD06_ID
                             | WORLD07_ID
+                            | WORLD08_ID
                             | WORLD09_ID
                             | WORLD10_ID
                             | WORLD11_ID
@@ -1490,6 +1512,7 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
                     WORLD05_ID
                         | WORLD06_ID
                         | WORLD07_ID
+                        | WORLD08_ID
                         | WORLD09_ID
                         | WORLD10_ID
                         | WORLD11_ID
@@ -1537,6 +1560,7 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
     for (id, key, pixels, support) in [
         (WORLD06_ID, "world6_lava", 698, WORLD06_LAVA_SUPPORT),
         (WORLD07_ID, "world7_lava", 660, WORLD07_LAVA_SUPPORT),
+        (WORLD08_ID, "world8_lava", 581, WORLD08_LAVA_SUPPORT),
         (WORLD10_ID, "world10_lava", 460, WORLD10_LAVA_SUPPORT),
         (WORLD11_ID, "world11_lava", 577, WORLD11_LAVA_SUPPORT),
         (WORLD12_ID, "world12_lava", 635, WORLD12_LAVA_SUPPORT),
@@ -1550,7 +1574,7 @@ fn strict_source_audit(policy: &[u8], annotations: &[u8], recipe: &ReviewedRecip
                 choice["rgb"] = serde_json::json!(["d54900"]);
             } else if id == WORLD13_ID {
                 choice["rgb"] = serde_json::json!(["d54900", "d44900"]);
-            } else if matches!(id, WORLD06_ID | WORLD12_ID) {
+            } else if matches!(id, WORLD06_ID | WORLD08_ID | WORLD12_ID) {
                 choice["rgb"] = serde_json::json!(["d44a00"]);
             }
             ensure!(
@@ -1972,6 +1996,32 @@ fn world07_lava_choice_remains_source_bound() -> Result<()> {
 }
 
 #[test]
+fn world08_lava_choice_remains_source_bound() -> Result<()> {
+    let root = Path::new("data/realms");
+    let Recipe::ReviewedCellsV1(recipe) = read_recipe(root, "world08.json")? else {
+        panic!("reviewed source recipe required")
+    };
+    let bytes = std::fs::read(root.join("world08/source-policy.json"))?;
+    let annotations = std::fs::read(root.join("world08/source-annotations.json"))?;
+    let policy: serde_json::Value = serde_json::from_slice(&bytes)?;
+    strict_source_audit(&bytes, &annotations, &recipe)?;
+    ScopedLava::binding(&recipe, &policy)?.context("missing World8 lava")?;
+    let mut wrong = policy.clone();
+    wrong["world8_lava"]["pixels"] = 580.into();
+    assert!(ScopedLava::binding(&recipe, &wrong).is_err());
+    let mut wrong = policy.clone();
+    wrong["world8_lava"]["rgb"] = serde_json::json!(["b70034"]);
+    assert!(strict_source_audit(&serde_json::to_vec(&wrong)?, &annotations, &recipe).is_err());
+    let mut wrong = policy.clone();
+    wrong["source_sha256"] = WORLD13_SOURCE.into();
+    assert!(ScopedLava::binding(&recipe, &wrong).is_err());
+    let mut mixed = policy;
+    mixed["world13_lava"] = serde_json::json!({});
+    assert!(ScopedLava::binding(&recipe, &mixed).is_err());
+    Ok(())
+}
+
+#[test]
 fn world12_lava_choice_remains_source_bound() -> Result<()> {
     let root = Path::new("data/realms");
     let Recipe::ReviewedCellsV1(recipe) = read_recipe(root, "world12.json")? else {
@@ -2067,6 +2117,7 @@ fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
         "world05.json",
         "world06.json",
         "world07.json",
+        "world08.json",
         "world10.json",
         "world11.json",
         "world12.json",
