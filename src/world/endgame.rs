@@ -1187,7 +1187,10 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     directory.tick = 2399;
     directory.endgame_step(&[-3]);
     assert!(directory.forced_transfer(player).unwrap().is_none());
-    assert!(inbox.try_recv().is_err());
+    assert!(matches!(
+        inbox.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
     directory.tick = 2400;
     directory.endgame_step(&[-3]);
     let notices: Vec<_> = std::iter::from_fn(|| inbox.try_recv().ok()).collect();
@@ -1207,10 +1210,16 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     effect.done().unwrap();
     assert!(directory.forced_transfer(player).unwrap().is_none());
     directory.endgame_step(&[-3]);
-    assert!(inbox.try_recv().is_err(), "earthquake must start only once");
+    assert!(matches!(
+        inbox.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
     directory.tick = 2559;
     directory.endgame_step(&[-3]);
-    assert!(inbox.try_recv().is_err());
+    assert!(matches!(
+        inbox.try_recv(),
+        Err(mpsc::error::TryRecvError::Empty)
+    ));
     assert!(directory.endgame.realms[&-3].castle.is_none());
     directory.tick = 2560;
     for _ in 0..1000 {
