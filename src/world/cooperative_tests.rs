@@ -2,6 +2,54 @@ use super::*;
 use std::time::Duration;
 
 #[test]
+fn spider_den_teleport_requires_an_eligible_observed_target() {
+    let (mut world, sender) = movement_tests::fixture(0x18, false);
+    world.name = "Spider Den".into();
+    let mut character = world.players[&sender].character.clone();
+    character.id = 2;
+    character.account = 2;
+    let target = world.enter(character, None).unwrap();
+    world.players.get_mut(&sender).unwrap().known.insert(target);
+    let destination = Pos { x: 12.25, y: 9.75 };
+    world.players.get_mut(&target).unwrap().pos = destination;
+    let mut directory = Directory::test_with_seed(
+        std::path::Path::new("data"),
+        world.content.clone(),
+        16,
+        1051,
+    )
+    .unwrap();
+    directory.worlds.insert(-2, world);
+    let received = Instant::now();
+    let receipt = directory.teleport(sender, target, received).unwrap();
+    assert_eq!(receipt.position.distance(destination), 0.);
+    let world = directory.worlds.get_mut(&-2).unwrap();
+    world.players.get_mut(&target).unwrap().paused = true;
+    assert!(
+        directory
+            .teleport(sender, target, received + Duration::from_secs(10))
+            .unwrap_err()
+            .to_string()
+            .contains("paused player")
+    );
+    let world = directory.worlds.get_mut(&-2).unwrap();
+    world.players.get_mut(&target).unwrap().paused = false;
+    world
+        .players
+        .get_mut(&sender)
+        .unwrap()
+        .known
+        .remove(&target);
+    assert!(
+        directory
+            .teleport(sender, target, received + Duration::from_secs(10))
+            .unwrap_err()
+            .to_string()
+            .contains("not been observed")
+    );
+}
+
+#[test]
 fn manor_advertises_player_teleport_in_mapinfo() {
     let (mut world, _) = movement_tests::fixture(0x18, false);
     world.name = "Manor of the Immortals".into();
