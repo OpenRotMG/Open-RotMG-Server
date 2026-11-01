@@ -2884,6 +2884,11 @@ impl World {
             .copied()
             .filter(|id| (0x802..=0x805).contains(&entities[id].kind))
             .collect();
+        let npc_global_ids = actor_ids
+            .iter()
+            .copied()
+            .filter(|id| Self::npc_kind(&content, entities[id].kind))
+            .collect();
         let mut world = Self {
             content,
             map,
@@ -2909,7 +2914,7 @@ impl World {
                 .collect(),
             entities,
             non_population_ids: actor_ids.clone(),
-            npc_global_ids: actor_ids.clone(),
+            npc_global_ids,
             actor_ids,
             quests_by_level,
             players: BTreeMap::new(),
@@ -3229,7 +3234,9 @@ impl World {
         if kind == 0x90b {
             self.abyss_flamer_ids.insert(id);
         }
-        self.npc_global_ids.insert(id);
+        if Self::npc_kind(&self.content, kind) {
+            self.npc_global_ids.insert(id);
+        }
         self.non_population_ids.insert(id);
         if definition.quest {
             self.quests_by_level
