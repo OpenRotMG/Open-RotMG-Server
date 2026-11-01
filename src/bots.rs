@@ -942,6 +942,63 @@ impl Brain {
         if self.reflex(v, content, &s, &mut decision)? {
             return Ok((Activity::Survive, decision));
         }
+        let (activity, mut decision) =
+            self.choose(v, content, &s, decision, now, reserved, equipping)?;
+        self.tactics(v, content, &s, &mut decision)?;
+        Ok((activity, decision))
+    }
+    /// Live: dodging replaced the plan for 35-40% of level-20 decisions, so trips stalled; tactics now run under it.
+    fn tactics(
+        &mut self,
+        v: &PlayerView,
+        content: &Content,
+        s: &Scene,
+        decision: &mut Decision,
+    ) -> Result<()> {
+        if !s.threatened {
+            return Ok(());
+        }
+        // Near the planned fight, keep weapon range from it; otherwise keep making way toward the plan.
+        let engaged = s.enemies.iter().find(|e| {
+            matches!(decision.goal, Goal::Fight(id) | Goal::Hunt(id) if id == e.id)
+                && e.position.distance(v.position) < s.range * 1.3
+        });
+        let pull = match engaged {
+            Some(enemy) => Some((enemy.position, s.range)),
+            None => decision.movement.map(|step| (step, 0.)),
+        };
+        decision.movement =
+            combat::movement(v, &s.grid, &s.enemies, pull, false, &s.perception, None);
+        if decision.aim.is_none()
+            && let Some(enemy) =
+                combat::target(v, content, &s.grid, &s.enemies, s.range, s.passes_cover)
+        {
+            combat::attack(
+                v,
+                content,
+                &s.grid,
+                enemy,
+                self.tracks
+                    .get(&enemy.id)
+                    .map_or(Pos { x: 0., y: 0. }, |track| track.2),
+                &s.perception,
+                decision,
+            )?;
+        }
+        Ok(())
+    }
+    /// The plan: errands, social life, consumption and adventuring, by priority.
+    #[allow(clippy::too_many_arguments)]
+    fn choose(
+        &mut self,
+        v: &PlayerView,
+        content: &Content,
+        s: &Scene,
+        mut decision: Decision,
+        now: u64,
+        reserved: bool,
+        equipping: bool,
+    ) -> Result<(Activity, Decision)> {
         // Consent and receipts outrank every errand; an advertised quote does not preempt a started one.
         if self.mind.market.locked()
             || reserved && self.plan.owner().is_none_or(|o| o == plan::Owner::Trade)
@@ -970,7 +1027,7 @@ impl Brain {
         }
         // The current errand runs first, so no other policy can undo it half-way.
         if let Some(owner) = self.plan.owner() {
-            match self.errand(owner, v, content, &s, &decision)? {
+            match self.errand(owner, v, content, s, &decision)? {
                 plan::Errand::Act(activity, d) => return Ok((activity, d)),
                 plan::Errand::Done(reason) => self.plan.complete(now, reason),
                 plan::Errand::Abort(reason) => self.plan.abort(now, reason),
@@ -983,7 +1040,7 @@ impl Brain {
                     continue;
                 }
                 if let plan::Errand::Act(activity, d) =
-                    self.errand(owner, v, content, &s, &decision)?
+                    self.errand(owner, v, content, s, &decision)?
                 {
                     self.plan
                         .start(now, owner, cctv::reason(activity, &d, v, content));
@@ -1067,7 +1124,7 @@ impl Brain {
         }
         Ok((
             Activity::Adventure,
-            self.adventure(v, content, &s, decision)?,
+            self.adventure(v, content, s, decision)?,
         ))
     }
     /// One errand's policy: act now, yield this decision to the outing, or report completion.
@@ -1289,13 +1346,7 @@ impl Brain {
             return Ok(true);
         }
         if retreat || threatened {
-            decision.goal = if retreat {
-                Goal::Recover
-            } else if let Some(blue) = remedy {
-                Goal::Remedy(blue.id)
-            } else {
-                Goal::Dodge
-            };
+            let emergency = retreat || remedy.is_some();
             let opponent = if retreat {
                 None
             } else {
@@ -1303,7 +1354,14 @@ impl Brain {
             };
             let pressured = threatened
                 || nearest.is_some_and(|e| e.position.distance(v.position) < range * 1.3);
-            if pressured {
+            if emergency {
+                decision.goal = if retreat {
+                    Goal::Recover
+                } else {
+                    Goal::Remedy(remedy.expect("emergency remedy").id)
+                };
+            }
+            if emergency && pressured {
                 let focus = if retreat {
                     nearest.map(|e| e.position)
                 } else if let Some(blue) = remedy {
@@ -1392,7 +1450,7 @@ impl Brain {
             {
                 decision.item = combat::ability(v, content, grid, enemy)?;
             }
-            if let Some(enemy) = opponent {
+            if emergency && let Some(enemy) = opponent {
                 combat::attack(
                     v,
                     content,
@@ -1405,7 +1463,7 @@ impl Brain {
                     decision,
                 )?;
             }
-            return Ok(true);
+            return Ok(emergency);
         }
         Ok(false)
     }
