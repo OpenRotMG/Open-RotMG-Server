@@ -892,6 +892,9 @@ impl World {
     pub(super) fn inside_ghost_tower(&self, pos: Pos) -> bool {
         self.ghost_towers.iter().any(|area| area.contains(pos))
     }
+    pub(super) fn inside_god_exclusion(&self, pos: Pos) -> bool {
+        self.inside_ghost_tower(pos) || self.phoenix_pyres.iter().any(|area| area.contains(pos))
+    }
     pub(super) fn outside_setpieces(&self, pos: Pos) -> bool {
         // Most Realm cells are beyond the bounding box, so avoid millions of hypot calls.
         self.setpieces.iter().all(|a| {
@@ -1192,6 +1195,10 @@ impl World {
             "named Realm boss setpiece placed"
         );
         self.setpieces.push(area);
+        if kind == 0x675 {
+            // Pyre clones habitat, so exclude Mountains gods by movement rather than repainting terrain: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/setpieces/Pyre.cs
+            self.phoenix_pyres.push(area);
+        }
         if kind == 0x928 {
             self.claim_ghost_tower(area);
         }
