@@ -12,6 +12,23 @@ fn fixture() -> (World, i32) {
 }
 
 #[test]
+fn each_generated_sarcophagus_owns_eight_worshippers() {
+    let (world, _) = fixture();
+    for sarcophagus in world.actors().filter(|e| e.kind == d::SARCOPHAGUS) {
+        let guards: Vec<_> = world
+            .actors()
+            .filter(|e| {
+                matches!(e.kind, 0xd2a | 0xd2b)
+                    && e.tomb.as_ref().unwrap().anchor == Some(sarcophagus.id)
+            })
+            .collect();
+        assert_eq!(guards.len(), 8, "sarcophagus at {:?}", sarcophagus.pos);
+        assert_eq!(guards.iter().filter(|e| e.kind == 0xd2a).count(), 4);
+        assert_eq!(guards.iter().filter(|e| e.kind == 0xd2b).count(), 4);
+    }
+}
+
+#[test]
 fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reentry() {
     let (mut world, player) = fixture();
     let objectives: Vec<_> = world

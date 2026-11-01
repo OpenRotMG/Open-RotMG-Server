@@ -330,7 +330,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 if treasure { TREASURE } else { SARCOPHAGUS },
             )?;
             if !treasure {
-                let count = rng.gen_range(8..=12);
+                // Preserve later room generation when removing the variable sentry count.
+                let _ = rng.gen_range(8..=12);
+                let count = 8;
                 for n in 0..count {
                     let angle = n as f32 * TAU / count as f32;
                     let radius = if n % 2 == 0 { 3. } else { 5. };
