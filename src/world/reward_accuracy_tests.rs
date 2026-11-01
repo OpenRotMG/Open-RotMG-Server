@@ -336,6 +336,53 @@ fn septavius_stages_a_realm_exit_until_clear_commit() {
 }
 
 #[tokio::test]
+async fn arachna_stages_one_realm_exit_until_durable_clear_commit() {
+    let (mut world, store, owners) = reward_world().await;
+    world.name = "Spider Den".into();
+    let boss = world
+        .spawn_entity(crate::dungeon::spider::BOSS, Pos { x: 3.5, y: 3.5 }, vec![])
+        .unwrap();
+    world
+        .entities
+        .get_mut(&boss)
+        .unwrap()
+        .damage
+        .insert(owners[0].1, 1);
+    world.defeat_entity(boss).unwrap();
+    let exit = world.clear_exit.unwrap();
+    assert_eq!(world.entities[&exit].kind, 0x704);
+    assert!(!world.entities[&exit].published);
+    assert!(!world.entities.contains_key(&boss));
+    assert!(!world.actors().any(|e| e.kind == 0x71d));
+    let plans = world.pending_progress_where(|_, account| account == owners[0].0);
+    assert_eq!(plans.len(), 1);
+    let (player, snapshot) = plans.into_iter().next().unwrap();
+    assert_eq!(snapshot.spider_dens, 1);
+    assert!(!world.entities[&exit].published);
+    world
+        .committed(player, store.progress(snapshot.clone()).await)
+        .unwrap();
+    world.finish_progress(player, snapshot.clone()).unwrap();
+    assert_eq!(
+        store
+            .load(snapshot.account, snapshot.id)
+            .await
+            .unwrap()
+            .spider_dens,
+        1
+    );
+    assert!(world.entities[&exit].published);
+    assert!(world.clear_exit.is_none());
+    assert!(
+        world
+            .pending_progress_where(|_, account| account == owners[0].0)
+            .is_empty()
+    );
+    assert!(world.finish_progress(player, snapshot).is_err());
+    assert_eq!(world.actors().filter(|e| e.kind == 0x704).count(), 1);
+}
+
+#[tokio::test]
 async fn flying_brain_death_requests_only_the_realm_lab_portal() {
     let (mut w, _store, _owners) = reward_world().await;
     assert_eq!(crate::dungeon::portal_drop(0x657), Some((0x890, 0.17)));

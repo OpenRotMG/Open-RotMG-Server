@@ -6,6 +6,40 @@ fn rejects<T>(result: Result<T>, message: &str) {
 }
 
 #[test]
+fn arachna_realm_exit_preserves_parent_or_explicit_random_route() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut d = Directory::test_with_seed(std::path::Path::new("data"), content, 2, 1308).unwrap();
+    for origin in [1, -2] {
+        let route = d.dungeon_return_from(origin).unwrap();
+        let dungeon = d.instance("spider-den", None, Some(route)).unwrap();
+        let world = d.worlds.get_mut(&dungeon).unwrap();
+        let mut ch = Character::fresh(world.content.get(0x30e).unwrap()).unwrap();
+        ch.account = origin + 3;
+        ch.id = origin + 3;
+        let player = world.enter(ch, None).unwrap();
+        let exit = world.spawn_exit(0x704, world.players[&player].pos).unwrap();
+        world.players.get_mut(&player).unwrap().pos = world.entities[&exit].pos;
+        let before = world.players[&player].character.clone();
+        let (account, character, destination) = d.destination(player, Some(exit)).unwrap();
+        assert_eq!((account, character), (before.account, before.id));
+        if origin == -2 {
+            assert!(matches!(route, DungeonReturn::Random));
+            assert!(d.endgame.realms[&destination].enabled);
+            assert!(d.worlds[&destination].admission_open);
+            assert_eq!(d.worlds[&destination].name, "Realm");
+        } else {
+            assert_eq!(destination, origin);
+            d.worlds.get_mut(&origin).unwrap().admission_open = false;
+            rejects(d.destination(player, Some(exit)), "has closed. Use Nexus");
+            assert_eq!(d.destination(player, None).unwrap().2, -2);
+            assert_eq!(d.worlds[&dungeon].players[&player].character, before);
+            assert!(d.grants.is_empty());
+            d.worlds.get_mut(&origin).unwrap().admission_open = true;
+        }
+    }
+}
+
+#[test]
 fn travel_denials_bindings_expiry_and_once_only_admission() {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let mut d = Directory::test_with_seed(std::path::Path::new("data"), content, 2, 791).unwrap();
