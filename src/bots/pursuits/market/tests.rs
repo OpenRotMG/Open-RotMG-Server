@@ -370,3 +370,31 @@ fn bots_never_offer_ordinary_gear_as_payment_for_gear() {
     assert!(bounded_quote(&goods(0xabd, 8), &goods(0xac5, 1), &c).is_none());
     assert!(bounded_quote(&goods(0xabd, 1), &goods(SPEED, 8), &c).is_some());
 }
+
+#[test]
+fn vault_stock_is_fetched_for_a_buyer_and_a_full_vault_trades_speed_up() {
+    // Live: 34 of 34 bot sessions ended without a buyer; stock in a Vault was never offered to one.
+    let (c, v) = nexus_peer([-1; 8]);
+    let mut m = Market {
+        name: "Trader".into(),
+        vault: Some(vec![DEFENSE, DEFENSE, -1, -1, -1, -1, -1, -1]),
+        ..Market::default()
+    };
+    assert!(m.receive(&peer_said("wtb def"), &v, &c, None).unwrap());
+    assert_eq!(m.quote.as_ref().map(|q| q[0].kind), Some(DEFENSE));
+    assert!(m.sought && m.outgoing.is_none());
+
+    let (c, v) = nexus_peer([-1; 8]);
+    let m = Market {
+        name: "Trader".into(),
+        vault: Some(vec![SPEED, SPEED, SPEED, SPEED, SPEED, SPEED, SPEED, -1]),
+        ..Market::default()
+    };
+    let quotes = m.quotes(&v, &c, None).unwrap();
+    assert!(
+        quotes
+            .iter()
+            .any(|q| (q[0].kind, q[1].kind) == (SPEED, DEFENSE)),
+        "{quotes:?}"
+    );
+}
