@@ -767,6 +767,8 @@ pub struct World {
     pub map: Arc<Map>,
     navigation_geometry: Box<std::cell::RefCell<view::GeometryCache>>,
     pub(crate) realm_layout: Option<String>,
+    /// Where this Realm map's Godlands lie, as a veteran who played it before remembers.
+    pub(crate) godlands: Arc<Vec<Pos>>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
@@ -833,6 +835,7 @@ pub struct World {
     djinn_attacking: BTreeSet<i32>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
+    phoenix_pyres: Vec<realm_setpieces::Area>,
     event_sites: Vec<realm_setpieces::EventSite>,
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
@@ -1284,6 +1287,7 @@ impl Directory {
                 ids.clone(),
             )?;
             world.realm_layout = source.as_ref().map(|source| source.name().to_owned());
+            world.godlands = Arc::new(godlands(&world.map, &world.content));
             world.clock = clock.clone();
             world.attack_epoch = clock.now();
             world.new_tick_at = clock.now();
@@ -1609,7 +1613,21 @@ impl Directory {
                 .get(&id)
                 .ok_or_else(|| protocol("portal missing"))?;
             ensure!(e.published, protocol("portal not published"));
-            ensure!(p.pos.distance(e.pos) <= 2., protocol("portal out of reach"));
+            // The client sends only a portal ID, so a reach refusal is not a malformed packet: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/net/_1f.as#L509-L513
+            let distance = p.pos.distance(e.pos);
+            ensure!(distance <= 2., {
+                tracing::info!(
+                    player,
+                    portal = id,
+                    player_x = p.pos.x,
+                    player_y = p.pos.y,
+                    portal_x = e.pos.x,
+                    portal_y = e.pos.y,
+                    distance,
+                    "portal transfer refused: out of reach"
+                );
+                controller("portal out of reach")
+            });
             e.kind
         } else {
             0x712
@@ -2869,11 +2887,17 @@ impl World {
             .copied()
             .filter(|id| (0x802..=0x805).contains(&entities[id].kind))
             .collect();
+        let npc_global_ids = actor_ids
+            .iter()
+            .copied()
+            .filter(|id| Self::npc_kind(&content, entities[id].kind))
+            .collect();
         let mut world = Self {
             content,
             map,
             navigation_geometry: Box::default(),
             realm_layout: None,
+            godlands: Arc::default(),
             timed_ids: BTreeSet::new(),
             quest_ids: BTreeSet::new(),
             gun_ids,
@@ -2894,7 +2918,7 @@ impl World {
                 .collect(),
             entities,
             non_population_ids: actor_ids.clone(),
-            npc_global_ids: actor_ids.clone(),
+            npc_global_ids,
             actor_ids,
             quests_by_level,
             players: BTreeMap::new(),
@@ -2946,6 +2970,7 @@ impl World {
             djinn_attacking: BTreeSet::new(),
             setpieces: vec![],
             ghost_towers: vec![],
+            phoenix_pyres: vec![],
             event_sites: vec![],
             portal_requests: vec![],
             critical_deaths: vec![],
@@ -3213,7 +3238,9 @@ impl World {
         if kind == 0x90b {
             self.abyss_flamer_ids.insert(id);
         }
-        self.npc_global_ids.insert(id);
+        if Self::npc_kind(&self.content, kind) {
+            self.npc_global_ids.insert(id);
+        }
         self.non_population_ids.insert(id);
         if definition.quest {
             self.quests_by_level
@@ -4242,6 +4269,10 @@ impl World {
     pub(crate) fn regress_native_ingress_for_test(&mut self, id: i32) -> Pos {
         self.players.get_mut(&id).unwrap().last_move_at = u64::MAX;
         self.accept_native_move_for_test(id)
+    }
+    #[cfg(test)]
+    pub(crate) fn set_admission_open_for_test(&mut self, open: bool) {
+        self.admission_open = open;
     }
     #[cfg(test)]
     pub(crate) fn accept_native_move_for_test(&mut self, id: i32) -> Pos {
@@ -6179,7 +6210,7 @@ impl World {
             object.god && object.terrain == 1
         };
         let home = self.entities[&id].home;
-        let started_inside = godlands && self.inside_ghost_tower(old);
+        let started_inside = godlands && self.inside_god_exclusion(old);
         let mut resolved = old;
         for i in 1..=samples {
             let next = if slide {
@@ -6206,7 +6237,7 @@ impl World {
                     && self.jungle_walkable(kind, pos))
                     || self.ocean_walkable(kind, pos);
                 open && (!godlands
-                    || !self.inside_ghost_tower(pos)
+                    || !self.inside_god_exclusion(pos)
                     || (started_inside && pos.distance(home) + 0.05 < old.distance(home)))
             };
             let x_clear = clear(horizontal);
@@ -7697,3 +7728,58 @@ mod quest_tests;
 
 #[cfg(test)]
 mod map_tests;
+
+/// The biggest Mountains areas, one spot per 24-tile square, at most as many as a bot remembers.
+fn godlands(map: &Map, content: &Content) -> Vec<Pos> {
+    let mut squares: BTreeMap<(i32, i32), Vec<Pos>> = BTreeMap::new();
+    for (i, cell) in map.cells.iter().enumerate() {
+        if cell.terrain == 1 && content.grounds[&cell.ground] > 0. {
+            let (x, y) = (i as i32 % map.width, i as i32 / map.width);
+            let pos = Pos {
+                x: x as f32 + 0.5,
+                y: y as f32 + 0.5,
+            };
+            squares.entry((x / 24, y / 24)).or_default().push(pos);
+        }
+    }
+    let mut spots: Vec<_> = squares
+        .into_values()
+        .filter(|cells| cells.len() >= 150)
+        .map(|cells| {
+            let n = cells.len() as f32;
+            let middle = Pos {
+                x: cells.iter().map(|p| p.x).sum::<f32>() / n,
+                y: cells.iter().map(|p| p.y).sum::<f32>() / n,
+            };
+            let spot = *cells
+                .iter()
+                .min_by(|a, b| a.distance(middle).total_cmp(&b.distance(middle)))
+                .expect("a counted square has cells");
+            (cells.len(), spot)
+        })
+        .collect();
+    spots.sort_by(|a, b| b.0.cmp(&a.0));
+    spots
+        .into_iter()
+        .take(crate::bots::REMEMBERED_GODLANDS)
+        .map(|(_, p)| p)
+        .collect()
+}
+
+#[cfg(test)]
+#[test]
+fn both_live_realm_maps_have_godlands_spots() {
+    let content = Content::load(std::path::Path::new("data")).unwrap();
+    for layout in [
+        "classic-world-02-reconstruction",
+        "classic-world-10-reconstruction",
+    ] {
+        let bytes = std::fs::read(format!("data/realms/{layout}.wmap")).unwrap();
+        let map = Map::decode_realm_cells(&bytes, &content, [2100, 2100]).unwrap();
+        let spots = godlands(&map, &content);
+        assert!(spots.len() >= 4, "{layout}: {spots:?}");
+        for p in spots {
+            assert_eq!(map.cell(p.x, p.y).unwrap().terrain, 1, "{layout} {p:?}");
+        }
+    }
+}

@@ -335,7 +335,6 @@ async fn lifecycle_finalize_real_socket_manual_and_resurrection_transfer_retire_
     }
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -442,7 +441,6 @@ async fn living_character_load_preserves_saved_fields_and_rejects_foreign_owner(
     assert_eq!(a.store.load(owner, ch.id).await.unwrap(), ch);
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
-    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -572,4 +570,14 @@ async fn slow_command_keeps_delivering_queued_output() {
     busy.await.unwrap().unwrap();
     drop(socket);
     server.abort();
+}
+
+#[tokio::test]
+async fn sigterm_right_after_startup_requests_shutdown() {
+    let stop = shutdown_signal().unwrap();
+    unsafe { libc::raise(libc::SIGTERM) };
+    tokio::time::timeout(Duration::from_secs(5), stop)
+        .await
+        .unwrap()
+        .unwrap();
 }

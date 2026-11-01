@@ -115,6 +115,9 @@ pub struct MapInfo {
     pub allow_teleport: bool,
     /// Which Realm map this is; 2012 players recognized each one.
     pub layout: Option<String>,
+    /// Where this map's Godlands are, for veterans who played it before; not drawn on the minimap.
+    #[serde(skip)]
+    pub godlands: Arc<Vec<Pos>>,
 }
 #[derive(Serialize)]
 pub struct OwnCharacter {
@@ -246,10 +249,15 @@ impl World {
         let started = crate::performance::Measure::start();
         let w = self;
         let p = w.players.get(&id).context("view player missing")?;
-        let visible = w.visible(id);
-        let objects = visible
-            .intersection(&p.known)
+        // `known` already holds this tick's visibility; recomputing it for every bot poll cost ~13% of world CPU.
+        let objects = p
+            .known
+            .iter()
             .filter(|entity| **entity != id)
+            .filter(|entity| match w.players.get(entity) {
+                Some(q) => q.pos.distance(p.pos) < 20.,
+                None => w.entities.contains_key(entity),
+            })
             .map(|entity| {
                 Ok(if let Some(q) = w.players.get(entity) {
                     VisibleObject {
@@ -374,6 +382,7 @@ impl World {
                 height: w.map.height,
                 allow_teleport: w.allow_teleport(),
                 layout: w.realm_layout.clone(),
+                godlands: w.godlands.clone(),
             },
             character: OwnCharacter {
                 conditions: p.conditions(w.now) | if p.paused { 1 << 20 } else { 0 },
@@ -430,7 +439,6 @@ impl World {
                         && dungeon_entry::observing(p)
                         && w.owner.is_none()
                         && w.guild.is_none()
-                        && visible.contains(&e.portal)
                         && p.known.contains(&e.portal)
                         && w.entities.get(&e.portal).is_some_and(|portal| {
                             portal.published
@@ -452,6 +460,43 @@ impl World {
 mod tests {
     use super::*;
     use crate::condition::{BERSERK, SICK, bit};
+    #[test]
+    fn bot_view_reuses_the_ticks_visibility() {
+        let (mut world, player) = super::super::movement_tests::fixture(0x18, false);
+        let pos = world.players[&player].pos;
+        let near = world
+            .spawn_entity(
+                0x602,
+                Pos {
+                    x: pos.x + 2.,
+                    y: pos.y,
+                },
+                vec![],
+            )
+            .unwrap();
+        world
+            .spawn_entity(
+                0x602,
+                Pos {
+                    x: pos.x + 22.,
+                    y: pos.y,
+                },
+                vec![],
+            )
+            .unwrap();
+        world.updates(player, true).unwrap();
+        let seen = |w: &World| -> Vec<i32> {
+            w.player_view(1, player, 0)
+                .unwrap()
+                .objects
+                .iter()
+                .map(|o| o.id)
+                .collect()
+        };
+        assert_eq!(seen(&world), vec![near]);
+        world.remove_entity(near);
+        assert!(seen(&world).is_empty());
+    }
 
     #[tokio::test]
     async fn local_support_public_conditions_and_actual_ability_benefits() {

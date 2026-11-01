@@ -2193,7 +2193,19 @@ async fn reconnect(
                         );
                         return Ok(None);
                     }
-                    d.destination(id, portal)?
+                    match d.destination(id, portal) {
+                        Ok(destination) => destination,
+                        Err(error) if lifecycle::rule_rejection(&error) => {
+                            let message = crate::world::chat_error(&error.to_string());
+                            crate::world::send(
+                                &d.worlds[&d.location(id)?].players[&id],
+                                message.id,
+                                message.body,
+                            );
+                            return Ok(None);
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             };
             let world = &d.worlds[&destination];
@@ -3340,6 +3352,8 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
             persistence_tick(&deaths).await?;
         }
     });
+    // Deploy rehearsals send SIGTERM as soon as /health answers.
+    let stop_requested = shutdown_signal()?;
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
         format!("cannot listen on {bind}; another server may already use this port. Stop it and rerun ./run.sh")
     })?;
@@ -3363,7 +3377,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
     )
     .with_graceful_shutdown(async move {
         let result: Result<()> = async {
-            shutdown_signal().await?;
+            stop_requested.await?;
             tracing::info!("saving active characters before shutdown");
             lifecycle::drain::prepare(&shutdown);
             shutdown.shutdown.send_replace(true);
@@ -3412,18 +3426,26 @@ async fn failed_shutdown(a: &App, error: anyhow::Error) -> Result<()> {
     a.world.supervisor.failed().await;
     Err(error)
 }
-async fn shutdown_signal() -> Result<()> {
-    #[cfg(unix)]
-    {
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! {v=tokio::signal::ctrl_c()=>v?,_=term.recv()=>{}};
-    }
-    #[cfg(not(unix))]
-    tokio::signal::ctrl_c().await?;
-    Ok(())
+#[cfg(unix)]
+fn shutdown_signal() -> Result<impl std::future::Future<Output = Result<()>>> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (mut term, mut interrupt) = (
+        signal(SignalKind::terminate())?,
+        signal(SignalKind::interrupt())?,
+    );
+    Ok(async move {
+        tokio::select! {_=term.recv()=>{},_=interrupt.recv()=>{}};
+        Ok(())
+    })
+}
+#[cfg(not(unix))]
+fn shutdown_signal() -> Result<impl std::future::Future<Output = Result<()>>> {
+    Ok(async { Ok(tokio::signal::ctrl_c().await?) })
 }
 
 #[cfg(test)]
 mod lifecycle_finalize_tests;
 #[cfg(test)]
 mod lock_command_tests;
+#[cfg(test)]
+mod portal_reach_tests;

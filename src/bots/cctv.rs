@@ -35,6 +35,15 @@ struct Feed {
     plan: plan::Plan,
     shots: Vec<u8>,
     viewers: usize,
+    // Bots refresh inputs 20 times a second; building JSON per refresh cost ~3% of bot CPU, so readers build it.
+    live: Option<Live>,
+}
+struct Live {
+    inputs: Option<crate::world::bot_inputs::Inputs>,
+    tick: u64,
+    x: f32,
+    y: f32,
+    aim: Option<f32>,
 }
 impl Registry {
     fn feed(&mut self, name: &str) -> &mut Feed {
@@ -46,10 +55,23 @@ impl Registry {
             plan: plan::Plan::default(),
             shots: Vec::new(),
             viewers: 0,
+            live: None,
         })
     }
 }
 impl Feed {
+    fn frame(&self) -> Value {
+        let mut frame = self.frame.clone();
+        if let Some(live) = &self.live {
+            frame["inputs"] =
+                serde_json::to_value(&live.inputs).expect("finite virtual input state");
+            frame["tick"] = json!(live.tick);
+            frame["x"] = json!(live.x);
+            frame["y"] = json!(live.y);
+            frame["aim"] = json!(live.aim);
+        }
+        frame
+    }
     fn think(&mut self, text: String) {
         let seq = self.thoughts.back().map_or(1, |t| t.0 + 1);
         let at = SystemTime::now()
@@ -80,6 +102,7 @@ impl Cctv {
         feed.session = Some((player, account));
         feed.shots.clear();
         feed.frame = Value::Null;
+        feed.live = None;
         feed.updated = Instant::now();
     }
     pub(super) fn departed(&self, name: &str, player: i32, account: i32) {
@@ -89,6 +112,7 @@ impl Cctv {
         {
             feed.session = None;
             feed.frame = Value::Null;
+            feed.live = None;
             feed.shots.clear();
             feed.updated = Instant::now();
         }
@@ -96,7 +120,7 @@ impl Cctv {
     fn live_bots(&self) -> Vec<Value> {
         let now = plan::now();
         self.lock().feeds.iter().filter(|(_,f)|f.session.is_some()).map(|(name,f)| {
-            let mut bot = json!({"name":name,"age_ms":f.updated.elapsed().as_millis(),"viewers":f.viewers,"frame":f.frame});
+            let mut bot = json!({"name":name,"age_ms":f.updated.elapsed().as_millis(),"viewers":f.viewers,"frame":f.frame()});
             bot.as_object_mut().expect("bot object").extend(f.plan.public(now).as_object().expect("plan object").clone());
             bot
         }).collect()
@@ -201,7 +225,11 @@ impl Cctv {
         for event in brain.plan.events.iter().filter(|e| e.seq > seen) {
             feed.think(event.text());
         }
-        feed.plan = brain.plan.clone();
+        // Cloning the event history on every decision was a third of this function's cost.
+        if feed.plan.revision() != brain.plan.revision() {
+            feed.plan = brain.plan.clone();
+        }
+        feed.live = None;
         feed.frame = json!({"class":content.objects[&v.character.class].name,"level":v.character.level,
             "hp":v.character.hp,"max_hp":v.character.stats[0],"mp":v.character.mp,"max_mp":v.character.stats[1],
             "world":v.map.name,"x":v.position.x,"y":v.position.y,"aim":actual_aim(v),"fired":fired,"inputs":v.inputs,"tick":v.tick,
@@ -215,12 +243,13 @@ impl Cctv {
         let mut registry = self.lock();
         let feed = registry.feed(name);
         if feed.session == Some((v.session.player, v.session.account)) && !feed.frame.is_null() {
-            feed.frame["inputs"] =
-                serde_json::to_value(&v.inputs).expect("finite virtual input state");
-            feed.frame["tick"] = json!(v.tick);
-            feed.frame["x"] = json!(v.position.x);
-            feed.frame["y"] = json!(v.position.y);
-            feed.frame["aim"] = json!(actual_aim(v));
+            feed.live = Some(Live {
+                inputs: v.inputs.clone(),
+                tick: v.tick,
+                x: v.position.x,
+                y: v.position.y,
+                aim: actual_aim(v),
+            });
         }
     }
     pub(super) fn heard(&self, name: &str, own: i32, packet: &Packet) -> Result<()> {
@@ -249,7 +278,7 @@ impl Cctv {
             .filter(|t| t.0 > seen)
             .map(|(seq, at, text)| json!({"seq":seq,"at":at,"text":text}))
             .collect();
-        let event = json!({"age_ms":feed.updated.elapsed().as_millis(),"frame":feed.frame,
+        let event = json!({"age_ms":feed.updated.elapsed().as_millis(),"frame":feed.frame(),
             "thoughts":thoughts});
         (
             event.to_string(),
@@ -561,5 +590,19 @@ mod tests {
         view.inputs.as_mut().unwrap().fire = false;
         cctv.inputs("Triceps", &view);
         assert!(cctv.live_bots()[0]["frame"]["aim"].is_null());
+        let mut brain = Brain::new(ARCHETYPES[0], &view);
+        brain
+            .plan
+            .start(view.time_ms, plan::Owner::Goal, "testing plan".into());
+        cctv.decided(
+            &view,
+            &decision,
+            "testing".into(),
+            &Value::Null,
+            &brain,
+            &content,
+        );
+        assert_eq!(cctv.live_bots()[0]["step"]["target"], "testing plan");
+        assert_eq!(cctv.live_bots()[0]["events"][0]["reason"], "testing plan");
     }
 }

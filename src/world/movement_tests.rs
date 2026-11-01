@@ -97,6 +97,120 @@ fn godlands_gods_stop_at_a_ghost_king_tower() {
 }
 
 #[test]
+fn mountains_gods_cannot_walk_into_a_placed_phoenix_pyre() {
+    let (mut world, player) = fixture_map(0x18, None, 160);
+    let character = world.players.remove(&player).unwrap().character;
+    world.name = "Realm".into();
+    world.encounter = true;
+    world.rng = rand::rngs::StdRng::seed_from_u64(1058);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 1;
+        cell.config = "pyre-preserved".into();
+    }
+    Arc::make_mut(&mut world.map).cells[100 * 160 + 100].terrain = 2;
+    let original = world.map.clone();
+    let center = world.place_named_setpiece(0x675, &[2]).unwrap();
+    let area = *world.setpieces.last().unwrap();
+    assert_eq!([area.x, area.y, area.width, area.height], [85, 85, 30, 30]);
+    assert_eq!(world.map.cell(center.x, center.y).unwrap().ground, 0xf2);
+    for (before, after) in original.cells.iter().zip(&world.map.cells) {
+        assert_eq!(after.terrain, before.terrain);
+        assert_eq!(after.config, before.config);
+    }
+    let birth = Pos {
+        x: center.x + 1.,
+        y: center.y,
+    };
+    assert_eq!(world.map.cell(birth.x, birth.y).unwrap().terrain, 1);
+    assert!(world.walkable(birth));
+    assert!(
+        !world.family_ground(birth, 1),
+        "ordinary births already exclude walkable Mountains inside Pyres"
+    );
+    let player = world.enter(character, None).unwrap();
+    world.players.get_mut(&player).unwrap().pos = Pos {
+        x: area.x as f32 + 4.25,
+        y: center.y,
+    };
+    let start = Pos {
+        x: 82.5,
+        y: center.y,
+    };
+    let god = world.spawn_entity(0x654, start, vec![]).unwrap();
+    assert!(matches!(
+        world
+            .god_movement(god, world.players[&player].pos, 0)
+            .unwrap()
+            .0,
+        crate::encounter::Motion::Chase { .. }
+    ));
+    for _ in 0..100 {
+        world.now += 50;
+        world.npc_step();
+    }
+    let resolved = world.entities[&god].pos;
+    assert!(world.entities[&god].activated.is_some() && resolved.distance(start) > 1.);
+    eprintln!(
+        "ordinary Medusa chase: start={start:?} player={:?} resolved={resolved:?} area=[85,85,30,30]",
+        world.players[&player].pos
+    );
+    assert!(
+        !area.contains(resolved),
+        "ordinary Medusa chase entered the Pyre at {resolved:?}"
+    );
+    world.remove_entity(god);
+    world.players.clear();
+    for kind in [0x651, 0x654, 0x659, 0x675, 0x603, 0x649] {
+        let mountains_god =
+            world.content.objects[&kind].god && world.content.objects[&kind].terrain == 1;
+        for (start, goal) in [
+            (
+                Pos {
+                    x: 82.5,
+                    y: center.y,
+                },
+                center,
+            ),
+            (
+                Pos {
+                    x: 117.5,
+                    y: center.y,
+                },
+                center,
+            ),
+            (
+                Pos {
+                    x: center.x,
+                    y: 82.5,
+                },
+                center,
+            ),
+            (
+                Pos {
+                    x: center.x,
+                    y: 117.5,
+                },
+                center,
+            ),
+            (Pos { x: 82.5, y: 82.5 }, center),
+        ] {
+            let id = world.spawn_entity(kind, start, vec![]).unwrap();
+            world.move_entity_colliding(id, goal, 40., true).unwrap();
+            let pos = world.entities[&id].pos;
+            eprintln!(
+                "kind={kind:#x} start={start:?} goal={goal:?} resolved={pos:?} area=[85,85,30,30]"
+            );
+            assert_eq!(
+                area.contains(pos),
+                !mountains_god,
+                "kind={kind:#x} at {pos:?}"
+            );
+            world.remove_entity(id);
+        }
+    }
+}
+
+#[test]
 fn lair_slime_children_start_on_the_defeated_parents_floor() {
     for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
         let (mut world, _) = fixture(0x18, true);
@@ -911,4 +1025,42 @@ fn oryx_counts_family_members_once_summoned() {
     assert_eq!(world.oryx_counted(11).len(), 3, "active leader summoned");
     world.remove_entity(leader);
     assert_eq!(world.oryx_counted(11).len(), 2, "orphans still count");
+}
+
+#[test]
+fn walls_never_wait_in_the_per_tick_npc_scan() {
+    let (mut world, player) = fixture(0x18, false);
+    let pos = world.players[&player].pos;
+    let wall = world
+        .content
+        .objects
+        .values()
+        .find(|o| o.class == "Wall" && !o.passive_destructible())
+        .unwrap()
+        .kind;
+    let wall = world
+        .spawn_entity(
+            wall,
+            Pos {
+                x: pos.x + 2.,
+                y: pos.y,
+            },
+            vec![],
+        )
+        .unwrap();
+    let snake = world
+        .spawn_entity(
+            0x602,
+            Pos {
+                x: pos.x - 2.,
+                y: pos.y,
+            },
+            vec![],
+        )
+        .unwrap();
+    assert!(world.actor_ids.contains(&wall));
+    assert!(!world.npc_global_ids.contains(&wall));
+    let selected = world.npc_candidates(&[pos]);
+    assert!(selected.contains(&snake) && !selected.contains(&wall));
+    assert!(!world.npc_global_ids.contains(&wall));
 }
