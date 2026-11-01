@@ -17,6 +17,7 @@ pub(super) struct Grid {
     pub(super) walkable: Walkable,
     pub(super) known: Arc<Tiles>,
     pub(super) dimensions: (i32, i32),
+    pub(super) full_occupy: BTreeSet<TilePoint>,
     reached: Mutex<Option<(TilePoint, Arc<BTreeSet<TilePoint>>)>>,
     local_reached: Mutex<Option<LocalReach>>,
     frontiers: Mutex<BTreeMap<TilePoint, bool>>,
@@ -35,6 +36,7 @@ impl Clone for Grid {
             walkable: self.walkable.clone(),
             known: self.known.clone(),
             dimensions: self.dimensions,
+            full_occupy: self.full_occupy.clone(),
             frontiers: Mutex::new(
                 self.frontiers
                     .lock()
@@ -268,15 +270,36 @@ impl Grid {
             candidates
         })
     }
+    fn clear(&self, position: Pos) -> bool {
+        let (x, y) = tile(position);
+        let side = |n: f32| {
+            if n.fract() < 0.5 {
+                -1
+            } else if n.fract() > 0.5 {
+                1
+            } else {
+                0
+            }
+        };
+        let (dx, dy) = (side(position.x), side(position.y));
+        // FullOccupy reaches the neighboring half-cell: selected 123.5.1 Player._M_S_/_g7, https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as#L427-L503
+        self.walkable.contains(&(x, y))
+            && [(x + dx, y), (x, y + dy), (x + dx, y + dy)]
+                .into_iter()
+                .filter(|p| *p != (x, y))
+                .all(|p| {
+                    !self.full_occupy.contains(&p) && self.known.ground(p).is_some_and(|g| g != 255)
+                })
+    }
     pub(super) fn segment(&self, from: Pos, to: Pos) -> bool {
         let steps = (from.distance(to) * 4.).ceil().max(1.) as i32;
         self.walkable.contains(&tile(to))
             && (0..=steps).all(|i| {
                 let f = i as f32 / steps as f32;
-                self.walkable.contains(&tile(Pos {
+                self.clear(Pos {
                     x: from.x + (to.x - from.x) * f,
                     y: from.y + (to.y - from.y) * f,
-                }))
+                })
             })
     }
     pub(super) fn metrics(&self) -> serde_json::Value {
