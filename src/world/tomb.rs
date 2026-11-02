@@ -41,7 +41,7 @@ impl State {
 impl World {
     pub(super) fn populate_tomb_entry(&mut self) -> Result<()> {
         // One selected PerRealmMax site feeds the shared director, which reserves and earns the actor.
-        let pos = self.place_named_setpiece(d::SPHINX, &[1])?;
+        let pos = self.place_named_setpiece(d::SPHINX, realm_events::EVENT_TERRAINS)?;
         let id = self.spawn_entity(d::SPHINX, pos, vec![])?;
         self.entities
             .get_mut(&id)

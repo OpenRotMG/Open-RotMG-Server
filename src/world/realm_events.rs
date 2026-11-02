@@ -19,6 +19,9 @@ fn movement_speed(value: f32) -> f32 {
     (5.55 * value + 0.74) * 1.5
 }
 
+// Events can land from Mountains through MidForest, independently of the defeated quest's biome: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Oryx.cs#L641-L658
+pub(super) const EVENT_TERRAINS: &[u8] = &[1, 2, 3, 4, 5, 6, 7];
+
 pub(super) enum EventAdmission {
     Miss,
     Waiting,
@@ -372,7 +375,7 @@ impl World {
         }
         // Two independent prebuilt sites enforce the approved lifetime cap without reusing dead identities.
         for kind in quest::EVENTS.into_iter().chain(quest::EVENTS) {
-            let pos = self.place_named_setpiece(kind, &[1])?;
+            let pos = self.place_named_setpiece(kind, EVENT_TERRAINS)?;
             let root = self.spawn_entity(kind, pos, vec![])?;
             let e = self.entities.get_mut(&root).unwrap();
             e.quest.set(Some(root), root, &mut self.quest_ids);
@@ -786,5 +789,88 @@ impl World {
         };
         self.predict_enemy_shots(id, target, &mut shots, |_| prediction)?;
         Ok(shots)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_sites_accept_inland_biomes_and_reject_lowlands_and_shore() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let mut map = Map {
+            width: 256,
+            height: 256,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x18,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0,
+                };
+                256 * 256
+            ],
+            spawns: vec![(8.5, 8.5)],
+        };
+        for terrain in 0..=12 {
+            for cell in &mut map.cells {
+                cell.terrain = terrain;
+            }
+            for (populate, kinds, copies) in [
+                (
+                    World::populate_realm_events as fn(&mut World) -> Result<()>,
+                    &quest::EVENTS[..],
+                    2,
+                ),
+                (
+                    World::populate_tomb_entry,
+                    &[crate::dungeon::tomb::SPHINX][..],
+                    1,
+                ),
+                (World::populate_lost_lands, &[0xd50][..], 1),
+            ] {
+                let mut world = World::new(content.clone(), Arc::new(map.clone())).unwrap();
+                world.rng = rand::rngs::StdRng::seed_from_u64(1370);
+                let result = populate(&mut world);
+                if !(1..=7).contains(&terrain) {
+                    let error = result.unwrap_err();
+                    assert!(error.to_string().contains("selected habitat"), "{error:#}");
+                    assert!(world.event_sites.is_empty());
+                    continue;
+                }
+                result.unwrap_or_else(|error| {
+                    panic!("event kinds {kinds:x?} refused inland terrain {terrain}: {error:#}")
+                });
+                for kind in kinds {
+                    let roots: Vec<_> = world
+                        .entities
+                        .values()
+                        .filter(|e| e.kind == *kind)
+                        .collect();
+                    assert_eq!(roots.len(), copies);
+                    for root in roots {
+                        assert_eq!(
+                            world.map.cell(root.pos.x, root.pos.y).unwrap().terrain,
+                            terrain
+                        );
+                        assert!(root.hp > 0);
+                    }
+                }
+                world.reserve_realm_events().unwrap();
+                assert_eq!(world.event_reserves.len(), kinds.len() * copies);
+                assert!(world.event_sites.is_empty());
+                assert!(!world.entities.values().any(|e| kinds.contains(&e.kind)));
+                for event in &world.event_reserves {
+                    assert_eq!(event.root.quest, Some(event.root.id));
+                    assert!(event.root.hp > 0);
+                }
+                println!(
+                    "terrain={terrain} kinds={kinds:x?}: prepared and reserved {} living events",
+                    kinds.len() * copies
+                );
+            }
+        }
     }
 }

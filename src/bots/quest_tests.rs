@@ -1025,3 +1025,29 @@ fn a_venture_keeps_the_destination_it_started_with() {
         d.movement
     );
 }
+
+#[test]
+fn a_venture_trip_ends_at_its_destination() {
+    // Live snapshot: a bot about a tile from its kept Venture destination kept wandering around it.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.quest = None;
+    v.objects.clear();
+    v.position = Pos { x: 64.5, y: 64.5 };
+    v.map.layout = Some("classic-world-02-reconstruction".into());
+    let (reached, next) = (Pos { x: 65.5, y: 64.5 }, Pos { x: 110.5, y: 64.5 });
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.mind.godlands.insert(
+        "classic-world-02-reconstruction".into(),
+        BTreeSet::from([tile(next)]),
+    );
+    brain
+        .crowd
+        .bands
+        .observe(&v, &c, &mut brain.mind.godlands, false);
+    brain.goal = Goal::Venture;
+    brain.travel = Some((Goal::Venture, u64::MAX, reached));
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Venture);
+    assert!(d.movement.is_some_and(|m| m.x > 66.), "{:?}", d.movement);
+}
