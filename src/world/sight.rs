@@ -35,7 +35,10 @@ impl World {
     }
 
     pub(super) fn invalidate_sight(&mut self) {
-        if self.name == "Snake Pit" || self.name == crate::dungeon::davy::NAME {
+        if self.name == "Snake Pit"
+            || self.name == crate::dungeon::davy::NAME
+            || self.name == "Manor of the Immortals"
+        {
             for p in self.players.values_mut() {
                 p.tile_scan = None;
             }
