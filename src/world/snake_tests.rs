@@ -1,5 +1,111 @@
 use super::*;
 
+fn swarm_fixture(offset: f32) -> (World, i32, i32) {
+    use crate::dungeon::snake::{BOSS, SWARM};
+    let (mut world, player) = super::movement_tests::fixture(0x18, false);
+    world.name = "Snake Pit".into();
+    world.encounter = true;
+    world.rng = rand::rngs::StdRng::seed_from_u64(1363);
+    let center = Pos { x: 16.5, y: 16.5 };
+    world.players.get_mut(&player).unwrap().pos = center;
+    let boss = world.spawn_entity(BOSS, center, vec![]).unwrap();
+    for _ in 0..161 {
+        world.now += 50;
+        world.npc_step();
+    }
+    assert_eq!(world.entities[&boss].stage, Some(1));
+    let center = world.entities[&boss].pos;
+    let swarm = world
+        .spawn_entity(
+            SWARM,
+            Pos {
+                x: center.x + offset,
+                y: center.y,
+            },
+            vec![],
+        )
+        .unwrap();
+    world
+        .entities
+        .get_mut(&swarm)
+        .unwrap()
+        .parent
+        .set(Some(boss), swarm, &mut world.timed_ids);
+    world.players.values_mut().next().unwrap().pos = Pos {
+        x: center.x + 5.,
+        y: center.y,
+    };
+    (world, boss, swarm)
+}
+
+#[test]
+fn stheno_swarm_uses_protect_speed_and_one_tile_inner_range() {
+    for offset in [1.5, 3.] {
+        let (mut world, boss, swarm) = swarm_fixture(offset);
+        let start = world.entities[&swarm].pos;
+        world.now += 50;
+        world.npc_step();
+        let end = world.entities[&swarm].pos;
+        let expected = (5.55 * 0.3 + 0.74) * 0.05;
+        eprintln!(
+            "swarm approach: offset={offset} start={start:?} end={end:?} expected_step={expected}"
+        );
+        assert!((start.distance(end) - expected).abs() < 0.0001);
+        let leader = world.entities[&boss].pos;
+        assert!(end.distance(leader) < start.distance(leader));
+        assert!(
+            end.x < start.x,
+            "swarm followed the player, not its own boss"
+        );
+    }
+}
+
+#[test]
+fn stheno_swarm_wanders_on_top_and_reprotects_only_beyond_two_tiles() {
+    let (mut world, boss, swarm) = swarm_fixture(0.);
+    let start = world.entities[&swarm].pos;
+    for _ in 0..4 {
+        world.now += 50;
+        world.npc_step();
+    }
+    let e = &world.entities[&swarm];
+    eprintln!(
+        "swarm on top: start={start:?} end={:?} following={:?}",
+        e.pos, e.following
+    );
+    assert!(
+        e.pos.distance(start) > 0.1,
+        "protected swarm froze on its boss"
+    );
+    assert_eq!(e.following, Following::Resting);
+    for (distance, expected) in [(1.5, Following::Resting), (2.3, Following::Acquired)] {
+        let pos = world.entities[&swarm].pos;
+        world
+            .position_entity(
+                boss,
+                Pos {
+                    x: pos.x + distance,
+                    y: pos.y,
+                },
+            )
+            .unwrap();
+        world.now += 50;
+        world.npc_step();
+        assert_eq!(world.entities[&swarm].following, expected);
+    }
+}
+
+#[test]
+fn stheno_swarm_never_pursues_a_player_without_its_parent() {
+    let (mut world, boss, swarm) = swarm_fixture(3.);
+    world.remove_entity(boss);
+    assert!(world.entities.contains_key(&swarm));
+    let start = world.entities[&swarm].pos;
+    world.now += 50;
+    world.npc_step();
+    assert_eq!(world.entities[&swarm].pos.distance(start), 0.);
+}
+
 #[test]
 fn guardians_circle_through_sthenos_phases_without_stalling_on_cover() {
     let (fixture, player) = super::movement_tests::fixture(0x18, false);

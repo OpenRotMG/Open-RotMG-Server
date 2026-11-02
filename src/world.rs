@@ -6816,6 +6816,17 @@ impl World {
                         e.goal
                     }
                     Motion::Follow { idle, .. } => {
+                        let target = if kind == crate::dungeon::snake::SWARM {
+                            match self.orbit_anchor(id, crate::encounter::Anchor::Parent, target) {
+                                Ok(parent) => Some(parent),
+                                Err(error) => {
+                                    tracing::error!(entity=id, %error, "swarm protection anchor refused");
+                                    continue 'entities;
+                                }
+                            }
+                        } else {
+                            target
+                        };
                         if let Some(target) = self.follow_goal(id, target, motion, delta) {
                             Some(if kind == 0x651 && self.name != "Abyss of Demons" {
                                 Pos {

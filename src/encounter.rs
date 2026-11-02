@@ -323,12 +323,16 @@ pub fn profile(kind: u16) -> Option<Profile> {
             1000,
             25.,
         ),
+        // Protect approaches to one tile, then yields to Wander until two tiles away: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.SnakePit.cs#L279-L287
         0x919 => (
-            Protect {
-                anchor: Anchor::Parent,
-                distance: 2.,
+            Follow {
+                sight: 10.,
+                stop: 1.,
+                idle: nr_speed(0.3),
+                duration: 0,
+                cooldown: 0,
             },
-            4.,
+            nr_speed(0.3),
             1000,
             20.,
         ),
