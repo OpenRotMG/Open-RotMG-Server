@@ -1196,7 +1196,7 @@ impl Directory {
             d.bind_realm_heroes(origin, d.worlds[&origin].hero_identities())?;
             let name =
                 (seed as usize % realm_portal::NAMES.len() + slot) % realm_portal::NAMES.len();
-            let portal = d.install_realm_portal(slot)?;
+            let portal = d.install_realm_portal(origin, None)?;
             let record = d.endgame.realms.get_mut(&origin).unwrap();
             record.name = name;
             record.portal = Some(portal);

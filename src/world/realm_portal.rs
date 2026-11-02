@@ -31,28 +31,51 @@ impl Directory {
         self.sync_realm_portal();
         Ok(target)
     }
-    pub(super) fn install_realm_portal(&mut self, slot: usize) -> Result<i32> {
+    pub(super) fn install_realm_portal(
+        &mut self,
+        realm: i32,
+        retiring: Option<i32>,
+    ) -> Result<i32> {
         let nexus = self.worlds.get_mut(&-2).context("Nexus missing")?;
-        let mut positions: Vec<Pos> = Vec::new();
-        for pos in nexus.map.cells.iter().enumerate().filter_map(|(i, c)| {
-            let pos = Pos {
-                x: (i % nexus.map.width as usize) as f32 + 0.5,
-                y: (i / nexus.map.width as usize) as f32 + 0.5,
-            };
-            (c.region == 2 && c.object.is_none() && nexus.walkable(pos)).then_some(pos)
-        }) {
-            if positions.iter().all(|other| other.distance(pos) >= 4.) {
-                positions.push(pos);
-            }
-            if positions.len() > slot {
-                break;
-            }
-        }
-        let pos = *positions
-            .get(slot)
-            .context("Nexus has insufficient separated walkable Realm portal regions")?;
+        let entrances: Vec<_> = nexus
+            .entities
+            .values()
+            .filter(|e| e.kind == 0x712 && Some(e.id) != retiring)
+            .map(|e| e.pos)
+            .collect();
+        // Region sampling: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/RealmPortalMonitor.cs#L36-L47
+        // Four-tile clearance is reconstruction/usability policy, not a historical constant.
+        let positions: Vec<_> = nexus
+            .map
+            .cells
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                let pos = Pos {
+                    x: (i % nexus.map.width as usize) as f32 + 0.5,
+                    y: (i / nexus.map.width as usize) as f32 + 0.5,
+                };
+                (c.region == 2
+                    && c.object.is_none()
+                    && nexus.walkable(pos)
+                    && entrances.iter().all(|other| other.distance(pos) >= 4.))
+                .then_some(pos)
+            })
+            .collect();
+        let pos = *positions.choose(&mut nexus.rng).with_context(|| {
+            format!(
+                "Realm {realm}: Nexus has no separated objectless walkable region-2 entrance cell"
+            )
+        })?;
         let id = nexus.spawn_entity(0x712, pos, vec![])?;
         nexus.entities.get_mut(&id).unwrap().published = false;
+        tracing::info!(
+            realm,
+            portal = id,
+            x = pos.x,
+            y = pos.y,
+            "Realm entrance allocated"
+        );
         Ok(id)
     }
     pub(super) fn sync_realm_portal(&mut self) {
@@ -127,4 +150,99 @@ fn realm_portal_counts_reservations_and_retires_closed_entrances() {
     assert!(entrance.published);
     assert!(entrance.name.ends_with("(0/1)"));
     assert_eq!(entrance.extra_stats, vec![(37, 1)]);
+}
+
+#[cfg(test)]
+#[test]
+fn realm_entrance_seeded_legal_stationary_and_bounded() {
+    let path = std::path::Path::new("data");
+    let content = Arc::new(Content::load(path).unwrap());
+    let mut d = Directory::prepared(path, content.clone(), 16, 901, 2).unwrap();
+    let same = Directory::prepared(path, content, 16, 901, 2).unwrap();
+    let positions = |d: &Directory| {
+        d.endgame
+            .realms
+            .values()
+            .map(|r| d.worlds[&-2].entities[&r.portal.unwrap()].pos)
+            .collect::<Vec<_>>()
+    };
+    let initial = positions(&d);
+    assert!(
+        initial
+            .iter()
+            .zip(positions(&same))
+            .all(|(a, b)| a.distance(b) == 0.)
+    );
+    assert!(initial[0].distance(initial[1]) >= 4.);
+    for pos in &initial {
+        let nexus = &d.worlds[&-2];
+        let cell = &nexus.map.cells[pos.y as usize * nexus.map.width as usize + pos.x as usize];
+        assert_eq!(cell.region, 2);
+        assert!(cell.object.is_none() && nexus.walkable(*pos));
+        assert_eq!(pos.x.fract(), 0.5);
+        assert_eq!(pos.y.fract(), 0.5);
+    }
+    let old = d.endgame.realms[&-3].portal.unwrap();
+    let old_pos = d.worlds[&-2].entities[&old].pos;
+    let mut choices = BTreeSet::new();
+    for seed in 0..16 {
+        d.worlds.get_mut(&-2).unwrap().rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let replacement = d.install_realm_portal(10, Some(old)).unwrap();
+        let pos = d.worlds[&-2].entities[&replacement].pos;
+        choices.insert((pos.x as i32, pos.y as i32));
+        assert!(pos.distance(initial[1]) >= 4.);
+        assert!(
+            positions(&d)
+                .iter()
+                .zip(&initial)
+                .all(|(a, b)| a.distance(*b) == 0.),
+            "existing entrances moved"
+        );
+        d.worlds.get_mut(&-2).unwrap().remove_entity(replacement);
+    }
+    assert!(choices.len() > 1, "different seeds still use a fixed slot");
+    let nexus = d.worlds.get_mut(&-2).unwrap();
+    let old_index = old_pos.y as usize * nexus.map.width as usize + old_pos.x as usize;
+    for (i, cell) in Arc::make_mut(&mut nexus.map).cells.iter_mut().enumerate() {
+        cell.region = if i == old_index { 2 } else { 0 };
+    }
+    let count = nexus.entities.len();
+    assert!(
+        d.install_realm_portal(10, None)
+            .unwrap_err()
+            .to_string()
+            .contains("no separated")
+    );
+    assert_eq!(d.worlds[&-2].entities.len(), count);
+    let replacement = d.install_realm_portal(10, Some(old)).unwrap();
+    assert_eq!(
+        d.worlds[&-2].entities[&replacement].pos.distance(old_pos),
+        0.,
+        "legal old-tile reuse refused"
+    );
+    assert!(
+        d.install_realm_portal(11, Some(old)).is_err(),
+        "unpublished replacement must reserve space"
+    );
+    d.worlds.get_mut(&-2).unwrap().remove_entity(replacement);
+    let nexus = d.worlds.get_mut(&-2).unwrap();
+    Arc::make_mut(&mut nexus.map).cells[old_index].object = Some(0x100);
+    assert!(
+        d.install_realm_portal(10, Some(old)).is_err(),
+        "object-bearing region accepted"
+    );
+    let blocked_ground = *d.worlds[&-2]
+        .content
+        .grounds
+        .iter()
+        .find(|(_, speed)| **speed <= 0.)
+        .unwrap()
+        .0;
+    let cell = &mut Arc::make_mut(&mut d.worlds.get_mut(&-2).unwrap().map).cells[old_index];
+    cell.object = None;
+    cell.ground = blocked_ground;
+    assert!(
+        d.install_realm_portal(10, Some(old)).is_err(),
+        "unwalkable region accepted"
+    );
 }

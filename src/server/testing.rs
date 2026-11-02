@@ -95,6 +95,9 @@ enum Command {
     PrepareRealmCapacity {
         limit: usize,
     },
+    PrepareRealmClosure {
+        world: i32,
+    },
     Catalog {
         search: String,
         limit: usize,
@@ -1003,6 +1006,41 @@ async fn prepare_realm_capacity(a: &App, t: &Testing, limit: usize) -> Result<Va
         .await?;
     Ok(receipt)
 }
+async fn prepare_realm_closure(a: &App, t: &Testing, world: i32) -> Result<Value> {
+    ensure!(
+        a.world.clock.paused(),
+        "closure setup requires a paused prepared session"
+    );
+    let path = t.root.join("prepared-realm-closure.json");
+    ensure!(!path.exists(), "Realm closure was already prepared");
+    ensure!(
+        !fs::read_dir(&t.root)?
+            .collect::<std::io::Result<Vec<_>>>()?
+            .iter()
+            .any(|e| e.file_name().as_encoded_bytes().ends_with(b".spawn.json")),
+        "closure setup must precede enrollment"
+    );
+    let owners = a.owners.clone();
+    let admission_started = a.admission_started.clone();
+    a.world
+        .directory(move |d| {
+            let claims = owners.lock().expect("ownership registry poisoned");
+            ensure!(
+                claims.is_empty(),
+                "closure setup requires no ownership claims"
+            );
+            ensure!(
+                !admission_started.load(Ordering::Relaxed),
+                "closure setup must precede admission"
+            );
+            let (hero, position) = d.prepare_realm_closure(world)?;
+            let receipt =
+                json!({"world":world,"hero":hero,"position":position,"provenance":"prepared"});
+            write_json(&path, &receipt)?;
+            Ok(receipt)
+        })
+        .await
+}
 async fn prepare_guild(
     a: &App,
     t: &Testing,
@@ -1124,8 +1162,9 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         "native control lease expired; this prepared session is terminal"
     );
     match command {
-        Command::Capabilities => Ok(json!({"schema":1,"provenance":"prepared","pause_scope":"isolated server and all registered native clients","controllers":["direct","native","game_bot"],"game_bot_profiles":crate::bots::profiles(),"goals":["time","level","kills","pirate_caves"],"max_game_ms":600000,"trace_page_limit":40,"request_bytes_limit":MAX_REQUEST_BYTES,"mutation_limit":MAX_MUTATIONS,"starting_context_operations":["prepare_realm_capacity","persona"],"prepared_realm_capacity":if t.root.join("prepared-realm-capacity.json").exists(){serde_json::from_slice::<Value>(&fs::read(t.root.join("prepared-realm-capacity.json"))?)?}else{Value::Null}})),
+        Command::Capabilities => Ok(json!({"schema":1,"provenance":"prepared","pause_scope":"isolated server and all registered native clients","controllers":["direct","native","game_bot"],"game_bot_profiles":crate::bots::profiles(),"goals":["time","level","kills","pirate_caves"],"max_game_ms":600000,"trace_page_limit":40,"request_bytes_limit":MAX_REQUEST_BYTES,"mutation_limit":MAX_MUTATIONS,"starting_context_operations":["prepare_realm_capacity","prepare_realm_closure","persona"],"prepared_realm_capacity":if t.root.join("prepared-realm-capacity.json").exists(){serde_json::from_slice::<Value>(&fs::read(t.root.join("prepared-realm-capacity.json"))?)?}else{Value::Null}})),
         Command::PrepareRealmCapacity{limit} => prepare_realm_capacity(a,t,limit).await,
+        Command::PrepareRealmClosure{world} => prepare_realm_closure(a,t,world).await,
         Command::Catalog{search,limit} => {ensure!(!search.is_empty() && search.len()<=80 && (1..=20).contains(&limit),"catalog needs search and limit 1–20");let matches=a.content.objects.values().filter(|o|o.name.to_lowercase().contains(&search.to_lowercase())).collect::<Vec<_>>();Ok(json!({"items":matches.iter().take(limit).map(|o|json!({"id":o.kind,"name":o.name,"class":o.class,"slot_type":o.slot_type,"unsupported_equipment":o.unsupported_equipment})).collect::<Vec<_>>(),"omitted":matches.len().saturating_sub(limit)}))},
         // JavaScript numbers would round the seed needed to reproduce a prepared map.
         Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed.map(|seed|seed.to_string()),"privileged":true,"damaging_ground":w.map.cells.iter().enumerate().filter(|(_,c)|w.content.hazards.contains_key(&c.ground)).map(|(i,_)|Pos{x:(i as i32%w.map.width) as f32+0.5,y:(i as i32/w.map.width) as f32+0.5}).filter(|p|w.walkable(*p)).take(16).collect::<Vec<_>>(),"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0x67d|crate::dungeon::pirate::BOSS|0xd05|0xd06|0xd7a|0xd7b|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe32|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
@@ -1281,4 +1320,84 @@ pub async fn command(State(a): State<App>, headers: HeaderMap, Json(raw): Json<V
         )
             .into_response(),
     }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn prepared_realm_closure_guards_and_selected_realm_isolation() {
+    let (dir, mut app) = super::account_actions::tests::fixture();
+    fs::write(
+        dir.join("testing.json"),
+        r#"{"schema":1,"provenance":"prepared"}"#,
+    )
+    .unwrap();
+    let testing = Testing::open(&dir).unwrap().unwrap();
+    assert!(
+        prepare_realm_closure(&app, &testing, -3)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("paused")
+    );
+    app.world.clock.set_paused(true);
+    assert!(
+        prepare_realm_closure(&app, &testing, -3)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("prepared state")
+    );
+    let mut d =
+        crate::world::Directory::prepared(Path::new("data"), app.content.clone(), 16, 12351, 2)
+            .unwrap();
+    d.clock.set_paused(true);
+    let other: Vec<_> = d.worlds[&1]
+        .entities
+        .values()
+        .map(|e| (e.id, e.hp, e.pos.x, e.pos.y))
+        .collect();
+    assert!(d.prepare_realm_closure(-2).is_err());
+    app.world = crate::world::Handle::spawn(d);
+    fs::write(testing.root.join("1.spawn.json"), "{}").unwrap();
+    assert!(
+        prepare_realm_closure(&app, &testing, -3)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("enrollment")
+    );
+    fs::remove_file(testing.root.join("1.spawn.json")).unwrap();
+    app.admission_started.store(true, Ordering::Relaxed);
+    assert!(
+        prepare_realm_closure(&app, &testing, -3)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("admission")
+    );
+    app.admission_started.store(false, Ordering::Relaxed);
+    let receipt = prepare_realm_closure(&app, &testing, -3).await.unwrap();
+    assert_eq!(receipt["provenance"], "prepared");
+    app.world
+        .directory(move |d| {
+            assert_eq!(
+                d.worlds[&1]
+                    .entities
+                    .values()
+                    .map(|e| (e.id, e.hp, e.pos.x, e.pos.y))
+                    .collect::<Vec<_>>(),
+                other
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(
+        prepare_realm_closure(&app, &testing, -3)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("already prepared")
+    );
+    fs::remove_dir_all(dir).unwrap();
 }

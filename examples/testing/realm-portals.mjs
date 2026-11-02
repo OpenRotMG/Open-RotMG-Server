@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
+export const realmSeed=12351;
 const spec={class:0x310,level:20,seed:901,world:-2,position:'spawn',equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
 export async function prepare(){
   const root=join(process.env.QA_RESULTS_DIR,'native'),{origin}=JSON.parse(await readFile(join(root,'result.json'),'utf8'));
@@ -51,6 +52,9 @@ export async function run(game){
     portals=(await game.inspect()).diagnostic.entities.filter(e=>e.kind===0x712);
   }
   assert.equal(portals.length,2,'Walking north did not reveal both Realm entrances');
+  const limited=(await game.inspect()).view.objects.find(o=>o.kind===0x712&&o.name.endsWith('(0/1)'));
+  assert(limited,'Prepared capacity entrance missing');
+  portals=[portals.find(p=>p.id===limited.id),portals.find(p=>p.id!==limited.id)];
   await walk(portals[0].pos);
   await capture('realm-portals-open');
   const open=await save('open');
