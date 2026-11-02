@@ -876,18 +876,6 @@ impl Market {
                     offers.push(offer);
                 }
             }
-            tracing::info!(
-                account = v.session.account,
-                peer = account,
-                ?q,
-                ?offers,
-                "market wanted advertisement answered with own potions"
-            );
-            if let Some(offer) = offers.into_iter().next() {
-                self.quote = Some(offer.clone());
-                self.respond(v, (peer.id, account, name), ReplyKind::Counter(offer), c)?;
-                return Ok(true);
-            }
             // Live: 300 of 300 wanted ads in 46 minutes found no potions carried; they were saved in the Vault.
             // Owner, 2012: a player takes saved potions out of the Vault to buy what it wants.
             let saved: BTreeSet<i32> = self
@@ -905,9 +893,24 @@ impl Market {
                     break;
                 }
             }
+            tracing::info!(
+                account = v.session.account,
+                peer = account,
+                ?q,
+                ?offers,
+                vault_known = self.vault.is_some(),
+                ?funds,
+                preparing = self.preparing,
+                "market wanted advertisement answered with own potions"
+            );
+            if let Some(offer) = offers.into_iter().next() {
+                self.quote = Some(offer.clone());
+                self.respond(v, (peer.id, account, name), ReplyKind::Counter(offer), c)?;
+                return Ok(true);
+            }
+            // Live: 0 of 893 wanted ads fetched while a Nexus market session was open, the moment bots hear ads.
             if let Some(offer) = funds
                 && !self.preparing
-                && self.session.is_none()
             {
                 tracing::info!(account = v.session.account, peer = account, quote = ?offer, "market fetching vault potions for a wanted item");
                 self.quote = Some(offer);
@@ -938,7 +941,6 @@ impl Market {
             related(o) && !carried(o) && self.count(v, o[0].kind) >= usize::from(o[0].quantity)
         }) && counters.iter().all(|o| !(related(o) && carried(o)))
             && !self.preparing
-            && self.session.is_none()
         {
             // Owner, 2012: "I have a tier 11 staff in my vault" — the seller fetches it for the buyer.
             tracing::info!(account = v.session.account, peer = peer.account, quote = ?counter, "market fetching vault stock for a buyer");
