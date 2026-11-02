@@ -14,7 +14,7 @@ export async function run(game){
   const guarded=client=>({...client,act:async(...args)=>{for(const p of participants)await protect(p);return client.act(...args);}});game=guarded(game);
   const api=async command=>{const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});const v=await r.json();assert(r.ok&&v.status!=='failed',JSON.stringify(v));return v;};
   async function save(name,client=game){const state=await client.inspect();samples.push({name,state});await writeFile(join(out,'davy-observations.json'),JSON.stringify(samples));return state;}
-  async function scene(){const v=await game.observe(),r=await fetch(config.origin+'/dev/map?player='+v.session.player,{headers:{Authorization:'Bearer '+token}});assert(r.ok);const m=await r.json();assert(m.width===132&&m.height===132);return m;}
+  async function scene(){const v=await game.observe(),r=await fetch(config.origin+'/dev/map?player='+v.session.player,{headers:{Authorization:'Bearer '+token}});assert(r.ok);const m=await r.json();assert(m.width===256&&m.height===256);return m;}
   async function protect(client){const v=await client.observe(),old=protections.get(client.actor);if(old?.player===v.session.player&&v.game_ms<old.until)return;await api({op:'cheat',actor:client.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protections.set(client.actor,{player:v.session.player,until:v.game_ms+60000});}
   async function add(spec){const p=guarded(await game.join(spec));participants.push(p);await protect(p);return p;}
   function route(m,from,to,mask){
@@ -51,7 +51,7 @@ export async function run(game){
   await peer.act({keys:['a','w'],duration_ms:120});
   game.check('prepared peer collects natural purple key through native movement',!(await scene()).entities.some(e=>e.id===purple.id));
   await save('peer-purple-discovery',peer);
-  // The admission portal lasts one minute; reconnect before traversing the reconstructed maze.
+  // The admission portal lasts one minute; reconnect before traversing the reconstructed layout.
   {
       const browser=config.native[0],cdp=await connect({port:browser.port,target:browser.target,url:config.origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
       try{
