@@ -20,3 +20,9 @@ Nilly; sebastianfra12 for some more behaviors; Kieron for making 1 behavior;
 everyone else that have contributed to this project on mpgh or any other site.
 The README's named-user exclusion is removed under AGPL v3 section 7.
 Underlying third-party asset rights are not expanded by the backend license.
+
+manor-templates.json (all templates but start, vault, vault_b and those noted
+minimap): cells cut from VotR-Server/bin/resources/worlds/manor.wmap at
+https://github.com/Omniraptyr/Valor-Server/tree/40fab9e80d8a44e922036d178b9d1f03aca66a44
+(GNU AGPL v3, VotR-Server/LICENSE), a client capture of one live Manor of the
+Immortals instance; enemies are dropped and used sockets are stored closed.
