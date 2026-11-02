@@ -9,7 +9,7 @@ impl World {
             crate::encounter::validate(&self.content, kind)?;
             crate::loot::validate(&self.content, kind)?;
         }
-        let pos = self.place_named_setpiece(0xd50, &[1])?;
+        let pos = self.place_named_setpiece(0xd50, realm_events::EVENT_TERRAINS)?;
         let id = self.spawn_entity(0xd50, pos, vec![])?;
         self.landmark_bind(id)?;
         Ok(())
