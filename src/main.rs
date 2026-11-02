@@ -71,6 +71,12 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         .init();
     supervision::install_panic_hook();
     let (config, dev_control) = config::Config::load(&args)?;
+    tracing::info!(
+        platform = std::env::consts::OS,
+        linux_host_metrics = cfg!(target_os = "linux"),
+        linux_bot_thread_priority = cfg!(target_os = "linux"),
+        "runtime platform capabilities"
+    );
     let dialogue = bots::dialogue::Service::configured(config.bot_llm)?;
     let client = config.client;
     let state = config.state;
@@ -210,5 +216,5 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         persona_departure_gate: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,
     };
-    server::serve(app, config.bind, client).await
+    server::serve(app, config.bind, client, config.desktop).await
 }
