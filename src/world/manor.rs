@@ -449,6 +449,96 @@ mod tests {
         assert!(counts.iter().all(|count| *count > 0));
     }
 
+    fn secret_bookshelf_view() -> (World, i32, i32, Pos) {
+        let (mut world, _) = arena();
+        let (wall, outside, inside) = world
+            .actors()
+            .filter(|e| {
+                e.kind == BOOKCASE && world.map.cell(e.pos.x, e.pos.y).unwrap().region == 250
+            })
+            .find_map(|e| {
+                [(0., 1.), (1., 0.)].into_iter().find_map(|(dx, dy)| {
+                    let outside = Pos {
+                        x: e.pos.x + dx,
+                        y: e.pos.y + dy,
+                    };
+                    let inside = Pos {
+                        x: e.pos.x - dx,
+                        y: e.pos.y - dy,
+                    };
+                    (world.walkable(outside) && world.walkable(inside))
+                        .then_some((e.id, outside, inside))
+                })
+            })
+            .expect("generated Manor has a secret bookshelf between walkable tiles");
+        assert!(world.content.objects[&BOOKCASE].blocks_sight);
+        assert_eq!(world.entities[&wall].hp, 3000);
+        assert_eq!(world.entities[&wall].condition, 0);
+        let (fixture, player) = super::super::movement_tests::fixture(0x18, false);
+        let player = world
+            .enter(fixture.players[&player].character.clone(), None)
+            .unwrap();
+        world.players.get_mut(&player).unwrap().pos = outside;
+        eprintln!(
+            "Manor seed 12351: wall={:?}, outside={outside:?}, inside={inside:?}",
+            world.entities[&wall].pos
+        );
+        (world, player, wall, inside)
+    }
+
+    #[test]
+    fn manor_secret_bookshelf_hides_unexplored_tiles_and_actors_until_opened() {
+        let (mut world, player, wall, inside) = secret_bookshelf_view();
+        let tile = (inside.x as i16, inside.y as i16);
+        let wall_pos = world.entities[&wall].pos;
+        let wall_tile = (wall_pos.x as i16, wall_pos.y as i16);
+        let marker = world.spawn_entity(ROCK, inside, vec![]).unwrap();
+        let outside = world.players[&player].pos;
+        assert!(
+            !world
+                .room_sight((outside.x as i32, outside.y as i32))
+                .contains(&tile)
+        );
+        assert_ne!(world.quest_target(player), Some(marker));
+        world.updates(player, true).unwrap();
+        let p = &world.players[&player];
+        assert!(
+            p.known.contains(&wall),
+            "the unopened bookshelf face must be visible"
+        );
+        assert!(p.tiles.contains(&wall_tile));
+        assert!(
+            !p.tiles.contains(&tile),
+            "unopened Manor bookshelf leaked terrain behind it"
+        );
+        assert!(
+            !p.known.contains(&marker),
+            "unopened Manor bookshelf leaked an actor behind it"
+        );
+        world.remove_entity(wall);
+        world.updates(player, false).unwrap();
+        let p = &world.players[&player];
+        assert_eq!((p.pos.x, p.pos.y), (outside.x, outside.y));
+        assert!(
+            p.tiles.contains(&tile),
+            "opened bookshelf did not reveal terrain to a stationary player"
+        );
+        assert!(p.known.contains(&marker));
+        assert!(!p.known.contains(&wall));
+    }
+
+    #[test]
+    fn manor_secret_bookshelf_removal_invalidates_stationary_tile_scan() {
+        let (mut world, player, wall, _) = secret_bookshelf_view();
+        world.updates(player, true).unwrap();
+        assert!(world.players[&player].tile_scan.is_some());
+        world.remove_entity(wall);
+        assert_eq!(
+            world.players[&player].tile_scan, None,
+            "Manor bookshelf removal retained the closed-room scan"
+        );
+    }
+
     #[test]
     fn genuine_coffin_threshold_waves_do_not_repeat() {
         let (mut world, boss) = arena();
