@@ -15,7 +15,7 @@ export async function run(game){
   const phase=s=>{
     safe(s);const now=s.diagnostic.time_ms,e=s.diagnostic.entities.find(e=>e.id===switchId&&e.kind===0xd37);assert(e?.tomb&&Math.hypot(e.pos.x-16.5,e.pos.y-16.5)<.01,'Original switch/context/position required');assert(Number.isFinite(now)&&now>=0&&distance(s)<4,'Finite clock and bounded ordinary room movement required');if(mode==='initial')assert(Math.hypot(s.diagnostic.pos.x-16.9,s.diagnostic.pos.y-16.1)<.02,'Partial first hold must retain its supplied position');
     if(e.stage===null){assert(mode==='initial'&&firstEpoch===undefined&&e.tomb.press_since===null&&active(s),'Only the complete pre-first-tick switch may be uninitialized');return e;}
-    assert(e.stage===0||e.stage===1,'Known switch phase required');if(firstDisabled)assert(e.stage===1,'Disabled switch must not regress');if(e.stage===0&&distance(s)>=1)lastOutsideAt=now;
+    assert(e.stage===0||e.stage===1,'Known switch phase required');if(firstDisabled)assert(e.stage===1,'Disabled switch must not regress');if(e.stage===0&&distance(s)>=1)lastOutsideAt=now;if(mode==='held')assert(distance(s)<1&&secondEpoch!==undefined,'Fresh continuous hold must stay within radius');
     if(e.stage===0){
       assert(active(s),'All eight unchanged originals, without premature off traps, required');const since=e.tomb.press_since;
       if(since===null){
@@ -30,7 +30,6 @@ export async function run(game){
         else{assert(resetAt!==undefined&&['returning','held'].includes(mode)&&distance(s)<1&&lastOutsideAt!==undefined&&since>=lastOutsideAt&&since>firstEpoch&&since>=resetAt&&(reentrySeen===undefined||since<reentrySeen+100),'New epoch requires occupancy, no outside backdating and timely initialization');if(secondEpoch===undefined)secondEpoch=since;else assert(since===secondEpoch,'Second uninterrupted epoch reset');}
         assert(now<since+3000,'Three seconds of continuous pressure did not deactivate');
       }
-      if(mode==='held')assert(distance(s)<1&&secondEpoch!==undefined,'Fresh continuous hold must stay within radius');
     }else{
       assert(secondEpoch!==undefined&&now>=secondEpoch+3000&&e.tomb.press_since===null&&replaced(s),'Early, unbound or incomplete deactivation');
       const ids=localOff(s).map(e=>e.id).sort((a,b)=>a-b);if(!firstDisabled){firstDisabled={time:now};replacementIds=ids;}else assert.deepEqual(ids,replacementIds,'Released room replacement identities changed');
