@@ -230,3 +230,150 @@ async fn issue1371_current_policy_requires_the_exact_quoted_basket() {
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn incoming_rejection_diagnostics_include_only_selected_types_and_current_quote() {
+    use crate::world::TradeAction;
+    use serde_json::{Value, json};
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    v.session.world = -2;
+    v.map.name = "Nexus".into();
+    v.character.items[4..6].fill(2571);
+    let peer = &mut v.objects[0];
+    peer.account = Some(2);
+    peer.name = "Buyer".into();
+    peer.position = v.position;
+    peer.equipped = vec![-1; 4];
+    let quote = [
+        Goods {
+            kind: 2571,
+            quantity: 2,
+        },
+        Goods {
+            kind: 2591,
+            quantity: 1,
+        },
+    ];
+    let path =
+        std::env::temp_dir().join(format!("market-rejection-{}.jsonl", rand::random::<u64>()));
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(std::sync::Mutex::new(
+            std::fs::File::create_new(&path).unwrap(),
+        ))
+        .finish();
+    let capture = tracing::subscriber::set_default(subscriber);
+    let mut rejected = 0;
+    for (slots, expected_counts, non_backpack, empty_slots, invalid_kinds) in [
+        (vec![4], json!({"2591": 1}), 0, 0, 0),
+        (vec![4, 5], json!({"2591": 1, "2592": 1}), 0, 0, 0),
+        (vec![4, 6], json!({"2591": 2}), 0, 0, 0),
+        (vec![5], json!({"2592": 1}), 0, 0, 0),
+        (vec![], json!({}), 0, 0, 0),
+        (vec![0], json!({"2591": 1}), 1, 0, 0),
+        (vec![8], json!({}), 0, 1, 0),
+        (vec![9], json!({}), 0, 0, 1),
+        ((0..12).collect(), json!({"2591": 12}), 4, 0, 0),
+    ] {
+        let mut theirs = vec![1826; 12];
+        theirs[0] = 2591;
+        theirs[4..7].copy_from_slice(&[2591, 2592, 2591]);
+        theirs[8] = -1;
+        theirs[9] = 65536;
+        if slots.len() == 12 {
+            theirs.fill(2591);
+        }
+        let mut offer = [false; 12];
+        for slot in &slots {
+            offer[*slot] = true;
+        }
+        let mut market = Market {
+            incoming: Some(Incoming::outbound(&v, 2, 2, "Buyer".into(), quote.clone())),
+            trade: Some(SessionTrade {
+                binding: [-2, v.session.player, v.session.character],
+                peer: "Buyer".into(),
+                items: [v.character.items.clone(), theirs],
+                tradeable: [true; 12],
+                offers: [[false; 12], offer],
+                ready: 0,
+                ready_at: v.clock_at,
+                empty_offer_until: v.clock_at + Duration::from_secs(20),
+                changed: false,
+            }),
+            ..Market::default()
+        };
+        let mut mine = [false; 12];
+        mine[4..6].fill(true);
+        assert!(
+            matches!(market.incoming_action(&v, &c, None).unwrap(), Some(TradeAction::Change { offer }) if offer == mine)
+        );
+        assert!(market.incoming_action(&v, &c, None).unwrap().is_none());
+        v.time_ms += 3001;
+        v.clock_at += Duration::from_millis(3001);
+        if slots.is_empty() {
+            assert!(market.incoming_action(&v, &c, None).unwrap().is_none());
+            v.time_ms += 17000;
+            v.clock_at += Duration::from_millis(17000);
+        }
+        let action = market.incoming_action(&v, &c, None).unwrap();
+        let accepts = slots == [4];
+        if accepts {
+            assert!(
+                matches!(action, Some(TradeAction::Accept { mine: actual, theirs }) if actual == mine && theirs == offer)
+            );
+        } else {
+            assert!(matches!(action, Some(TradeAction::Cancel)));
+            rejected += 1;
+        }
+        let records: Vec<Value> = std::fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap()["fields"].clone())
+            .filter(|fields| fields["message"] == "market incoming exchange refused")
+            .collect();
+        assert_eq!(records.len(), rejected);
+        if !accepts {
+            let fields = records.last().unwrap();
+            assert_eq!(
+                fields["reason"],
+                if slots.is_empty() {
+                    "empty_offer_timeout"
+                } else {
+                    "incompatible_offer"
+                }
+            );
+            assert_eq!(fields["q"], format!("{quote:?}"));
+            assert_eq!(
+                serde_json::from_str::<Value>(fields["selected_item_counts"].as_str().unwrap())
+                    .unwrap(),
+                expected_counts
+            );
+            assert_eq!(fields["selected_non_backpack_count"], non_backpack);
+            assert_eq!(fields["selected_empty_slot_count"], empty_slots);
+            assert_eq!(fields["selected_invalid_kind_count"], invalid_kinds);
+            assert_eq!(
+                fields
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>(),
+                BTreeSet::from([
+                    "account",
+                    "peer",
+                    "message",
+                    "reason",
+                    "q",
+                    "selected_item_counts",
+                    "selected_non_backpack_count",
+                    "selected_empty_slot_count",
+                    "selected_invalid_kind_count",
+                ])
+            );
+        }
+    }
+    drop(capture);
+    std::fs::remove_file(path).unwrap();
+}
