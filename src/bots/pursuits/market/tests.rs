@@ -450,3 +450,40 @@ fn gear_sells_for_any_fair_potions_and_buyers_counter_with_their_own() {
     );
     assert!(seller.incoming.is_some(), "fair potions buy spare gear");
 }
+
+#[test]
+fn a_buyer_fetches_saved_potions_from_its_vault_for_a_wanted_item() {
+    // Live: 300 of 300 wanted ads in 46 minutes found no potions carried; they were saved in the Vault.
+    let c = Content::load(Path::new("data")).unwrap();
+    let bow = 2699;
+    let weak = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == 3 && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    let asked = bounded_quote(&goods(DEX, 8), &goods(bow, 1), &c).unwrap()[0].clone();
+    let (c, mut v) = nexus_peer([-1; 8]);
+    v.character.class = 775;
+    v.character.items[0] = weak;
+    v.character.base_stats[4] = c.classes[&v.character.class].caps[4];
+    let mut buyer = Market {
+        name: "Buyer".into(),
+        vault: Some(vec![SPEED; 8]),
+        ..Market::default()
+    };
+    assert!(buyer.wanted(&v, &c, None, bow).unwrap() > 0);
+    assert!(
+        buyer
+            .receive(&peer_said(&wts(&[goods(bow, 1), asked], &c)), &v, &c, None)
+            .unwrap()
+    );
+    let offer = buyer.quote.clone().expect("a purchase paid from the Vault");
+    assert_eq!((offer[0].kind, offer[1].kind), (SPEED, bow));
+    assert!(buyer.sought && buyer.outgoing.is_none());
+    assert_eq!(
+        buyer.quote(&v, &c, None).unwrap(),
+        Some(offer),
+        "the session keeps the purchase"
+    );
+}

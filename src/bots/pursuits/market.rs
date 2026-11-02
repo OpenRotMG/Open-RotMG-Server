@@ -888,6 +888,33 @@ impl Market {
                 self.respond(v, (peer.id, account, name), ReplyKind::Counter(offer), c)?;
                 return Ok(true);
             }
+            // Live: 300 of 300 wanted ads in 46 minutes found no potions carried; they were saved in the Vault.
+            // Owner, 2012: a player takes saved potions out of the Vault to buy what it wants.
+            let saved: BTreeSet<i32> = self
+                .vault
+                .iter()
+                .flatten()
+                .copied()
+                .filter(|k| *k >= 0 && money(c, *k))
+                .collect();
+            let mut funds = None;
+            for kind in saved {
+                let quantity = u8::try_from(self.count(v, kind).min(8))?;
+                if let Some(offer) = bounded_quote(&Goods { kind, quantity }, &q[0], c) {
+                    funds = Some(offer);
+                    break;
+                }
+            }
+            if let Some(offer) = funds
+                && !self.preparing
+                && self.session.is_none()
+            {
+                tracing::info!(account = v.session.account, peer = account, quote = ?offer, "market fetching vault potions for a wanted item");
+                self.quote = Some(offer);
+                self.sought = true;
+                self.session_used = false;
+                return Ok(true);
+            }
         }
         // Interest alone supplies neither a peer price nor permission to open a trade, so answer with
         // own carried terms. A counter stays current only while it is this bot's quote.
