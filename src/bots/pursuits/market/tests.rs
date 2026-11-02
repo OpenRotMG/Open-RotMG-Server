@@ -398,3 +398,55 @@ fn vault_stock_is_fetched_for_a_buyer_and_a_full_vault_trades_speed_up() {
         "{quotes:?}"
     );
 }
+
+#[test]
+fn gear_sells_for_any_fair_potions_and_buyers_counter_with_their_own() {
+    // Live: 228 of 228 bot sessions ended unsold; sellers asked one potion kind and buyers only mirrored exact quotes.
+    // Live ad: "wts Verdant Bow for 1 Dexterity".
+    let c = Content::load(Path::new("data")).unwrap();
+    let staff = 2699;
+    let weak = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == 3 && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    let price = bounded_quote(&goods(SPEED, 8), &goods(staff, 1), &c).unwrap();
+
+    // A buyer who wants the bow but carries Speed answers an ad asking for Dexterity.
+    let (c, mut buyer_view) = nexus_peer([SPEED; 8]);
+    buyer_view.character.class = 775;
+    buyer_view.character.items[0] = weak;
+    buyer_view.character.base_stats[4] = c.classes[&buyer_view.character.class].caps[4];
+    let mut buyer = Market {
+        name: "Buyer".into(),
+        ..Market::default()
+    };
+    assert!(
+        buyer.wanted(&buyer_view, &c, None, staff).unwrap() > 0,
+        "the upgrade is wanted"
+    );
+    let asked = bounded_quote(&goods(DEX, 8), &goods(staff, 1), &c).unwrap()[0].clone();
+    let ad = wts(&[goods(staff, 1), asked], &c);
+    assert!(
+        buyer
+            .receive(&peer_said(&ad), &buyer_view, &c, None)
+            .unwrap()
+    );
+    let reply = buyer.outgoing.clone().expect("a counter in own potions");
+    assert_eq!(reply.text, format!("nty {}", wts(&price, &c)));
+
+    // A seller with a spare bow, maxed in Speed, accepts that fair Speed payment.
+    let (c, mut seller_view) = nexus_peer([staff, -1, -1, -1, -1, -1, -1, -1]);
+    seller_view.character.base_stats[4] = c.classes[&seller_view.character.class].caps[4];
+    let mut seller = Market {
+        name: "Seller".into(),
+        ..Market::default()
+    };
+    assert!(
+        seller
+            .receive(&peer_said(&wts(&price, &c)), &seller_view, &c, None)
+            .unwrap()
+    );
+    assert!(seller.incoming.is_some(), "fair potions buy spare gear");
+}
