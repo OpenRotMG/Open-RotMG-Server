@@ -465,7 +465,7 @@ fn plan(rng: &mut StdRng, name: &'static str) -> Option<(Vec<Node>, Vec<usize>)>
     }
     // Hidden rooms hang north or west of a room (their doors face S or E; TKR's shelf door is on a north wall).
     for _ in 0..rng.gen_range(VAULTS) {
-        for _ in 0..8 {
+        (0..8).find_map(|_| {
             let hosts: Vec<_> = (1..nodes.len())
                 .filter(|&i| nodes[i].name != "boss" && !nodes[i].name.starts_with("vault"))
                 .filter(|&i| {
@@ -475,10 +475,8 @@ fn plan(rng: &mut StdRng, name: &'static str) -> Option<(Vec<Node>, Vec<usize>)>
                 })
                 .collect();
             let &host = hosts.choose(rng)?;
-            if attach(&mut nodes, host, &VAULT_WEIGHTS, 1, "NW", true, rng).is_some() {
-                break;
-            }
-        }
+            attach(&mut nodes, host, &VAULT_WEIGHTS, 1, "NW", true, rng)
+        })?;
     }
     let (x0, y0, x1, y1) = bounds(&nodes);
     (x1 - x0 <= MAX_EXTENT && y1 - y0 <= MAX_EXTENT).then_some((nodes, path))
@@ -682,7 +680,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
         attempts,
         start = nodes[0].name,
         rooms = nodes.len(),
-        vaults = nodes.iter().filter(|n| n.name == "vault").count(),
+        vaults = nodes.iter().filter(|n| n.name.starts_with("vault")).count(),
         width = x1 - x0,
         height = y1 - y0,
         "generated Manor template tree"
@@ -716,10 +714,25 @@ mod tests {
     }
 
     #[test]
+    fn manor_rejects_a_plan_that_drops_a_requested_vault() {
+        // Seed 22's first plan requests two vaults, but only one fits.
+        let mut rng = StdRng::seed_from_u64(22);
+        let &(start, _) = tuning::START_WEIGHTS
+            .choose_weighted(&mut rng, |e| e.1)
+            .unwrap();
+        assert!(plan(&mut rng, start).is_none());
+    }
+
+    #[test]
     fn manor_tree_follows_the_capture_rules() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         for seed in 0..32 {
             let (map, nodes, path) = build(&content, seed).unwrap();
+            assert!(
+                tuning::VAULTS
+                    .contains(&nodes.iter().filter(|n| n.name.starts_with("vault")).count()),
+                "seed {seed}: hidden-room count"
+            );
             // Nine rooms between start and boss, the boss hanging off a north-facing port (entered from the south).
             assert_eq!(path.len(), tuning::PATH_ROOMS + 2, "seed {seed}");
             let boss = *path.last().unwrap();
