@@ -60,14 +60,13 @@ export async function run(game){
   await walk(game,old.pos);await enter(game);
   assert.equal((await game.observe()).session.world,-3);
   await escape(game);
-  await hall(game);await walk(game,old.pos);await enter(game);
   game.check('same living character enters and returns through the original entrance', (await game.observe()).session.character===initial.view.session.character);
   const watcher=await game.join({...spec,seed:902});
   await hall(watcher);await walk(watcher,other.pos);
   const unaffected=await save('other-before',watcher);
   const rejected=await api({op:'prepare_realm_closure',world:-3},false);
   game.check('prepared closure cannot be repeated after enrollment',JSON.stringify(rejected).includes('already prepared'));
-  await api({op:'cheat',actor:game.actor,change:{kind:'teleport',position:prepared.position}});
+  await hall(game);await walk(game,old.pos);await enter(game);
   await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
   const kills=(await game.inspect()).diagnostic.character.kills;
   for(let n=0;n<30;n++){

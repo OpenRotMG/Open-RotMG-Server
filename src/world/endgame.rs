@@ -395,15 +395,20 @@ impl Directory {
                     .is_some_and(|e| e.kind == 0x67d && e.hp > 0)
             })
             .context("closure setup needs a living Cyclops God")?;
-        let entity = world.entities.get_mut(&hero).unwrap();
-        entity.hp = 1;
-        let position = entity.pos;
+        let position = world.entities[&hero].pos;
+        ensure!(
+            world.walkable(position),
+            "prepared final hero arrival is blocked"
+        );
+        world.entities.get_mut(&hero).unwrap().hp = 1;
+        // Native positions need client acknowledgement; prepare ordinary arrival before enrollment instead.
+        Arc::make_mut(&mut world.map).spawns = vec![(position.x, position.y)];
         record.cycle.remaining = BTreeSet::from([hero]);
         world.event_reserves.clear();
         tracing::info!(
             realm = origin,
             hero,
-            "prepared final Realm hero; native defeat still required"
+            "prepared final Realm hero and arrival; native defeat still required"
         );
         Ok((hero, position))
     }
@@ -1393,6 +1398,7 @@ fn prepare_realm_closure_preserves_other_cycle_and_refuses_reservations() {
     let mut d = Directory::prepared(path, content, 16, 12351, 2).unwrap();
     d.clock.set_paused(true);
     let other = d.endgame.realms[&1].cycle.remaining.clone();
+    let other_spawns = d.worlds[&1].map.spawns.clone();
     d.issue(7, 7, -3).unwrap();
     assert!(
         d.prepare_realm_closure(-3)
@@ -1402,7 +1408,9 @@ fn prepare_realm_closure_preserves_other_cycle_and_refuses_reservations() {
     );
     d.tick += 2400;
     d.retire_transfer_grants();
-    let (hero, _) = d.prepare_realm_closure(-3).unwrap();
+    let (hero, position) = d.prepare_realm_closure(-3).unwrap();
+    assert_eq!(d.worlds[&-3].map.spawns, vec![(position.x, position.y)]);
+    assert_eq!(d.worlds[&1].map.spawns, other_spawns);
     assert_eq!(
         d.endgame.realms[&-3].cycle.remaining,
         BTreeSet::from([hero])
