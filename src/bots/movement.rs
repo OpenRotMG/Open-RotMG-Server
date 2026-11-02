@@ -84,9 +84,8 @@ impl Grid {
         let next = self
             .frontier_tiles()
             .intersection(&reachable)
-            .filter(|point| {
+            .inspect(|_| {
                 self.candidates.fetch_add(1, Ordering::Relaxed);
-                center(**point).distance(from) > 3.
             })
             .min_by(|a, b| {
                 center(**a)
@@ -97,7 +96,10 @@ impl Grid {
             .lock()
             .expect("bot timings poisoned")
             .work("frontier_selection", measuring);
-        self.next(from, center(*next?))
+        // Live: skipping nearby edges flipped the choice each step, so bots shuffled between two tiles for minutes.
+        // Standing at the known edge nearest the target, with nothing revealed beyond, the target is out of reach.
+        let next = next.filter(|p| center(**p).distance(from) > 3.)?;
+        self.next(from, center(*next))
     }
     pub(super) fn reachable(&self, from: Pos) -> Arc<BTreeSet<TilePoint>> {
         let start = tile(from);

@@ -909,3 +909,31 @@ fn dodging_keeps_the_trip_and_still_makes_progress() {
         "{step:?}"
     );
 }
+
+#[test]
+fn travel_toward_unseen_ground_heads_for_one_edge_and_gives_up_there() {
+    // Live: about a dozen bots shuffled between two tiles for minutes while "heading to an observed band".
+    let (_, v) = fixture();
+    let geometry = crate::navigation::Geometry::new(
+        (128, 128),
+        vec![1; 128 * 128],
+        &BTreeMap::from([(1, 1.)]),
+    );
+    let tiles = crate::navigation::Tiles::new(
+        geometry,
+        (0..=20).flat_map(|x| (0..128).map(move |y| (x, y))),
+    );
+    let mut v = v;
+    v.tiles = Arc::new(tiles);
+    let grid = Grid::terrain(&v);
+    let target = Pos { x: 100.5, y: 50.5 };
+    let steps: Vec<_> = [15.5, 16.5, 15.5]
+        .into_iter()
+        .map(|x| {
+            grid.towards(Pos { x, y: 50.5 }, target)
+                .expect("an edge ahead")
+        })
+        .collect();
+    assert!(steps.iter().all(|s| s.x > 16.), "{steps:?}");
+    assert!(grid.towards(Pos { x: 19.5, y: 50.5 }, target).is_none());
+}

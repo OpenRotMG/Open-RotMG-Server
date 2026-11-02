@@ -2044,7 +2044,13 @@ impl Brain {
                             clearing.item = decision.item;
                             return Ok(clearing);
                         }
-                        self.blocked.insert(tile(destination), v.tick + 100);
+                        // An unreachable trip stays set aside long enough for the bot to do something else.
+                        let aside = if travel(&goal, destination) {
+                            6000
+                        } else {
+                            100
+                        };
+                        self.blocked.insert(tile(destination), v.tick + aside);
                         if travel(&goal, destination) {
                             self.travel = None;
                             if let Goal::Hunt(id) | Goal::Fight(id) = &goal {
