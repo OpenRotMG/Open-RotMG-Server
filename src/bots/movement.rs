@@ -76,30 +76,50 @@ impl Grid {
         self.candidates.store(0, Ordering::Relaxed);
     }
     pub(super) fn towards(&self, from: Pos, target: Pos) -> Option<Pos> {
+        self.towards_kept(from, target, &mut None)
+    }
+    /// Toward an unseen target, the known edge nearest it; a chosen edge is kept until reached or gone.
+    pub(super) fn towards_kept(
+        &self,
+        from: Pos,
+        target: Pos,
+        kept: &mut Option<(TilePoint, TilePoint)>,
+    ) -> Option<Pos> {
         if self.walkable.contains(&tile(target)) {
             return self.next(from, target);
         }
         let reachable = self.reachable(from);
         let measuring = crate::performance::Measure::start();
-        let next = self
-            .frontier_tiles()
-            .intersection(&reachable)
-            .inspect(|_| {
-                self.candidates.fetch_add(1, Ordering::Relaxed);
-            })
-            .min_by(|a, b| {
-                center(**a)
-                    .distance(target)
-                    .total_cmp(&center(**b).distance(target))
+        let usable = |p: &TilePoint| {
+            self.frontier_tiles().contains(p)
+                && reachable.contains(p)
+                && center(*p).distance(from) > 3.
+        };
+        // Live: near-equal edges swapped as tiles were revealed, so trips flipped between two waypoints for minutes.
+        let edge = kept
+            .filter(|(t, e)| *t == tile(target) && usable(e))
+            .map(|(_, e)| e)
+            .or_else(|| {
+                self.frontier_tiles()
+                    .intersection(&reachable)
+                    .inspect(|_| {
+                        self.candidates.fetch_add(1, Ordering::Relaxed);
+                    })
+                    .min_by(|a, b| {
+                        center(**a)
+                            .distance(target)
+                            .total_cmp(&center(**b).distance(target))
+                    })
+                    .copied()
+                    // Standing at the known edge nearest the target, with nothing revealed beyond, it is out of reach.
+                    .filter(usable)
             });
         self.performance
             .lock()
             .expect("bot timings poisoned")
             .work("frontier_selection", measuring);
-        // Live: skipping nearby edges flipped the choice each step, so bots shuffled between two tiles for minutes.
-        // Standing at the known edge nearest the target, with nothing revealed beyond, the target is out of reach.
-        let next = next.filter(|p| center(**p).distance(from) > 3.)?;
-        self.next(from, center(*next))
+        *kept = edge.map(|e| (tile(target), e));
+        self.next(from, center(edge?))
     }
     pub(super) fn reachable(&self, from: Pos) -> Arc<BTreeSet<TilePoint>> {
         let start = tile(from);
