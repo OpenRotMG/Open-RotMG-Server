@@ -960,3 +960,38 @@ fn a_hurt_bot_backs_off_only_near_enemies() {
         );
     }
 }
+
+#[test]
+fn travel_keeps_its_chosen_edge_when_another_becomes_slightly_nearer() {
+    // Live snapshots: on open ground a trip's step flipped between waypoints NW and SW as tiles were revealed.
+    let (_, mut v) = fixture();
+    let grid = |extra: bool, v: &mut PlayerView| {
+        let geometry = crate::navigation::Geometry::new(
+            (128, 128),
+            vec![1; 128 * 128],
+            &BTreeMap::from([(1, 1.)]),
+        );
+        let base = (0..=10).flat_map(|x| (0..128).map(move |y| (x, y)));
+        let prongs = (11..=20).flat_map(|x| [(x, 40), (x, 60)]);
+        let reveal = extra.then_some((21, 60));
+        v.tiles = Arc::new(crate::navigation::Tiles::new(
+            geometry,
+            base.chain(prongs).chain(reveal),
+        ));
+        Grid::terrain(v)
+    };
+    v.position = Pos { x: 10.5, y: 50.5 };
+    let target = Pos { x: 100.5, y: 50.5 };
+    let mut kept = None;
+    let first = grid(false, &mut v)
+        .towards_kept(v.position, target, &mut kept)
+        .unwrap();
+    let second = grid(true, &mut v)
+        .towards_kept(v.position, target, &mut kept)
+        .unwrap();
+    assert_eq!(
+        first.y > v.position.y,
+        second.y > v.position.y,
+        "{first:?} then {second:?}"
+    );
+}

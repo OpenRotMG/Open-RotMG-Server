@@ -284,6 +284,8 @@ struct Brain {
     stalls: BTreeMap<(i16, i16), (u32, u64)>,
     /// Recent positions and steps, to catch travel that moves back and forth without getting anywhere.
     trail: VecDeque<(u64, Pos, Option<Pos>)>,
+    /// The known edge a trip toward unseen ground is heading for, per target tile.
+    edge: Option<(TilePoint, TilePoint)>,
     next_snapshot: u64,
     cover: BTreeMap<TilePoint, bool>,
     visits: BTreeMap<(i16, i16), u64>,
@@ -367,6 +369,7 @@ impl Brain {
             blocked: BTreeMap::new(),
             stalls: BTreeMap::new(),
             trail: VecDeque::new(),
+            edge: None,
             next_snapshot: 0,
             cover: BTreeMap::new(),
             visits: BTreeMap::new(),
@@ -2110,7 +2113,7 @@ impl Brain {
                     None
                 }
                 _ => match if matches!(goal, Goal::Hunt(_) | Goal::Venture | Goal::Survey(..)) {
-                    grid.towards(v.position, destination)
+                    grid.towards_kept(v.position, destination, &mut self.edge)
                 } else {
                     grid.next(v.position, destination)
                 } {
