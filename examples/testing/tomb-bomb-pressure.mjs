@@ -24,13 +24,13 @@ export async function run(game){
     assert(Math.hypot(before.inspected.view.position.x-17.17,before.inspected.view.position.y-15.83)<.02,'Supplied pressure position required');
     const switches=before.inspected.diagnostic.entities.filter(e=>e.kind===0xd37&&Math.hypot(e.pos.x-16.5,e.pos.y-16.5)<.01);assert(switches.length===1,'Unique original switch required');switchId=switches[0].id;
     assert(switches[0].stage===null||switches[0].stage===0,'Fresh inactive switch required');originals=before.inspected.diagnostic.entities.filter(e=>e.kind===0xd38&&e.tomb?.anchor===switchId).map(e=>({id:e.id,pos:e.pos}));assert(originals.length===8,'Exactly eight original local bomb traps required');
-    // The angle minimizes the octagon's projected extent; the offset exposes the switch.
-    await watched({keys:[],duration_ms:300,target:{entity:switchId,camera_angle:-Math.PI/2-Math.atan(.25),fire:false}});
+    // The offset exposes the switch without moving during its pressure interval.
+    await watched({keys:[],duration_ms:300});
     const warm=await save('warm'),pressed=phase(warm.inspected);assert(pressed.stage===0&&Number.isFinite(pressed.tomb.press_since)&&active(warm.inspected),'Early uninterrupted pressure on all original active traps required');pressureSince=pressed.tomb.press_since;
     assert(warm.inspected.view.time_ms<pressureSince+2300,'Active screenshot window already closed');
-    await watched({keys:[],duration_ms:200},{name:'tomb-eight-active-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms<pressureSince+2500});
+    await watched({keys:[],duration_ms:200},{name:'tomb-active-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms<pressureSince+2500});
     const intact=await save('active');assert(phase(intact.inspected).stage===0&&active(intact.inspected),'Original eight traps must remain active before the deadline');
-    await watched({keys:[],duration_ms:3500},{name:'tomb-eight-disabled-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms>=pressureSince+3200});
+    await watched({keys:[],duration_ms:3500},{name:'tomb-disabled-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms>=pressureSince+3200});
     const disabled=await save('disabled');assert(phase(disabled.inspected).stage===1&&replaced(disabled.inspected),'Three-second standing pressure must replace exactly the eight original trap positions');
     await watched({keys:[],duration_ms:1000});const stable=await save('stable');
     game.check('standing pressure disables the eight original traps after three seconds',Boolean(firstDisabled&&firstDisabled.time>=pressureSince+3000&&phase(stable.inspected).stage===1&&replaced(stable.inspected)));
@@ -39,7 +39,7 @@ export async function run(game){
     game.check('same living legal Knight returns with unchanged gear and no abilities',escaped.observed.world==='Nexus'&&escaped.observed.session.character===before.observed.session.character&&abilities.length===0&&JSON.stringify(escaped.inspected.view.character.items)===JSON.stringify(before.inspected.view.character.items));
   }catch(error){failure=error;throw error;}finally{
     let auditError;try{await events();}catch(error){auditError=error;}
-    await writeFile(join(out,'switch-pressure.json'),JSON.stringify({qualification:'Fresh prepared single native Knight with legal base770HP, ShortSword/Ogmur/Acropolis/HPring giving970HP/78DEF, suppliedseed12position17.17,15.83 insideone-tilepressure radius. No firing/abilities/joins/bots/NPC/HP/RNG/stat edits/refill/relocation/adoption/revival; onlypassivepressureandordinaryInsert. Read-only non-atomic observer/capture; holdsnot totalexposure. Currentone-roomthree-secondpressure/eighttrapreplacementonly, notearnedentry/traversal, interruptedpressure/reentry/otherrooms/allturrets/historicalradiusorfullTombacceptance.',snapshots,samples,abilities,switchId,originals,pressureSince,firstDisabled,error:failure?String(failure):null,auditError:auditError?String(auditError):null},null,2));
+    await writeFile(join(out,'switch-pressure.json'),JSON.stringify({qualification:'Fresh prepared single native Knight with legal base770HP, ShortSword/Ogmur/Acropolis/HPring giving970HP/78DEF, suppliedseed12position17.17,15.83 insideone-tilepressure radius. No firing/abilities/joins/bots/NPC/HP/RNG/stat edits/refill/relocation/adoption/revival; onlypassivepressureandordinaryInsert. Read-only non-atomic observer/capture; holdsnot totalexposure. Currentone-roomthree-secondpressure/eighttrapreplacementonly. Imagesare representativeactive/disabledtrapandswitchviews, notaneight-bodyimagecensus. Notearnedentry/traversal, interruptedpressure/reentry/otherrooms/allturrets/historicalradiusorfullTombacceptance.',snapshots,samples,abilities,switchId,originals,pressureSince,firstDisabled,error:failure?String(failure):null,auditError:auditError?String(auditError):null},null,2));
     if(auditError)throw new AggregateError([...(failure?[failure]:[]),auditError],'Case and final accepted-ability audit must both remain observable');
   }
 }
