@@ -24,8 +24,8 @@ export async function run(game){
     assert(Math.hypot(before.inspected.view.position.x-17.17,before.inspected.view.position.y-15.83)<.02,'Supplied pressure position required');
     const switches=before.inspected.diagnostic.entities.filter(e=>e.kind===0xd37&&Math.hypot(e.pos.x-16.5,e.pos.y-16.5)<.01);assert(switches.length===1,'Unique original switch required');switchId=switches[0].id;
     assert(switches[0].stage===null||switches[0].stage===0,'Fresh inactive switch required');originals=before.inspected.diagnostic.entities.filter(e=>e.kind===0xd38&&e.tomb?.anchor===switchId).map(e=>({id:e.id,pos:e.pos}));assert(originals.length===8,'Exactly eight original local bomb traps required');
-    // The offset keeps the switch visible while remaining inside its standing-pressure radius.
-    await watched({keys:[],duration_ms:300,target:{entity:switchId,camera_angle:-Math.PI/4,fire:false}});
+    // The angle minimizes the octagon's projected extent; the offset exposes the switch.
+    await watched({keys:[],duration_ms:300,target:{entity:switchId,camera_angle:-Math.PI/2-Math.atan(.25),fire:false}});
     const warm=await save('warm'),pressed=phase(warm.inspected);assert(pressed.stage===0&&Number.isFinite(pressed.tomb.press_since)&&active(warm.inspected),'Early uninterrupted pressure on all original active traps required');pressureSince=pressed.tomb.press_since;
     assert(warm.inspected.view.time_ms<pressureSince+2300,'Active screenshot window already closed');
     await watched({keys:[],duration_ms:200},{name:'tomb-eight-active-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms<pressureSince+2500});
