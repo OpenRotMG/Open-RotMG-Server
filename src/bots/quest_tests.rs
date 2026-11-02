@@ -937,3 +937,26 @@ fn travel_toward_unseen_ground_heads_for_one_edge_and_gives_up_there() {
     assert!(steps.iter().all(|s| s.x > 16.), "{steps:?}");
     assert!(grid.towards(Pos { x: 19.5, y: 50.5 }, target).is_none());
 }
+
+#[test]
+fn a_hurt_bot_backs_off_only_near_enemies() {
+    // Live: 3 of 8 bots "backing off to recover" were standing in the Nexus.
+    for nexus in [false, true] {
+        let (c, mut v) = fixture();
+        v.quest = None;
+        v.character.hp = v.character.stats[0] / 10;
+        if nexus {
+            v.map.name = "Nexus".into();
+            v.objects.clear();
+        } else {
+            v.objects[0].position = Pos { x: 14.5, y: 10.5 };
+        }
+        let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
+        assert_eq!(
+            d.goal == Goal::Recover,
+            !nexus,
+            "nexus {nexus}: {:?}",
+            d.goal
+        );
+    }
+}
