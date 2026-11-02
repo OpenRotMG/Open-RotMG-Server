@@ -470,6 +470,13 @@ fn a_buyer_fetches_saved_potions_from_its_vault_for_a_wanted_item() {
     let mut buyer = Market {
         name: "Buyer".into(),
         vault: Some(vec![SPEED; 8]),
+        // Live: 0 of 893 wanted ads fetched; Nexus bots hear ads while their own market session is open.
+        session: Some(MarketSession {
+            anchor: (1, 1),
+            until: u64::MAX,
+            next_move: 0,
+            destination: None,
+        }),
         ..Market::default()
     };
     assert!(buyer.wanted(&v, &c, None, bow).unwrap() > 0);
