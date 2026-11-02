@@ -10,6 +10,7 @@ export async function run(game){
   const safe=s=>assert(s.view.lifecycle.alive&&s.view.character.hp>300&&s.view.time_ms<26000,'Living health-above300 and exposure-below26000 required');
   const jars=s=>s.diagnostic.entities.filter(e=>e.kind>=0xd2d&&e.kind<=0xd30&&e.tomb?.producer===treasure);
   const scarabs=s=>s.diagnostic.entities.filter(e=>e.kind===0xd1b&&e.tomb?.producer===jar);
+  const early=s=>s.diagnostic.entities.some(e=>e.id===treasure&&e.hp>0&&[2,3,4,5].includes(e.stage));
   async function events(){const text=await readFile(join(out,'native/server.log'),'utf8');assert(text.endsWith('\n'),'Complete accepted-ability records required');abilities.splice(0,abilities.length,...text.trimEnd().split('\n').filter(x=>x.startsWith('{')).map(JSON.parse).filter(x=>x.fields?.message==='ability activated'&&x.fields.player===player).map(x=>x.fields));return abilities;}
   async function sample(){const s=await game.inspect();safe(s);samples.push(s);const spawned=scarabs(s);if(!born&&spawned.length===1)born={id:spawned[0].id,time:s.view.time_ms};}
   async function watched(input,capture){
@@ -25,16 +26,16 @@ export async function run(game){
     await watched({keys:[' '],duration_ms:100,target:{entity:treasure,camera_angle:-Math.PI/4,fire:false}});
     const activated=await save('activated');safe(activated.inspected);const hit=activated.inspected.diagnostic.entities.find(e=>e.id===treasure);await events();
     assert(hit&&hit.hp>0&&hit.hp<49500&&abilities.length===1&&abilities[0].item===0xb22&&abilities[0].mana_cost===100&&abilities[0].cooldown_ms===500&&activated.inspected.diagnostic.character.shots===5,'One ordinary selected shield must activate the living treasure');
-    for(let n=0;n<6&&!jars((await game.inspect())).some(e=>e.kind===0xd2d);n++)await watched({keys:[],duration_ms:300});
-    const ready=await save('first-jar-ready');safe(ready.inspected);const source=ready.inspected.diagnostic.entities.find(e=>e.id===treasure),first=jars(ready.inspected).filter(e=>e.kind===0xd2d);
-    assert(source&&source.stage<6&&first.length===1&&first[0].hp===1&&jars(ready.inspected).length<5,'First original jar required before a repeated jar kind or full census');jar=first[0].id;
+    for(let n=0;n<6;n++){const s=await game.inspect();safe(s);if(jars(s).some(e=>e.kind===0xd2d))break;await watched({keys:[],duration_ms:300});}
+    const ready=await save('first-jar-ready');safe(ready.inspected);const first=jars(ready.inspected).filter(e=>e.kind===0xd2d);
+    assert(early(ready.inspected)&&first.length===1&&first[0].hp===1&&jars(ready.inspected).length<5,'First original jar required before a repeated jar kind or full census');jar=first[0].id;
     assert(Math.hypot(first[0].pos.x-ready.inspected.view.position.x,first[0].pos.y-ready.inspected.view.position.y)<3.5,'Short Sword must reach the stationary jar');
     await watched({keys:[],duration_ms:200},{name:'tomb-first-canopic-jar',when:v=>v.lifecycle.alive});
-    const intact=await save('intact');safe(intact.inspected);assert(intact.inspected.diagnostic.entities.some(e=>e.id===jar&&e.hp===1),'Original jar must remain intact before ordinary sword input');
+    const intact=await save('intact');safe(intact.inspected);assert(early(intact.inspected)&&intact.inspected.diagnostic.entities.some(e=>e.id===jar&&e.hp===1),'Original jar must remain intact inside the early break window');
     // The starter sword leaves a 300-HP Scarab alive even if two trailing shots connect.
     await watched([{actor:game.actor,input:{keys:[],duration_ms:100,target:{entity:jar,camera_angle:-Math.PI/4,fire:true}}},{actor:game.actor,input:{keys:[],duration_ms:500}}]);
     const broken=await save('broken');safe(broken.inspected);const shots=broken.inspected.diagnostic.character.shots-5;
-    assert(shots>=1&&shots<=3&&!broken.inspected.diagnostic.entities.some(e=>e.id===jar)&&scarabs(broken.inspected).length===1&&scarabs(broken.inspected)[0].hp>0,'One bounded sword burst must break the original jar and leave its one Scarab alive');
+    assert(early(broken.inspected)&&shots>=1&&shots<=3&&!broken.inspected.diagnostic.entities.some(e=>e.id===jar)&&scarabs(broken.inspected).length===1&&scarabs(broken.inspected)[0].hp>0,'One bounded sword burst must break the original jar before the fifth spawn and leave its one Scarab alive');
     await watched({keys:[],duration_ms:500},{name:'tomb-first-jar-scarab',when:v=>Boolean(born&&v.lifecycle.alive&&v.game_ms>=born.time+250)});
     const emerged=await save('emerged');safe(emerged.inspected);const offspring=scarabs(emerged.inspected);
     game.check('first original jar releases exactly one living selected Scarab',offspring.length===1&&offspring[0].id===born.id&&offspring[0].hp>0&&offspring[0].hp<=300&&offspring[0].tomb.producer===jar);
