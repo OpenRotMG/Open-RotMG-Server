@@ -6935,7 +6935,10 @@ impl World {
                             Some(pos)
                         } else {
                             let direction = if let Some(orbit) = e.orbit {
-                                if pos.distance(target) > 0.001 {
+                                // Tomb's target angle must keep moving at pillars: https://github.com/Club559/ROTMGServer/blob/f112a71caa5e73f3013d9bff88527669519f178c/wServer/logic/movement/Circling.cs#L63-L85
+                                if !crate::dungeon::tomb::BOSSES.contains(&kind)
+                                    && pos.distance(target) > 0.001
+                                {
                                     e.phase = (pos.y - target.y).atan2(pos.x - target.x);
                                 }
                                 orbit.direction
