@@ -62,6 +62,11 @@ class RestartTest(unittest.TestCase):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 requests.append((self.path, self.headers['Authorization'], body))
+                if reply['state'] == 'redirect':
+                    self.send_response(302)
+                    self.send_header('Location', 'http://127.0.0.1:9/')
+                    self.end_headers()
+                    return
                 value = reply.copy()
                 if body['operation'] == 'begin':
                     value = {'state': 'pending', 'receipt': {**RECEIPT, 'owner': body['owner']}}
@@ -88,6 +93,9 @@ class RestartTest(unittest.TestCase):
                         reply.update({'state': 'consumed', 'receipt': RECEIPT, **change})
                         with self.assertRaisesRegex(RuntimeError, error):
                             update.checked_restart_request(config, PROCESS, 'consume', RECEIPT)
+                    reply['state'] = 'redirect'
+                    with self.assertRaisesRegex(RuntimeError, 'Restart endpoint redirected'):
+                        update.checked_restart_request(config, PROCESS, 'consume', RECEIPT)
                 for identities in [[{}, PROCESS], [PROCESS, {}]]:
                     reply.clear()
                     reply.update({'state': 'consumed', 'receipt': RECEIPT})
