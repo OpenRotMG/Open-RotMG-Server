@@ -272,7 +272,8 @@ struct Brain {
     heading: f32,
     steering: Option<(i32, f32)>,
     /// The kept journey and its distance-proportional deadline (ms).
-    travel: Option<(Goal, u64)>,
+    /// The trip being followed: its goal, deadline and the destination chosen when it started.
+    travel: Option<(Goal, u64, Pos)>,
     /// Hunt/Fight targets whose approach failed, until a time (ms); moving targets defeat tile exclusion.
     unreachable: BTreeMap<i32, u64>,
     last_aim: u64,
@@ -1344,6 +1345,8 @@ impl Brain {
                 self.goal,
                 Goal::Venture | Goal::Explore(..) | Goal::Hunt(_) | Goal::Follow(_)
             )
+                    // Circling a target being fought is combat, not a stalled trip.
+            || matches!(self.goal, Goal::Hunt(_)) && self.travel.is_none()
         {
             return;
         }
@@ -1387,6 +1390,7 @@ impl Brain {
             world = v.session.world,
             layout = ?v.map.layout,
             goal = ?self.goal,
+            trip = ?self.travel.as_ref().map(|(_, _, to)| (to.x, to.y)),
             x = v.position.x,
             y = v.position.y,
             recent = ?recent,
@@ -1907,7 +1911,15 @@ impl Brain {
             Goal::Hunt(_) | Goal::Fight(_) => p.distance(v.position) >= range,
             _ => false,
         };
-        if let Some((kept, deadline)) = self.travel.clone() {
+        if let Some((kept, deadline, to)) = self.travel.clone() {
+            // Live: Venture's destination was re-chosen every decision from the current 8-tile region and flipped
+            // at region edges, so bots walked back and forth; a trip keeps the destination it started with.
+            for choice in choices
+                .iter_mut()
+                .filter(|c| c.1 == kept && kept == Goal::Venture)
+            {
+                choice.2 = to;
+            }
             let offered = choices.iter().find(|(_, g, _)| *g == kept).map(|c| c.2);
             if v.time_ms >= deadline {
                 self.travel = None;
@@ -2217,6 +2229,7 @@ impl Brain {
                 _ => (
                     goal.clone(),
                     v.time_ms + 10_000 + (destination.distance(v.position) * 1000.) as u64,
+                    destination,
                 ),
             });
             decision.goal = goal;
