@@ -361,9 +361,24 @@ impl Grid {
         }
         let target = center(next);
         if self.segment(from, target) {
-            Some(target)
-        } else {
-            self.segment(from, center(start)).then_some(center(start))
+            return Some(target);
         }
+        // Live: held keys snap to eight directions, so a small correction across the route was lost while moving
+        // along it; between trees bots flipped between two tile centers. Line up across the route first.
+        let middle = center(start);
+        let across = if next.0 != start.0 {
+            Pos {
+                x: from.x,
+                y: middle.y,
+            }
+        } else {
+            Pos {
+                x: middle.x,
+                y: from.y,
+            }
+        };
+        [across, middle]
+            .into_iter()
+            .find(|p| p.distance(from) > 0.01 && self.segment(from, *p))
     }
 }
