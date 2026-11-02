@@ -8,7 +8,14 @@ export async function run(game){
   const out=process.env.QA_RESULTS_DIR,snapshots=[],samples=[],abilities=[];let player,switchId,originals,pressureSince,firstDisabled,failure;
   const safe=s=>assert(s.view.lifecycle.alive&&s.view.character.hp>300&&s.view.time_ms<26000&&s.diagnostic.character.shots===0&&s.diagnostic.character.kills===0&&s.diagnostic.character.tombs===0,'Living HP>300/time<26000 and no firing/kills/credit required');
   const save=async label=>{const s={label,observed:await game.observe(),inspected:await game.inspect()};safe(s.inspected);snapshots.push(s);return s;};
-  const phase=s=>{const e=s.diagnostic.entities.find(e=>e.id===switchId&&e.kind===0xd37);assert(e&&e.tomb,'Original switch identity/context required');if(pressureSince!==undefined){assert(e.stage===0||e.stage===1,'Known switch phase required');if(firstDisabled)assert(e.stage===1,'Disabled switch must not regress');if(e.stage===0)assert(e.tomb.press_since===pressureSince&&active(s),'Standing pressure and all eight active traps required');else{assert(s.view.time_ms>=pressureSince+3000&&replaced(s),'Early or incomplete eight-trap deactivation');if(!firstDisabled)firstDisabled={time:s.view.time_ms,id:e.id};}}return e;};
+  const phase=s=>{
+    const e=s.diagnostic.entities.find(e=>e.id===switchId&&e.kind===0xd37);assert(e&&e.tomb,'Original switch identity/context required');
+    if(e.stage===null){assert(pressureSince===undefined&&e.tomb.press_since===null&&active(s),'Only a complete pre-first-tick switch may be uninitialized');return e;}
+    assert(e.stage===0||e.stage===1,'Known switch phase required');if(firstDisabled)assert(e.stage===1,'Disabled switch must not regress');
+    if(e.stage===0){assert(Number.isFinite(e.tomb.press_since)&&e.tomb.press_since>=0&&active(s),'Initialized standing pressure and all eight active traps required');if(pressureSince===undefined)pressureSince=e.tomb.press_since;else assert(e.tomb.press_since===pressureSince,'Standing pressure epoch must not reset');}
+    else{assert(pressureSince!==undefined&&s.view.time_ms>=pressureSince+3000&&replaced(s),'Early or incomplete eight-trap deactivation');if(!firstDisabled)firstDisabled={time:s.view.time_ms,id:e.id};}
+    return e;
+  };
   const active=s=>originals.every(t=>s.diagnostic.entities.some(e=>e.id===t.id&&e.kind===0xd38&&e.tomb?.anchor===switchId&&Math.hypot(e.pos.x-t.pos.x,e.pos.y-t.pos.y)<.01));
   const replaced=s=>{const dead=s.diagnostic.entities.filter(e=>e.kind===0xd39&&Math.hypot(e.pos.x-16.5,e.pos.y-16.5)<8);return dead.length===8&&originals.every(t=>!s.diagnostic.entities.some(e=>e.id===t.id)&&dead.filter(e=>Math.hypot(e.pos.x-t.pos.x,e.pos.y-t.pos.y)<.01).length===1);};
   async function events(){const text=await readFile(join(out,'native/server.log'),'utf8');assert(text.endsWith('\n'),'Complete accepted-ability records required');abilities.splice(0,abilities.length,...text.trimEnd().split('\n').filter(x=>x.startsWith('{')).map(JSON.parse).filter(x=>x.fields?.message==='ability activated'&&x.fields.player===player).map(x=>x.fields));return abilities;}
@@ -23,10 +30,10 @@ export async function run(game){
     assert(before.observed.world==='Tomb of the Ancients'&&before.inspected.view.character.hp===970&&before.inspected.view.character.mp===252&&!before.inspected.diagnostic.entities.some(e=>e.kind===0xd1a),'Fresh legal Knight outside Mummy encounters required');
     assert(Math.hypot(before.inspected.view.position.x-17.17,before.inspected.view.position.y-15.83)<.02,'Supplied pressure position required');
     const switches=before.inspected.diagnostic.entities.filter(e=>e.kind===0xd37&&Math.hypot(e.pos.x-16.5,e.pos.y-16.5)<.01);assert(switches.length===1,'Unique original switch required');switchId=switches[0].id;
-    assert(switches[0].stage===null||switches[0].stage===0,'Fresh inactive switch required');originals=before.inspected.diagnostic.entities.filter(e=>e.kind===0xd38&&e.tomb?.anchor===switchId).map(e=>({id:e.id,pos:e.pos}));assert(originals.length===8,'Exactly eight original local bomb traps required');
+    assert(switches[0].stage===null||switches[0].stage===0,'Fresh inactive switch required');originals=before.inspected.diagnostic.entities.filter(e=>e.kind===0xd38&&e.tomb?.anchor===switchId).map(e=>({id:e.id,pos:e.pos}));assert(originals.length===8,'Exactly eight original local bomb traps required');phase(before.inspected);
     // The offset exposes the switch without moving during its pressure interval.
     await watched({keys:[],duration_ms:300});
-    const warm=await save('warm'),pressed=phase(warm.inspected);assert(pressed.stage===0&&Number.isFinite(pressed.tomb.press_since)&&active(warm.inspected),'Early uninterrupted pressure on all original active traps required');pressureSince=pressed.tomb.press_since;
+    const warm=await save('warm'),pressed=phase(warm.inspected);assert(pressed.stage===0&&Number.isFinite(pressed.tomb.press_since)&&active(warm.inspected),'Early uninterrupted pressure on all original active traps required');
     assert(warm.inspected.view.time_ms<pressureSince+2300,'Active screenshot window already closed');
     await watched({keys:[],duration_ms:200},{name:'tomb-active-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms<pressureSince+2500});
     const intact=await save('active');assert(phase(intact.inspected).stage===0&&active(intact.inspected),'Original eight traps must remain active before the deadline');
