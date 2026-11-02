@@ -886,9 +886,14 @@ impl Brain {
         let outmatched = enemies.iter().any(|enemy| {
             !progression::can_fight(v, content, enemy) && enemy.position.distance(v.position) < 8.
         });
+        // Live: bots "backed off" in the Nexus with nothing near; away from enemies a hurt player keeps its plan while it heals.
+        let pressed = enemies
+            .iter()
+            .any(|e| e.position.distance(v.position) < 15.);
         let retreat = outmatched
-            || v.tick < self.recover_until
-            || (matches!(self.goal, Goal::Recover) && hp < healthy);
+            || pressed
+                && (v.tick < self.recover_until
+                    || (matches!(self.goal, Goal::Recover) && hp < healthy));
         let avoid: Vec<_> = enemies
             .iter()
             .filter(|enemy| !retreat && !progression::can_fight(v, content, enemy))
