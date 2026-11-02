@@ -284,7 +284,7 @@ struct Brain {
     /// Stalls per destination tile and the last one, so a tile that keeps failing stays excluded longer.
     stalls: BTreeMap<(i16, i16), (u32, u64)>,
     /// Recent positions and steps, to catch travel that moves back and forth without getting anywhere.
-    trail: VecDeque<(u64, Pos, Option<Pos>)>,
+    trail: VecDeque<(u64, Pos, Option<Pos>, Goal)>,
     /// The known edge a trip toward unseen ground is heading for, per target tile.
     edge: Option<(TilePoint, TilePoint)>,
     next_snapshot: u64,
@@ -1109,14 +1109,20 @@ impl Brain {
                 && self.companion.is_none()
                 && s.enemies.is_empty()
             {
-                let available = |p: Pos| {
-                    p.distance(v.position) <= 7.
-                        && s.grid.segment(v.position, p)
-                        && v.player_markers.iter().all(|peer| {
-                            peer.id == v.session.player || peer.position.distance(p) >= 2.
-                        })
+                let free = |p: Pos, room: f32| {
+                    v.player_markers.iter().all(|peer| {
+                        peer.id == v.session.player || peer.position.distance(p) >= room
+                    })
                 };
-                if self.nexus_spot.is_none_or(|p| !available(p)) {
+                let available = |p: Pos| {
+                    p.distance(v.position) <= 7. && s.grid.segment(v.position, p) && free(p, 2.)
+                };
+                // Live: spots were re-picked whenever a step broke the line to them or a peer passed by, so
+                // Nexus bots shuffled around each other; a chosen spot is kept until someone takes it.
+                if self
+                    .nexus_spot
+                    .is_none_or(|p| !free(p, 0.8) || p.distance(v.position) > 10.)
+                {
                     let (x, y) = tile(v.position);
                     self.nexus_spot = (x.saturating_sub(7)..=x.saturating_add(7))
                         .flat_map(|x| {
@@ -1321,21 +1327,21 @@ impl Brain {
     // Live: a dozen bots shuffled between two tiles for minutes; the stall check saw movement and never fired.
     fn snapshot_stalled_travel(&mut self, v: &PlayerView) {
         self.trail
-            .push_back((v.time_ms, v.position, self.destination));
+            .push_back((v.time_ms, v.position, self.destination, self.goal.clone()));
         while self
             .trail
             .front()
-            .is_some_and(|(t, _, _)| v.time_ms.saturating_sub(*t) > 10_000)
+            .is_some_and(|(t, _, _, _)| v.time_ms.saturating_sub(*t) > 10_000)
         {
             self.trail.pop_front();
         }
-        let Some((start, from, _)) = self.trail.front().copied() else {
+        let Some((start, from)) = self.trail.front().map(|(t, p, _, _)| (*t, *p)) else {
             return;
         };
         let steps: BTreeSet<_> = self
             .trail
             .iter()
-            .filter_map(|(_, _, s)| s.map(tile))
+            .filter_map(|(_, _, s, _)| s.map(tile))
             .collect();
         if v.time_ms.saturating_sub(start) < 9_000
             || v.time_ms < self.next_snapshot
@@ -1381,7 +1387,7 @@ impl Brain {
             .trail
             .iter()
             .rev()
-            .filter_map(|(_, p, s)| s.map(|s| (p.x, p.y, s.x, s.y)))
+            .filter_map(|(_, p, s, g)| s.map(|s| (p.x, p.y, s.x, s.y, format!("{g:?}"))))
             .take(12)
             .collect();
         tracing::warn!(
@@ -1911,6 +1917,14 @@ impl Brain {
             Goal::Hunt(_) | Goal::Fight(_) => p.distance(v.position) >= range,
             _ => false,
         };
+        // Live: a Venture trip kept a destination it had already reached, and the bot wandered around it.
+        if self
+            .travel
+            .as_ref()
+            .is_some_and(|(kept, _, to)| *kept == Goal::Venture && to.distance(v.position) < 4.)
+        {
+            self.travel = None;
+        }
         if let Some((kept, deadline, to)) = self.travel.clone() {
             // Live: Venture's destination was re-chosen every decision from the current 8-tile region and flipped
             // at region edges, so bots walked back and forth; a trip keeps the destination it started with.
