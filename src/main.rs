@@ -14,6 +14,7 @@ mod navigation;
 mod performance;
 mod quest;
 mod server;
+mod state_lock;
 mod store;
 mod supervision;
 mod terrain;
@@ -22,6 +23,10 @@ mod world;
 use anyhow::{Result, ensure};
 use rand::RngCore;
 use std::sync::Arc;
+
+// Background saves may outlive a failed drain; only process exit releases desktop ownership.
+static STATE_LOCK: std::sync::OnceLock<state_lock::StateLock> = std::sync::OnceLock::new();
+
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if terrain::prepare::run(&args)? {
@@ -82,6 +87,12 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
     let state = config.state;
     tracing::info!(address=%config.bind, state=%state.display(), client=%client.display(), data=%config.data.display(), "local environment selected");
     std::fs::create_dir_all(&state)?;
+    if config.desktop {
+        STATE_LOCK
+            .set(state_lock::StateLock::acquire(&state)?)
+            .map_err(|_| anyhow::anyhow!("desktop state lock already initialized"))?;
+        tracing::info!(state=%state.display(), "desktop state lock acquired");
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
