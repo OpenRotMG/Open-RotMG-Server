@@ -5,7 +5,7 @@ import {setTimeout as delay} from 'node:timers/promises';
 
 export const fixture={class:0x31e,level:20,seed:12351,world:'tomb-of-the-ancients',worldSeed:12,position:{x:16.9,y:16.1},equipment:[0xa00,0xc0f,0xafc,0xacd],backpack:Array(8).fill(-1),stats:[770,252,50,40,50,50,75,50]};
 export async function run(game){
-  const out=process.env.QA_RESULTS_DIR,snapshots=[],samples=[],abilities=[];let player,switchId,originals,mode='initial',firstEpoch,resetAt,secondEpoch,reentrySeen,firstDisabled,replacementIds,failure;
+  const out=process.env.QA_RESULTS_DIR,snapshots=[],samples=[],abilities=[];let player,switchId,originals,mode='initial',firstEpoch,resetAt,secondEpoch,reentrySeen,lastOutsideAt,firstDisabled,replacementIds,observerFailure,failure;
   const safe=s=>assert(s.view.lifecycle.alive&&s.diagnostic.character.alive&&s.diagnostic.character.hp>350&&s.diagnostic.character.mp===252&&s.diagnostic.time_ms<26000&&s.diagnostic.character.shots===0&&s.diagnostic.character.kills===0&&s.diagnostic.character.tombs===0,'Living HP>350/MP252/time<26000 and zero firing/kills/credit required');
   const save=async label=>{const s={label,observed:await game.observe(),inspected:await game.inspect()};snapshots.push(s);safe(s.inspected);if(switchId!==undefined&&label!=='escaped')phase(s.inspected);return s;};
   const localOff=s=>s.diagnostic.entities.filter(e=>e.kind===0xd39&&Math.hypot(e.pos.x-16.5,e.pos.y-16.5)<8);
@@ -15,7 +15,7 @@ export async function run(game){
   const phase=s=>{
     safe(s);const now=s.diagnostic.time_ms,e=s.diagnostic.entities.find(e=>e.id===switchId&&e.kind===0xd37);assert(e?.tomb&&Math.hypot(e.pos.x-16.5,e.pos.y-16.5)<.01,'Original switch/context/position required');assert(Number.isFinite(now)&&now>=0&&distance(s)<4,'Finite clock and bounded ordinary room movement required');if(mode==='initial')assert(Math.hypot(s.diagnostic.pos.x-16.9,s.diagnostic.pos.y-16.1)<.02,'Partial first hold must retain its supplied position');
     if(e.stage===null){assert(mode==='initial'&&firstEpoch===undefined&&e.tomb.press_since===null&&active(s),'Only the complete pre-first-tick switch may be uninitialized');return e;}
-    assert(e.stage===0||e.stage===1,'Known switch phase required');if(firstDisabled)assert(e.stage===1,'Disabled switch must not regress');
+    assert(e.stage===0||e.stage===1,'Known switch phase required');if(firstDisabled)assert(e.stage===1,'Disabled switch must not regress');if(e.stage===0&&distance(s)>=1)lastOutsideAt=now;
     if(e.stage===0){
       assert(active(s),'All eight unchanged originals, without premature off traps, required');const since=e.tomb.press_since;
       if(since===null){
@@ -27,7 +27,7 @@ export async function run(game){
       }else{
         assert(Number.isFinite(since)&&since>=0&&since<=now,'Finite pressure epoch required');
         if(mode==='initial'||(mode==='leaving'&&resetAt===undefined)){if(firstEpoch===undefined)firstEpoch=since;else assert(since===firstEpoch,'Partial first epoch changed before interruption');}
-        else{assert(resetAt!==undefined&&['returning','held'].includes(mode)&&since>firstEpoch&&since>=resetAt,'Only genuine reentry may start a new epoch');if(secondEpoch===undefined)secondEpoch=since;else assert(since===secondEpoch,'Second uninterrupted epoch reset');}
+        else{assert(resetAt!==undefined&&['returning','held'].includes(mode)&&distance(s)<1&&lastOutsideAt!==undefined&&since>=lastOutsideAt&&since>firstEpoch&&since>=resetAt&&(reentrySeen===undefined||since<reentrySeen+100),'New epoch requires occupancy, no outside backdating and timely initialization');if(secondEpoch===undefined)secondEpoch=since;else assert(since===secondEpoch,'Second uninterrupted epoch reset');}
         assert(now<since+3000,'Three seconds of continuous pressure did not deactivate');
       }
       if(mode==='held')assert(distance(s)<1&&secondEpoch!==undefined,'Fresh continuous hold must stay within radius');
@@ -38,7 +38,10 @@ export async function run(game){
     return e;
   };
   async function events(){const text=await readFile(join(out,'native/server.log'),'utf8');assert(text.endsWith('\n'),'Complete accepted-ability records required');abilities.splice(0,abilities.length,...text.trimEnd().split('\n').filter(x=>x.startsWith('{')).map(JSON.parse).filter(x=>x.fields?.message==='ability activated'&&x.fields.player===player).map(x=>x.fields));assert(abilities.length===0,'Passive interruption case must have no accepted abilities');return abilities;}
-  async function sample(){const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===switchId);samples.push({time:s.diagnostic.time_ms,hp:s.diagnostic.character.hp,mp:s.diagnostic.character.mp,pos:s.diagnostic.pos,mode,switchMissing:!e,stage:e?.stage,pressSince:e?.tomb?.press_since,originalTrapsActive:active(s),originalTrapsReplaced:replaced(s)});phase(s);}
+  async function sample(){
+    const s=await game.inspect();try{const e=s.diagnostic.entities.find(e=>e.id===switchId);samples.push({time:s.diagnostic.time_ms,hp:s.diagnostic.character.hp,mp:s.diagnostic.character.mp,pos:s.diagnostic.pos,mode,switchMissing:!e,stage:e?.stage,pressSince:e?.tomb?.press_since,originalTrapsActive:active(s),originalTrapsReplaced:replaced(s)});phase(s);}
+    catch(error){observerFailure={inspected:s,error:String(error)};throw error;}
+  }
   async function watched(input,capture){
     let running=true;const action=game.act(input,capture).finally(()=>running=false);
     const observing=(async()=>{for(let n=0;running&&(await game.observe()).paused;n++){assert(n<250,'Native actor did not unpause');await delay(20);}while(running){await sample();await delay(80);}})();
@@ -66,7 +69,7 @@ export async function run(game){
     await game.act({keys:['Insert'],duration_ms:300});const escaped=await save('escaped');await events();game.check('same living legal Knight returns with unchanged gear and no abilities',escaped.observed.world==='Nexus'&&escaped.observed.session.character===before.observed.session.character&&abilities.length===0&&JSON.stringify(escaped.inspected.view.character.items)===JSON.stringify(before.inspected.view.character.items));
   }catch(error){failure=error;throw error;}finally{
     let auditError;try{await events();}catch(error){auditError=error;}
-    await writeFile(join(out,'switch-reset.json'),JSON.stringify({qualification:'Distinct fresh prepared single legal Knight, base770HP/252MP, ShortSword/Ogmur/Acropolis/HPring effective970HP/78DEF/75VIT/50WIS, suppliedseed12start16.9,16.1. Ordinary empty-key/W/S/Insert inputs only; no firing/abilities/companions/protection/stat or NPC-HP-RNG edits/refills/relocation/revival/adoption. Tests interrupted pressure/new full epoch and same replacements after release in one room, not replay of acceptedf836 for better media. Non-atomic observer/capture, holds not total exposure. Prepared start not earned entry/traversal; not instance reentry/multiplayer/quicksand/other rooms/historical precision/full Tomb or eight-body gallery acceptance.',snapshots,samples,abilities,switchId,originals,firstEpoch,resetAt,secondEpoch,reentrySeen,firstDisabled,replacementIds,error:failure?String(failure):null,auditError:auditError?String(auditError):null},null,2));
+    await writeFile(join(out,'switch-reset.json'),JSON.stringify({qualification:'Distinct fresh prepared single legal Knight, base770HP/252MP, ShortSword/Ogmur/Acropolis/HPring effective970HP/78DEF/75VIT/50WIS, suppliedseed12start16.9,16.1. Ordinary empty-key/W/S/Insert inputs only; no firing/abilities/companions/protection/stat or NPC-HP-RNG edits/refills/relocation/revival/adoption. Tests interrupted pressure/new full epoch and same replacements after release in one room, not replay of acceptedf836 for better media. Non-atomic observer/capture, holds not total exposure. Prepared start not earned entry/traversal; not instance reentry/multiplayer/quicksand/other rooms/historical precision/full Tomb or eight-body gallery acceptance.',snapshots,samples,abilities,switchId,originals,firstEpoch,resetAt,secondEpoch,reentrySeen,lastOutsideAt,firstDisabled,replacementIds,observerFailure,error:failure?String(failure):null,auditError:auditError?String(auditError):null},null,2));
     if(auditError)throw new AggregateError([...(failure?[failure]:[]),auditError],'Case and final accepted-ability audit must both remain observable');
   }
 }
