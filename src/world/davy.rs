@@ -314,7 +314,25 @@ impl World {
                 e.stage = Some(2);
                 e.activated = Some(self.now);
                 if let Some(boss) = self.entities.get_mut(&locker.boss) {
+                    let chase = boss.reaction_until <= self.now;
                     boss.reaction_until = self.now + 3000;
+                    // 2012 footage shows this bubble as the lanterns fire; once per wave is a reconstruction.
+                    if chase {
+                        let packet = chat::text_packet(
+                            "#Davy Jones",
+                            locker.boss,
+                            5,
+                            "Avast, ye filthy mongrel!",
+                        );
+                        for p in self
+                            .players
+                            .values()
+                            .filter(|p| p.known.contains(&locker.boss))
+                        {
+                            send(p, packet.id, packet.body.clone());
+                        }
+                        tracing::info!(boss = locker.boss, "Davy Jones taunted at lantern burst");
+                    }
                 }
                 tracing::info!(lantern = id, "Locker lantern paralyze burst armed");
             } else if burst_at.is_none() && self.now >= lit_at + 15000 {
@@ -425,6 +443,50 @@ impl World {
                 let p = crate::dungeon::davy::profile(kind).expect("validated Locker actor");
                 (p.motion, p.speed)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn davy_taunts_once_per_lantern_burst_wave() {
+        let (mut w, player) = super::super::movement_tests::fixture(0x7e, false);
+        let (packets, mut inbox) = mpsc::channel(64);
+        let (lost, _) = watch::channel(None);
+        let p = w.players.get_mut(&player).unwrap();
+        p.tx = Some(Output { packets, lost });
+        let pos = p.pos;
+        let boss = w.spawn_entity(BOSS, pos, vec![]).unwrap();
+        let lamps: Vec<_> = (0..8)
+            .map(|k| {
+                w.spawn_entity(
+                    UNLIT,
+                    Pos {
+                        x: pos.x + k as f32,
+                        y: pos.y + 2.,
+                    },
+                    vec![],
+                )
+            })
+            .collect::<Result<_>>()
+            .unwrap();
+        w.prepare_locker().unwrap();
+        w.players.get_mut(&player).unwrap().known.insert(boss);
+        for id in lamps {
+            w.light_locker_lantern(id).unwrap();
+        }
+        for (advance, taunts) in [(5000, 1), (500, 0)] {
+            w.now += advance;
+            w.locker_step().unwrap();
+            let said = std::iter::from_fn(|| inbox.try_recv().ok())
+                .filter(|p| {
+                    p.id == wire::TEXT && String::from_utf8_lossy(&p.body).contains("Avast")
+                })
+                .count();
+            assert_eq!(said, taunts);
         }
     }
 }
