@@ -687,6 +687,8 @@ impl Market {
             } else {
                 (planned && self.target.is_some())
                     || self.wanted(v, c, future, q[0].kind)? >= q[0].quantity
+                    // Owner, 2012: potions are money, so gear sells for any fair potions, not one wanted kind.
+                    || money(c, q[0].kind) && !money(c, q[1].kind) && fair(q, c)
             })
     }
 
@@ -848,6 +850,42 @@ impl Market {
                     name,
                     [q[1].clone(), q[0].clone()],
                 ));
+                return Ok(true);
+            }
+        }
+        // Live: 228 of 228 bot sessions ended unsold; a buyer wanting the item but not the asked potion stayed
+        // silent. A 2012 player answered with the potions it had: "nty 3 spd".
+        if let Advertisement::Quote(q) = &ad
+            && !money(c, q[0].kind)
+            && self.wanted(v, c, future, q[0].kind)? >= q[0].quantity
+            && self.outgoing.is_none()
+            && v.elapsed_ms >= self.next_message_ms
+            && let Some(account) = peer.account
+        {
+            let carried: BTreeSet<i32> = v.character.items[4..]
+                .iter()
+                .copied()
+                .filter(|k| *k >= 0 && money(c, *k))
+                .collect();
+            let mut offers = Vec::new();
+            for kind in carried {
+                let quantity = u8::try_from(self.spendable_surplus(v, c, future, kind)?.min(8))?;
+                if quantity > 0
+                    && let Some(offer) = bounded_quote(&Goods { kind, quantity }, &q[0], c)
+                {
+                    offers.push(offer);
+                }
+            }
+            tracing::info!(
+                account = v.session.account,
+                peer = account,
+                ?q,
+                ?offers,
+                "market wanted advertisement answered with own potions"
+            );
+            if let Some(offer) = offers.into_iter().next() {
+                self.quote = Some(offer.clone());
+                self.respond(v, (peer.id, account, name), ReplyKind::Counter(offer), c)?;
                 return Ok(true);
             }
         }
