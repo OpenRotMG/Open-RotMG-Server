@@ -282,6 +282,9 @@ struct Brain {
     blocked: BTreeMap<(i16, i16), u64>,
     /// Stalls per destination tile and the last one, so a tile that keeps failing stays excluded longer.
     stalls: BTreeMap<(i16, i16), (u32, u64)>,
+    /// Recent positions and steps, to catch travel that moves back and forth without getting anywhere.
+    trail: VecDeque<(u64, Pos, Option<Pos>)>,
+    next_snapshot: u64,
     cover: BTreeMap<TilePoint, bool>,
     visits: BTreeMap<(i16, i16), u64>,
     companion: Option<i32>,
@@ -363,6 +366,8 @@ impl Brain {
             destination: None,
             blocked: BTreeMap::new(),
             stalls: BTreeMap::new(),
+            trail: VecDeque::new(),
+            next_snapshot: 0,
             cover: BTreeMap::new(),
             visits: BTreeMap::new(),
             companion: None,
@@ -643,6 +648,7 @@ impl Brain {
             self.heading = self.rng.gen_range(0.0..std::f32::consts::TAU);
             self.stationary = v.tick;
         }
+        self.snapshot_stalled_travel(v);
         self.previous = v.position;
         self.visits.insert(tile(v.position), v.tick);
         let decision = Decision {
@@ -1308,6 +1314,83 @@ impl Brain {
     }
 
     /// Safety always outranks any activity: retreat, dodge, or leave for the Nexus.
+    // Live: a dozen bots shuffled between two tiles for minutes; the stall check saw movement and never fired.
+    fn snapshot_stalled_travel(&mut self, v: &PlayerView) {
+        self.trail
+            .push_back((v.time_ms, v.position, self.destination));
+        while self
+            .trail
+            .front()
+            .is_some_and(|(t, _, _)| v.time_ms.saturating_sub(*t) > 10_000)
+        {
+            self.trail.pop_front();
+        }
+        let Some((start, from, _)) = self.trail.front().copied() else {
+            return;
+        };
+        let steps: BTreeSet<_> = self
+            .trail
+            .iter()
+            .filter_map(|(_, _, s)| s.map(tile))
+            .collect();
+        if v.time_ms.saturating_sub(start) < 9_000
+            || v.time_ms < self.next_snapshot
+            || from.distance(v.position) >= 2.
+            || steps.len() < 2
+            || !matches!(
+                self.goal,
+                Goal::Venture | Goal::Explore(..) | Goal::Hunt(_) | Goal::Follow(_)
+            )
+        {
+            return;
+        }
+        let Some(grid) = self.navigation.as_ref() else {
+            return;
+        };
+        self.next_snapshot = v.time_ms + 300_000;
+        let (x0, y0) = tile(v.position);
+        let map: Vec<String> = (y0 - 5..=y0 + 5)
+            .map(|y| {
+                (x0 - 5..=x0 + 5)
+                    .map(|x| {
+                        let p = (x, y);
+                        if p == (x0, y0) {
+                            '@'
+                        } else if !grid.known.contains(&p) {
+                            '?'
+                        } else if grid.full_occupy.contains(&p) {
+                            'T'
+                        } else if self.blocked.contains_key(&p) {
+                            'x'
+                        } else if !grid.walkable.contains(&p) {
+                            '#'
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let recent: Vec<_> = self
+            .trail
+            .iter()
+            .rev()
+            .filter_map(|(_, p, s)| s.map(|s| (p.x, p.y, s.x, s.y)))
+            .take(12)
+            .collect();
+        tracing::warn!(
+            player = v.session.player,
+            account = v.session.account,
+            world = v.session.world,
+            layout = ?v.map.layout,
+            goal = ?self.goal,
+            x = v.position.x,
+            y = v.position.y,
+            recent = ?recent,
+            map = map.join("/"),
+            "autonomous travel made no net progress"
+        );
+    }
     fn reflex(
         &mut self,
         v: &PlayerView,
