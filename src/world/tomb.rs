@@ -25,6 +25,7 @@ pub(super) struct State {
     pub artifacts_unlocked: bool,
     pub completion_pos: Option<Pos>,
     pub paralyzed: bool,
+    pub circling: bool,
 }
 impl State {
     pub fn for_kind(kind: u16) -> Option<Self> {
@@ -238,6 +239,7 @@ impl World {
         e.activated = Some(self.now);
         e.next_shot = self.now;
         e.orbit = Some(orbit);
+        e.tomb.as_mut().context("Tomb boss state missing")?.circling = false;
         e.condition &=
             !(condition::bit(condition::ARMORED) | condition::bit(condition::INVULNERABLE));
         if kind == d::BES || phase == 0 {

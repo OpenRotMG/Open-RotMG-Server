@@ -11,6 +11,199 @@ fn fixture() -> (World, i32) {
     (world, player)
 }
 
+fn awakened_fixture() -> (World, i32, [i32; 3]) {
+    let (mut world, player) = fixture();
+    world.rng = rand::SeedableRng::seed_from_u64(1362);
+    let objectives: Vec<_> = world
+        .actors()
+        .filter(|e| e.kind == d::SARCOPHAGUS)
+        .map(|e| e.id)
+        .collect();
+    for id in objectives {
+        world
+            .damage_enemy(player, id, 1_000_000, true, &[], None)
+            .unwrap();
+    }
+    let bosses = d::BOSSES.map(|kind| world.actors().find(|e| e.kind == kind).unwrap().id);
+    for id in bosses {
+        world.tomb_mechanics(id, None).unwrap();
+    }
+    (world, player, bosses)
+}
+
+#[test]
+fn circle_phases_resume_around_generated_room_pillars() {
+    for kind in d::BOSSES {
+        for phase in [weapons::SPECIAL_TWO, weapons::SPECIAL_THREE] {
+            for (dx, dy) in [(-1., -1.), (-1., 1.), (1., -1.), (1., 1.)] {
+                let (mut world, player, bosses) = awakened_fixture();
+                let id = bosses[d::BOSSES.iter().position(|k| *k == kind).unwrap()];
+                world.tomb_enter(id, phase, false).unwrap();
+                let anchor = world.entities[&id].tomb.as_ref().unwrap().anchor.unwrap();
+                let center = world.entities[&anchor].pos;
+                let hp = weapons::thresholds(kind).unwrap()[(phase - 6) as usize] - 1;
+                let e = world.entities.get_mut(&id).unwrap();
+                e.hp = hp;
+                let orbit = e.orbit.as_mut().unwrap();
+                orbit.radius = 9.9;
+                orbit.direction = -dx * dy;
+                let orbit = *orbit;
+                world
+                    .position_entity(
+                        id,
+                        Pos {
+                            x: center.x,
+                            y: center.y + dy * orbit.radius,
+                        },
+                    )
+                    .unwrap();
+                world.players.get_mut(&player).unwrap().pos = center;
+                let pillar = Pos {
+                    x: center.x + dx * 7.,
+                    y: center.y + dy * 7.,
+                };
+                assert!(!world.walkable(pillar));
+                let mut contact = false;
+                let mut beyond = false;
+                let mut stalled = 0;
+                let mut longest_stall = 0;
+                for _ in 0..120 {
+                    let old = world.entities[&id].pos;
+                    world.now += 50;
+                    world.npc_step();
+                    let e = &world.entities[&id];
+                    assert!(world.walkable(e.pos), "{kind:#x}/{phase}: entered a pillar");
+                    assert_eq!(e.stage, Some(phase));
+                    assert!((hp..=world.content.objects[&kind].hp).contains(&e.hp));
+                    assert_eq!(e.orbit.unwrap().speed, orbit.speed);
+                    assert_eq!(e.orbit.unwrap().radius, orbit.radius);
+                    assert_eq!(e.orbit.unwrap().direction, orbit.direction);
+                    assert!(old.distance(e.pos) <= orbit.speed / 1.5 * 0.05 + 0.001);
+                    contact |= e.pos.distance(pillar) < 1.;
+                    beyond |= dx * (e.pos.x - center.x) > 8. && dy * (e.pos.y - center.y) < 7.;
+                    stalled = if e.pos.distance(old) < 0.001 {
+                        stalled + 50
+                    } else {
+                        0
+                    };
+                    longest_stall = longest_stall.max(stalled);
+                }
+                assert!(contact, "{kind:#x}/{phase}: fixture missed the pillar");
+                assert!(
+                    beyond,
+                    "{kind:#x}/{phase}: circle never passed pillar {pillar:?}; stalled {longest_stall}ms at {:?}",
+                    world.entities[&id].pos
+                );
+                assert!(
+                    longest_stall < 1000,
+                    "{kind:#x}/{phase}: stalled {longest_stall}ms"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn circle_entry_reanchors_after_each_phase_and_guard_duty() {
+    for (slot, caller_slot, caller_phase) in [(0, 2, 3), (1, 0, 4), (2, 0, 3)] {
+        let (mut world, _, bosses) = awakened_fixture();
+        let id = bosses[slot];
+        let anchor = world.entities[&id].tomb.as_ref().unwrap().anchor.unwrap();
+        let center = world.entities[&anchor].pos;
+        for phase in (0..=6).chain([weapons::SPECIAL_TWO, weapons::SPECIAL_THREE]) {
+            world.tomb_enter(id, phase, false).unwrap();
+            assert!(!world.entities[&id].tomb.as_ref().unwrap().circling);
+            let pos = Pos {
+                x: center.x + 2.,
+                y: center.y - 3.,
+            };
+            world.position_entity(id, pos).unwrap();
+            world.entities.get_mut(&id).unwrap().phase = 99.;
+            assert!(matches!(
+                world.tomb_movement(id, None).unwrap().0,
+                Motion::Orbit { .. }
+            ));
+            assert_eq!(world.entities[&id].phase, (-3_f32).atan2(2.));
+            world.entities.get_mut(&id).unwrap().phase = 1.;
+            world.tomb_movement(id, None).unwrap();
+            assert_eq!(world.entities[&id].phase, 1.);
+        }
+        world
+            .tomb_enter(bosses[caller_slot], caller_phase, false)
+            .unwrap();
+        assert_eq!(world.tomb_guard(id), Some(bosses[caller_slot]));
+        assert!(matches!(
+            world.tomb_movement(id, None).unwrap().0,
+            Motion::Protect { .. }
+        ));
+        assert!(!world.entities[&id].tomb.as_ref().unwrap().circling);
+        world
+            .position_entity(
+                id,
+                Pos {
+                    x: center.x - 4.,
+                    y: center.y + 2.,
+                },
+            )
+            .unwrap();
+        world.tomb_enter(bosses[caller_slot], 2, false).unwrap();
+        assert!(matches!(
+            world.tomb_movement(id, None).unwrap().0,
+            Motion::Orbit { .. }
+        ));
+        assert_eq!(world.entities[&id].phase, 2_f32.atan2(-4.));
+    }
+}
+
+#[test]
+fn circle_clock_keeps_slow_and_paralysis_rules() {
+    for kind in d::BOSSES {
+        let (mut world, player, bosses) = awakened_fixture();
+        let id = bosses[d::BOSSES.iter().position(|k| *k == kind).unwrap()];
+        let anchor = world.entities[&id].tomb.as_ref().unwrap().anchor.unwrap();
+        let center = world.entities[&anchor].pos;
+        world
+            .position_entity(
+                id,
+                Pos {
+                    x: center.x + 5.,
+                    y: center.y,
+                },
+            )
+            .unwrap();
+        world.players.get_mut(&player).unwrap().pos = center;
+        world.tomb_movement(id, None).unwrap();
+        for effect in [None, Some(condition::SLOWED), Some(condition::PARALYZED)] {
+            world.entities.get_mut(&id).unwrap().statuses.clear();
+            if let Some(effect) = effect {
+                world.apply_condition(id, effect, 1000).unwrap();
+            }
+            let old = world.entities[&id].pos;
+            let angle = world.entities[&id].phase;
+            let orbit = world.entities[&id].orbit.unwrap();
+            world.now += 50;
+            world.npc_step();
+            let e = &world.entities[&id];
+            let fraction = match effect {
+                Some(condition::PARALYZED) => 0.,
+                Some(condition::SLOWED) => 0.5,
+                _ => 1.,
+            };
+            let expected = orbit.speed / 1.5 * 0.05 * fraction;
+            assert!((e.phase - angle - orbit.direction * expected / orbit.radius).abs() < 0.00001);
+            assert!((old.distance(e.pos) - expected).abs() < 0.001);
+            assert_eq!(
+                e.orbit.unwrap().direction,
+                if fraction == 0. {
+                    -orbit.direction
+                } else {
+                    orbit.direction
+                }
+            );
+        }
+    }
+}
+
 #[test]
 fn each_generated_sarcophagus_owns_eight_worshippers() {
     let (world, _) = fixture();
