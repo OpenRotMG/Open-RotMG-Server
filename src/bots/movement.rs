@@ -295,13 +295,16 @@ impl Grid {
     }
     pub(super) fn segment(&self, from: Pos, to: Pos) -> bool {
         let steps = (from.distance(to) * 4.).ceil().max(1.) as i32;
+        // Like the 2012 client's Player._A_y, a position is only re-checked after crossing a half-cell edge.
+        let half = |p: Pos| ((p.x * 2.).floor() as i32, (p.y * 2.).floor() as i32);
         self.walkable.contains(&tile(to))
             && (0..=steps).all(|i| {
                 let f = i as f32 / steps as f32;
-                self.clear(Pos {
+                let point = Pos {
                     x: from.x + (to.x - from.x) * f,
                     y: from.y + (to.y - from.y) * f,
-                })
+                };
+                half(point) == half(from) || self.clear(point)
             })
     }
     pub(super) fn metrics(&self) -> serde_json::Value {
@@ -358,9 +361,24 @@ impl Grid {
         }
         let target = center(next);
         if self.segment(from, target) {
-            Some(target)
-        } else {
-            self.segment(from, center(start)).then_some(center(start))
+            return Some(target);
         }
+        // Live: held keys snap to eight directions, so a small correction across the route was lost while moving
+        // along it; between trees bots flipped between two tile centers. Line up across the route first.
+        let middle = center(start);
+        let across = if next.0 != start.0 {
+            Pos {
+                x: from.x,
+                y: middle.y,
+            }
+        } else {
+            Pos {
+                x: middle.x,
+                y: from.y,
+            }
+        };
+        [across, middle]
+            .into_iter()
+            .find(|p| p.distance(from) > 0.01 && self.segment(from, *p))
     }
 }
