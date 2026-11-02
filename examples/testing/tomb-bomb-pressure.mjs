@@ -30,7 +30,8 @@ export async function run(game){
     assert(warm.inspected.view.time_ms<pressureSince+2300,'Active screenshot window already closed');
     await watched({keys:[],duration_ms:200},{name:'tomb-active-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms<pressureSince+2500});
     const intact=await save('active');assert(phase(intact.inspected).stage===0&&active(intact.inspected),'Original eight traps must remain active before the deadline');
-    await watched({keys:[],duration_ms:3500},{name:'tomb-disabled-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms>=pressureSince+3200});
+    // Previously thrown bombs can still land after their traps are disabled.
+    await watched({keys:[],duration_ms:5000},{name:'tomb-disabled-bomb-traps',when:v=>v.lifecycle.alive&&v.game_ms>=pressureSince+5200});
     const disabled=await save('disabled');assert(phase(disabled.inspected).stage===1&&replaced(disabled.inspected),'Three-second standing pressure must replace exactly the eight original trap positions');
     await watched({keys:[],duration_ms:1000});const stable=await save('stable');
     game.check('standing pressure disables the eight original traps after three seconds',Boolean(firstDisabled&&firstDisabled.time>=pressureSince+3000&&phase(stable.inspected).stage===1&&replaced(stable.inspected)));
