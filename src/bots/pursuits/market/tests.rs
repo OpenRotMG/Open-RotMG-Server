@@ -526,6 +526,8 @@ fn a_bot_uses_potions_saved_in_any_vault_chest() {
         ..Market::default()
     };
     m.observe(&v);
+    // Live: the remembered multi-chest Vault failed drain validation for 11 bots and blocked the deploy.
+    m.validate(v.session.account).unwrap();
     assert_eq!(m.count(&v, SPEED), 3);
     assert!(!m.vault_full());
     let grid = Grid::terrain(&v);
