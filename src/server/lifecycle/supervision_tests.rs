@@ -235,6 +235,13 @@ async fn a_failed_publication_still_saves_releases_and_drains() {
         .unwrap()
         .unwrap();
     assert!(state(&app, account).is_none(), "the account is released");
+    assert!(
+        !app.world
+            .call(move |w| Ok(w.players.contains_key(&player)))
+            .await
+            .unwrap(),
+        "the failed avatar keeps a player slot"
+    );
     drain::prepare(&app);
     app.shutdown.send_replace(true);
     tokio::time::timeout(Duration::from_secs(20), drain::terminate(&app))
