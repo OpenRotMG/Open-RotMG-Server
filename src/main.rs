@@ -1,3 +1,4 @@
+mod audit;
 mod backup;
 mod bots;
 mod clock;
