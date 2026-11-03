@@ -540,6 +540,128 @@ mod tests {
     }
 
     #[test]
+    fn manor_admitted_staff_projectiles_defeat_original_bookshelf_and_open_sight() {
+        let (fixture, _) = super::super::movement_tests::fixture(0x18, false);
+        let mut map = (*fixture.map).clone();
+        for y in 0..map.height {
+            let cell = &mut map.cells[(y * map.width + 10) as usize];
+            cell.object = Some(if y == 8 { BOOKCASE } else { 0x180a });
+            cell.region = if y == 8 { 250 } else { 0 };
+        }
+        let mut world = World::new(fixture.content.clone(), Arc::new(map)).unwrap();
+        world.name = "Manor of the Immortals".into();
+        world.encounter = true;
+        let outside = Pos { x: 8.5, y: 8.5 };
+        let wall_pos = Pos { x: 10.5, y: 8.5 };
+        let inside = (11, 8);
+        let wall = world
+            .actors()
+            .find(|e| e.kind == BOOKCASE && e.pos.distance(wall_pos) == 0.)
+            .unwrap()
+            .id;
+        assert_eq!(world.map.cell(wall_pos.x, wall_pos.y).unwrap().region, 250);
+        assert_eq!(world.entities[&wall].hp, 3000);
+        assert_eq!(world.entities[&wall].condition, 0);
+        let mut character =
+            Character::fresh(world.content.get(crate::content::WIZARD).unwrap()).unwrap();
+        character.id = 1384;
+        character.account = 1;
+        character.name = "ManorStaff".into();
+        character.items.fill(-1);
+        character.items[0] = 0xb08;
+        character
+            .gain_experience(
+                &world.content,
+                crate::store::level_start(20).unwrap(),
+                &mut rand::rngs::StdRng::seed_from_u64(1384),
+            )
+            .unwrap();
+        let player = world
+            .enter_at(
+                character,
+                None,
+                Some(outside),
+                AccountPresentation {
+                    guild: None,
+                    credits: 0,
+                    fame: 0,
+                    best_fame: BTreeMap::new(),
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(world.players[&player].character.level, 20);
+        assert_eq!(world.players[&player].character.shots, 0);
+        assert_eq!(world.players[&player].character.hits, 0);
+        assert_eq!(world.players[&player].conditions(world.now), 0);
+        world.updates(player, true).unwrap();
+        assert!(world.players[&player].known.contains(&wall));
+        assert!(!world.players[&player].tiles.contains(&inside));
+        let start = Pos {
+            x: outside.x + 0.3,
+            y: outside.y,
+        };
+        let mut damaged = false;
+        for _ in 0..40 {
+            if !world.entities.contains_key(&wall) {
+                break;
+            }
+            for _ in 0..2 {
+                let bullet = world.players[&player].next_bullet;
+                world
+                    .shoot(player, world.now as i32, bullet, 0xb08, start, 0.)
+                    .unwrap();
+            }
+            for _ in 0..10 {
+                world.step();
+                let p = &world.players[&player];
+                assert!(
+                    p.character.alive && p.character.hp > 0 && !p.death_pending,
+                    "engine player became terminal: time={} hp={} alive={} pending={}",
+                    world.now,
+                    p.character.hp,
+                    p.character.alive,
+                    p.death_pending
+                );
+                if let Some(e) = world.entities.get(&wall) {
+                    if e.hp < 3000 {
+                        assert!(e.hp > 0);
+                        assert_eq!(e.damage.get(&1384), Some(&(3000 - e.hp)));
+                        assert!(p.character.hits > 0 && p.character.lifetime.projectile_hits > 0);
+                        damaged = true;
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        assert!(
+            damaged,
+            "no surviving original-wall projectile damage observed"
+        );
+        assert!(
+            !world.entities.contains_key(&wall),
+            "staff did not defeat original bookshelf"
+        );
+        world.updates(player, false).unwrap();
+        let p = &world.players[&player];
+        assert_eq!((p.pos.x, p.pos.y), (outside.x, outside.y));
+        assert!(p.tiles.contains(&inside));
+        assert!(!p.known.contains(&wall));
+        assert!(p.character.shots > 0 && p.character.lifetime.projectile_hits > 0);
+        assert!(p.character.kills > 0 && p.character.lifetime.kills > 0);
+        assert_eq!(p.character.manors, 0);
+        eprintln!(
+            "engine staff bookshelf: time={}ms shots={} hits={} projectile_hits={} kills={}",
+            world.now,
+            p.character.shots,
+            p.character.hits,
+            p.character.lifetime.projectile_hits,
+            p.character.kills
+        );
+    }
+
+    #[test]
     fn genuine_coffin_threshold_waves_do_not_repeat() {
         let (mut world, boss) = arena();
         let id = world
