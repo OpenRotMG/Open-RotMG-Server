@@ -3591,6 +3591,13 @@ impl World {
             y = pos.y,
             "player entered development world"
         );
+        let p = &self.players[&id];
+        if p.controller == Controller::Human {
+            crate::audit::record(
+                "player_enter",
+                serde_json::json!({"account":p.character.account,"character":char_id,"player":id,"world":self.name}),
+            );
+        }
         Ok(id)
     }
 
@@ -3606,7 +3613,58 @@ impl World {
         let p = self.players.remove(&id).unwrap();
         self.bullets.retain(|b| b.owner != id);
         tracing::info!(player = id, character = p.character.id, "player left");
+        if p.controller == Controller::Human {
+            crate::audit::record(
+                "player_leave",
+                serde_json::json!({"account":p.character.account,"character":p.character.id,"player":id,"world":self.name}),
+            );
+        }
         Ok(p.character)
+    }
+    pub(crate) fn audit_native<T>(
+        &mut self,
+        id: i32,
+        operation: &str,
+        request: serde_json::Value,
+        work: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let before = self.players.get(&id).filter(|p| p.controller == Controller::Human).map(|p| {
+            let slots = [("object", "slot"), ("to_object", "to_slot")].into_iter().filter_map(|(object_key, slot_key)| {
+                let object = request[object_key].as_i64()? as i32;
+                let slot = request[slot_key].as_u64()? as usize;
+                let entity = self.entities.get(&object);
+                let own = object == id;
+                Some(serde_json::json!({"object":object,"slot":slot,"own_inventory":own,
+                    "actual_item":if own {p.character.items.get(slot)} else {entity.and_then(|e|e.items.get(slot))},
+                    "entity_exists":entity.is_some(),"container_kind":entity.map(|e|e.kind),
+                    "reserved":entity.map(|e|e.reserved),"accessible":entity.map(|e|e.accessible(p.character.account)),
+                    "distance":entity.map(|e|p.pos.distance(e.pos))}))
+            }).collect::<Vec<_>>();
+            serde_json::json!({"account":p.character.account,"character":p.character.id,"player":id,
+                "world":self.name,"x":p.pos.x,"y":p.pos.y,"class":p.character.class,
+                "hp":p.character.hp,"mp":p.character.mp,"equipment":&p.character.items[..4],
+                "next_bullet":p.next_bullet,"last_attack":p.last_attack,"last_move":p.last_move,
+                "advertised_weapons":p.weapon_ticks.iter().map(|(tick,weapon,dex)|serde_json::json!([tick,weapon,dex])).collect::<Vec<_>>(),
+                "paused":p.paused,"pending":p.pending,"death_pending":p.death_pending,"slots":slots})
+        });
+        let result = work(self);
+        if let Some(before) = before {
+            let denominator = if matches!(operation, "move" | "shot") {
+                32
+            } else {
+                1
+            };
+            let sampled = rand::random::<u8>().is_multiple_of(denominator);
+            if result.is_err() || sampled {
+                crate::audit::record(
+                    "native_action",
+                    serde_json::json!({"operation":operation,"request":request,"before":before,
+                    "returned_ok":result.is_ok(),"error":result.as_ref().err().map(|e|format!("{e:#}").chars().take(512).collect::<String>()),
+                    "healthy_sample_denominator":denominator}),
+                );
+            }
+        }
+        result
     }
     pub fn stats(&self, id: i32, recipient: i32) -> Result<Vec<u8>> {
         let mut o = Writer::new();

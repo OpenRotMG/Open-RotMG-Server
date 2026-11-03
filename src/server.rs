@@ -1235,7 +1235,12 @@ fn input(
             let id = character("MOVE before character")?;
             Box::new(move |w| {
                 w.acknowledge_tick(id, tick, received)?;
-                match w.native_move_received(id, pos, (time, received)) {
+                match w.audit_native(
+                    id,
+                    "move",
+                    serde_json::json!({"tick":tick,"time":time,"x":pos.x,"y":pos.y}),
+                    |w| w.native_move_received(id, pos, (time, received)),
+                ) {
                     Ok(_) => Ok(()),
                     Err(e) if lifecycle::rule_rejection(&e) => {
                         w.correct_position(id, time, &e.to_string())
@@ -1256,7 +1261,7 @@ fn input(
             r.done()?;
             let id = character("shoot before character")?;
             Box::new(move |w| {
-                match w.native_shoot_received(id, (time, received), bullet, kind, pos, angle) {
+                match w.audit_native(id, "shot", serde_json::json!({"time":time,"bullet":bullet,"weapon":kind,"x":pos.x,"y":pos.y,"angle":angle}), |w| w.native_shoot_received(id, (time, received), bullet, kind, pos, angle)) {
                     Ok(_) => Ok(()),
                     Err(error)
                         if error
@@ -2042,7 +2047,7 @@ async fn handle_inner(
             lifecycle::stage(Stage::Reservation);
             match a
                 .world
-                .call(move |w| w.native_use_item(id, time, s, pos))
+                .call(move |w| w.audit_native(id, "item", serde_json::json!({"time":time,"object":s.object,"slot":s.slot,"item":s.kind,"x":pos.x,"y":pos.y}), |w| w.native_use_item(id, time, s, pos)))
                 .await
             {
                 Ok(Some(plan)) => persist(a, plan).await?,
@@ -2100,7 +2105,17 @@ async fn handle_inner(
             let id =
                 player.ok_or_else(|| lifecycle::protocol("inventory drop before character"))?;
             lifecycle::stage(Stage::Reservation);
-            let plan = a.world.call(move |w| w.drop_item(id, slot)).await?;
+            let plan = a
+                .world
+                .call(move |w| {
+                    w.audit_native(
+                        id,
+                        "drop",
+                        serde_json::json!({"object":slot.object,"slot":slot.slot,"item":slot.kind}),
+                        |w| w.drop_item(id, slot),
+                    )
+                })
+                .await?;
             persist(a, plan).await?;
         }
         65 => {
@@ -2113,7 +2128,7 @@ async fn handle_inner(
             let id =
                 player.ok_or_else(|| lifecycle::protocol("inventory swap before character"))?;
             lifecycle::stage(Stage::Reservation);
-            let plan = a.world.call(move |w| w.swap(id, from, to)).await?;
+            let plan = a.world.call(move |w| w.audit_native(id, "swap", serde_json::json!({"object":from.object,"slot":from.slot,"item":from.kind,"to_object":to.object,"to_slot":to.slot,"to_item":to.kind}), |w| w.swap(id, from, to))).await?;
             persist(a, plan).await?;
         }
         33 => {
@@ -2391,6 +2406,9 @@ async fn connection_io<S, I>(
     let mut reconnect_sent = false;
     let mut deferred = None;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(5));
+    let mut audit = crate::audit::Window::new();
+    let mut audit_timer = tokio::time::interval(std::time::Duration::from_secs(5));
+    audit_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut serial = 0;
     let mut transfers = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut testing_stop = a.testing.as_ref().map(|t| t.stopped.subscribe());
@@ -2464,7 +2482,10 @@ async fn connection_io<S, I>(
                             }
                         }
                         session.diagnostics.packets_in += packets.len() as u64;
-                        for (packet, _) in &packets { session.diagnostics.processed(packet.id); }
+                        for (packet, received) in &packets {
+                            session.diagnostics.processed(packet.id);
+                            audit.observe(packet, *received);
+                        }
                         let handling = std::time::Instant::now();
                         let queued=a.world.clock.now().saturating_duration_since(received);
                         let requests=Arc::new(Mutex::new(crate::performance::Requests::default()));
@@ -2592,6 +2613,7 @@ async fn connection_io<S, I>(
                         || testing_stop.as_ref().is_some_and(|stop| stop.borrow().is_some()) {break;}
                 }
             },
+            _=audit_timer.tick()=>audit.flush(session.account.as_ref().map(|o|o.id),session.player,session.diagnostics.world,false),
             _=ping.tick()=>{if session.account.is_some() && !a.world.clock.paused(){serial+=1;let mut o=Writer::new();o.i32(serial);
                 session.diagnostics.sent(serial);
                 if send!(Message::Binary(codec.frame(wire::PING,o.0).into())).is_err(){break;}}}
@@ -2602,6 +2624,12 @@ async fn connection_io<S, I>(
         close_reason = CloseReason::Output;
     }
     input_task.abort();
+    audit.flush(
+        session.account.as_ref().map(|o| o.id),
+        session.player,
+        session.diagnostics.world,
+        true,
+    );
     // Publish custody before diagnostics; neither a cancelled socket task nor its sink owns cleanup.
     let cancelled_admission = session
         .admission
@@ -3348,6 +3376,21 @@ fn routes(a: &App, client: PathBuf) -> Router {
 }
 
 pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
+    crate::audit::record(
+        "start",
+        serde_json::json!({"revision":a.diagnostics.source_revision,"binary_sha256":a.diagnostics.binary_sha256,"prepared":a.testing.is_some()}),
+    );
+    let mut audit_shutdown = a.shutdown.subscribe();
+    tokio::spawn(async move {
+        let mut timer = tokio::time::interval(std::time::Duration::from_secs(5));
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = timer.tick() => crate::audit::record("heartbeat", serde_json::json!({})),
+                _ = audit_shutdown.changed() => break,
+            }
+        }
+    });
     let deaths = a.clone();
     a.world.supervisor.spawn("persistence", async move {
         loop {

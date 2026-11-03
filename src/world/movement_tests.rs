@@ -60,6 +60,31 @@ fn native(
 }
 
 #[test]
+fn audit_observation_preserves_work_results_and_mutations() {
+    let (mut world, id) = fixture(0x18, false);
+    let hp = world.players[&id].character.hp;
+    let result = world.audit_native(
+        id,
+        "move",
+        serde_json::json!({"tick":1,"time":1000,"x":8.5,"y":8.5}),
+        |w| {
+            w.players.get_mut(&id).unwrap().character.hp -= 1;
+            Ok(42)
+        },
+    );
+    assert_eq!(result.unwrap(), 42);
+    assert_eq!(world.players[&id].character.hp, hp - 1);
+    let rejected: Result<()> = world.audit_native(
+        id,
+        "item",
+        serde_json::json!({"time":1000,"object":id,"slot":4,"item":2595,"x":8.5,"y":8.5}),
+        |_| Err(controller("audit-test rejection")),
+    );
+    assert_eq!(rejected.unwrap_err().to_string(), "audit-test rejection");
+    assert_eq!(world.players[&id].character.hp, hp - 1);
+}
+
+#[test]
 fn godlands_gods_stop_at_a_ghost_king_tower() {
     let (mut world, _) = fixture(0x18, false);
     let area = realm_setpieces::Area {
