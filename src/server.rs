@@ -2650,7 +2650,7 @@ async fn connection_io<S, I>(
             Err(error) => Err(error),
         };
         if let Err(error) = result {
-            tracing::error!(player=?session.player,error=%error,"disconnect finalization failed; account fenced");
+            tracing::error!(player=?session.player,error=%error,"disconnect finalization failed");
         }
     }
 }

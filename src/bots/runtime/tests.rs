@@ -91,7 +91,7 @@ async fn drain_waits_for_accepted_bot_reentry_after_source_save() {
         .await
         .unwrap();
     let saved = app.store.load(account, character).await.unwrap();
-    assert_eq!(lifecycle::state(&app, account), Some((false, None, false)));
+    assert_eq!(lifecycle::state(&app, account), Some((false, None)));
     let (ready, held) = tokio::sync::oneshot::channel();
     let (release, released) = tokio::sync::oneshot::channel();
     let controller_app = app.clone();
