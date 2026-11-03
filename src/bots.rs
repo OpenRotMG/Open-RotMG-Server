@@ -1448,11 +1448,8 @@ impl Brain {
         }
         if retreat || threatened {
             let emergency = retreat || remedy.is_some();
-            let opponent = if retreat {
-                None
-            } else {
-                combat::target(v, content, grid, enemies, range, s.passes_cover)
-            };
+            // Live: 32 of 32 sampled Recover frames never fired. A 2012 player backing off kept shooting.
+            let opponent = combat::target(v, content, grid, enemies, range, s.passes_cover);
             let pressured = threatened
                 || nearest.is_some_and(|e| e.position.distance(v.position) < range * 1.3);
             if emergency {
