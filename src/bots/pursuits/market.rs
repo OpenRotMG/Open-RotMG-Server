@@ -183,10 +183,12 @@ impl Market {
         ensure!(
             self.contacts.len() <= 32
                 && self.history.len() <= 8
-                && self
-                    .vault
-                    .as_ref()
-                    .is_none_or(|v| v.len() == 8 && v.iter().all(|k| (-1..=65535).contains(k))),
+                && self.vault.as_ref().is_none_or(|v| {
+                    // One remembered slice of 8 per owned chest.
+                    v.len().is_multiple_of(8)
+                        && (8..=8 * crate::store::VAULT_CHESTS as usize).contains(&v.len())
+                        && v.iter().all(|k| (-1..=65535).contains(k))
+                }),
             "invalid market memory bounds"
         );
         ensure!(
