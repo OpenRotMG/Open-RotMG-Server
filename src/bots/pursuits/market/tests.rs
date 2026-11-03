@@ -494,3 +494,46 @@ fn a_buyer_fetches_saved_potions_from_its_vault_for_a_wanted_item() {
         "the session keeps the purchase"
     );
 }
+
+#[test]
+fn a_bot_uses_potions_saved_in_any_vault_chest() {
+    // Live: account 2233 kept 8 Speed in chests 1-3 and found no funds in 238 wanted ads; bots read only chest 0.
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    let mut chest = v.objects.remove(0);
+    let mut gear = crate::bots::quest_tests::fixture().1.objects.remove(0);
+    v.objects.clear();
+    v.map.name = "Vault".into();
+    v.character.items[4..].fill(-1);
+    v.character.class = 775;
+    v.character.items[0] = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == 3 && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    chest.kind = 0x504;
+    chest.position = v.position;
+    gear.kind = 0x504;
+    gear.position = v.position;
+    gear.id = 41;
+    gear.contents = vec![2653; 8];
+    chest.id = 42;
+    chest.contents = vec![SPEED, SPEED, SPEED, -1, -1, -1, -1, -1];
+    v.objects.extend([gear, chest]);
+    let mut m = Market {
+        quote: Some([goods(SPEED, 3), goods(2699, 1)]),
+        preparing: true,
+        ..Market::default()
+    };
+    m.observe(&v);
+    // Live: the remembered multi-chest Vault failed drain validation for 11 bots and blocked the deploy.
+    m.validate(v.session.account).unwrap();
+    assert_eq!(m.count(&v, SPEED), 3);
+    assert!(!m.vault_full());
+    let grid = Grid::terrain(&v);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+    let d = m.decide(&v, &c, None, &grid, &mut rng).unwrap().unwrap();
+    assert!(
+        matches!(&d.item, Some(Action::Swap { from, .. }) if from.object == 42 && from.kind == SPEED)
+    );
+}

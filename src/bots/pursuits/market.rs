@@ -183,10 +183,12 @@ impl Market {
         ensure!(
             self.contacts.len() <= 32
                 && self.history.len() <= 8
-                && self
-                    .vault
-                    .as_ref()
-                    .is_none_or(|v| v.len() == 8 && v.iter().all(|k| (-1..=65535).contains(k))),
+                && self.vault.as_ref().is_none_or(|v| {
+                    // One remembered slice of 8 per owned chest.
+                    v.len().is_multiple_of(8)
+                        && (8..=8 * crate::store::VAULT_CHESTS as usize).contains(&v.len())
+                        && v.iter().all(|k| (-1..=65535).contains(k))
+                }),
             "invalid market memory bounds"
         );
         ensure!(
@@ -276,13 +278,13 @@ impl Market {
                 }
             }
         }
-        if v.map.name == "Vault"
-            && let Some(chest) = v.objects.iter().find(|p| p.kind == 0x504)
+        if let Some(vault) = Self::live_vault(v)
+            && !vault.is_empty()
         {
-            if self.vault.as_ref() != Some(&chest.contents) {
-                tracing::info!(account=v.session.account,revision=v.character.inventory_revision,items=?v.character.items,vault=?chest.contents,"market own private stock observed");
+            if self.vault.as_ref() != Some(&vault) {
+                tracing::info!(account=v.session.account,revision=v.character.inventory_revision,items=?v.character.items,?vault,"market own private stock observed");
             }
-            self.vault = Some(chest.contents.clone());
+            self.vault = Some(vault);
             self.vault_refreshed = true;
         }
     }
@@ -355,19 +357,33 @@ impl Market {
             0
         })
     }
-    fn live_vault(v: &PlayerView) -> Option<&[i32]> {
-        (v.map.name == "Vault")
-            .then(|| v.objects.iter().find(|o| o.kind == 0x504))
-            .flatten()
-            .map(|o| o.contents.as_slice())
+    // Live: veterans kept their potions in chests 1-4 while bots read only chest 0.
+    fn live_vault(v: &PlayerView) -> Option<Vec<i32>> {
+        (v.map.name == "Vault").then(|| {
+            v.objects
+                .iter()
+                .filter(|o| o.kind == 0x504)
+                .flat_map(|o| o.contents.iter().copied())
+                .collect()
+        })
+    }
+    /// The chest holding `take`, or one with a free slot when only depositing.
+    fn chest(v: &PlayerView, take: Option<i32>) -> Option<&crate::world::view::VisibleObject> {
+        let mut chests = v.objects.iter().filter(|o| o.kind == 0x504);
+        let wanted = take.unwrap_or(-1);
+        chests
+            .clone()
+            .find(|o| o.contents.contains(&wanted))
+            .or_else(|| chests.next())
     }
     fn verified_count(v: &PlayerView, kind: i32) -> usize {
         v.character
             .items
             .iter()
             .skip(4)
+            .copied()
             .chain(Self::live_vault(v).into_iter().flatten())
-            .filter(|k| **k == kind)
+            .filter(|k| *k == kind)
             .count()
     }
     pub(in crate::bots) fn verified_surplus(
@@ -394,9 +410,9 @@ impl Market {
             .items
             .iter()
             .skip(4)
-            .chain(Self::live_vault(v).into_iter().flatten())
-            .filter(|k| **k >= 0)
             .copied()
+            .chain(Self::live_vault(v).into_iter().flatten())
+            .filter(|k| *k >= 0)
             .collect::<BTreeSet<_>>()
         {
             let quantity = Self::verified_surplus(v, c, future, kind)?;
@@ -1127,7 +1143,8 @@ impl Market {
             let free = v.character.items.iter().skip(4).filter(|k| **k < 0).count();
             let bank = carried < own || free + own < needed;
             if v.map.name == "Vault" {
-                let Some(chest) = v.objects.iter().find(|o| o.kind == 0x504) else {
+                let take = (carried < own).then_some(b.terms.goods[side].kind);
+                let Some(chest) = Self::chest(v, take) else {
                     return Ok(Some(d));
                 };
                 let transfer = if carried < own
@@ -1304,9 +1321,6 @@ impl Market {
                 .filter(|k| **k == q[0].kind)
                 .count();
             let free = v.character.items.iter().skip(4).filter(|k| **k < 0).count();
-            let Some(chest) = v.objects.iter().find(|o| o.kind == 0x504) else {
-                return Ok(Some(d));
-            };
             // Personal keeps must travel too: the live chest is no longer funding evidence in Nexus.
             let keep = if self.target.is_some() {
                 Self::keep(v, c, future, q[0].kind)?
@@ -1317,6 +1331,10 @@ impl Market {
             let need_stock = carried_surplus < usize::from(q[0].quantity);
             let need_space = (need_stock && free == 0)
                 || free + usize::from(q[0].quantity) < usize::from(q[1].quantity);
+            let Some(chest) = Self::chest(v, (need_stock && !need_space).then_some(q[0].kind))
+            else {
+                return Ok(Some(d));
+            };
             let transfer = if keep + usize::from(q[0].quantity) > v.character.items.len() - 4 {
                 None
             } else if need_space {
