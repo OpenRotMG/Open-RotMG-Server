@@ -14,7 +14,6 @@ pub(super) struct AdmissionState {
     current: Option<DrainStatus>,
     entries: usize,
     http_entries: usize,
-    failure: Option<String>,
 }
 impl Default for Admission {
     fn default() -> Self {
@@ -28,7 +27,6 @@ impl Default for Admission {
                 current: None,
                 entries: 0,
                 http_entries: 0,
-                failure: None,
             }),
             stop: tokio::sync::watch::channel(0).0,
         }
@@ -290,10 +288,6 @@ async fn drain(a: &App, deadline: tokio::time::Instant) -> Vec<String> {
         }
         let (empty, settled, mut errors, detail) = {
             let owners = a.owners.lock().expect("ownership registry poisoned");
-            let errors = owners
-                .values()
-                .filter_map(|c| c.failure.clone())
-                .collect::<Vec<_>>();
             let settled = owners.values().all(|c| {
                 !c.pending
                     && c.finalization
@@ -301,16 +295,8 @@ async fn drain(a: &App, deadline: tokio::time::Instant) -> Vec<String> {
                         .is_none_or(|f| f.done.borrow().is_some())
             });
             let detail = owners.iter().map(|(id,c)| format!("account={id} session={:p} avatar={:?} pending={} owner_present={} closing={}", Arc::as_ptr(&c.generation), c.avatar, c.pending, c.owner_present, c.finalization.is_some())).collect::<Vec<_>>().join("; ");
-            (owners.is_empty(), settled, errors, detail)
+            (owners.is_empty(), settled, Vec::new(), detail)
         };
-        errors.extend(
-            a.admission
-                .state
-                .lock()
-                .expect("admission poisoned")
-                .failure
-                .clone(),
-        );
         if entries == 0 && empty {
             return errors;
         }
@@ -403,13 +389,7 @@ pub(crate) async fn http_entry(
             Ok(response) => response,
             Err(_) => {
                 let error = "accepted HTTP handler panicked; outcome uncertain";
-                a.admission
-                    .state
-                    .lock()
-                    .expect("admission poisoned")
-                    .failure
-                    .get_or_insert_with(|| error.into());
-                report_failure(error, "HTTP completion fenced");
+                report_failure(error, "HTTP completion failed");
                 super::super::hiscores::json_error(StatusCode::INTERNAL_SERVER_ERROR, error)
             }
         }

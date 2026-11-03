@@ -2421,7 +2421,7 @@ impl Handle {
             .worlds
             .start(clock.clone(), supervisor.clone(), tx.downgrade())
             .expect("world actors could not start");
-        // Preserve the incident component consumed by shutdown and account-fence readers.
+        // Preserve the incident component consumed by shutdown.
         supervisor.spawn_finite_thread("world", move || {
             let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build()?;
             runtime.block_on(async move {

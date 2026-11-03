@@ -212,3 +212,34 @@ async fn failed_shutdown_drain_records_incident_and_restart_admits_the_account()
         crate::supervision::Supervisor::recovered(dir.join("incident.json"), &store).unwrap();
     assert!(restarted.ensure_running().is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_publication_still_saves_releases_and_drains() {
+    // Live Nov 3: 15 bot re-entries failed at publication; their claims refused every deploy drain until restart.
+    let (dir, app) = fixture();
+    let (owner, player, character) = avatar(&app, "failed-publication").await;
+    let account = character.account;
+    let operation = reserve_player(&app, account, player, "autonomous_reentry")
+        .unwrap()
+        .unwrap();
+    let error = complete(operation, |_| async {
+        stage(Stage::Publication);
+        Err::<(), _>(anyhow::anyhow!("invalid market memory bounds"))
+    })
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("invalid market memory bounds"));
+    let finalized = owner.close(&app, CloseReason::Controller).unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(10), finalized.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(state(&app, account).is_none(), "the account is released");
+    drain::prepare(&app);
+    app.shutdown.send_replace(true);
+    tokio::time::timeout(Duration::from_secs(20), drain::terminate(&app))
+        .await
+        .unwrap()
+        .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
