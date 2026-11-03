@@ -168,9 +168,30 @@ impl Market {
             .all(|(i, b)| !*b || (i >= 4 && t.items[1][i] == q[1].kind))
             && t.offers[1].iter().filter(|b| **b).count() == usize::from(q[1].quantity);
         if !compatible && v.time_ms >= t.ready && v.clock_at >= t.ready_at {
+            let mut selected_item_counts = BTreeMap::<i32, u8>::new();
+            let mut selected_non_backpack_count = 0;
+            let mut selected_empty_slot_count = 0;
+            let mut selected_invalid_kind_count = 0;
+            // Unselected inventory is private even when a trade is refused.
+            for (slot, selected) in t.offers[1].iter().enumerate() {
+                if !selected {
+                    continue;
+                }
+                selected_non_backpack_count += usize::from(slot < 4);
+                match t.items[1][slot] {
+                    -1 => selected_empty_slot_count += 1,
+                    kind @ 0..=65535 => *selected_item_counts.entry(kind).or_default() += 1,
+                    _ => selected_invalid_kind_count += 1,
+                }
+            }
             tracing::info!(
                 account = v.session.account,
                 peer = g.account,
+                ?q,
+                selected_item_counts = %serde_json::json!(selected_item_counts),
+                selected_non_backpack_count,
+                selected_empty_slot_count,
+                selected_invalid_kind_count,
                 reason = if empty {
                     "empty_offer_timeout"
                 } else {
