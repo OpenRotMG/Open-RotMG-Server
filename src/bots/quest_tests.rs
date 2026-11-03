@@ -296,7 +296,12 @@ fn recovering_wizard_nova_respects_target_protection_and_mana() {
             decision.journey.is_none(),
             "Nexus must not mask the retreat cast"
         );
-        assert!(decision.aim.is_none(), "retreat must not fire the staff");
+        // Live: 32 of 32 sampled Recover frames never fired; a 2012 player backing off kept shooting.
+        assert_eq!(
+            decision.aim.is_some(),
+            protection == 0,
+            "retreat shoots back only at a target it can hurt"
+        );
         let backstep = decision.movement.expect("viable retreat step");
         assert!(
             backstep.distance(view.objects[0].position)
