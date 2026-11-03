@@ -346,7 +346,9 @@ impl World {
         counts
     }
     pub(super) fn cull_population(&mut self, terrain: u8) {
-        let counted = self.oryx_counted(terrain);
+        let mut counted = self.oryx_counted(terrain);
+        // Compaction stores families first, so slot order culled every Sprite God; oldest bodies go first instead.
+        counted.sort_unstable();
         let excess = counted.len() - self.population_regions[terrain as usize].target;
         // Only bodies without a player within 10 tiles leave, so active areas keep their regrowth.
         let culled: Vec<_> = counted
@@ -547,5 +549,28 @@ fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
                 .count()
         );
     }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn culling_an_overgrown_godlands_keeps_its_sprite_gods() -> Result<()> {
+    let path = std::path::Path::new("data");
+    let content = Arc::new(Content::load(path)?);
+    let source = crate::terrain::realms::sources(path)?.remove(0);
+    let mut directory = Directory::configured(path, content, 16, 756, Some(756), vec![source], 2)?;
+    let world = &mut directory.worlds[&-3];
+    let sprite_gods = |w: &World| w.entities.values().filter(|e| e.kind == 0x652).count();
+    let before = sprite_gods(world);
+    assert!(before > 0);
+    world.compact_population()?;
+    // Live, the Godlands bred to 150% and one cull removed every Sprite God.
+    world.population_regions[1].target = world.oryx_counted(1).len() / 2;
+    world.cull_population(1);
+    assert!(
+        sprite_gods(world) * 4 > before,
+        "{} of {before}",
+        sprite_gods(world)
+    );
     Ok(())
 }
