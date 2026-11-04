@@ -1345,8 +1345,13 @@ fn cli_process(
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(password).unwrap();
-    child.wait_with_output().unwrap()
+    let written = child.stdin.take().unwrap().write_all(password);
+    let output = child.wait_with_output().unwrap();
+    if let Err(error) = written {
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        assert!(!output.status.success());
+    }
+    output
 }
 fn cli(args: &[&str], password: &[u8]) -> (bool, serde_json::Value, String) {
     cli_env(args, password, &[])
