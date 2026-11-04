@@ -42,8 +42,13 @@ def command(*values, secret=None, success=True):
     assert (result.returncode == 0) == success, result.stderr.decode()
     if success:
         return json.loads(result.stdout)
-    assert password.strip() not in result.stderr
-    return result.stderr.decode()
+    assert password.strip() not in result.stderr and password.strip() not in result.stdout
+    failure = json.loads(result.stdout)
+    assert set(failure) == {'protocol', 'operation', 'outcome', 'error'}
+    assert failure['protocol'] == 1 and failure['operation'] == values[1]
+    assert failure['outcome'] == 'unchanged'
+    assert isinstance(failure['error'], str) and 0 < len(failure['error']) <= 512
+    return failure
 
 
 def save(*values, **kw):

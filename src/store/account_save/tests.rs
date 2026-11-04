@@ -942,7 +942,9 @@ async fn account_save_full_restore_process_cuts_preserve_old_or_complete_snapsho
             std::thread::sleep(Duration::from_millis(20));
         }
         child.kill().unwrap();
-        child.wait().unwrap();
+        assert!(!child.wait().unwrap().success());
+        let log = std::fs::read_to_string(directory.join("child.log")).unwrap();
+        assert!(!log.contains("\"protocol\"") && !log.contains("\"restored\""));
         assert_eq!(
             dump(&Connection::open(directory.join("pre-restore.db")).unwrap()),
             old
@@ -1317,7 +1319,12 @@ async fn account_save_cli_child() {
         std::process::exit(2);
     }
 }
-fn cli(args: &[&str], password: &[u8]) -> (bool, serde_json::Value, String) {
+fn cli_process(
+    args: &[&str],
+    password: &[u8],
+    env: &[(&str, &str)],
+    stdout: std::process::Stdio,
+) -> std::process::Output {
     use std::{
         io::Write,
         process::{Command, Stdio},
@@ -1332,13 +1339,24 @@ fn cli(args: &[&str], password: &[u8]) -> (bool, serde_json::Value, String) {
             "ACCOUNT_SAVE_CLI_ARGS",
             serde_json::to_string(&[&["--local-save"][..], args].concat()).unwrap(),
         )
+        .envs(env.iter().copied())
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(stdout)
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     child.stdin.take().unwrap().write_all(password).unwrap();
-    let output = child.wait_with_output().unwrap();
+    child.wait_with_output().unwrap()
+}
+fn cli(args: &[&str], password: &[u8]) -> (bool, serde_json::Value, String) {
+    cli_env(args, password, &[])
+}
+fn cli_env(
+    args: &[&str],
+    password: &[u8],
+    env: &[(&str, &str)],
+) -> (bool, serde_json::Value, String) {
+    let output = cli_process(args, password, env, std::process::Stdio::piped());
     let stdout = String::from_utf8(output.stdout).unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     for secret in [
@@ -1357,6 +1375,28 @@ fn cli(args: &[&str], password: &[u8]) -> (bool, serde_json::Value, String) {
         })
         .next()
         .unwrap_or(serde_json::Value::Null);
+    if !output.status.success() {
+        assert!(
+            !stdout.contains("PRIVATE_FAILURE_CANARY")
+                && !stderr.contains("PRIVATE_FAILURE_CANARY")
+        );
+        assert_eq!(value.as_object().unwrap().len(), 4);
+        assert_eq!(value["protocol"], 1);
+        let operation = match args.first().copied() {
+            Some(
+                op @ ("import" | "replace" | "restore" | "snapshot" | "export" | "preview"
+                | "verify-account" | "verify-snapshot"),
+            ) => op,
+            _ => "invalid",
+        };
+        assert_eq!(value["operation"], operation);
+        assert!(matches!(
+            value["outcome"].as_str(),
+            Some("unchanged" | "unknown")
+        ));
+        let error = value["error"].as_str().unwrap();
+        assert!(!error.is_empty() && error.len() <= 512);
+    }
     (output.status.success(), value, stderr)
 }
 fn cli_ok(args: &[&str], password: &[u8]) -> serde_json::Value {
@@ -1736,6 +1776,229 @@ async fn account_save_expected_transaction_rechecks_identity_and_cli_origin_repl
         assert_eq!(dump(&db), before);
     }
     drop(db);
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_cli_failure_outcome_prewrite_retry_and_rolled_back_postwrite_unknown() {
+    let (root, content, source, save) = fixture().await;
+    let file = write_input(&root, &save);
+    let file = file.to_str().unwrap();
+    let state = root.join("local");
+    std::fs::create_dir(&state).unwrap();
+    let dbpath = state.join("game.db");
+    let local = Store::open(&dbpath, &content).unwrap();
+    local.list("keep-original".into()).await.unwrap();
+    let state = state.to_str().unwrap();
+    let backup = root.join("pre-import.db");
+    let backup = backup.to_str().unwrap();
+    let before = dump(&Connection::open(&dbpath).unwrap());
+    let confirmed = cli_ok(&["preview", state, "data", file], b"");
+    for failure_args in [
+        vec!["import", state, "data", file, backup],
+        vec!["import", state, "data", file, backup, &"0".repeat(64)],
+    ] {
+        let (ok, failure, _) = cli(&failure_args, b"private-cli-password\n");
+        assert!(!ok);
+        assert_eq!(failure["outcome"], "unchanged");
+        assert!(!Path::new(backup).exists());
+        assert_eq!(dump(&Connection::open(&dbpath).unwrap()), before);
+    }
+    let result = cli_ok(
+        &[
+            "import",
+            state,
+            "data",
+            file,
+            backup,
+            confirmed["expected"].as_str().unwrap(),
+        ],
+        b"private-cli-password\n",
+    );
+    assert_eq!(result["login"], confirmed["login"]);
+    let db = Connection::open(&dbpath).unwrap();
+    db.execute_batch("CREATE TRIGGER fail_after_character_deletion BEFORE UPDATE ON accounts WHEN OLD.id=2 BEGIN SELECT RAISE(ABORT,'PRIVATE_FAILURE_CANARY'); END;").unwrap();
+    let confirmed = cli_ok(&["preview", state, "data", file], b"");
+    let before = dump(&db);
+    let backup = root.join("pre-replace.db");
+    let (ok, failure, _) = cli(
+        &[
+            "replace",
+            state,
+            "data",
+            file,
+            backup.to_str().unwrap(),
+            confirmed["expected"].as_str().unwrap(),
+        ],
+        b"replacement-cli-password\n",
+    );
+    assert!(!ok);
+    assert_eq!(failure["outcome"], "unknown");
+    assert!(backup.is_file());
+    assert_eq!(dump(&db), before);
+    for operation in ["verify-account", "preview"] {
+        let bad = root.join("PRIVATE_FAILURE_CANARY.json");
+        std::fs::write(
+            &bad,
+            b"{\"PRIVATE_FAILURE_CANARY\":\"private-cli-password\"}",
+        )
+        .unwrap();
+        let args = if operation == "preview" {
+            vec![operation, state, "data", bad.to_str().unwrap()]
+        } else {
+            vec![operation, bad.to_str().unwrap(), "data"]
+        };
+        let (ok, failure, _) = cli(&args, b"");
+        assert!(!ok);
+        assert_eq!(failure["outcome"], "unchanged");
+    }
+    for args in [vec!["PRIVATE_FAILURE_CANARY"], vec!["restore"]] {
+        let (ok, failure, _) = cli(&args, b"");
+        assert!(!ok);
+        assert_eq!(failure["outcome"], "unchanged");
+    }
+    drop(db);
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_cli_failure_output_artifacts_are_not_game_mutation_and_restore_is_unknown() {
+    let (root, content, source, _) = fixture().await;
+    let state = root.join("source");
+    let before = dump(&Connection::open(state.join("game.db")).unwrap());
+    let snapshot = root.join("published-but-not-acknowledged.db");
+    let (ok, failure, _) = cli_env(
+        &[
+            "snapshot",
+            state.to_str().unwrap(),
+            "data",
+            snapshot.to_str().unwrap(),
+        ],
+        b"",
+        &[("ACCOUNT_SAVE_SNAPSHOT_FAIL_AFTER_PUBLISH", "1")],
+    );
+    assert!(!ok);
+    assert_eq!(failure["outcome"], "unchanged");
+    assert!(snapshot.is_file());
+    assert_eq!(
+        dump(&Connection::open(state.join("game.db")).unwrap()),
+        before
+    );
+    let exported = root.join("written-but-not-acknowledged.json");
+    let (ok, failure, _) = cli_env(
+        &[
+            "export",
+            state.to_str().unwrap(),
+            "data",
+            "2",
+            exported.to_str().unwrap(),
+        ],
+        b"",
+        &[("ACCOUNT_SAVE_EXPORT_FAIL_AFTER_WRITE", "1")],
+    );
+    assert!(!ok);
+    assert_eq!(failure["outcome"], "unchanged");
+    assert!(exported.is_file());
+    assert_eq!(
+        dump(&Connection::open(state.join("game.db")).unwrap()),
+        before
+    );
+    let target = root.join("target");
+    std::fs::create_dir(&target).unwrap();
+    let local = Store::open(&target.join("game.db"), &content).unwrap();
+    local.list("different-progress".into()).await.unwrap();
+    let target_before = dump(&Connection::open(target.join("game.db")).unwrap());
+    let pre = root.join("pre-restore.db");
+    let (ok, failure, _) = cli_env(
+        &[
+            "restore",
+            target.to_str().unwrap(),
+            "data",
+            snapshot.to_str().unwrap(),
+            pre.to_str().unwrap(),
+        ],
+        b"",
+        &[("ACCOUNT_SAVE_RESTORE_FAIL_AFTER_COPY", "1")],
+    );
+    assert!(!ok);
+    assert_eq!(failure["outcome"], "unknown");
+    assert_eq!(dump(&Connection::open(&pre).unwrap()), target_before);
+    assert_eq!(
+        dump(&Connection::open(target.join("game.db")).unwrap()),
+        before
+    );
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_cli_truncated_or_broken_acknowledgement_is_nonzero_not_unchanged() {
+    let (root, content, source, save) = fixture().await;
+    let file = write_input(&root, &save);
+    let state = root.join("unacknowledged");
+    let confirmed = cli_ok(
+        &[
+            "preview",
+            state.to_str().unwrap(),
+            "data",
+            file.to_str().unwrap(),
+        ],
+        b"",
+    );
+    let backup = root.join("unused.db");
+    let output = cli_process(
+        &[
+            "import",
+            state.to_str().unwrap(),
+            "data",
+            file.to_str().unwrap(),
+            backup.to_str().unwrap(),
+            confirmed["expected"].as_str().unwrap(),
+        ],
+        b"private-cli-password\n",
+        &[("ACCOUNT_SAVE_TRUNCATE_ACK", "1")],
+        std::process::Stdio::piped(),
+    );
+    assert!(!output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    let fragment = &text[text.find('{').unwrap()..];
+    assert!(serde_json::from_str::<serde_json::Value>(fragment).is_err());
+    assert!(!text.contains("\"unchanged\""));
+    let local = Store::open(&state.join("game.db"), &content).unwrap();
+    assert_eq!(
+        local
+            .authenticate(
+                "player-1@local.invalid".into(),
+                "private-cli-password".into()
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    #[cfg(target_os = "linux")]
+    {
+        let device = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .unwrap();
+        let output = cli_process(
+            &["verify-account", file.to_str().unwrap(), "data"],
+            b"",
+            &[],
+            std::process::Stdio::from(device),
+        );
+        assert!(!output.status.success());
+        assert!(
+            !String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("PRIVATE_FAILURE_CANARY")
+        );
+    }
     drop(local);
     drop(source);
     std::fs::remove_dir_all(root).unwrap();

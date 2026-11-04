@@ -115,8 +115,9 @@ def check(binary, data, directory, revision):
     preview = json.loads(subprocess.check_output([str(binary), '--local-save', 'preview', str(trade_state), str(data), str(portable)]))
     refused = subprocess.run([str(binary), '--local-save', 'replace', str(trade_state), str(data), str(portable), str(directory / 'pre-trade-refusal.db'), preview['expected']],
                              input='independent-local-password\n', text=True, capture_output=True)
-    if refused.returncode == 0 or 'retained local trade history' not in refused.stderr:
-        raise RuntimeError('Replacement failed to refuse immutable target trade history')
+    failure = json.loads(refused.stdout)
+    if refused.returncode == 0 or set(failure) != {'protocol', 'operation', 'outcome', 'error'} or failure['protocol'] != 1 or failure['operation'] != 'replace' or failure['outcome'] != 'unknown' or not isinstance(failure['error'], str) or not 0 < len(failure['error']) <= 512:
+        raise RuntimeError('Replacement failed to report conservative post-activation failure')
     with closing(sqlite3.connect(trade_database)) as db:
         if list(db.iterdump()) != unchanged:
             raise RuntimeError('Refused trade replacement mutated local credentials, receipts or progress')
