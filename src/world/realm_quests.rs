@@ -1074,6 +1074,75 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ghost_king_stun_does_not_permanently_discard_its_master() {
+        for (lost_hp, master_at) in [(10, 6000), (5000, 36000), (15000, 36000), (38000, 66000)] {
+            for stunned in [false, true] {
+                let (mut world, player) = super::super::movement_tests::fixture(0x18, false);
+                world
+                    .spawn_named_quest(0x928, Pos { x: 16., y: 16. })
+                    .unwrap();
+                let root = world.actors().find(|e| e.kind == 0x928).unwrap().id;
+                let king = world.entities.get_mut(&root).unwrap();
+                king.stage = Some(2);
+                king.activated = Some(0);
+                king.hp -= lost_hp;
+                for now in (6000..=master_at + 6000).step_by(50) {
+                    world.now = now;
+                    if stunned && now == master_at {
+                        world
+                            .damage_enemy(
+                                player,
+                                root,
+                                10,
+                                false,
+                                &[(condition::STUNNED, 3000)],
+                                None,
+                            )
+                            .unwrap();
+                        assert_ne!(world.entities[&root].conditions(world.now) & STUNNED, 0);
+                    }
+                    world.quest_mechanics(root).unwrap();
+                    world.named_birth_step();
+                }
+                assert_eq!(
+                    world.quest_members(root, &[0x929]).len(),
+                    1,
+                    "mandatory Ghost Master lost: damage={lost_hp}, stunned={stunned}"
+                );
+                let master = world.quest_members(root, &[0x929])[0];
+                world.quest_mechanics(master).unwrap();
+                assert_eq!(
+                    world
+                        .damage_enemy(player, master, 6003, false, &[], None)
+                        .unwrap(),
+                    6001
+                );
+                world.quest_mechanics(master).unwrap();
+                assert!(!world.entities.contains_key(&root));
+                assert_eq!(
+                    world.quest_actors(root).filter(|e| e.kind == 0x92d).count(),
+                    1
+                );
+            }
+        }
+        let (mut world, _) = super::super::movement_tests::fixture(0x18, false);
+        world
+            .spawn_named_quest(0x91b, Pos { x: 16., y: 16. })
+            .unwrap();
+        let lich = world.actors().find(|e| e.kind == 0x91b).unwrap().id;
+        world
+            .apply_condition(lich, condition::STUNNED, 3000)
+            .unwrap();
+        assert_eq!(
+            world
+                .named_toss(lich, 0x91d, 1, &[Pos { x: 18., y: 16. }])
+                .unwrap(),
+            0
+        );
+        assert_eq!(world.pending_named(lich, None), 0);
+    }
+
+    #[test]
     fn generated_ghost_king_tower_keeps_eastern_master_spawnable() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
         let map = Map {
