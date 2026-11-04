@@ -10,7 +10,7 @@ export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const browser=config.native.find(n=>n.actor===game.actor);
-  const cdp=await connect({port:browser.port,target:browser.target,url:config.origin+'/',helper:config.browserTools});
+  const cdp=await connect({port:browser.port,target:browser.target,owner:browser.owner,url:config.origin+'/',helper:config.browserTools});
   try{
   const rect=await cdp.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()');
   assert(rect.width===800&&rect.height===600);
