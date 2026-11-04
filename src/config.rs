@@ -171,8 +171,8 @@ impl Config {
     }
     fn validate(&self, control: bool) -> Result<()> {
         ensure!(
-            (2..=3).contains(&self.realm_count),
-            "realm_count must be 2 or 3"
+            (1..=crate::world::realm_population::MAX_CURRENT).contains(&self.realm_count),
+            "initial realm_count must be between 1 and 8"
         );
         ensure!(
             self.bind.ip().is_loopback(),
@@ -245,6 +245,28 @@ impl Config {
 #[cfg(test)]
 mod bot_view_tests {
     use super::*;
+    #[test]
+    fn initial_realm_count_accepts_one_to_eight_without_changing_player_limit() {
+        let (mut config, _) = Config::load(&[]).unwrap();
+        assert_eq!(config.realm_count, 2);
+        config.max_players = 72;
+        for count in 1..=8 {
+            config.realm_count = count;
+            config.validate(false).unwrap();
+            assert_eq!(config.max_players, 72);
+        }
+        for count in [0, 9, usize::MAX] {
+            config.realm_count = count;
+            assert!(
+                config
+                    .validate(false)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("initial realm_count")
+            );
+        }
+    }
+
     #[test]
     fn explicit_realm_seed_preserves_zero_and_rejects_invalid_arguments() {
         for seed in [0, u64::MAX] {

@@ -1148,6 +1148,7 @@ struct Session {
     expected: Option<i32>,
     arrival: Option<crate::world::TransferArrival>,
     admission: Option<Vec<u8>>,
+    initial_entry: Option<crate::world::realm_population::InitialEntryHold>,
     reconnecting: bool,
     transfer: Option<PreparedTransfer>,
     runtime: Option<tokio::runtime::Handle>,
@@ -1482,6 +1483,7 @@ async fn handle_inner(
         expected,
         arrival,
         admission,
+        initial_entry,
         reconnecting,
         transfer: _,
         runtime,
@@ -1565,7 +1567,7 @@ async fn handle_inner(
                 .transpose()?
                 .flatten();
             let transfer_key = (!key.is_empty()).then(|| key.clone());
-            let (destination, character, transfer_arrival) = a
+            let (destination, character, transfer_arrival, entry_hold) = a
                 .world
                 .directory(move |d| {
                     if key.is_empty() {
@@ -1574,19 +1576,21 @@ async fn handle_inner(
                                 d.worlds.contains_key(&world),
                                 "prepared native world no longer exists"
                             );
-                            Ok((world, None, None))
+                            Ok((world, None, None, d.hold_initial_entry(world)?))
                         } else {
-                            Ok((d.initial(game)?, None, None))
+                            let world = d.initial(game)?;
+                            Ok((world, None, None, d.hold_initial_entry(world)?))
                         }
                     } else {
                         let (character, arrival) = d.consume(id, game, keytime, key)?;
-                        Ok((game, Some(character), Some(arrival)))
+                        Ok((game, Some(character), Some(arrival), None))
                     }
                 })
                 .await?;
             *expected = character;
             *arrival = transfer_arrival;
             *admission = transfer_key;
+            *initial_entry = entry_hold;
             diagnostics.world = Some(destination);
             a.world = a.world.in_world(destination);
             let body = a.world.call(|w| Ok(w.map_info())).await?;
@@ -1661,6 +1665,7 @@ async fn handle_inner(
             let ticket = admission.clone();
             let bind = lifecycle::binding(a, account)?;
             let transfer_arrival = arrival.take();
+            let entry_hold = initial_entry.take();
             let destination = diagnostics.world.context("LOAD destination missing")?;
             lifecycle::stage(Stage::Publication);
             *player = Some(
@@ -1694,6 +1699,7 @@ async fn handle_inner(
                         if let Some(key) = entry_key {
                             d.complete_dungeon_entry(&key, id)?;
                         }
+                        drop(entry_hold);
                         Ok(id)
                     })
                     .await?,
@@ -2854,7 +2860,13 @@ async fn bot_create(
             };
             let bind = lifecycle::binding(&a, acc.id)?;
             lifecycle::stage(Stage::Reservation);
-            let destination = a.world.directory(move |d| d.initial(input.world)).await?;
+            let (destination, entry_hold) = a
+                .world
+                .directory(move |d| {
+                    let destination = d.initial(input.world)?;
+                    Ok((destination, d.hold_initial_entry(destination)?))
+                })
+                .await?;
             lifecycle::stage(Stage::Store);
             let presentation = a.store.presentation(acc.id).await?;
             let legendary = a.store.is_legend(acc.id).await?;
@@ -2865,6 +2877,7 @@ async fn bot_create(
                 .call(move |w| {
                     let id = w.enter_at(ch, None, None, presentation, legendary)?;
                     bind(id)?;
+                    drop(entry_hold);
                     Ok(id)
                 })
                 .await?;
