@@ -5,6 +5,8 @@ use std::{net::SocketAddr, path::PathBuf};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip)]
+    pub desktop: bool,
     pub bind: SocketAddr,
     pub origin: String,
     #[serde(default)]
@@ -47,6 +49,7 @@ impl Config {
         let mut port = None;
         let mut realm_seed = None;
         let mut control = false;
+        let mut desktop = false;
         let mut shore_bots = None;
         let mut bot_llm = None;
         let mut client_dir = None;
@@ -74,6 +77,10 @@ impl Config {
                             .parse::<u64>()
                             .context("--realm-seed requires an unsigned 64-bit integer")?,
                     );
+                }
+                "--desktop" => {
+                    ensure!(!desktop, "duplicate --desktop");
+                    desktop = true;
                 }
                 "--dev-control" => {
                     ensure!(!control, "duplicate --dev-control");
@@ -103,10 +110,14 @@ impl Config {
                     ));
                 }
                 _ => anyhow::bail!(
-                    "usage: openrotmg [--config FILE] [--port PORT] [--dev-control] [--shore-bots | --no-shore-bots] [--bot-llm | --no-bot-llm] [--client DIR] [--state DIR] [--realm-seed SEED]"
+                    "usage: openrotmg [--desktop --config ABS_FILE | --config FILE] [--port PORT] [--dev-control] [--shore-bots | --no-shore-bots] [--bot-llm | --no-bot-llm] [--client DIR] [--state DIR] [--realm-seed SEED]"
                 ),
             }
         }
+        ensure!(
+            !desktop || file.is_some_and(|path| std::path::Path::new(path).is_absolute()),
+            "--desktop requires --config with an absolute JSON file path"
+        );
         let mut config = if let Some(file) = file {
             serde_json::from_slice(
                 &std::fs::read(file).with_context(|| format!("read config {file}"))?,
@@ -114,6 +125,7 @@ impl Config {
         } else {
             let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
             Self {
+                desktop: false,
                 bind: "127.0.0.1:18923".parse()?,
                 origin: "http://127.0.0.1:18923".into(),
                 bot_view_origin: Some("http://127.0.0.1:18923".into()),
@@ -156,6 +168,7 @@ impl Config {
         if let Some(enabled) = bot_llm {
             config.bot_llm = enabled;
         }
+        config.desktop = desktop;
         config.test_state |= test_state;
         control |= test_state;
         ensure!(
@@ -170,6 +183,20 @@ impl Config {
         Ok((config, control))
     }
     fn validate(&self, control: bool) -> Result<()> {
+        if self.desktop {
+            ensure!(
+                !control && !self.test_state && !self.behind_proxy,
+                "--desktop forbids development control, prepared state and proxy hosting"
+            );
+            ensure!(
+                !self.shore_bots && !self.bot_llm,
+                "--desktop requires shore_bots:false and bot_llm:false"
+            );
+            ensure!(
+                self.origin == format!("http://{}", self.bind),
+                "--desktop origin must match the loopback HTTP bind address"
+            );
+        }
         ensure!(
             (1..=crate::world::realm_population::MAX_CURRENT).contains(&self.realm_count),
             "initial realm_count must be between 1 and 8"
@@ -303,5 +330,63 @@ mod bot_view_tests {
         config.validate(false).unwrap();
         config.bot_view_origin = None;
         config.validate(false).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+
+    #[test]
+    fn desktop_requires_an_explicit_absolute_config_and_preserves_ordinary_defaults() {
+        for args in [
+            vec!["--desktop"],
+            vec!["--desktop", "--config", "relative.json"],
+            vec!["--desktop", "--desktop"],
+        ] {
+            assert!(Config::load(&args.into_iter().map(String::from).collect::<Vec<_>>()).is_err());
+        }
+        let (config, control) = Config::load(&[]).unwrap();
+        assert!(!config.desktop && !control && config.shore_bots);
+        let path = std::env::temp_dir().join(format!("desktop-config-{}.json", std::process::id()));
+        let dir = std::env::temp_dir();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!({
+                "bind":"127.0.0.1:18923", "origin":"http://127.0.0.1:18923",
+                "data":dir, "client":dir, "state":dir, "max_players":85,
+                "behind_proxy":false, "shore_bots":false, "bot_llm":false, "realm_seed":0
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let args = vec![
+            "--desktop".into(),
+            "--config".into(),
+            path.to_str().unwrap().into(),
+        ];
+        let (config, control) = Config::load(&args).unwrap();
+        assert!(config.desktop && !control && !config.shore_bots && !config.bot_llm);
+        for flag in ["--dev-control", "--shore-bots", "--bot-llm"] {
+            let mut invalid = args.clone();
+            invalid.push(flag.into());
+            assert!(Config::load(&invalid).is_err(), "{flag}");
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn desktop_rejects_proxy_public_origin_and_relative_runtime_paths() {
+        let (mut config, _) = Config::load(&["--no-shore-bots".into()]).unwrap();
+        config.desktop = true;
+        config.validate(false).unwrap();
+        config.behind_proxy = true;
+        assert!(config.validate(false).is_err());
+        config.behind_proxy = false;
+        config.origin = "https://example.com".into();
+        assert!(config.validate(false).is_err());
+        config.origin = format!("http://{}", config.bind);
+        config.state = "relative".into();
+        assert!(config.validate(false).is_err());
     }
 }

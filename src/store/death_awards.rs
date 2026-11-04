@@ -272,6 +272,8 @@ pub(super) fn save_assists(
         if let Some(giver) = prior {
             ensure!(giver == assist.giver, "level assist replay changed giver");
         } else {
+            let consumed: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM portable_consumed_levels WHERE recipient=?1 AND reached_level=?2)", params![ch.id,level], |r| r.get(0))?;
+            ensure!(!consumed, "imported level credit already consumed");
             ensure!(
                 level > previous_level,
                 "cannot manufacture retroactive level credit"
