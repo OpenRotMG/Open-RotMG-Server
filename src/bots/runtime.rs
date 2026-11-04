@@ -15,16 +15,19 @@ pub(crate) fn thinking_runtime() -> Result<tokio::runtime::Runtime> {
     Ok(tokio::runtime::Builder::new_multi_thread()
         .thread_name("bot-ai")
         .on_thread_start(|| {
-            let tid = unsafe { libc::gettid() } as libc::id_t;
-            let current = unsafe { libc::getpriority(libc::PRIO_PROCESS, tid) };
-            let lowered =
-                unsafe { libc::setpriority(libc::PRIO_PROCESS, tid, (current + 10).min(19)) };
-            assert_eq!(
-                lowered,
-                0,
-                "lower bot thinking priority: {}",
-                std::io::Error::last_os_error()
-            );
+            #[cfg(target_os = "linux")]
+            {
+                let tid = unsafe { libc::gettid() } as libc::id_t;
+                let current = unsafe { libc::getpriority(libc::PRIO_PROCESS, tid) };
+                let lowered =
+                    unsafe { libc::setpriority(libc::PRIO_PROCESS, tid, (current + 10).min(19)) };
+                assert_eq!(
+                    lowered,
+                    0,
+                    "lower bot thinking priority: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
         })
         .enable_all()
         .build()?)
@@ -1430,6 +1433,7 @@ fn close_controller(
 
 #[cfg(test)]
 mod composer_tests;
+#[cfg(target_os = "linux")]
 #[test]
 fn bot_thinking_runs_below_world_priority() {
     let nice = || unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) };
