@@ -1,6 +1,8 @@
+pub mod oryx1;
+
 use crate::{
     content::Content,
-    encounter::{Anchor, Motion, Profile},
+    encounter::{Motion, Profile},
 };
 use anyhow::{Result, ensure};
 use std::{
@@ -28,8 +30,9 @@ pub const DUNGEONS: &[(u16, &str, &str, u16)] = &[
 pub const ROSTER: &[u16] = &[
     0x668, 0x669, 0x66a, 0x66b, 0x67d, 0x67e, 0x67f, 0x680, 0x681, 0x682, 0xd70, 0xd71, 0xd78,
     0xd79, 0xd7a, 0xd7c, 0xd7d, 0xd7e, 0xd7f, 0xd80, 0xd81, 0xd82, 0xd83, 0xd84, 0xd86, 0xd87,
-    0x1740, 0x1748, 0x1749, 0x174a, 0x174b, 0x932, 0x944, 0xde0, 0xde1, 0xde2, 0xde3, 0xde4, 0xde5,
-    0xdf0, 0xdf1, 0xdf2,
+    0x1740, 0x1741, 0x1742, 0x1743, 0x1744, 0x1745, 0x1746, 0x1747, 0x1748, 0x1749, 0x174a, 0x174b,
+    0x174c, 0x174d, 0x174e, 0x932, 0x944, 0xde0, 0xde1, 0xde2, 0xde3, 0xde4, 0xde5, 0xdf0, 0xdf1,
+    0xdf2,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,26 +197,31 @@ pub fn profile(kind: u16) -> Option<Profile> {
             500,
             25.,
         ),
-        0x1748 => (Motion::Stationary, 0., 700, 25.),
-        0x174a => (
-            Motion::Orbit {
-                anchor: Anchor::Parent,
-                radius: 1.,
+        // Elements stand or orbit Oryx per World::finale_movement; they fire from schedules.
+        0x1742..=0x1748 | 0x174a..=0x174e => (Motion::Stationary, 0., 200, 25.),
+        // Assassins chase to 1-3 tiles in 2012 footage; "approximately matching the player's speed" (RealmEye rev 1, old wiki).
+        0x1741 => (
+            Motion::Chase {
+                sight: 15.,
+                stop: 1.5,
             },
-            3.,
-            700,
-            25.,
+            tiles_per_s(oryx1::ASSASSIN_SPEED),
+            200,
+            8.,
         ),
-        0x174b => (
-            Motion::Orbit {
-                anchor: Anchor::Parent,
-                radius: 9.,
+        // Minions move toward the nearest player and wander when none is visible (2012 footage, LOW).
+        0x1749 => (
+            Motion::Follow {
+                sight: 10.,
+                stop: 3.,
+                idle: tiles_per_s(1.5),
+                duration: 0,
+                cooldown: 0,
             },
-            3.,
-            700,
-            25.,
+            tiles_per_s(oryx1::MINION_SPEED),
+            200,
+            10.,
         ),
-        0x1749 => (Motion::Wander, 3., 1000, 3.),
         0x944 => (Motion::Wander, 2., 2500, 15.),
         0xde0 => (
             Motion::Chase {
@@ -264,23 +272,8 @@ fn ring(index: u8, count: usize, heading: f32) -> Vec<(u8, f32)> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OryxPhase {
     Opening,
-    Dance,
-    Artifacts,
-    Gaze,
-    DanceTwo,
     PrepareRage,
     Rage,
-}
-pub fn oryx_phase(elapsed: u64) -> OryxPhase {
-    if elapsed < 20_000 {
-        return OryxPhase::Opening;
-    }
-    match (elapsed - 20_000) % 85_000 {
-        0..25_000 => OryxPhase::Dance,
-        25_000..50_000 => OryxPhase::Artifacts,
-        50_000..60_000 => OryxPhase::Gaze,
-        _ => OryxPhase::DanceTwo,
-    }
 }
 #[derive(Clone, Copy, Debug)]
 pub struct Wave {
@@ -311,8 +304,8 @@ impl BossBrain {
     }
     pub fn update(&mut self, kind: u16, hp: i32, max_hp: i32, elapsed: u64) -> Result<BossFacts> {
         ensure!(
-            matches!(kind, ORYX | ORYX2) && hp > 0 && max_hp > 0,
-            "invalid live Oryx phase input"
+            kind == ORYX2 && hp > 0 && max_hp > 0,
+            "invalid live Oryx 2 phase input"
         );
         ensure!(
             self.last_elapsed.is_none_or(|last| elapsed >= last),
@@ -322,13 +315,7 @@ impl BossBrain {
         if hp <= max_hp / 5 {
             self.rage_at.get_or_insert(elapsed);
         }
-        let phase = if kind == ORYX {
-            if hp <= max_hp / 5 {
-                OryxPhase::Rage
-            } else {
-                oryx_phase(elapsed)
-            }
-        } else if let Some(start) = self.rage_at {
+        let phase = if let Some(start) = self.rage_at {
             ensure!(elapsed >= start, "Oryx 2 phase clock regressed");
             if elapsed - start < 10_000 {
                 OryxPhase::PrepareRage
@@ -341,57 +328,19 @@ impl BossBrain {
         let changed = self.phase != Some(phase);
         self.phase = Some(phase);
         let mut waves = vec![];
-        if changed && kind == ORYX {
-            match phase {
-                OryxPhase::Dance | OryxPhase::DanceTwo => waves.push(Wave {
-                    kind: 0x1748,
-                    count: 15,
-                    radius: 9.,
-                    lifetime: 20_000,
-                }),
-                OryxPhase::Artifacts => {
-                    waves.push(Wave {
-                        kind: 0x174a,
-                        count: 4,
-                        radius: 1.,
-                        lifetime: 20_000,
-                    });
-                    waves.push(Wave {
-                        kind: 0x174b,
-                        count: 4,
-                        radius: 9.,
-                        lifetime: 20_000,
-                    });
-                }
-                _ => {}
-            }
-        }
-        if elapsed >= self.next_summon && matches!(phase, OryxPhase::Opening | OryxPhase::Rage) {
-            if kind == ORYX {
-                waves.push(Wave {
-                    kind: 0x1749,
-                    count: if phase == OryxPhase::Rage { 10 } else { 5 },
-                    radius: 3.,
-                    lifetime: 60_000,
-                });
-                self.next_summon = elapsed + 1500;
-            } else if phase == OryxPhase::Opening {
-                waves.push(Wave {
-                    kind: 0x944,
-                    count: 5,
-                    radius: 3.,
-                    lifetime: 60_000,
-                });
-                self.next_summon = elapsed + 5000;
-            }
+        if elapsed >= self.next_summon && phase == OryxPhase::Opening {
+            waves.push(Wave {
+                kind: 0x944,
+                count: 5,
+                radius: 3.,
+                lifetime: 60_000,
+            });
+            self.next_summon = elapsed + 5000;
         }
         Ok(BossFacts {
             phase,
             changed,
-            invulnerable: matches!(
-                phase,
-                OryxPhase::Dance | OryxPhase::DanceTwo | OryxPhase::PrepareRage
-            ),
+            invulnerable: phase == OryxPhase::PrepareRage,
             waves,
         })
     }
@@ -745,11 +694,6 @@ pub fn attacks(kind: u16, hp: i32, max_hp: i32, heading: f32, elapsed: u64) -> V
             elapsed,
             heading,
         ),
-        0x1749 => {
-            let mut shots = fan(0, 3, 10., heading);
-            shots.extend(fan(1, 3, 10., heading));
-            shots
-        }
         0xde4 => fan(0, 5, 7., heading),
         0xde0 => (0..5).map(|i| (i, heading + i as f32 * TAU / 5.)).collect(),
         _ => panic!("endgame attack requested for unselected object {kind:#x}"),
@@ -765,6 +709,23 @@ pub fn validate_kind(content: &Content, kind: u16) -> Result<()> {
         profile(kind).is_some(),
         "unselected endgame encounter {kind:#x}"
     );
+    if kind == ORYX {
+        for phase in oryx1::PHASES {
+            for hp in [object.hp, oryx1::LOW_HP - 1] {
+                for age in (0..45_000).step_by(100) {
+                    let schedule =
+                        crate::encounter::attacks::oryx1_schedule(phase, 1, age, hp, false);
+                    for (index, angle) in schedule.snapshot(0.) {
+                        ensure!(
+                            angle.is_finite() && object.projectiles.contains_key(&index),
+                            "Oryx {phase:?} emits absent selected projectile {index}"
+                        );
+                    }
+                }
+            }
+        }
+        return Ok(());
+    }
     for hp in [object.hp, object.hp / 2, (object.hp / 10).max(1)] {
         for elapsed in (0..110_000).step_by(100) {
             for (index, angle) in attacks(kind, hp, object.hp, 0., elapsed) {
@@ -935,14 +896,21 @@ pub(crate) fn loot(kind: u16) -> &'static [(f64, crate::loot::Pick)] {
             (0.08, Tier(3, ABILITIES)),
             (0.08, Tier(3, RINGS)),
         ],
+        // Att, Def, T9-T11 weapons and armour, T4-T5 rings and abilities, no T12 or UT in three dated 2012 sources; rates are one player's
+        // 100 logged Build 123 kills, 2012-04-23 .. 05-02, posted on the Wild Shadow forums.
         ORYX => &[
-            (0.3, Item(0xa1f)),
-            (0.3, Item(0xa20)),
-            (0.07, Tier(10, WEAPONS)),
-            (0.06, Tier(11, WEAPONS)),
-            (0.07, Tier(5, ABILITIES)),
-            (0.07, Tier(11, ARMOR)),
-            (0.06, Tier(5, RINGS)),
+            (0.23, Item(0xa1f)),
+            (0.2, Item(0xa20)),
+            (0.02, Tier(9, WEAPONS)),
+            (0.13, Tier(10, WEAPONS)),
+            (0.04, Tier(11, WEAPONS)),
+            (0.08, Tier(9, ARMOR)),
+            (0.1, Tier(10, ARMOR)),
+            (0.04, Tier(11, ARMOR)),
+            (0.12, Tier(4, ABILITIES)),
+            (0.03, Tier(5, ABILITIES)),
+            (0.06, Tier(4, RINGS)),
+            (0.07, Tier(5, RINGS)),
         ],
         ORYX2 => &[
             (1., Item(0xa34)),
@@ -981,9 +949,8 @@ pub(crate) fn loot(kind: u16) -> &'static [(f64, crate::loot::Pick)] {
         | 0xd80
         | 0xd86
         | 0xd87
-        | 0x1748
-        | 0x174a
-        | 0x174b
+        | 0x1741..=0x1748
+        | 0x174a..=0x174e
         | 0xde1..=0xde4
         // A 2012 player reports the barrels empty: https://web.archive.org/web/20130627235632/http://gaming.stackexchange.com/questions/92083/where-is-the-wine
         | 0xde5

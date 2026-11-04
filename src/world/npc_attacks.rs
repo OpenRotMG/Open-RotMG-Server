@@ -236,7 +236,6 @@ impl World {
                     .context("rage clock missing")?
                     .checked_sub(10000)
                     .context("rage began before protected preparation completed")?,
-                _ => bail!("invalid Oryx2 phase"),
             };
             return Ok(Some(attacks::oryx2_schedule(phase, age)));
         }
@@ -282,6 +281,30 @@ impl World {
                 self.now - brute.since,
             )));
         }
+        if e.kind == ORYX {
+            let brain = self
+                .finale
+                .oryx
+                .get(&id)
+                .context("activated Oryx brain missing")?;
+            return Ok(Some(attacks::oryx1_schedule(
+                brain.phase(),
+                brain.serial(),
+                brain.age(self.now),
+                e.hp,
+                brain.lead_in(self.now),
+            )));
+        }
+        if matches!(e.kind, 0x174a..=0x174e) {
+            // Artifact flames fly outward from Oryx, not at players (ZdjeB9t-n5w 2012-06-28 t=6.65-10.5): aim along the orbit's own angle.
+            let mut schedule = attacks::oryx1_summon_schedule(e.kind, elapsed);
+            for attack in &mut schedule.attacks {
+                if matches!(attack.aim, Aim::Target) {
+                    attack.aim = Aim::Fixed(e.phase);
+                }
+            }
+            return Ok(Some(schedule));
+        }
         let mut schedule = match attacks::schedule(e.kind, e.hp, elapsed) {
             Some(schedule) => Some(schedule),
             None => {
@@ -310,18 +333,6 @@ impl World {
                 .context("Gray Blob schedule missing")?
                 .attacks[0]
                 .enabled = e.stage == Some(1);
-        }
-        if e.kind == ORYX && e.hp <= self.content.objects[&e.kind].hp / 5 {
-            schedule
-                .as_mut()
-                .context("Oryx rage attack schedule missing")?
-                .age = self
-                .finale
-                .bosses
-                .get(&id)
-                .context("activated Oryx brain missing")?
-                .rage_elapsed(elapsed)
-                .context("Oryx rage entry clock missing")?;
         }
         if e.kind == 0xd06 && e.reaction_until > self.now {
             schedule
