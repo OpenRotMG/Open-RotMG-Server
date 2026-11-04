@@ -296,7 +296,7 @@ async fn account_save_complete_linked_human_roundtrip_privacy_auth_and_future_ea
         giver: living.id,
     };
     local
-        .progress_with_assists(peer.clone(), vec![assist.clone()])
+        .progress_with_assists(peer.clone(), vec![assist])
         .await
         .unwrap();
     local

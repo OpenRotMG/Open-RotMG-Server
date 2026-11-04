@@ -3346,7 +3346,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
             a.clone(),
             lifecycle::drain::http_entry,
         ))
-        .merge(account_export::routes(&a))
+        .merge(account_export::routes(a))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
         .route("/realmdex/stats", get(realmdex_stats))
