@@ -80,6 +80,7 @@ impl App {
 }
 use tokio::sync::mpsc;
 mod account_actions;
+mod account_export;
 pub(crate) mod email;
 #[cfg(test)]
 pub(crate) use account_actions::tests::fixture as test_app;
@@ -3345,6 +3346,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
             a.clone(),
             lifecycle::drain::http_entry,
         ))
+        .merge(account_export::routes(a))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
         .route("/realmdex/stats", get(realmdex_stats))
@@ -3381,7 +3383,9 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .with_state(a.clone())
 }
 
-pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
+mod desktop;
+
+pub async fn serve(a: App, bind: SocketAddr, client: PathBuf, desktop: bool) -> Result<()> {
     crate::audit::record(
         "start",
         serde_json::json!({"revision":a.diagnostics.source_revision,"binary_sha256":a.diagnostics.binary_sha256,"prepared":a.testing.is_some()}),
@@ -3405,7 +3409,24 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         }
     });
     // Deploy rehearsals send SIGTERM as soon as /health answers.
-    let stop_requested = shutdown_signal()?;
+    #[cfg(not(windows))]
+    let signal = shutdown_signal()?;
+    #[cfg(windows)]
+    let signal = async move {
+        if desktop {
+            // GUI-owned children need no console handler; their parent pipe owns shutdown.
+            std::future::pending::<Result<()>>().await
+        } else {
+            shutdown_signal()?.await
+        }
+    };
+    let parent = desktop.then(desktop::shutdown).transpose()?;
+    let stop_requested = async move {
+        match parent {
+            Some(parent) => tokio::select! { result = signal => result, result = parent => result },
+            None => signal.await,
+        }
+    };
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
         format!("cannot listen on {bind}; another server may already use this port. Stop it and rerun ./run.sh")
     })?;
@@ -3428,22 +3449,26 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
-        let result: Result<()> = async {
-            stop_requested.await?;
-            tracing::info!("saving active characters before shutdown");
-            lifecycle::drain::prepare(&shutdown);
-            shutdown.shutdown.send_replace(true);
-            lifecycle::drain::terminate(&shutdown).await
-        }
-        .await;
+        let result = drain_shutdown(&shutdown, stop_requested).await;
         if let Err(e) = result {
-            tracing::error!(error=%e,"shutdown persistence failed");
+            tracing::error!(error=%e,"shutdown failed");
             *report.lock().expect("shutdown report poisoned") = Some(e);
         }
         stopped.send_replace(true);
     });
     supervise_serving(&a, async { serving.await }, &failure, stop).await
 }
+async fn drain_shutdown(a: &App, stop: impl Future<Output = Result<()>>) -> Result<()> {
+    let request = stop.await;
+    tracing::info!("saving active characters before shutdown");
+    lifecycle::drain::prepare(a);
+    a.shutdown.send_replace(true);
+    lifecycle::drain::terminate(a).await?;
+    request?;
+    tracing::info!("shutdown persistence complete");
+    Ok(())
+}
+
 async fn supervise_serving(
     a: &App,
     serving: impl std::future::Future<Output = std::io::Result<()>>,

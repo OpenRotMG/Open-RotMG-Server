@@ -572,6 +572,7 @@ async fn slow_command_keeps_delivering_queued_output() {
     server.abort();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn sigterm_right_after_startup_requests_shutdown() {
     let stop = shutdown_signal().unwrap();
