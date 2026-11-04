@@ -13,7 +13,7 @@ function textPacket(bytes){
 }
 export async function beforeNavigate({browser,signal}){
   const client={browser,name:['Whispa','Whispb','Whispc'][clients.length],texts:[],sent:[],lists:0},streams=new Map();assert(client.name);
-  client.cdp=await connect({port:browser.port,target:browser.target,url:'about:blank',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
+  client.cdp=await connect({port:browser.port,target:browser.target,owner:browser.owner,url:'about:blank',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
     if(e.method==='Network.requestWillBeSent'&&e.params.request.url.endsWith('/legacy-api/char/list')){client.request=e.params.requestId;client.lists++;}
     if(e.method==='Network.requestWillBeSent'&&e.params.request.url.endsWith('/legacy-api/account/verify'))client.verified=true;
     if(e.method==='Network.responseReceived'&&e.params.response.url.endsWith('/legacy-api/account/register'))client.registration=e.params.requestId;
