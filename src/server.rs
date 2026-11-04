@@ -89,6 +89,7 @@ pub(crate) mod diagnostics;
 mod gold;
 mod guilds;
 mod hiscores;
+pub(crate) mod restart;
 pub(crate) mod testing;
 mod updates;
 use account_actions::{
@@ -143,6 +144,7 @@ pub struct App {
     pub(crate) persona_departure_gate: Arc<Mutex<Option<PersonaDepartureGate>>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
     pub(crate) admission: Arc<lifecycle::drain::Admission>,
+    pub(crate) restart: Arc<Mutex<restart::Service>>,
 }
 fn error(e: anyhow::Error) -> Response {
     tracing::error!(error=%format_args!("{e:#}"),"request failed");
@@ -3314,6 +3316,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/api/collection/{account}", get(collection))
         .route("/api/graveyard", get(graveyard))
         .route("/internal/discord/announce", post(discord_announce))
+        .route("/internal/lifecycle/restart", post(restart::request))
         .route("/internal/discord/link", post(discord_link))
         .route("/internal/discord/link/start", post(browser_link::issue))
         .route("/internal/discord/link/status", post(browser_link::status))
