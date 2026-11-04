@@ -76,30 +76,50 @@ impl Grid {
         self.candidates.store(0, Ordering::Relaxed);
     }
     pub(super) fn towards(&self, from: Pos, target: Pos) -> Option<Pos> {
+        self.towards_kept(from, target, &mut None)
+    }
+    /// Toward an unseen target, the known edge nearest it; a chosen edge is kept until reached or gone.
+    pub(super) fn towards_kept(
+        &self,
+        from: Pos,
+        target: Pos,
+        kept: &mut Option<(TilePoint, TilePoint)>,
+    ) -> Option<Pos> {
         if self.walkable.contains(&tile(target)) {
             return self.next(from, target);
         }
         let reachable = self.reachable(from);
         let measuring = crate::performance::Measure::start();
-        let next = self
-            .frontier_tiles()
-            .intersection(&reachable)
-            .inspect(|_| {
-                self.candidates.fetch_add(1, Ordering::Relaxed);
-            })
-            .min_by(|a, b| {
-                center(**a)
-                    .distance(target)
-                    .total_cmp(&center(**b).distance(target))
+        let usable = |p: &TilePoint| {
+            self.frontier_tiles().contains(p)
+                && reachable.contains(p)
+                && center(*p).distance(from) > 3.
+        };
+        // Live: near-equal edges swapped as tiles were revealed, so trips flipped between two waypoints for minutes.
+        let edge = kept
+            .filter(|(t, e)| *t == tile(target) && usable(e))
+            .map(|(_, e)| e)
+            .or_else(|| {
+                self.frontier_tiles()
+                    .intersection(&reachable)
+                    .inspect(|_| {
+                        self.candidates.fetch_add(1, Ordering::Relaxed);
+                    })
+                    .min_by(|a, b| {
+                        center(**a)
+                            .distance(target)
+                            .total_cmp(&center(**b).distance(target))
+                    })
+                    .copied()
+                    // Standing at the known edge nearest the target, with nothing revealed beyond, it is out of reach.
+                    .filter(usable)
             });
         self.performance
             .lock()
             .expect("bot timings poisoned")
             .work("frontier_selection", measuring);
-        // Live: skipping nearby edges flipped the choice each step, so bots shuffled between two tiles for minutes.
-        // Standing at the known edge nearest the target, with nothing revealed beyond, the target is out of reach.
-        let next = next.filter(|p| center(**p).distance(from) > 3.)?;
-        self.next(from, center(*next))
+        *kept = edge.map(|e| (tile(target), e));
+        self.next(from, center(edge?))
     }
     pub(super) fn reachable(&self, from: Pos) -> Arc<BTreeSet<TilePoint>> {
         let start = tile(from);
@@ -295,13 +315,16 @@ impl Grid {
     }
     pub(super) fn segment(&self, from: Pos, to: Pos) -> bool {
         let steps = (from.distance(to) * 4.).ceil().max(1.) as i32;
+        // Like the 2012 client's Player._A_y, a position is only re-checked after crossing a half-cell edge.
+        let half = |p: Pos| ((p.x * 2.).floor() as i32, (p.y * 2.).floor() as i32);
         self.walkable.contains(&tile(to))
             && (0..=steps).all(|i| {
                 let f = i as f32 / steps as f32;
-                self.clear(Pos {
+                let point = Pos {
                     x: from.x + (to.x - from.x) * f,
                     y: from.y + (to.y - from.y) * f,
-                })
+                };
+                half(point) == half(from) || self.clear(point)
             })
     }
     pub(super) fn metrics(&self) -> serde_json::Value {
@@ -358,9 +381,24 @@ impl Grid {
         }
         let target = center(next);
         if self.segment(from, target) {
-            Some(target)
-        } else {
-            self.segment(from, center(start)).then_some(center(start))
+            return Some(target);
         }
+        // Live: held keys snap to eight directions, so a small correction across the route was lost while moving
+        // along it; between trees bots flipped between two tile centers. Line up across the route first.
+        let middle = center(start);
+        let across = if next.0 != start.0 {
+            Pos {
+                x: from.x,
+                y: middle.y,
+            }
+        } else {
+            Pos {
+                x: middle.x,
+                y: from.y,
+            }
+        };
+        [across, middle]
+            .into_iter()
+            .find(|p| p.distance(from) > 0.01 && self.segment(from, *p))
     }
 }

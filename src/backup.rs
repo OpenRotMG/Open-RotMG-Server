@@ -26,7 +26,7 @@ fn retire_mind_fields(value: &mut Value) -> Result<()> {
 }
 
 // Deserialization ignores unknown fields; exporting their original JSON could leak credentials.
-fn known_fields(value: &Value, saved: &Value) -> bool {
+pub(crate) fn known_fields(value: &Value, saved: &Value) -> bool {
     match (value, saved) {
         (Value::Object(input), Value::Object(output)) => input.iter().all(|(key, value)| {
             output
@@ -435,6 +435,14 @@ pub async fn run(args: &[String]) -> Result<bool> {
                     }],
                 })
                 .await?;
+            let mut db = rusqlite::Connection::open(directory.join("game.db"))?;
+            let tx = db.transaction()?;
+            tx.execute(
+                "INSERT INTO account_origins VALUES(1,?1,17)",
+                ["2".repeat(64)],
+            )?;
+            tx.execute_batch("INSERT INTO portable_assists VALUES(1,7); INSERT INTO portable_consumed_levels VALUES(1,2); INSERT INTO portable_history VALUES(1,0,3,2);")?;
+            tx.commit()?;
             println!("{}", serde_json::json!({"fixture_characters": 4}));
         }
         ["--backup-load", database, data] => {

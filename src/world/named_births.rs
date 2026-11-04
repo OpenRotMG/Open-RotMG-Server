@@ -26,7 +26,10 @@ impl World {
         let e = &self.entities[&owner];
         let tag = e.quest.context("named toss lacks encounter identity")?;
         let home = e.home;
-        if e.conditions(self.now) & crate::condition::bit(crate::condition::STUNNED) != 0 {
+        // The King's required Master must survive stuns; its reference toss is unconditional: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/attack/TossEnemy.cs
+        if e.kind != 0x928
+            && e.conditions(self.now) & crate::condition::bit(crate::condition::STUNNED) != 0
+        {
             return Ok(0);
         }
         let mut admitted = 0;

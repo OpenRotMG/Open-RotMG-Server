@@ -296,7 +296,12 @@ fn recovering_wizard_nova_respects_target_protection_and_mana() {
             decision.journey.is_none(),
             "Nexus must not mask the retreat cast"
         );
-        assert!(decision.aim.is_none(), "retreat must not fire the staff");
+        // Live: 32 of 32 sampled Recover frames never fired; a 2012 player backing off kept shooting.
+        assert_eq!(
+            decision.aim.is_some(),
+            protection == 0,
+            "retreat shoots back only at a target it can hurt"
+        );
         let backstep = decision.movement.expect("viable retreat step");
         assert!(
             backstep.distance(view.objects[0].position)
@@ -639,7 +644,7 @@ fn explorer_joins_a_crowded_realm_event_by_teleporting_outside_the_fight() {
     });
     let mut brain = Brain::new(ARCHETYPES[0], &v);
     brain.goal = Goal::Explore(20, 10);
-    brain.travel = Some((Goal::Explore(20, 10), u64::MAX));
+    brain.travel = Some((Goal::Explore(20, 10), u64::MAX, Pos { x: 20.5, y: 10.5 }));
     let d = brain.decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Hunt(2));
     assert!(
@@ -936,4 +941,118 @@ fn travel_toward_unseen_ground_heads_for_one_edge_and_gives_up_there() {
         .collect();
     assert!(steps.iter().all(|s| s.x > 16.), "{steps:?}");
     assert!(grid.towards(Pos { x: 19.5, y: 50.5 }, target).is_none());
+}
+
+#[test]
+fn a_hurt_bot_backs_off_only_near_enemies() {
+    // Live: 3 of 8 bots "backing off to recover" were standing in the Nexus.
+    for nexus in [false, true] {
+        let (c, mut v) = fixture();
+        v.quest = None;
+        v.character.hp = v.character.stats[0] / 10;
+        if nexus {
+            v.map.name = "Nexus".into();
+            v.objects.clear();
+        } else {
+            v.objects[0].position = Pos { x: 14.5, y: 10.5 };
+        }
+        let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
+        assert_eq!(
+            d.goal == Goal::Recover,
+            !nexus,
+            "nexus {nexus}: {:?}",
+            d.goal
+        );
+    }
+}
+
+#[test]
+fn travel_keeps_its_chosen_edge_when_another_becomes_slightly_nearer() {
+    // Live snapshots: on open ground a trip's step flipped between waypoints NW and SW as tiles were revealed.
+    let (_, mut v) = fixture();
+    let grid = |extra: bool, v: &mut PlayerView| {
+        let geometry = crate::navigation::Geometry::new(
+            (128, 128),
+            vec![1; 128 * 128],
+            &BTreeMap::from([(1, 1.)]),
+        );
+        let base = (0..=10).flat_map(|x| (0..128).map(move |y| (x, y)));
+        let prongs = (11..=20).flat_map(|x| [(x, 40), (x, 60)]);
+        let reveal = extra.then_some((21, 60));
+        v.tiles = Arc::new(crate::navigation::Tiles::new(
+            geometry,
+            base.chain(prongs).chain(reveal),
+        ));
+        Grid::terrain(v)
+    };
+    v.position = Pos { x: 10.5, y: 50.5 };
+    let target = Pos { x: 100.5, y: 50.5 };
+    let mut kept = None;
+    let first = grid(false, &mut v)
+        .towards_kept(v.position, target, &mut kept)
+        .unwrap();
+    let second = grid(true, &mut v)
+        .towards_kept(v.position, target, &mut kept)
+        .unwrap();
+    assert_eq!(
+        first.y > v.position.y,
+        second.y > v.position.y,
+        "{first:?} then {second:?}"
+    );
+}
+
+#[test]
+fn a_venture_keeps_the_destination_it_started_with() {
+    // Live snapshots: a bot crossing an 8-tile region edge re-chose its Venture destination and walked back.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.quest = None;
+    v.objects.clear();
+    v.position = Pos { x: 64.5, y: 64.5 };
+    v.map.layout = Some("classic-world-02-reconstruction".into());
+    let (west, east) = (Pos { x: 20.5, y: 64.5 }, Pos { x: 110.5, y: 64.5 });
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.mind.godlands.insert(
+        "classic-world-02-reconstruction".into(),
+        BTreeSet::from([tile(west), tile(east)]),
+    );
+    brain
+        .crowd
+        .bands
+        .observe(&v, &c, &mut brain.mind.godlands, false);
+    brain.goal = Goal::Venture;
+    brain.travel = Some((Goal::Venture, u64::MAX, east));
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Venture);
+    assert!(
+        d.movement.is_some_and(|m| m.x > v.position.x),
+        "{:?}",
+        d.movement
+    );
+}
+
+#[test]
+fn a_venture_trip_ends_at_its_destination() {
+    // Live snapshot: a bot about a tile from its kept Venture destination kept wandering around it.
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.quest = None;
+    v.objects.clear();
+    v.position = Pos { x: 64.5, y: 64.5 };
+    v.map.layout = Some("classic-world-02-reconstruction".into());
+    let (reached, next) = (Pos { x: 65.5, y: 64.5 }, Pos { x: 110.5, y: 64.5 });
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.mind.godlands.insert(
+        "classic-world-02-reconstruction".into(),
+        BTreeSet::from([tile(next)]),
+    );
+    brain
+        .crowd
+        .bands
+        .observe(&v, &c, &mut brain.mind.godlands, false);
+    brain.goal = Goal::Venture;
+    brain.travel = Some((Goal::Venture, u64::MAX, reached));
+    let d = brain.decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Venture);
+    assert!(d.movement.is_some_and(|m| m.x > 66.), "{:?}", d.movement);
 }

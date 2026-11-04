@@ -80,6 +80,7 @@ impl App {
 }
 use tokio::sync::mpsc;
 mod account_actions;
+mod account_export;
 pub(crate) mod email;
 #[cfg(test)]
 pub(crate) use account_actions::tests::fixture as test_app;
@@ -92,7 +93,8 @@ mod hiscores;
 pub(crate) mod testing;
 mod updates;
 use account_actions::{
-    discord_announce, discord_gold, discord_kick, discord_recover, reset_password,
+    discord_announce, discord_close_realm, discord_give_realm_close, discord_gold, discord_kick,
+    discord_recover, reset_password,
 };
 use hiscores::{collection, discord_link, graveyard, hiscores};
 #[cfg(test)]
@@ -1147,6 +1149,7 @@ struct Session {
     expected: Option<i32>,
     arrival: Option<crate::world::TransferArrival>,
     admission: Option<Vec<u8>>,
+    initial_entry: Option<crate::world::realm_population::InitialEntryHold>,
     reconnecting: bool,
     transfer: Option<PreparedTransfer>,
     runtime: Option<tokio::runtime::Handle>,
@@ -1235,7 +1238,12 @@ fn input(
             let id = character("MOVE before character")?;
             Box::new(move |w| {
                 w.acknowledge_tick(id, tick, received)?;
-                match w.native_move_received(id, pos, (time, received)) {
+                match w.audit_native(
+                    id,
+                    "move",
+                    serde_json::json!({"tick":tick,"time":time,"x":pos.x,"y":pos.y}),
+                    |w| w.native_move_received(id, pos, (time, received)),
+                ) {
                     Ok(_) => Ok(()),
                     Err(e) if lifecycle::rule_rejection(&e) => {
                         w.correct_position(id, time, &e.to_string())
@@ -1256,7 +1264,7 @@ fn input(
             r.done()?;
             let id = character("shoot before character")?;
             Box::new(move |w| {
-                match w.native_shoot_received(id, (time, received), bullet, kind, pos, angle) {
+                match w.audit_native(id, "shot", serde_json::json!({"time":time,"bullet":bullet,"weapon":kind,"x":pos.x,"y":pos.y,"angle":angle}), |w| w.native_shoot_received(id, (time, received), bullet, kind, pos, angle)) {
                     Ok(_) => Ok(()),
                     Err(error)
                         if error
@@ -1476,6 +1484,7 @@ async fn handle_inner(
         expected,
         arrival,
         admission,
+        initial_entry,
         reconnecting,
         transfer: _,
         runtime,
@@ -1559,7 +1568,7 @@ async fn handle_inner(
                 .transpose()?
                 .flatten();
             let transfer_key = (!key.is_empty()).then(|| key.clone());
-            let (destination, character, transfer_arrival) = a
+            let (destination, character, transfer_arrival, entry_hold) = a
                 .world
                 .directory(move |d| {
                     if key.is_empty() {
@@ -1568,19 +1577,21 @@ async fn handle_inner(
                                 d.worlds.contains_key(&world),
                                 "prepared native world no longer exists"
                             );
-                            Ok((world, None, None))
+                            Ok((world, None, None, d.hold_initial_entry(world)?))
                         } else {
-                            Ok((d.initial(game)?, None, None))
+                            let world = d.initial(game)?;
+                            Ok((world, None, None, d.hold_initial_entry(world)?))
                         }
                     } else {
                         let (character, arrival) = d.consume(id, game, keytime, key)?;
-                        Ok((game, Some(character), Some(arrival)))
+                        Ok((game, Some(character), Some(arrival), None))
                     }
                 })
                 .await?;
             *expected = character;
             *arrival = transfer_arrival;
             *admission = transfer_key;
+            *initial_entry = entry_hold;
             diagnostics.world = Some(destination);
             a.world = a.world.in_world(destination);
             let body = a.world.call(|w| Ok(w.map_info())).await?;
@@ -1655,6 +1666,7 @@ async fn handle_inner(
             let ticket = admission.clone();
             let bind = lifecycle::binding(a, account)?;
             let transfer_arrival = arrival.take();
+            let entry_hold = initial_entry.take();
             let destination = diagnostics.world.context("LOAD destination missing")?;
             lifecycle::stage(Stage::Publication);
             *player = Some(
@@ -1688,6 +1700,7 @@ async fn handle_inner(
                         if let Some(key) = entry_key {
                             d.complete_dungeon_entry(&key, id)?;
                         }
+                        drop(entry_hold);
                         Ok(id)
                     })
                     .await?,
@@ -2042,7 +2055,7 @@ async fn handle_inner(
             lifecycle::stage(Stage::Reservation);
             match a
                 .world
-                .call(move |w| w.native_use_item(id, time, s, pos))
+                .call(move |w| w.audit_native(id, "item", serde_json::json!({"time":time,"object":s.object,"slot":s.slot,"item":s.kind,"x":pos.x,"y":pos.y}), |w| w.native_use_item(id, time, s, pos)))
                 .await
             {
                 Ok(Some(plan)) => persist(a, plan).await?,
@@ -2100,7 +2113,17 @@ async fn handle_inner(
             let id =
                 player.ok_or_else(|| lifecycle::protocol("inventory drop before character"))?;
             lifecycle::stage(Stage::Reservation);
-            let plan = a.world.call(move |w| w.drop_item(id, slot)).await?;
+            let plan = a
+                .world
+                .call(move |w| {
+                    w.audit_native(
+                        id,
+                        "drop",
+                        serde_json::json!({"object":slot.object,"slot":slot.slot,"item":slot.kind}),
+                        |w| w.drop_item(id, slot),
+                    )
+                })
+                .await?;
             persist(a, plan).await?;
         }
         65 => {
@@ -2113,7 +2136,7 @@ async fn handle_inner(
             let id =
                 player.ok_or_else(|| lifecycle::protocol("inventory swap before character"))?;
             lifecycle::stage(Stage::Reservation);
-            let plan = a.world.call(move |w| w.swap(id, from, to)).await?;
+            let plan = a.world.call(move |w| w.audit_native(id, "swap", serde_json::json!({"object":from.object,"slot":from.slot,"item":from.kind,"to_object":to.object,"to_slot":to.slot,"to_item":to.kind}), |w| w.swap(id, from, to))).await?;
             persist(a, plan).await?;
         }
         33 => {
@@ -2391,6 +2414,9 @@ async fn connection_io<S, I>(
     let mut reconnect_sent = false;
     let mut deferred = None;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(5));
+    let mut audit = crate::audit::Window::new();
+    let mut audit_timer = tokio::time::interval(std::time::Duration::from_secs(5));
+    audit_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut serial = 0;
     let mut transfers = tokio::time::interval(std::time::Duration::from_millis(250));
     let mut testing_stop = a.testing.as_ref().map(|t| t.stopped.subscribe());
@@ -2464,7 +2490,10 @@ async fn connection_io<S, I>(
                             }
                         }
                         session.diagnostics.packets_in += packets.len() as u64;
-                        for (packet, _) in &packets { session.diagnostics.processed(packet.id); }
+                        for (packet, received) in &packets {
+                            session.diagnostics.processed(packet.id);
+                            audit.observe(packet, *received);
+                        }
                         let handling = std::time::Instant::now();
                         let queued=a.world.clock.now().saturating_duration_since(received);
                         let requests=Arc::new(Mutex::new(crate::performance::Requests::default()));
@@ -2592,6 +2621,7 @@ async fn connection_io<S, I>(
                         || testing_stop.as_ref().is_some_and(|stop| stop.borrow().is_some()) {break;}
                 }
             },
+            _=audit_timer.tick()=>audit.flush(session.account.as_ref().map(|o|o.id),session.player,session.diagnostics.world,false),
             _=ping.tick()=>{if session.account.is_some() && !a.world.clock.paused(){serial+=1;let mut o=Writer::new();o.i32(serial);
                 session.diagnostics.sent(serial);
                 if send!(Message::Binary(codec.frame(wire::PING,o.0).into())).is_err(){break;}}}
@@ -2602,6 +2632,12 @@ async fn connection_io<S, I>(
         close_reason = CloseReason::Output;
     }
     input_task.abort();
+    audit.flush(
+        session.account.as_ref().map(|o| o.id),
+        session.player,
+        session.diagnostics.world,
+        true,
+    );
     // Publish custody before diagnostics; neither a cancelled socket task nor its sink owns cleanup.
     let cancelled_admission = session
         .admission
@@ -2650,7 +2686,7 @@ async fn connection_io<S, I>(
             Err(error) => Err(error),
         };
         if let Err(error) = result {
-            tracing::error!(player=?session.player,error=%error,"disconnect finalization failed; account fenced");
+            tracing::error!(player=?session.player,error=%error,"disconnect finalization failed");
         }
     }
 }
@@ -2825,7 +2861,13 @@ async fn bot_create(
             };
             let bind = lifecycle::binding(&a, acc.id)?;
             lifecycle::stage(Stage::Reservation);
-            let destination = a.world.directory(move |d| d.initial(input.world)).await?;
+            let (destination, entry_hold) = a
+                .world
+                .directory(move |d| {
+                    let destination = d.initial(input.world)?;
+                    Ok((destination, d.hold_initial_entry(destination)?))
+                })
+                .await?;
             lifecycle::stage(Stage::Store);
             let presentation = a.store.presentation(acc.id).await?;
             let legendary = a.store.is_legend(acc.id).await?;
@@ -2836,6 +2878,7 @@ async fn bot_create(
                 .call(move |w| {
                     let id = w.enter_at(ch, None, None, presentation, legendary)?;
                     bind(id)?;
+                    drop(entry_hold);
                     Ok(id)
                 })
                 .await?;
@@ -3295,6 +3338,11 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/api/account/link/complete", post(browser_link::complete))
         .route("/api/account/link/callback", get(browser_link::callback))
         .route("/internal/discord/gold", post(discord_gold))
+        .route(
+            "/internal/discord/realm-close/give",
+            post(discord_give_realm_close),
+        )
+        .route("/internal/discord/close-realm", post(discord_close_realm))
         .route("/internal/discord/kick", post(discord_kick))
         .route("/internal/discord/recover", post(discord_recover))
         .route("/api/account/recover", post(reset_password))
@@ -3311,6 +3359,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
             a.clone(),
             lifecycle::drain::http_entry,
         ))
+        .merge(account_export::routes(a))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
         .route("/realmdex/stats", get(realmdex_stats))
@@ -3347,7 +3396,24 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .with_state(a.clone())
 }
 
-pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
+mod desktop;
+
+pub async fn serve(a: App, bind: SocketAddr, client: PathBuf, desktop: bool) -> Result<()> {
+    crate::audit::record(
+        "start",
+        serde_json::json!({"revision":a.diagnostics.source_revision,"binary_sha256":a.diagnostics.binary_sha256,"prepared":a.testing.is_some()}),
+    );
+    let mut audit_shutdown = a.shutdown.subscribe();
+    tokio::spawn(async move {
+        let mut timer = tokio::time::interval(std::time::Duration::from_secs(5));
+        timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = timer.tick() => crate::audit::record("heartbeat", serde_json::json!({})),
+                _ = audit_shutdown.changed() => break,
+            }
+        }
+    });
     let deaths = a.clone();
     a.world.supervisor.spawn("persistence", async move {
         loop {
@@ -3356,7 +3422,24 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         }
     });
     // Deploy rehearsals send SIGTERM as soon as /health answers.
-    let stop_requested = shutdown_signal()?;
+    #[cfg(not(windows))]
+    let signal = shutdown_signal()?;
+    #[cfg(windows)]
+    let signal = async move {
+        if desktop {
+            // GUI-owned children need no console handler; their parent pipe owns shutdown.
+            std::future::pending::<Result<()>>().await
+        } else {
+            shutdown_signal()?.await
+        }
+    };
+    let parent = desktop.then(desktop::shutdown).transpose()?;
+    let stop_requested = async move {
+        match parent {
+            Some(parent) => tokio::select! { result = signal => result, result = parent => result },
+            None => signal.await,
+        }
+    };
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
         format!("cannot listen on {bind}; another server may already use this port. Stop it and rerun ./run.sh")
     })?;
@@ -3379,22 +3462,26 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
-        let result: Result<()> = async {
-            stop_requested.await?;
-            tracing::info!("saving active characters before shutdown");
-            lifecycle::drain::prepare(&shutdown);
-            shutdown.shutdown.send_replace(true);
-            lifecycle::drain::terminate(&shutdown).await
-        }
-        .await;
+        let result = drain_shutdown(&shutdown, stop_requested).await;
         if let Err(e) = result {
-            tracing::error!(error=%e,"shutdown persistence failed");
+            tracing::error!(error=%e,"shutdown failed");
             *report.lock().expect("shutdown report poisoned") = Some(e);
         }
         stopped.send_replace(true);
     });
     supervise_serving(&a, async { serving.await }, &failure, stop).await
 }
+async fn drain_shutdown(a: &App, stop: impl Future<Output = Result<()>>) -> Result<()> {
+    let request = stop.await;
+    tracing::info!("saving active characters before shutdown");
+    lifecycle::drain::prepare(a);
+    a.shutdown.send_replace(true);
+    lifecycle::drain::terminate(a).await?;
+    request?;
+    tracing::info!("shutdown persistence complete");
+    Ok(())
+}
+
 async fn supervise_serving(
     a: &App,
     serving: impl std::future::Future<Output = std::io::Result<()>>,

@@ -86,6 +86,7 @@ game.openrotmg.org {
     header @website {
         Access-Control-Allow-Origin https://openrotmg.org
         Access-Control-Allow-Credentials true
+        Access-Control-Expose-Headers Content-Disposition
         +Vary Origin
     }
     @preflight {

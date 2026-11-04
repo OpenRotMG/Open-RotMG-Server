@@ -59,6 +59,49 @@ class UpdateTest(unittest.TestCase):
                 drain.assert_not_called()
                 exchange.assert_not_called()
 
+    def test_a_running_build_that_cannot_drain_is_still_replaced(self):
+        # Live Nov 3: 0cc052d6 could not drain its failed bot sessions, so every deploy of the fix restored it instead.
+        refused = 'Drain preparation failed: account=994 operation=autonomous_reentry stage=publication: invalid market memory bounds'
+        for error, replaced in [(update.DrainRefused(refused), True), (RuntimeError('Drain process replaced before stop'), False)]:
+            with self.subTest(error=str(error)), tempfile.TemporaryDirectory() as directory:
+                root, state = Path(directory), Path(directory) / 'state'
+                state.mkdir()
+                (state / 'server.pem').write_text('key')
+                (root / 'backup.lock').touch()
+                live = root / 'server'
+                live.mkdir()
+                (live / 'REVISION').write_text('a' * 40 + '\n')
+                calls = []
+                show = lambda args, **_: {'Result': 'exit-code\n', 'MainPID': '7\n'}[args[4]]
+                patches = {'LAST_BACKUP': root / 'last-success.json', 'LIVE': live, 'rehearse': None, 'install_backups': None,
+                           'outcome': None, 'copy_db': None, 'ready': None, 'start_backup': None}
+                with contextlib.ExitStack() as stack:
+                    for name, value in patches.items():
+                        stack.enter_context(patch.object(update, name, value) if value else patch.object(update, name))
+                    for name, kwargs in {'run': {'side_effect': lambda *a: calls.append(a)}, 'files': {'return_value': {}},
+                                         'main_revision': {'return_value': 'a' * 40}, 'warn_restart': {'return_value': True},
+                                         'stop_prepared': {'side_effect': error}, 'digest': {'return_value': 'sha'},
+                                         'exchange': {'side_effect': lambda *a: calls.append(('exchange',))}}.items():
+                        stack.enter_context(patch.object(update, name, **kwargs))
+                    stack.enter_context(patch.object(update.subprocess, 'check_output', side_effect=show))
+                    restore = stack.enter_context(patch.object(update, 'restore_service', return_value='already_running'))
+                    output = stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                    metadata = {'revision': 'a' * 40, 'manifest': {}, 'binary_sha256': 'sha'}
+                    config = {'bind': '127.0.0.1:18923', 'state': str(state)}
+                    if replaced:
+                        update.deploy(root / 'stage', root, metadata, config)
+                    else:
+                        self.assertRaises(RuntimeError, update.deploy, root / 'stage', root, metadata, config)
+                if replaced:
+                    restore.assert_not_called()
+                    self.assertEqual([c for c in calls if c in [('systemctl', 'stop', 'openrotmg.service'), ('exchange',)]],
+                                     [('systemctl', 'stop', 'openrotmg.service'), ('exchange',)])
+                    self.assertIn({'replacing_undrained_server': refused, 'shutdown_result': 'exit-code'},
+                                  [json.loads(line) for line in output.getvalue().splitlines()])
+                else:
+                    restore.assert_called_once()
+                    self.assertNotIn(('exchange',), calls)
+
     def test_helper_install_tracks_release_and_rejects_invalid_source(self):
         with tempfile.TemporaryDirectory() as directory:
             installed, source = Path(directory) / 'update.py', Path(directory) / 'source.py'

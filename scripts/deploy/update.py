@@ -512,6 +512,10 @@ def cancel_drain(config, work, evidence):
     write_drain_receipt(work, evidence)
 
 
+class DrainRefused(RuntimeError):
+    pass
+
+
 def stop_prepared(config, work):
     """Called under the deploy then backup locks; owns only readiness and the service stop."""
     evidence = {'stage': 'preparing', 'process': drain_process(config)}
@@ -520,10 +524,12 @@ def stop_prepared(config, work):
         evidence['drain'] = checked_drain_request(config, evidence['process'], 'prepare')
         write_drain_receipt(work, evidence)
         result = settle_drain(config, evidence)
-        require(result['state'] == 'ready', 'Drain preparation failed: ' + '; '.join(result['errors']))
+        if result['state'] != 'ready':
+            raise DrainRefused('Drain preparation failed: ' + '; '.join(result['errors']))
         evidence['stage'] = 'validating_before_stop'
         evidence['drain'] = checked_drain_request(config, evidence['process'], 'status', result['receipt'])
-        require(evidence['drain']['state'] == 'ready', 'Drain readiness is no longer current: ' + '; '.join(evidence['drain']['errors']))
+        if evidence['drain']['state'] != 'ready':
+            raise DrainRefused('Drain readiness is no longer current: ' + '; '.join(evidence['drain']['errors']))
         evidence['stage'] = 'stopping'
         write_drain_receipt(work, evidence)
         require(drain_process(config) == evidence['process'], 'Drain process replaced before stop')
@@ -644,9 +650,17 @@ def deploy(stage, work, metadata, config):
         outcome(work, 'cutover', stage)
         cutover = 'stop'
         try:
-            stop_prepared(config, work)
-            cutover = 'shutdown_result'
-            require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
+            try:
+                stop_prepared(config, work)
+            except DrainRefused as refused:
+                # Live Nov 3: the build being replaced could not drain its own failed sessions, which blocked every fix.
+                # Saves are atomic, so stopping it loses only those sessions' unsaved work, exactly as a manual restart would.
+                run('systemctl', 'stop', 'openrotmg.service')
+                result = subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip()
+                print(json.dumps({'replacing_undrained_server': str(refused), 'shutdown_result': result}), flush=True)
+            else:
+                cutover = 'shutdown_result'
+                require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
             cutover = 'freeze_recovery'
             frozen = work / 'cutover'
             frozen.mkdir(mode=0o700)

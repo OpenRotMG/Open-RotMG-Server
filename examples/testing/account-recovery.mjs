@@ -23,7 +23,7 @@ async function shot(name){const image=await cdp.call('Page.captureScreenshot',{f
 async function post(path,body,json=false){return cdp.eval(`fetch(${JSON.stringify(path)},{method:'POST',headers:${JSON.stringify(json?{'content-type':'application/json'}:{})},body:${json?JSON.stringify(JSON.stringify(body)):'new URLSearchParams('+JSON.stringify(body)+')'}}).then(async r=>({status:r.status,cache:r.headers.get('cache-control'),text:await r.text()}))`);}
 export async function beforeNavigate({browser,signal}){
   browserReceipt=browser;
-  cdp=await connect({port:browser.port,target:browser.target,url:'about:blank',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
+  cdp=await connect({port:browser.port,target:browser.target,owner:browser.owner,url:'about:blank',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
     if(e.method==='Network.requestWillBeSent'){
       const u=new URL(e.params.request.url);if(u.pathname==='/legacy-api/char/list'){origin=u.origin;listRequest=e.params.requestId;listDone=false;lists++;}
       if(u.pathname==='/legacy-api/account/verify'){verified=true;verifyRequest=e.params.requestId;verifyDone=false;verifies++;}
@@ -57,7 +57,7 @@ t=int(time.time());c.execute('INSERT INTO email_password_resets(account,email,ha
   check('reset refuses missing Origin',(await fetch(origin+'/api/account/recover',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token,password})})).status===403);
   let staticFailure;
   const browser=browserReceipt;
-  const page=await connect({port:browser.port,target:browser.target,url:origin+'/',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
+  const page=await connect({port:browser.port,target:browser.target,owner:browser.owner,url:origin+'/',helper:process.env.PI_BROWSER_TOOLS+'/direct-cdp.mjs',onEvent:e=>{
     if(e.method!=='Fetch.requestPaused')return;
     (async()=>{const request=e.params;assert.equal(request.request.method,'GET');const url=request.request.url;assert(assets.has(url),'Unexpected static request '+url);let body=assets.get(url).replaceAll('{{API_ORIGIN}}',origin).replaceAll('{{BASE}}','/');await page.call('Fetch.fulfillRequest',{requestId:request.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:url.endsWith('.js')?'text/javascript':url.endsWith('.css')?'text/css':'text/html'}],body:Buffer.from(body).toString('base64')});})().catch(e=>staticFailure=e);
   }});

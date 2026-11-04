@@ -72,6 +72,7 @@ mod population_density;
 mod realm_events;
 mod realm_voice;
 
+pub(crate) mod realm_population;
 mod realm_portal;
 mod realm_quests;
 
@@ -370,6 +371,7 @@ pub struct Player {
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32, i32)>,
     native_lag: native_lag::Window,
+    audit_motion: crate::audit::MotionWindow,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
@@ -420,6 +422,21 @@ pub struct Player {
     ability_shot: Option<(u16, i32, bool, i32)>,
 }
 impl Player {
+    fn audit_fact(
+        &self,
+        id: i32,
+        world: &str,
+        now: u64,
+        event: &str,
+        values: impl FnOnce() -> serde_json::Value,
+    ) {
+        if self.controller == Controller::Human {
+            crate::audit::combat(
+                serde_json::json!({"event":event,"world":world,"world_ms":now,
+                "identity":[self.character.account,self.character.id,id],"values":values()} ),
+            );
+        }
+    }
     fn acknowledge_lifetime(&mut self, committed: crate::store::FameLifetime) -> Result<()> {
         committed.follows(&self.committed_lifetime)?;
         self.character.lifetime.follows(&self.committed_lifetime)?;
@@ -933,7 +950,27 @@ struct ExitIntent {
     player: i32,
     dungeon: crate::dungeon::HistoricalDungeon,
 }
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PreparedNativeTransferPhase {
+    SourceRetiring,
+    SourceDeparted,
+    HelloConsumedAdmissionPending,
+}
+#[derive(Serialize)]
+pub(crate) struct PreparedNativeTransition {
+    pub account: i32,
+    pub character: i32,
+    pub destination: i32,
+    pub phase: PreparedNativeTransferPhase,
+}
+#[derive(Clone, Copy)]
+struct PreparedNativeSource {
+    player: i32,
+    departed: bool,
+}
 struct Grant {
+    prepared_source: Option<PreparedNativeSource>,
     entry_portal: Option<i32>,
     entry_witness: Option<dungeon_entry::Witness>,
     exit: Option<ExitIntent>,
@@ -961,6 +998,8 @@ pub struct Directory {
     templates: BTreeMap<String, Arc<Map>>,
     realms: Vec<Arc<crate::terrain::realms::Source>>,
     realm_rng: rand::rngs::StdRng,
+    portal_rng: rand::rngs::StdRng,
+    portal_positions: Vec<Pos>,
     content: Arc<Content>,
     ids: Arc<AtomicI32>,
     grants: BTreeMap<Vec<u8>, Grant>,
@@ -968,6 +1007,7 @@ pub struct Directory {
     chat_budgets: BTreeMap<i32, chat::ChatBudget>,
     guild_invites: BTreeMap<i32, guilds::Invitation>,
     endgame: endgame::RealmDirectory,
+    realm_population: realm_population::Population,
     teleports: BTreeMap<i32, Instant>,
     idle: BTreeMap<i32, u64>,
     next_world: i32,
@@ -1127,7 +1167,10 @@ impl Directory {
         realms: Vec<crate::terrain::realms::Source>,
         realm_count: usize,
     ) -> Result<Self> {
-        ensure!((2..=3).contains(&realm_count), "realm_count must be 2 or 3");
+        ensure!(
+            (1..=realm_population::MAX_CURRENT).contains(&realm_count),
+            "initial realm_count must be between 1 and 8"
+        );
         ensure!(!realms.is_empty(), "Realm layout pool is empty");
         crate::endgame::validate(&content)?;
         let mut templates = BTreeMap::new();
@@ -1156,6 +1199,8 @@ impl Directory {
             templates,
             realms: realms.into_iter().map(Arc::new).collect(),
             realm_rng: rand::rngs::StdRng::seed_from_u64(seed),
+            portal_rng: rand::rngs::StdRng::seed_from_u64(seed ^ u64::from_le_bytes(*b"entrance")),
+            portal_positions: Vec::new(),
             content,
             ids: Arc::new(AtomicI32::new(1000)),
             grants: BTreeMap::new(),
@@ -1163,6 +1208,7 @@ impl Directory {
             chat_budgets: BTreeMap::new(),
             guild_invites: BTreeMap::new(),
             endgame: endgame::RealmDirectory::default(),
+            realm_population: realm_population::Population::default(),
             teleports: BTreeMap::new(),
             idle: BTreeMap::new(),
             next_world: 1,
@@ -1183,6 +1229,7 @@ impl Directory {
             let world = d.make(template, name, safe, None)?;
             d.worlds.insert(id, world);
         }
+        d.portal_positions = d.worlds[&-2].realm_portal_positions()?;
         for slot in 0..realm_count {
             let origin = if slot == 0 {
                 -3
@@ -1196,10 +1243,19 @@ impl Directory {
             d.bind_realm_heroes(origin, d.worlds[&origin].hero_identities())?;
             let name =
                 (seed as usize % realm_portal::NAMES.len() + slot) % realm_portal::NAMES.len();
-            let portal = d.install_realm_portal(origin, None)?;
+            let portal = d.install_realm_portal(slot)?;
+            let position = d.worlds[&-2].entities[&portal].pos;
+            tracing::info!(
+                realm = origin,
+                portal,
+                x = position.x,
+                y = position.y,
+                "Realm entrance bound"
+            );
             let record = d.endgame.realms.get_mut(&origin).unwrap();
             record.name = name;
             record.portal = Some(portal);
+            record.portal_slot = slot;
         }
         d.sync_realm_portal();
         Ok(d)
@@ -1410,11 +1466,109 @@ impl Directory {
                 .context("player missing from world directory"),
         }
     }
+    #[cfg(test)]
     pub(crate) fn character_transferring(&self, character: i32) -> bool {
         self.grants.values().any(|g| {
             g.character == character
                 && g.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
         })
+    }
+    pub(crate) fn prepared_native_transition(
+        &self,
+        character: i32,
+    ) -> Result<Option<PreparedNativeTransition>> {
+        ensure!(
+            self.prepared_seed.is_some(),
+            "native transition reads require prepared state"
+        );
+        ensure!(
+            self.worlds
+                .values()
+                .flat_map(|w| w.players.values())
+                .filter(|p| p.character.id == character)
+                .count()
+                <= 1,
+            "multiple native source sessions"
+        );
+        let mut transition = None;
+        for (key, grant) in &self.grants {
+            if grant.character != character || grant.expires <= self.tick {
+                continue;
+            }
+            let state = grant.authority.state();
+            if state & (TRANSFER_REVOKED | TRANSFER_ADMITTED | TRANSFER_RETIRED) != 0
+                || state & TRANSFER_WRITE != 0 && state & TRANSFER_RESERVED == 0
+                || state & TRANSFER_DEPARTED != 0 && state & TRANSFER_WRITE == 0
+            {
+                continue;
+            }
+            let Some(origin) = grant.origin.filter(|origin| *origin != grant.destination) else {
+                continue;
+            };
+            let Some(custody) = grant.prepared_source.as_ref() else {
+                continue;
+            };
+            if !self.worlds.contains_key(&origin) {
+                continue;
+            }
+            let Some(destination) = self.worlds.get(&grant.destination) else {
+                continue;
+            };
+            let Some(admission) = destination.admissions.get(key) else {
+                continue;
+            };
+            let consumed = state & TRANSFER_CONSUMED != 0;
+            if !destination.admission_open
+                || admission.expires <= destination.now
+                || admission.account != grant.account
+                || admission.character != character
+                || admission.consumed != consumed
+            {
+                continue;
+            }
+            let connected = self.worlds.iter().find_map(|(world, w)| {
+                w.players
+                    .iter()
+                    .find(|(_, p)| p.character.id == character)
+                    .map(|(id, p)| (*world, *id, p))
+            });
+            let phase = if let Some((world, id, player)) = connected {
+                if custody.departed
+                    || custody.player != id
+                    || state & TRANSFER_DEPARTED != 0
+                    || world != origin
+                    || player.character.account != grant.account
+                    || !player.native_transferring()
+                    || !player.character.alive
+                    || player.death_pending
+                    || player.character.hp <= 0
+                    || consumed
+                {
+                    continue;
+                }
+                PreparedNativeTransferPhase::SourceRetiring
+            } else {
+                if !custody.departed
+                    || state & TRANSFER_RESERVED != 0 && state & TRANSFER_DEPARTED == 0
+                {
+                    continue;
+                }
+                // HELLO consumes authority before LOAD inserts the original avatar.
+                if consumed {
+                    PreparedNativeTransferPhase::HelloConsumedAdmissionPending
+                } else {
+                    PreparedNativeTransferPhase::SourceDeparted
+                }
+            };
+            ensure!(transition.is_none(), "multiple live native transfer owners");
+            transition = Some(PreparedNativeTransition {
+                account: grant.account,
+                character,
+                destination: grant.destination,
+                phase,
+            });
+        }
+        Ok(transition)
     }
     pub fn location(&self, player: i32) -> Result<i32> {
         self.worlds
@@ -1558,6 +1712,11 @@ impl Directory {
         )?;
         // Entrances expire before their dungeons; preserve RECONNECT's exact world identity: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/incoming/Reconnect.as
         world.return_route = return_route;
+        if let Some(DungeonReturn::Realm(origin)) = return_route
+            && let Some(record) = self.endgame.realms.get_mut(&origin)
+        {
+            record.empty_since = None;
+        }
         let id = self.next_world;
         self.next_world = id
             .checked_add(1)
@@ -1741,6 +1900,16 @@ impl Directory {
                     .any(|p| p.character.account == account && p.character.id == character)
             })
             .map(|(id, _)| *id);
+        let prepared_source = self.prepared_seed.and(origin).and_then(|origin| {
+            self.worlds[&origin].players.iter().find_map(|(id, p)| {
+                (p.character.account == account && p.character.id == character).then_some(
+                    PreparedNativeSource {
+                        player: *id,
+                        departed: false,
+                    },
+                )
+            })
+        });
         let reserved = self.endgame.forced.iter().any(|(id, route)| {
             self.worlds
                 .get(&route.origin)
@@ -1776,6 +1945,7 @@ impl Directory {
         self.grants.insert(
             key.clone(),
             Grant {
+                prepared_source,
                 entry_portal: None,
                 entry_witness: None,
                 exit: None,
@@ -1788,6 +1958,11 @@ impl Directory {
                 expires: self.tick + 2400,
             },
         );
+        for id in origin.into_iter().chain(std::iter::once(destination)) {
+            if let Some(record) = self.endgame.realms.get_mut(&id) {
+                record.empty_since = None;
+            }
+        }
         tracing::info!(
             account,
             character,
@@ -2064,7 +2239,27 @@ impl Directory {
                 .context("departed grant missing")?
                 .entry_witness = witness;
         }
-        self.worlds.get_mut(&source).unwrap().finish_departure(id)
+        let prepared_departure = self.prepared_seed.is_some()
+            && snapshot.alive
+            && snapshot.hp > 0
+            && self.worlds[&source].players[&id]
+                .persistence_failure
+                .is_none()
+            && !self.worlds[&source].players[&id].death_pending;
+        self.worlds.get_mut(&source).unwrap().finish_departure(id)?;
+        // Forced departures use no reservation bits; absence alone cannot prove source custody retired.
+        if prepared_departure {
+            for grant in self.grants.values_mut().filter(|grant| {
+                grant.origin == Some(source)
+                    && grant.account == snapshot.account
+                    && grant.character == snapshot.id
+            }) {
+                if let Some(custody) = grant.prepared_source.as_mut().filter(|s| s.player == id) {
+                    custody.departed = true;
+                }
+            }
+        }
+        Ok(())
     }
     pub fn consume(
         &mut self,
@@ -2259,6 +2454,7 @@ impl Directory {
     // Another world's completion or a timer must not publish this world's queued effects early.
     fn coordinate(&mut self, ready: &[i32]) {
         self.endgame_step(ready);
+        self.realm_population_step(self.clock.now());
         self.sync_realm_portal();
         self.worlds.release_world(&-2);
         let requesting: Vec<_> = self
@@ -2421,7 +2617,7 @@ impl Handle {
             .worlds
             .start(clock.clone(), supervisor.clone(), tx.downgrade())
             .expect("world actors could not start");
-        // Preserve the incident component consumed by shutdown and account-fence readers.
+        // Preserve the incident component consumed by shutdown.
         supervisor.spawn_finite_thread("world", move || {
             let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build()?;
             runtime.block_on(async move {
@@ -3496,6 +3692,7 @@ impl World {
                 dungeon_entries: VecDeque::new(),
                 weapon_ticks: VecDeque::from([(-1, ch.items[0], dex)]),
                 native_lag: native_lag::Window::default(),
+                audit_motion: crate::audit::MotionWindow::default(),
                 committed_lifetime: ch.lifetime.clone(),
                 character: ch,
                 pos,
@@ -3591,6 +3788,13 @@ impl World {
             y = pos.y,
             "player entered development world"
         );
+        let p = &self.players[&id];
+        if p.controller == Controller::Human {
+            crate::audit::record(
+                "player_enter",
+                serde_json::json!({"account":p.character.account,"character":char_id,"player":id,"world":self.name}),
+            );
+        }
         Ok(id)
     }
 
@@ -3603,10 +3807,66 @@ impl World {
             "inventory or death operation pending"
         );
         self.clear_companions(id);
-        let p = self.players.remove(&id).unwrap();
+        let mut p = self.players.remove(&id).unwrap();
+        if p.controller == Controller::Human {
+            crate::audit::flush_combat(true);
+            p.audit_motion
+                .flush(p.character.account, p.character.id, id, &self.name, true);
+        }
         self.bullets.retain(|b| b.owner != id);
         tracing::info!(player = id, character = p.character.id, "player left");
+        if p.controller == Controller::Human {
+            crate::audit::record(
+                "player_leave",
+                serde_json::json!({"account":p.character.account,"character":p.character.id,"player":id,"world":self.name}),
+            );
+        }
         Ok(p.character)
+    }
+    pub(crate) fn audit_native<T>(
+        &mut self,
+        id: i32,
+        operation: &str,
+        request: serde_json::Value,
+        work: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let before = self.players.get(&id).filter(|p| p.controller == Controller::Human).map(|p| {
+            let slots = [("object", "slot"), ("to_object", "to_slot")].into_iter().filter_map(|(object_key, slot_key)| {
+                let object = request[object_key].as_i64()? as i32;
+                let slot = request[slot_key].as_u64()? as usize;
+                let entity = self.entities.get(&object);
+                let own = object == id;
+                Some(serde_json::json!({"object":object,"slot":slot,"own_inventory":own,
+                    "actual_item":if own {p.character.items.get(slot)} else {entity.and_then(|e|e.items.get(slot))},
+                    "entity_exists":entity.is_some(),"container_kind":entity.map(|e|e.kind),
+                    "reserved":entity.map(|e|e.reserved),"accessible":entity.map(|e|e.accessible(p.character.account)),
+                    "distance":entity.map(|e|p.pos.distance(e.pos))}))
+            }).collect::<Vec<_>>();
+            serde_json::json!({"account":p.character.account,"character":p.character.id,"player":id,
+                "world":self.name,"x":p.pos.x,"y":p.pos.y,"class":p.character.class,
+                "hp":p.character.hp,"mp":p.character.mp,"equipment":&p.character.items[..4],
+                "next_bullet":p.next_bullet,"last_attack":p.last_attack,"last_move":p.last_move,
+                "advertised_weapons":p.weapon_ticks.iter().map(|(tick,weapon,dex)|serde_json::json!([tick,weapon,dex])).collect::<Vec<_>>(),
+                "paused":p.paused,"pending":p.pending,"death_pending":p.death_pending,"slots":slots})
+        });
+        let result = work(self);
+        if let Some(before) = before {
+            let denominator = if matches!(operation, "move" | "shot") {
+                32
+            } else {
+                1
+            };
+            let sampled = rand::random::<u8>().is_multiple_of(denominator);
+            if result.is_err() || sampled {
+                crate::audit::record(
+                    "native_action",
+                    serde_json::json!({"operation":operation,"request":request,"before":before,
+                    "returned_ok":result.is_ok(),"error":result.as_ref().err().map(|e|format!("{e:#}").chars().take(512).collect::<String>()),
+                    "healthy_sample_denominator":denominator}),
+                );
+            }
+        }
+        result
     }
     pub fn stats(&self, id: i32, recipient: i32) -> Result<Vec<u8>> {
         let mut o = Writer::new();
@@ -4124,6 +4384,27 @@ impl World {
         ensure!(received >= p.last_move_at, "native ingress clock regressed");
         // Rechecking client collision or speed here turns delayed packet delivery into snap-backs.
         let speed = p.speed(&self.content, self.now)? * 1000.;
+        if p.controller == Controller::Human {
+            let ground = self
+                .map
+                .cell(pos.x, pos.y)
+                .expect("validated native position")
+                .ground;
+            let from_ground = self
+                .map
+                .cell(p.pos.x, p.pos.y)
+                .expect("existing player position")
+                .ground;
+            let push = self.content.pushes[&ground];
+            let from_push = self.content.pushes[&from_ground];
+            let conditions = p.conditions(self.now);
+            let epoch = p.audit_motion.epoch;
+            p.audit_motion.observe(|| serde_json::json!({"client_ms":time,"received_ms":received,"world_ms":self.now,
+                "from":[p.pos.x,p.pos.y],"position":[pos.x,pos.y],"speed":speed,"conditions":conditions,"ground":ground,
+                "ground_speed":self.content.grounds[&ground],"ground_push":[push.0*1000.,push.1*1000.],
+                "from_ground":from_ground,"from_ground_speed":self.content.grounds[&from_ground],"from_ground_push":[from_push.0*1000.,from_push.1*1000.],
+                "epoch":epoch,"hp":p.character.hp}));
+        }
         p.record_motion(pos, time, self.now, speed);
         if p.pos.distance(pos) > 0.001 {
             p.last_motion = Some(((pos.y - p.pos.y).atan2(pos.x - p.pos.x), self.now));
@@ -6816,6 +7097,17 @@ impl World {
                         e.goal
                     }
                     Motion::Follow { idle, .. } => {
+                        let target = if kind == crate::dungeon::snake::SWARM {
+                            match self.orbit_anchor(id, crate::encounter::Anchor::Parent, target) {
+                                Ok(parent) => Some(parent),
+                                Err(error) => {
+                                    tracing::error!(entity=id, %error, "swarm protection anchor refused");
+                                    continue 'entities;
+                                }
+                            }
+                        } else {
+                            target
+                        };
                         if let Some(target) = self.follow_goal(id, target, motion, delta) {
                             Some(if kind == 0x651 && self.name != "Abyss of Demons" {
                                 Pos {
@@ -6935,7 +7227,10 @@ impl World {
                             Some(pos)
                         } else {
                             let direction = if let Some(orbit) = e.orbit {
-                                if pos.distance(target) > 0.001 {
+                                // Tomb's target angle must keep moving at pillars: https://github.com/Club559/ROTMGServer/blob/f112a71caa5e73f3013d9bff88527669519f178c/wServer/logic/movement/Circling.cs#L63-L85
+                                if !crate::dungeon::tomb::BOSSES.contains(&kind)
+                                    && pos.distance(target) > 0.001
+                                {
                                     e.phase = (pos.y - target.y).atan2(pos.x - target.x);
                                 }
                                 orbit.direction
@@ -7249,6 +7544,20 @@ impl World {
         self.now += 50;
         self.admissions.retain(|_, a| a.expires > self.now);
         self.tick += 1;
+        crate::audit::flush_combat(false);
+        if self.tick.is_multiple_of(100) {
+            for (id, p) in &mut self.players {
+                if p.controller == Controller::Human {
+                    p.audit_motion.flush(
+                        p.character.account,
+                        p.character.id,
+                        *id,
+                        &self.name,
+                        false,
+                    );
+                }
+            }
+        }
         self.merchant_step();
         self.lab_step();
         self.expire_consumable_boosts();
@@ -7831,6 +8140,379 @@ fn godlands(map: &Map, content: &Content) -> Vec<Pos> {
         .take(crate::bots::REMEMBERED_GODLANDS)
         .map(|(_, p)| p)
         .collect()
+}
+
+#[cfg(test)]
+mod prepared_native_transition_tests {
+    use super::*;
+
+    struct Fixture {
+        d: Directory,
+        store: crate::store::Store,
+        ch: Character,
+        player: i32,
+        _inbox: mpsc::Receiver<Packet>,
+    }
+    impl Fixture {
+        async fn new() -> Self {
+            let data = std::path::Path::new("data");
+            let content = Arc::new(Content::load(data).unwrap());
+            let store =
+                crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+            let account = store
+                .list("prepared-native-custody-unit".into())
+                .await
+                .unwrap();
+            let ch = store
+                .create(account.id, content.get(crate::content::WIZARD).unwrap())
+                .await
+                .unwrap();
+            let mut d = Directory::fixture(data, content, 16, 1344, Some(1344)).unwrap();
+            let (packets, mut inbox) = mpsc::channel(256);
+            let (lost, _) = watch::channel(None);
+            let player = d
+                .worlds
+                .get_mut(&-3)
+                .unwrap()
+                .enter(ch.clone(), Some(Output { packets, lost }))
+                .unwrap();
+            while inbox.try_recv().is_ok() {}
+            Self {
+                d,
+                store,
+                ch,
+                player,
+                _inbox: inbox,
+            }
+        }
+        fn phase(&self) -> Option<String> {
+            self.d
+                .prepared_native_transition(self.ch.id)
+                .unwrap()
+                .map(|t| {
+                    serde_json::to_value(t).unwrap()["phase"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                })
+        }
+        async fn depart(&mut self, key: Option<Vec<u8>>) {
+            let snapshot = self
+                .d
+                .begin_source_departure(self.player, key.as_deref())
+                .unwrap()
+                .unwrap();
+            assert_eq!(self.phase().as_deref(), Some("source_retiring"));
+            if let Some(key) = &key {
+                self.d.accept_source_write(self.player, key).unwrap();
+            }
+            let persisted = self.store.progress(snapshot.clone()).await;
+            self.d
+                .worlds
+                .get_mut(&-3)
+                .unwrap()
+                .committed(self.player, persisted)
+                .unwrap();
+            self.d
+                .finish_source_departure(self.player, snapshot, key)
+                .unwrap();
+            assert_eq!(self.phase().as_deref(), Some("source_departed"));
+        }
+        async fn load(&mut self, time: i32, key: Vec<u8>) {
+            let (character, arrival) = self
+                .d
+                .consume(self.ch.account, -2, time, key.clone())
+                .unwrap();
+            assert_eq!(character, self.ch.id);
+            assert_eq!(
+                self.phase().as_deref(),
+                Some("hello_consumed_admission_pending")
+            );
+            self.d
+                .admit_transfer(arrival, self.ch.account, character, -2)
+                .unwrap();
+            assert_eq!(self.phase(), None);
+            let saved = self.store.load(self.ch.account, character).await.unwrap();
+            let presentation = self.store.presentation(self.ch.account).await.unwrap();
+            let legend = self.store.is_legend(self.ch.account).await.unwrap();
+            let player = self
+                .d
+                .worlds
+                .get_mut(&-2)
+                .unwrap()
+                .enter_admitted(
+                    saved,
+                    None,
+                    None,
+                    presentation,
+                    legend,
+                    Some(key),
+                    Controller::Human,
+                )
+                .unwrap();
+            assert_eq!(self.d.worlds[&-2].players[&player].character.id, self.ch.id);
+            assert_eq!(self.phase(), None);
+        }
+    }
+
+    #[tokio::test]
+    async fn prepared_manual_and_unreserved_forced_custody_through_hello_and_load() {
+        for forced in [false, true] {
+            let mut f = Fixture::new().await;
+            let (time, key, mut reservation) = if forced {
+                // The Nexus route uses the same forced_transfer constructor as collective Castle.
+                f.d.return_to_nexus(f.player, -3, false);
+                let transfer = f.d.forced_transfer(f.player).unwrap().unwrap();
+                assert_eq!(transfer.destination, Some(-2));
+                assert_eq!(f.d.grants[&transfer.key].authority.state(), 0);
+                assert_eq!(f.phase().as_deref(), Some("source_retiring"));
+                (transfer.key_time, transfer.key, None)
+            } else {
+                let (time, key, _) = f.d.issue(f.ch.account, f.ch.id, -2).unwrap();
+                let reservation = f.d.reserve_transfer(key.clone()).unwrap();
+                (time, key, Some(reservation))
+            };
+            assert!(f.d.consume(f.ch.account, -2, time, key.clone()).is_err());
+            f.depart((!forced).then(|| key.clone())).await;
+            if let Some(r) = &mut reservation {
+                r.disarm();
+            }
+            let bits = f.d.grants[&key].authority.state();
+            assert_eq!(
+                bits,
+                if forced {
+                    0
+                } else {
+                    TRANSFER_RESERVED | TRANSFER_WRITE | TRANSFER_DEPARTED
+                }
+            );
+            f.load(time, key).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn prepared_departed_rejects_stale_cancelled_foreign_and_duplicate_authority() {
+        let mut f = Fixture::new().await;
+        let (time, key, _) = f.d.issue(f.ch.account, f.ch.id, -2).unwrap();
+        let mut reservation = f.d.reserve_transfer(key.clone()).unwrap();
+        f.depart(Some(key.clone())).await;
+        reservation.disarm();
+        let expires = f.d.grants[&key].expires;
+        f.d.grants.get_mut(&key).unwrap().expires = f.d.tick;
+        assert_eq!(f.phase(), None);
+        f.d.grants.get_mut(&key).unwrap().expires = expires;
+        let state = f.d.grants[&key].authority.state();
+        for flag in [TRANSFER_REVOKED, TRANSFER_ADMITTED, TRANSFER_RETIRED] {
+            f.d.grants[&key]
+                .authority
+                .0
+                .store(state | flag, Ordering::SeqCst);
+            assert_eq!(f.phase(), None);
+            f.d.grants[&key].authority.0.store(state, Ordering::SeqCst);
+        }
+        let admission =
+            f.d.worlds
+                .get_mut(&-2)
+                .unwrap()
+                .admissions
+                .remove(&key)
+                .unwrap();
+        assert_eq!(f.phase(), None);
+        f.d.worlds
+            .get_mut(&-2)
+            .unwrap()
+            .admissions
+            .insert(key.clone(), admission);
+        let expires = f.d.worlds[&-2].admissions[&key].expires;
+        let now = f.d.worlds[&-2].now;
+        f.d.worlds
+            .get_mut(&-2)
+            .unwrap()
+            .admissions
+            .get_mut(&key)
+            .unwrap()
+            .expires = now;
+        assert_eq!(f.phase(), None);
+        f.d.worlds
+            .get_mut(&-2)
+            .unwrap()
+            .admissions
+            .get_mut(&key)
+            .unwrap()
+            .expires = expires;
+        for account_mismatch in [true, false] {
+            let admission =
+                f.d.worlds
+                    .get_mut(&-2)
+                    .unwrap()
+                    .admissions
+                    .get_mut(&key)
+                    .unwrap();
+            if account_mismatch {
+                admission.account += 1;
+            } else {
+                admission.character += 1;
+            }
+            assert_eq!(f.phase(), None);
+            let admission =
+                f.d.worlds
+                    .get_mut(&-2)
+                    .unwrap()
+                    .admissions
+                    .get_mut(&key)
+                    .unwrap();
+            admission.account = f.ch.account;
+            admission.character = f.ch.id;
+        }
+        f.d.worlds
+            .get_mut(&-2)
+            .unwrap()
+            .admissions
+            .get_mut(&key)
+            .unwrap()
+            .consumed = true;
+        assert_eq!(f.phase(), None);
+        f.d.worlds
+            .get_mut(&-2)
+            .unwrap()
+            .admissions
+            .get_mut(&key)
+            .unwrap()
+            .consumed = false;
+        f.d.worlds.get_mut(&-2).unwrap().admission_open = false;
+        assert_eq!(f.phase(), None);
+        f.d.worlds.get_mut(&-2).unwrap().admission_open = true;
+        let custody = f.d.grants.get_mut(&key).unwrap().prepared_source.take();
+        assert_eq!(f.phase(), None);
+        f.d.grants.get_mut(&key).unwrap().prepared_source = custody;
+        let grant = f.d.grants.remove(&key).unwrap();
+        assert_eq!(f.phase(), None);
+        let mut duplicate = key.clone();
+        duplicate[0] ^= 1;
+        f.d.grants.insert(
+            duplicate.clone(),
+            Grant {
+                prepared_source: grant.prepared_source,
+                entry_portal: None,
+                entry_witness: None,
+                exit: None,
+                authority: TransferAuthority(Arc::new(AtomicU8::new(state))),
+                origin: grant.origin,
+                account: grant.account,
+                character: grant.character,
+                destination: grant.destination,
+                key_time: grant.key_time,
+                expires: grant.expires,
+            },
+        );
+        f.d.grants.insert(key.clone(), grant);
+        f.d.worlds.get_mut(&-2).unwrap().admissions.insert(
+            duplicate.clone(),
+            Admission {
+                account: f.ch.account,
+                character: f.ch.id,
+                expires,
+                consumed: false,
+            },
+        );
+        assert!(f.d.prepared_native_transition(f.ch.id).is_err());
+        f.d.cancel_admission(f.ch.account, duplicate).unwrap();
+        let (_, arrival) = f.d.consume(f.ch.account, -2, time, key.clone()).unwrap();
+        assert_eq!(
+            f.phase().as_deref(),
+            Some("hello_consumed_admission_pending")
+        );
+        f.d.admit_transfer(arrival, f.ch.account, f.ch.id, -2)
+            .unwrap();
+        assert_eq!(f.phase(), None);
+        f.d.cancel_admission(f.ch.account, key).unwrap();
+        assert_eq!(f.phase(), None);
+    }
+
+    #[tokio::test]
+    async fn prepared_absence_or_consumption_without_actual_source_retirement_is_not_proof() {
+        let mut f = Fixture::new().await;
+        f.d.return_to_nexus(f.player, -3, false);
+        let transfer = f.d.forced_transfer(f.player).unwrap().unwrap();
+        let other =
+            f.d.worlds
+                .get_mut(&-2)
+                .unwrap()
+                .enter(f.ch.clone(), None)
+                .unwrap();
+        assert!(f.d.prepared_native_transition(f.ch.id).is_err());
+        f.d.worlds
+            .get_mut(&-2)
+            .unwrap()
+            .players
+            .remove(&other)
+            .unwrap();
+        let old = f.d.grants[&transfer.key].prepared_source.unwrap();
+        f.d.grants
+            .get_mut(&transfer.key)
+            .unwrap()
+            .prepared_source
+            .as_mut()
+            .unwrap()
+            .player += 1;
+        assert_eq!(f.phase(), None);
+        f.d.grants.get_mut(&transfer.key).unwrap().prepared_source = Some(old);
+        let hp = f.d.worlds[&-3].players[&f.player].character.hp;
+        for (alive, health, dying) in [(false, hp, false), (true, 0, false), (true, hp, true)] {
+            let p =
+                f.d.worlds
+                    .get_mut(&-3)
+                    .unwrap()
+                    .players
+                    .get_mut(&f.player)
+                    .unwrap();
+            p.character.alive = alive;
+            p.character.hp = health;
+            p.death_pending = dying;
+            assert_eq!(f.phase(), None);
+        }
+        let p =
+            f.d.worlds
+                .get_mut(&-3)
+                .unwrap()
+                .players
+                .get_mut(&f.player)
+                .unwrap();
+        p.character.alive = true;
+        p.character.hp = hp;
+        p.death_pending = false;
+        f.d.worlds
+            .get_mut(&-3)
+            .unwrap()
+            .players
+            .get_mut(&f.player)
+            .unwrap()
+            .persistence_failure = Some("source save failed".into());
+        assert_eq!(f.phase(), None);
+        f.d.worlds
+            .get_mut(&-3)
+            .unwrap()
+            .players
+            .get_mut(&f.player)
+            .unwrap()
+            .persistence_failure = None;
+        // Inject lost custody without the production finish_source_departure boundary.
+        f.d.worlds
+            .get_mut(&-3)
+            .unwrap()
+            .players
+            .remove(&f.player)
+            .unwrap();
+        assert_eq!(f.phase(), None);
+        let _arrival =
+            f.d.consume(f.ch.account, -2, transfer.key_time, transfer.key)
+                .unwrap();
+        assert_eq!(
+            f.phase(),
+            None,
+            "HELLO consumption is not a durable-retirement witness"
+        );
+    }
 }
 
 #[cfg(test)]

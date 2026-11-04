@@ -272,7 +272,8 @@ struct Brain {
     heading: f32,
     steering: Option<(i32, f32)>,
     /// The kept journey and its distance-proportional deadline (ms).
-    travel: Option<(Goal, u64)>,
+    /// The trip being followed: its goal, deadline and the destination chosen when it started.
+    travel: Option<(Goal, u64, Pos)>,
     /// Hunt/Fight targets whose approach failed, until a time (ms); moving targets defeat tile exclusion.
     unreachable: BTreeMap<i32, u64>,
     last_aim: u64,
@@ -282,6 +283,11 @@ struct Brain {
     blocked: BTreeMap<(i16, i16), u64>,
     /// Stalls per destination tile and the last one, so a tile that keeps failing stays excluded longer.
     stalls: BTreeMap<(i16, i16), (u32, u64)>,
+    /// Recent positions and steps, to catch travel that moves back and forth without getting anywhere.
+    trail: VecDeque<(u64, Pos, Option<Pos>, Goal)>,
+    /// The known edge a trip toward unseen ground is heading for, per target tile.
+    edge: Option<(TilePoint, TilePoint)>,
+    next_snapshot: u64,
     cover: BTreeMap<TilePoint, bool>,
     visits: BTreeMap<(i16, i16), u64>,
     companion: Option<i32>,
@@ -363,6 +369,9 @@ impl Brain {
             destination: None,
             blocked: BTreeMap::new(),
             stalls: BTreeMap::new(),
+            trail: VecDeque::new(),
+            edge: None,
+            next_snapshot: 0,
             cover: BTreeMap::new(),
             visits: BTreeMap::new(),
             companion: None,
@@ -643,6 +652,7 @@ impl Brain {
             self.heading = self.rng.gen_range(0.0..std::f32::consts::TAU);
             self.stationary = v.tick;
         }
+        self.snapshot_stalled_travel(v);
         self.previous = v.position;
         self.visits.insert(tile(v.position), v.tick);
         let decision = Decision {
@@ -886,9 +896,14 @@ impl Brain {
         let outmatched = enemies.iter().any(|enemy| {
             !progression::can_fight(v, content, enemy) && enemy.position.distance(v.position) < 8.
         });
+        // Live: bots "backed off" in the Nexus with nothing near; away from enemies a hurt player keeps its plan while it heals.
+        let pressed = enemies
+            .iter()
+            .any(|e| e.position.distance(v.position) < 15.);
         let retreat = outmatched
-            || v.tick < self.recover_until
-            || (matches!(self.goal, Goal::Recover) && hp < healthy);
+            || pressed
+                && (v.tick < self.recover_until
+                    || (matches!(self.goal, Goal::Recover) && hp < healthy));
         let avoid: Vec<_> = enemies
             .iter()
             .filter(|enemy| !retreat && !progression::can_fight(v, content, enemy))
@@ -1094,14 +1109,20 @@ impl Brain {
                 && self.companion.is_none()
                 && s.enemies.is_empty()
             {
-                let available = |p: Pos| {
-                    p.distance(v.position) <= 7.
-                        && s.grid.segment(v.position, p)
-                        && v.player_markers.iter().all(|peer| {
-                            peer.id == v.session.player || peer.position.distance(p) >= 2.
-                        })
+                let free = |p: Pos, room: f32| {
+                    v.player_markers.iter().all(|peer| {
+                        peer.id == v.session.player || peer.position.distance(p) >= room
+                    })
                 };
-                if self.nexus_spot.is_none_or(|p| !available(p)) {
+                let available = |p: Pos| {
+                    p.distance(v.position) <= 7. && s.grid.segment(v.position, p) && free(p, 2.)
+                };
+                // Live: spots were re-picked whenever a step broke the line to them or a peer passed by, so
+                // Nexus bots shuffled around each other; a chosen spot is kept until someone takes it.
+                if self
+                    .nexus_spot
+                    .is_none_or(|p| !free(p, 0.8) || p.distance(v.position) > 10.)
+                {
                     let (x, y) = tile(v.position);
                     self.nexus_spot = (x.saturating_sub(7)..=x.saturating_add(7))
                         .flat_map(|x| {
@@ -1303,6 +1324,86 @@ impl Brain {
     }
 
     /// Safety always outranks any activity: retreat, dodge, or leave for the Nexus.
+    // Live: a dozen bots shuffled between two tiles for minutes; the stall check saw movement and never fired.
+    fn snapshot_stalled_travel(&mut self, v: &PlayerView) {
+        self.trail
+            .push_back((v.time_ms, v.position, self.destination, self.goal.clone()));
+        while self
+            .trail
+            .front()
+            .is_some_and(|(t, _, _, _)| v.time_ms.saturating_sub(*t) > 10_000)
+        {
+            self.trail.pop_front();
+        }
+        let Some((start, from)) = self.trail.front().map(|(t, p, _, _)| (*t, *p)) else {
+            return;
+        };
+        let steps: BTreeSet<_> = self
+            .trail
+            .iter()
+            .filter_map(|(_, _, s, _)| s.map(tile))
+            .collect();
+        if v.time_ms.saturating_sub(start) < 9_000
+            || v.time_ms < self.next_snapshot
+            || from.distance(v.position) >= 2.
+            || steps.len() < 2
+            || !matches!(
+                self.goal,
+                Goal::Venture | Goal::Explore(..) | Goal::Hunt(_) | Goal::Follow(_)
+            )
+                    // Circling a target being fought is combat, not a stalled trip.
+            || matches!(self.goal, Goal::Hunt(_)) && self.travel.is_none()
+        {
+            return;
+        }
+        let Some(grid) = self.navigation.as_ref() else {
+            return;
+        };
+        self.next_snapshot = v.time_ms + 300_000;
+        let (x0, y0) = tile(v.position);
+        let map: Vec<String> = (y0 - 5..=y0 + 5)
+            .map(|y| {
+                (x0 - 5..=x0 + 5)
+                    .map(|x| {
+                        let p = (x, y);
+                        if p == (x0, y0) {
+                            '@'
+                        } else if !grid.known.contains(&p) {
+                            '?'
+                        } else if grid.full_occupy.contains(&p) {
+                            'T'
+                        } else if self.blocked.contains_key(&p) {
+                            'x'
+                        } else if !grid.walkable.contains(&p) {
+                            '#'
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let recent: Vec<_> = self
+            .trail
+            .iter()
+            .rev()
+            .filter_map(|(_, p, s, g)| s.map(|s| (p.x, p.y, s.x, s.y, format!("{g:?}"))))
+            .take(12)
+            .collect();
+        tracing::warn!(
+            player = v.session.player,
+            account = v.session.account,
+            world = v.session.world,
+            layout = ?v.map.layout,
+            goal = ?self.goal,
+            trip = ?self.travel.as_ref().map(|(_, _, to)| (to.x, to.y)),
+            x = v.position.x,
+            y = v.position.y,
+            recent = ?recent,
+            map = map.join("/"),
+            "autonomous travel made no net progress"
+        );
+    }
     fn reflex(
         &mut self,
         v: &PlayerView,
@@ -1347,11 +1448,8 @@ impl Brain {
         }
         if retreat || threatened {
             let emergency = retreat || remedy.is_some();
-            let opponent = if retreat {
-                None
-            } else {
-                combat::target(v, content, grid, enemies, range, s.passes_cover)
-            };
+            // Live: 32 of 32 sampled Recover frames never fired. A 2012 player backing off kept shooting.
+            let opponent = combat::target(v, content, grid, enemies, range, s.passes_cover);
             let pressured = threatened
                 || nearest.is_some_and(|e| e.position.distance(v.position) < range * 1.3);
             if emergency {
@@ -1816,7 +1914,23 @@ impl Brain {
             Goal::Hunt(_) | Goal::Fight(_) => p.distance(v.position) >= range,
             _ => false,
         };
-        if let Some((kept, deadline)) = self.travel.clone() {
+        // Live: a Venture trip kept a destination it had already reached, and the bot wandered around it.
+        if self
+            .travel
+            .as_ref()
+            .is_some_and(|(kept, _, to)| *kept == Goal::Venture && to.distance(v.position) < 4.)
+        {
+            self.travel = None;
+        }
+        if let Some((kept, deadline, to)) = self.travel.clone() {
+            // Live: Venture's destination was re-chosen every decision from the current 8-tile region and flipped
+            // at region edges, so bots walked back and forth; a trip keeps the destination it started with.
+            for choice in choices
+                .iter_mut()
+                .filter(|c| c.1 == kept && kept == Goal::Venture)
+            {
+                choice.2 = to;
+            }
             let offered = choices.iter().find(|(_, g, _)| *g == kept).map(|c| c.2);
             if v.time_ms >= deadline {
                 self.travel = None;
@@ -2022,7 +2136,7 @@ impl Brain {
                     None
                 }
                 _ => match if matches!(goal, Goal::Hunt(_) | Goal::Venture | Goal::Survey(..)) {
-                    grid.towards(v.position, destination)
+                    grid.towards_kept(v.position, destination, &mut self.edge)
                 } else {
                     grid.next(v.position, destination)
                 } {
@@ -2126,6 +2240,7 @@ impl Brain {
                 _ => (
                     goal.clone(),
                     v.time_ms + 10_000 + (destination.distance(v.position) * 1000.) as u64,
+                    destination,
                 ),
             });
             decision.goal = goal;

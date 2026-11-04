@@ -508,3 +508,159 @@ async fn virtual_inputs_execute_held_diagonal_and_actual_cursor_between_decision
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn travel_beside_a_tree_row_off_center_keeps_moving() {
+    // Live: bots a fraction of a tile into the half beside trees flipped between a straight route and re-centering.
+    use crate::{
+        content::{Cell, Map},
+        world::{Controller, World},
+    };
+    let (content, mut view) = super::super::quest_tests::fixture();
+    view.objects.clear();
+    let mut cells = vec![
+        Cell {
+            ground: 1,
+            object: None,
+            config: String::new(),
+            terrain: 0,
+            region: 0,
+        };
+        128 * 128
+    ];
+    let template = super::super::quest_tests::fixture().1.objects.remove(0);
+    for x in 3..15 {
+        cells[11 * 128 + x].object = Some(0x120);
+        let mut tree = super::super::quest_tests::fixture().1.objects.remove(0);
+        tree.id = 100 + x as i32;
+        tree.kind = 0x120;
+        tree.position = Pos {
+            x: x as f32 + 0.5,
+            y: 11.5,
+        };
+        tree.blocks = true;
+        view.objects.push(tree);
+    }
+    drop(template);
+    let start = Pos { x: 15.42, y: 10.58 };
+    let goal = Pos { x: 1.5, y: 10.9 };
+    view.position = start;
+    let mut brain = Brain::new(ARCHETYPES[1], &view);
+    let grid = brain.navigation_grid(&view, &content, &[]);
+    let mut world = World::new(
+        Arc::new(content.clone()),
+        Arc::new(Map {
+            width: 128,
+            height: 128,
+            cells,
+            spawns: vec![(start.x, start.y)],
+        }),
+    )
+    .unwrap();
+    let mut character = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+    character.id = 1;
+    character.account = 1;
+    character.base[4] = 25;
+    let id = world.enter(character, None).unwrap();
+    world.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+    world.players.get_mut(&id).unwrap().pos = start;
+    let mut positions = Vec::new();
+    for _ in 0..120 {
+        let position = world.players[&id].pos;
+        positions.push((position.x, position.y));
+        if position.distance(goal) < 1. {
+            break;
+        }
+        let Some(waypoint) = grid.towards(position, goal) else {
+            panic!("no route from {position:?} after {positions:?}");
+        };
+        let movement = held_movement(&grid, position, waypoint, combat::speed(&view) * 0.3);
+        execute_inputs(&mut world, (id, 1, 1), movement, None, None, 6).unwrap();
+        for _ in 0..6 {
+            world.step();
+        }
+    }
+    assert!(
+        world.players[&id].pos.distance(goal) < 1.,
+        "stuck beside the trees: {:?}",
+        &positions[positions.len().saturating_sub(12)..]
+    );
+}
+
+#[test]
+fn travel_through_a_one_tile_tree_corridor_off_center_keeps_moving() {
+    // Live: off the center line of a one-tile corridor, bots flipped between two tile centers and never got in line.
+    use crate::{
+        content::{Cell, Map},
+        world::{Controller, World},
+    };
+    let (content, mut view) = super::super::quest_tests::fixture();
+    view.objects.clear();
+    let mut cells = vec![
+        Cell {
+            ground: 1,
+            object: None,
+            config: String::new(),
+            terrain: 0,
+            region: 0,
+        };
+        128 * 128
+    ];
+    let template = super::super::quest_tests::fixture().1.objects.remove(0);
+    for (x, y) in (3..15).flat_map(|x| [(x, 9), (x, 11)]) {
+        cells[y * 128 + x].object = Some(0x120);
+        let mut tree = super::super::quest_tests::fixture().1.objects.remove(0);
+        tree.id = 100 + (y * 20 + x) as i32;
+        tree.kind = 0x120;
+        tree.position = Pos {
+            x: x as f32 + 0.5,
+            y: 11.5,
+        };
+        tree.blocks = true;
+        view.objects.push(tree);
+    }
+    drop(template);
+    let start = Pos { x: 15.64, y: 10.6 };
+    let goal = Pos { x: 1.5, y: 10.5 };
+    view.position = start;
+    let mut brain = Brain::new(ARCHETYPES[1], &view);
+    let grid = brain.navigation_grid(&view, &content, &[]);
+    let mut world = World::new(
+        Arc::new(content.clone()),
+        Arc::new(Map {
+            width: 128,
+            height: 128,
+            cells,
+            spawns: vec![(start.x, start.y)],
+        }),
+    )
+    .unwrap();
+    let mut character = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+    character.id = 1;
+    character.account = 1;
+    character.base[4] = 25;
+    let id = world.enter(character, None).unwrap();
+    world.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+    world.players.get_mut(&id).unwrap().pos = start;
+    let mut positions = Vec::new();
+    for _ in 0..120 {
+        let position = world.players[&id].pos;
+        positions.push((position.x, position.y));
+        if position.distance(goal) < 1. {
+            break;
+        }
+        let Some(waypoint) = grid.towards(position, goal) else {
+            panic!("no route from {position:?} after {positions:?}");
+        };
+        let movement = held_movement(&grid, position, waypoint, combat::speed(&view) * 0.3);
+        execute_inputs(&mut world, (id, 1, 1), movement, None, None, 6).unwrap();
+        for _ in 0..6 {
+            world.step();
+        }
+    }
+    assert!(
+        world.players[&id].pos.distance(goal) < 1.,
+        "stuck in the corridor: {:?}",
+        &positions[positions.len().saturating_sub(12)..]
+    );
+}

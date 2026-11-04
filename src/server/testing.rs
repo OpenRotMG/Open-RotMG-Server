@@ -42,6 +42,11 @@ impl Drop for NativeControlRequest {
     }
 }
 
+struct SharedActiveClock {
+    source: crate::clock::Clock,
+    epoch: Instant,
+}
+
 #[derive(Clone)]
 pub struct Testing {
     root: PathBuf,
@@ -50,6 +55,7 @@ pub struct Testing {
     native_serial: Arc<std::sync::atomic::AtomicI32>,
     native_pings: Arc<Mutex<NativePings>>,
     runtime: String,
+    shared_active_clock: Arc<std::sync::OnceLock<SharedActiveClock>>,
     lease: Arc<Mutex<Option<NativeLease>>>,
     pub(super) stopped: tokio::sync::watch::Sender<Option<String>>,
 }
@@ -267,9 +273,46 @@ impl Testing {
             native_serial: Arc::new(std::sync::atomic::AtomicI32::new(-1)),
             native_pings: Arc::default(),
             runtime: format!("{:016x}", rand::random::<u64>()),
+            shared_active_clock: Arc::default(),
             lease: Arc::default(),
             stopped: tokio::sync::watch::channel(None).0,
         }))
+    }
+    pub(crate) fn bind_shared_active_clock(&self, clock: &crate::clock::Clock) -> Result<()> {
+        // Wall Instant::now() would not share prior pause exclusions with this epoch.
+        let bound = SharedActiveClock {
+            source: clock.clone(),
+            epoch: clock.now(),
+        };
+        ensure!(
+            self.shared_active_clock.set(bound).is_ok(),
+            "shared active clock already bound"
+        );
+        Ok(())
+    }
+    fn shared_active_time(&self, clock: &crate::clock::Clock) -> Result<Value> {
+        let bound = self
+            .shared_active_clock
+            .get()
+            .context("shared active clock was not bound at native-control construction")?;
+        ensure!(
+            bound.source.shares_source(clock),
+            "shared active clock source changed"
+        );
+        let elapsed = bound
+            .source
+            .now()
+            .checked_duration_since(bound.epoch)
+            .context("shared active clock regressed before its immutable epoch")?;
+        let elapsed_ms =
+            u64::try_from(elapsed.as_millis()).context("shared active milliseconds exceed u64")?;
+        ensure!(
+            elapsed_ms <= 9_007_199_254_740_991,
+            "shared active milliseconds exceed JavaScript safe integer"
+        );
+        Ok(
+            json!({"version":1,"runtime":self.runtime,"epoch":"native_control_binding","elapsed_ms":elapsed_ms}),
+        )
     }
     pub(super) fn acknowledge_native(&self, nonce: i32, player: i32) {
         let mut pending = self
@@ -364,24 +407,58 @@ async fn snapshot(a: &App, actor: i32, detail: bool) -> Result<Value> {
     let profile = registration.profile;
     let id = resolve(a, actor).await?;
     let content = a.content.clone();
-    a.world.directory(move |d| {
-        let view = d.player_view(id)?;
-        let player = &d.worlds[&view.session.world].players[&id];
-        let ch = &player.character;
-        let controller = match player.controller { crate::world::Controller::Human => Controller::Native, crate::world::Controller::Qa => Controller::Direct, crate::world::Controller::Autonomous => Controller::GameBot };
-        if detail { return Ok(json!({"view":view,"diagnostic":d.worlds[&view.session.world].observe(id)?,"privileged":true,"paused":d.clock.paused(),"pause_scope":"server","provenance":"prepared"})); }
-        let item = |kind: i32| -> Result<Value> { if kind == -1 { Ok(Value::Null) } else { Ok(json!({"id":kind,"name":content.get(u16::try_from(kind)?)?.name})) } };
-        let mut relevant = Vec::new();
-        for object in &view.objects {
-            let kind = content.get(object.kind)?;
-            if kind.enemy || matches!(kind.class.as_str(), "Portal" | "Container" | "Player") { relevant.push(object); }
+    a.world
+        .directory(move |d| {
+            snapshot_in_directory(d, actor, id, profile.as_deref(), &content, detail)
+        })
+        .await
+}
+fn snapshot_in_directory(
+    d: &crate::world::Directory,
+    actor: i32,
+    id: i32,
+    profile: Option<&str>,
+    content: &crate::content::Content,
+    detail: bool,
+) -> Result<Value> {
+    let view = d.player_view(id)?;
+    let player = &d.worlds[&view.session.world].players[&id];
+    let ch = &player.character;
+    let controller = match player.controller {
+        crate::world::Controller::Human => Controller::Native,
+        crate::world::Controller::Qa => Controller::Direct,
+        crate::world::Controller::Autonomous => Controller::GameBot,
+    };
+    if detail {
+        return Ok(
+            json!({"view":view,"diagnostic":d.worlds[&view.session.world].observe(id)?,"privileged":true,"paused":d.clock.paused(),"pause_scope":"server","provenance":"prepared"}),
+        );
+    }
+    let item = |kind: i32| -> Result<Value> {
+        if kind == -1 {
+            Ok(Value::Null)
+        } else {
+            Ok(json!({"id":kind,"name":content.get(u16::try_from(kind)?)?.name}))
         }
-        relevant.sort_by(|a,b|a.position.distance(view.position).total_cmp(&b.position.distance(view.position)));
-        let nearby = relevant.iter().take(8).map(|o| Ok(json!({"id":o.id,"kind":o.kind,"name":if o.name.is_empty(){&content.get(o.kind)?.name}else{&o.name},"hp":o.hp,"position":o.position}))).collect::<Result<Vec<_>>>()?;
-        let mut character = serde_json::to_value(&view.character)?;
-        character["stats"] = json!({"max_hp":view.character.stats[0],"max_mp":view.character.stats[1],"attack":view.character.stats[2],"defense":view.character.stats[3],"speed":view.character.stats[4],"dexterity":view.character.stats[5],"vitality":view.character.stats[6],"wisdom":view.character.stats[7]});
-        Ok(json!({"actor":actor,"controller":controller,"registered_profile":profile,"session":view.session,"world":view.map.name,"tick":view.tick,"game_ms":view.time_ms,"position":view.position,"character":character,"equipment":ch.items[..4].iter().map(|i|item(*i)).collect::<Result<Vec<_>>>()?,"lifecycle":view.lifecycle,"verification":{"shots":ch.shots,"kills":ch.kills,"pirate_caves":ch.pirate_caves},"nearby":nearby,"omitted_relevant_objects":relevant.len().saturating_sub(8),"paused":d.clock.paused(),"pause_scope":"server","knowledge_scope":"client_known_and_server_visible","provenance":"prepared"}))
-    }).await
+    };
+    let mut relevant = Vec::new();
+    for object in &view.objects {
+        let kind = content.get(object.kind)?;
+        if kind.enemy || matches!(kind.class.as_str(), "Portal" | "Container" | "Player") {
+            relevant.push(object);
+        }
+    }
+    relevant.sort_by(|a, b| {
+        a.position
+            .distance(view.position)
+            .total_cmp(&b.position.distance(view.position))
+    });
+    let nearby = relevant.iter().take(8).map(|o| Ok(json!({"id":o.id,"kind":o.kind,"name":if o.name.is_empty(){&content.get(o.kind)?.name}else{&o.name},"hp":o.hp,"position":o.position}))).collect::<Result<Vec<_>>>()?;
+    let mut character = serde_json::to_value(&view.character)?;
+    character["stats"] = json!({"max_hp":view.character.stats[0],"max_mp":view.character.stats[1],"attack":view.character.stats[2],"defense":view.character.stats[3],"speed":view.character.stats[4],"dexterity":view.character.stats[5],"vitality":view.character.stats[6],"wisdom":view.character.stats[7]});
+    Ok(
+        json!({"actor":actor,"controller":controller,"registered_profile":profile,"session":view.session,"world":view.map.name,"tick":view.tick,"game_ms":view.time_ms,"directory_ms":view.elapsed_ms,"position":view.position,"character":character,"equipment":ch.items[..4].iter().map(|i|item(*i)).collect::<Result<Vec<_>>>()?,"lifecycle":view.lifecycle,"verification":{"shots":ch.shots,"kills":ch.kills,"pirate_caves":ch.pirate_caves},"nearby":nearby,"omitted_relevant_objects":relevant.len().saturating_sub(8),"paused":d.clock.paused(),"pause_scope":"server","knowledge_scope":"client_known_and_server_visible","provenance":"prepared"}),
+    )
 }
 async fn native_sync(a: &App, t: &Testing, actors: Vec<i32>) -> Result<Value> {
     ensure!(
@@ -444,7 +521,7 @@ fn pending_death_stage(ch: &Character, content: &Content) -> &'static str {
             .take(4)
             .any(|kind| *kind >= 0 && content.objects[&(*kind as u16)].resurrects)
     {
-        "transferring"
+        "busy"
     } else {
         "dying"
     }
@@ -458,34 +535,49 @@ fn pending_resurrection_is_not_a_terminal_native_death() {
     ch.items[4] = 0xb3e;
     assert_eq!(pending_death_stage(&ch, &content), "dying");
     ch.items[3] = 0xb3e;
-    assert_eq!(pending_death_stage(&ch, &content), "transferring");
+    assert_eq!(pending_death_stage(&ch, &content), "busy");
     ch.alive = false;
     assert_eq!(pending_death_stage(&ch, &content), "dying");
 }
 
-async fn native_state(a: &App, t: &Testing, actors: Vec<i32>) -> Result<Value> {
+async fn native_state(a: &App, t: &Testing, actors: Vec<i32>, observations: bool) -> Result<Value> {
     ensure!(
         !actors.is_empty()
             && actors.len() <= 8
             && actors.iter().collect::<BTreeSet<_>>().len() == actors.len(),
         "native state requires 1–8 unique actors"
     );
-    for actor in &actors {
-        t.registration(*actor)?;
-    }
+    let profiles = actors
+        .iter()
+        .map(|actor| Ok((*actor, t.registration(*actor)?.profile)))
+        .collect::<Result<BTreeMap<_, _>>>()?;
     let runtime = t.runtime.clone();
+    let clock_owner = t.clone();
     let stopped = t.stopped.borrow().clone();
     let mut state = a.world.directory(move |d| {
+        let shared_active_time = clock_owner.shared_active_time(&d.clock)?;
         let paused = d.clock.paused();
         ensure!(d.worlds.values().flat_map(|w| w.players.values()).filter(|p| p.controller == crate::world::Controller::Human).all(|p| actors.contains(&p.character.id)), "every connected native participant must be configured");
-        let states = actors.into_iter().map(|actor| {
+        let states = actors.into_iter().map(|actor| -> Result<Value> {
+            ensure!(d.worlds.values().flat_map(|w| w.players.values()).filter(|p| p.character.id == actor).count() <= 1, "native character has multiple sessions");
             for (world,w) in &d.worlds { for (id,p) in &w.players { if p.character.id == actor {
-                let stage = if !p.character.alive { "dead" } else if p.native_transferring() { "transferring" } else if p.tx.as_ref().is_none_or(|o| o.packets.is_closed() || o.lost.borrow().is_some()) { "lost" } else if p.death_pending { pending_death_stage(&p.character, &w.content) } else if p.pending || p.progress_started { "busy" } else if !p.native_ready(paused) { "loading" } else { "ready" };
-                return json!({"actor":actor,"stage":stage,"player":id,"world":world,"world_name":w.name,"client_time":p.native_time()});
+                let resurrection_waiting = p.native_transferring()
+                    && p.character.hp > 0 && !p.death_pending && !p.death_started
+                    && d.native_resurrection_waiting(*id, *world)
+                    && p.tx.as_ref().is_some_and(|o| !o.packets.is_closed() && o.lost.borrow().is_none());
+                let stage = if !p.character.alive { "dead" } else if resurrection_waiting { "busy" } else if p.native_transferring() { "transferring" } else if p.tx.as_ref().is_none_or(|o| o.packets.is_closed() || o.lost.borrow().is_some()) { "lost" } else if p.death_pending { pending_death_stage(&p.character, &w.content) } else if p.pending || p.progress_started { "busy" } else if !p.native_ready(paused) { "loading" } else { "ready" };
+                let transition = if stage == "transferring" {
+                    Some(d.prepared_native_transition(actor)?.context("native transfer lacks live grant/admission ownership")?)
+                } else { None };
+                let observation = if observations && stage == "ready" {
+                    Some(snapshot_in_directory(d, actor, *id, profiles[&actor].as_deref(), &w.content, false)?)
+                } else { None };
+                return Ok(json!({"actor":actor,"account":p.character.account,"character":p.character.id,"class":p.character.class,"stage":stage,"player":id,"world":world,"world_name":w.name,"client_time":p.native_time(),"transition":transition,"observation":observation}));
             } } }
-            json!({"actor":actor,"stage":if d.character_transferring(actor){"transferring"}else{"disconnected"}})
-        }).collect::<Vec<_>>();
-        Ok(json!({"runtime":runtime,"paused":paused,"stopped":stopped,"actors":states}))
+            let transition = d.prepared_native_transition(actor)?;
+            Ok(json!({"actor":actor,"character":actor,"account":transition.as_ref().map(|t|t.account),"stage":if transition.is_some(){"transferring"}else{"disconnected"},"transition":transition,"observation":null}))
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(json!({"native_state_version":1,"runtime":runtime,"shared_active_time":shared_active_time,"paused":paused,"stopped":stopped,"actors":states}))
     }).await?;
     for actor in state["actors"]
         .as_array_mut()
@@ -530,7 +622,7 @@ async fn native_lease(
     match operation.as_str() {
         "begin" => {
             if !actors.is_empty() {
-                let state = native_state(a, t, actors.clone()).await?;
+                let state = native_state(a, t, actors.clone(), false).await?;
                 ensure!(
                     state["actors"]
                         .as_array()
@@ -598,7 +690,7 @@ async fn native_lease(
                 lease.actors.clone()
             };
             if !actors.is_empty() {
-                let state = native_state(a, t, actors).await?;
+                let state = native_state(a, t, actors, false).await?;
                 if let Some(terminal) = state["actors"]
                     .as_array()
                     .unwrap()
@@ -1167,7 +1259,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::PrepareRealmClosure{world} => prepare_realm_closure(a,t,world).await,
         Command::Catalog{search,limit} => {ensure!(!search.is_empty() && search.len()<=80 && (1..=20).contains(&limit),"catalog needs search and limit 1–20");let matches=a.content.objects.values().filter(|o|o.name.to_lowercase().contains(&search.to_lowercase())).collect::<Vec<_>>();Ok(json!({"items":matches.iter().take(limit).map(|o|json!({"id":o.kind,"name":o.name,"class":o.class,"slot_type":o.slot_type,"unsupported_equipment":o.unsupported_equipment})).collect::<Vec<_>>(),"omitted":matches.len().saturating_sub(limit)}))},
         // JavaScript numbers would round the seed needed to reproduce a prepared map.
-        Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed.map(|seed|seed.to_string()),"privileged":true,"damaging_ground":w.map.cells.iter().enumerate().filter(|(_,c)|w.content.hazards.contains_key(&c.ground)).map(|(i,_)|Pos{x:(i as i32%w.map.width) as f32+0.5,y:(i as i32/w.map.width) as f32+0.5}).filter(|p|w.walkable(*p)).take(16).collect::<Vec<_>>(),"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0x67d|crate::dungeon::pirate::BOSS|0xd05|0xd06|0xd7a|0xd7b|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe32|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
+        Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed.map(|seed|seed.to_string()),"privileged":true,"damaging_ground":w.map.cells.iter().enumerate().filter(|(_,c)|w.content.hazards.contains_key(&c.ground)).map(|(i,_)|Pos{x:(i as i32%w.map.width) as f32+0.5,y:(i as i32/w.map.width) as f32+0.5}).filter(|p|w.walkable(*p)).take(16).collect::<Vec<_>>(),"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0x67d|crate::dungeon::pirate::BOSS|0xd05|0xd06|0xd7a|0xd7b|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe31|0xe32|0xe45|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
         Command::Spawn{spec} => spawn(a,t,spec).await,
         Command::Persona{profile,world,position} => prepare_persona(a,t,profile,world,position).await,
         Command::World{template,seed} => { let world=a.world.directory(move |d|match seed { Some(seed)=>d.prepared_instance_with_seed(&template,seed), None=>d.prepared_instance(&template) }).await?; Ok(json!({"world":world,"provenance":"prepared"})) },
@@ -1175,7 +1267,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::Inspect{actor} => {t.registration(actor)?;snapshot(a,actor,true).await},
         Command::Resume => {resume(a,t).await?;Ok(json!({"paused":false}))},
         Command::NativeSync{actors} => native_sync(a,t,actors).await,
-        Command::NativeState{actors} => native_state(a,t,actors).await,
+        Command::NativeState{actors} => native_state(a,t,actors,true).await,
         Command::NativeLease{owner,operation,actors} => {
             let trace = Arc::new(crate::performance::NativeControlTrace {request:id.into(),operation:operation.clone(),started:Instant::now()});
             let requests = Arc::new(Mutex::new(crate::performance::Requests {native_control:Some(trace.clone()),..Default::default()}));
@@ -1400,4 +1492,362 @@ async fn prepared_realm_closure_guards_and_selected_realm_isolation() {
             .contains("already prepared")
     );
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(test)]
+mod shared_active_time_tests {
+    use super::*;
+
+    fn control() -> (PathBuf, Testing) {
+        let dir =
+            std::env::temp_dir().join(format!("shared-active-time-{}", rand::random::<u64>()));
+        fs::create_dir(&dir).unwrap();
+        fs::write(
+            dir.join("testing.json"),
+            br#"{"schema":1,"provenance":"prepared"}"#,
+        )
+        .unwrap();
+        let testing = Testing::open(&dir).unwrap().unwrap();
+        (dir, testing)
+    }
+
+    #[test]
+    fn explicit_binding_rejects_unbound_duplicate_and_foreign_clock_but_accepts_clones() {
+        let (dir, testing) = control();
+        let clock = crate::clock::Clock::default();
+        clock.set_paused(true);
+        assert!(
+            testing
+                .shared_active_time(&clock)
+                .unwrap_err()
+                .to_string()
+                .contains("not bound")
+        );
+        assert!(testing.shared_active_clock.get().is_none());
+        testing.bind_shared_active_clock(&clock).unwrap();
+        let cloned_clock = clock.clone();
+        let cloned_testing = testing.clone();
+        assert!(clock.shares_source(&cloned_clock));
+        assert_eq!(
+            testing.shared_active_time(&clock).unwrap(),
+            cloned_testing.shared_active_time(&cloned_clock).unwrap()
+        );
+        assert!(
+            cloned_testing
+                .bind_shared_active_clock(&clock)
+                .unwrap_err()
+                .to_string()
+                .contains("already bound")
+        );
+        let foreign = crate::clock::Clock::default();
+        assert!(!clock.shares_source(&foreign));
+        assert!(
+            testing
+                .shared_active_time(&foreign)
+                .unwrap_err()
+                .to_string()
+                .contains("source changed")
+        );
+        assert!(
+            cloned_testing
+                .bind_shared_active_clock(&foreign)
+                .unwrap_err()
+                .to_string()
+                .contains("already bound")
+        );
+        assert_eq!(testing.shared_active_time(&clock).unwrap()["elapsed_ms"], 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn paused_same_clock_epoch_and_real_json_preserve_runtime_descriptor_and_safe_elapsed() {
+        let (dir, testing) = control();
+        let clock = crate::clock::Clock::default();
+        clock.set_paused(true);
+        clock.set_paused(false);
+        clock.set_paused(true);
+        let epoch = clock.now();
+        testing.bind_shared_active_clock(&clock).unwrap();
+        assert_eq!(testing.shared_active_clock.get().unwrap().epoch, epoch);
+        let first = testing.shared_active_time(&clock).unwrap();
+        let decoded: Value = serde_json::from_slice(&serde_json::to_vec(&first).unwrap()).unwrap();
+        assert_eq!(first, decoded);
+        assert_eq!(decoded.as_object().unwrap().len(), 4);
+        assert_eq!(decoded["version"], 1);
+        assert_eq!(decoded["runtime"], testing.runtime);
+        assert_eq!(decoded["epoch"], "native_control_binding");
+        assert_eq!(decoded["elapsed_ms"].as_u64(), Some(0));
+        assert_eq!(testing.shared_active_time(&clock.clone()).unwrap(), decoded);
+        clock.set_paused(false);
+        let running = testing.shared_active_time(&clock).unwrap()["elapsed_ms"]
+            .as_u64()
+            .unwrap();
+        assert!(running <= 9_007_199_254_740_991);
+        clock.set_paused(true);
+        let frozen = testing.shared_active_time(&clock).unwrap();
+        assert!(frozen["elapsed_ms"].as_u64().unwrap() >= running);
+        assert_eq!(testing.shared_active_time(&clock).unwrap(), frozen);
+        assert_eq!(testing.shared_active_clock.get().unwrap().epoch, epoch);
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod native_state_header_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn registered_actors_without_player_projection_keep_shared_active_header() {
+        let (dir, app) = super::super::account_actions::tests::fixture_with_native_control();
+        assert_eq!(
+            std::os::unix::fs::PermissionsExt::mode(&fs::metadata(&dir).unwrap().permissions())
+                & 0o777,
+            0o700
+        );
+        let testing = app.testing.as_ref().unwrap();
+        let bound = testing.shared_active_clock.get().unwrap();
+        assert!(bound.source.shares_source(&app.world.clock));
+        assert!(app.world.clock.paused());
+        assert_eq!(bound.epoch, app.world.clock.now());
+        let mut actors = Vec::new();
+        for guid in ["header-no-player-a", "header-no-player-b"] {
+            let account = app.store.list(guid.to_owned()).await.unwrap();
+            let character = app
+                .store
+                .create(account.id, app.content.get(WIZARD).unwrap())
+                .await
+                .unwrap();
+            write_json(
+                &testing.path(&format!("actor-{}", character.id), "spawn"),
+                &Registration {
+                    guid: guid.to_owned(),
+                    controller: Controller::Native,
+                    profile: None,
+                },
+            )
+            .unwrap();
+            let registration = testing.registration(character.id).unwrap();
+            assert_eq!(registration.guid, guid);
+            assert!(matches!(registration.controller, Controller::Native));
+            assert!(
+                app.store
+                    .character_alive(character.id, registration.guid)
+                    .await
+                    .unwrap()
+            );
+            actors.push(character.id);
+        }
+        app.world
+            .directory(|d| {
+                assert!(d.worlds.values().next().is_some());
+                assert!(d.worlds.values().all(|w| w.players.is_empty()));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let state = native_state(&app, testing, actors.clone(), true)
+            .await
+            .unwrap();
+        let encoded = serde_json::to_vec(&state).unwrap();
+        let decoded: Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, state);
+        assert_eq!(decoded["native_state_version"], 1);
+        assert_eq!(decoded["runtime"], testing.runtime);
+        assert_eq!(decoded["paused"], true);
+        assert!(decoded["stopped"].is_null());
+        let header = &decoded["shared_active_time"];
+        assert_eq!(header["version"], 1);
+        assert_eq!(header["runtime"], testing.runtime);
+        assert_eq!(header["epoch"], "native_control_binding");
+        let elapsed = header["elapsed_ms"].as_u64().unwrap();
+        assert!(elapsed <= 9_007_199_254_740_991);
+        assert_eq!(elapsed, 0);
+        let rows = decoded["actors"].as_array().unwrap();
+        assert_eq!(rows.len(), actors.len());
+        for (row, actor) in rows.iter().zip(actors) {
+            assert_eq!(row["actor"], actor);
+            assert_eq!(row["character"], actor);
+            assert_eq!(row["stage"], "disconnected");
+            assert!(row["transition"].is_null());
+            assert!(row["observation"].is_null());
+            assert!(row.get("player").is_none());
+        }
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn resurrection_pending_states_do_not_require_a_transfer_grant() {
+        let (dir, app) = super::super::account_actions::tests::fixture_with_native_control();
+        let testing = app.testing.as_ref().unwrap();
+        let guid = "native-resurrection-state";
+        let account = app.store.list(guid.into()).await.unwrap();
+        let mut character = app
+            .store
+            .create(account.id, app.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        character.items[3] = 0xb3e;
+        character.revision = app
+            .store
+            .exchange(
+                vec![crate::store::InventoryWrite {
+                    id: character.id,
+                    account: account.id,
+                    revision: character.revision,
+                    items: character.items.clone(),
+                }],
+                vec![],
+            )
+            .await
+            .unwrap()[0];
+        let actor = character.id;
+        write_json(
+            &testing.path(&format!("actor-{actor}"), "spawn"),
+            &Registration {
+                guid: guid.into(),
+                controller: Controller::Native,
+                profile: None,
+            },
+        )
+        .unwrap();
+        let (packets, _inbox) = tokio::sync::mpsc::channel(256);
+        let (lost, _) = tokio::sync::watch::channel(None);
+        let player = app
+            .world
+            .in_world(-3)
+            .call(move |w| w.enter(character, Some(crate::world::Output { packets, lost })))
+            .await
+            .unwrap();
+        app.world
+            .for_player(player)
+            .call(move |w| {
+                w.players.get_mut(&player).unwrap().departing = true;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(
+            native_state(&app, testing, vec![actor], false)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("native transfer lacks live grant/admission ownership")
+        );
+        let snapshot = app
+            .world
+            .for_player(player)
+            .call(move |w| {
+                let p = w.players.get_mut(&player).unwrap();
+                p.departing = false;
+                p.character.hp = 0;
+                p.death_pending = true;
+                let deaths = w.pending_deaths();
+                assert_eq!(deaths.len(), 1);
+                assert_eq!(deaths[0].0, player);
+                Ok(deaths.into_iter().next().unwrap().1)
+            })
+            .await
+            .unwrap();
+        let pending = native_state(&app, testing, vec![actor], false)
+            .await
+            .unwrap();
+        assert_eq!(pending["actors"][0]["stage"], "busy");
+        assert!(pending["actors"][0]["transition"].is_null());
+        let restored = app
+            .store
+            .resurrect(snapshot, 3, app.content.clone())
+            .await
+            .unwrap();
+        app.world
+            .directory(move |d| d.finish_resurrection(player, Ok(restored)))
+            .await
+            .unwrap();
+        let committed = native_state(&app, testing, vec![actor], true)
+            .await
+            .unwrap();
+        assert_eq!(committed["actors"][0]["stage"], "busy");
+        assert!(committed["actors"][0]["transition"].is_null());
+        assert!(committed["actors"][0]["observation"].is_null());
+        app.world
+            .directory(move |d| {
+                assert!(d.prepared_native_transition(actor)?.is_none());
+                let transfer = d.forced_transfer(player)?.unwrap();
+                assert_eq!(transfer.destination, Some(-2));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let transferring = native_state(&app, testing, vec![actor], false)
+            .await
+            .unwrap();
+        assert_eq!(transferring["actors"][0]["stage"], "transferring");
+        assert_eq!(
+            transferring["actors"][0]["transition"]["phase"],
+            "source_retiring"
+        );
+        assert!(app.store.character_alive(actor, guid.into()).await.unwrap());
+        assert_eq!(
+            app.store.load(account.id, actor).await.unwrap().items[3],
+            -1
+        );
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod directory_observation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn snapshot_keeps_directory_and_world_clocks_distinct() {
+        let (dir, app) = super::super::account_actions::tests::fixture_with_native_control();
+        let testing = app.testing.as_ref().unwrap();
+        let guid = "snapshot-directory-clock";
+        let account = app.store.list(guid.into()).await.unwrap();
+        let character = app
+            .store
+            .create(account.id, app.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        let actor = character.id;
+        write_json(
+            &testing.path(&format!("actor-{actor}"), "spawn"),
+            &Registration {
+                guid: guid.into(),
+                controller: Controller::Direct,
+                profile: None,
+            },
+        )
+        .unwrap();
+        let player = app
+            .world
+            .in_world(-2)
+            .call(move |world| {
+                let player = world.enter(character, None)?;
+                assert!(world.players[&player].controller == crate::world::Controller::Qa);
+                world.step();
+                assert_eq!(world.now, 50);
+                Ok(player)
+            })
+            .await
+            .unwrap();
+        assert!(app.world.clock.paused());
+        let directory_tick = app.world.directory(|d| Ok(d.tick)).await.unwrap();
+        assert_eq!(directory_tick, 0);
+        let state = snapshot(&app, actor, false).await.unwrap();
+        let decoded: Value = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+        assert_eq!(decoded, state);
+        assert_eq!(decoded["controller"], "direct");
+        assert_eq!(decoded["actor"], actor);
+        assert_eq!(decoded["session"]["player"], player);
+        assert_eq!(decoded["session"]["character"], actor);
+        assert_eq!(decoded["game_ms"], 50);
+        assert_eq!(decoded["directory_ms"].as_u64(), Some(directory_tick * 50));
+        assert_eq!(decoded["directory_ms"], 0);
+        assert_ne!(decoded["directory_ms"], decoded["game_ms"]);
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
 }

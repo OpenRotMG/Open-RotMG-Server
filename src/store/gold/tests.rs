@@ -245,7 +245,7 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
         [account],
     )
     .unwrap();
-    db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts;").unwrap();
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts;").unwrap();
     db.pragma_update(None, "user_version", 17).unwrap();
     let rows = || {
         db.prepare("SELECT account,reward,awarded_at,notified_at FROM gold_rewards ORDER BY reward")
@@ -274,7 +274,7 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        21
+        22
     );
     check_schema(&db, 18).unwrap();
     let gold = reopened.gold(account).await.unwrap();

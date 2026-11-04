@@ -119,7 +119,7 @@ impl Drop for FinalizationGuard {
         }
         if !self.finished {
             let error = "finalization executor abandoned completion".to_string();
-            fence_owned(
+            fail_owned(
                 &self.registry,
                 &self.expected,
                 "finalization",
@@ -191,7 +191,7 @@ impl SessionControl {
             return;
         };
         if let Err(error) = &result {
-            let message = fence(
+            let message = fail(
                 claim,
                 self.account,
                 "autonomous_completion",
@@ -221,7 +221,6 @@ pub struct Claim {
     script_avatar: Option<i32>,
     pending: bool,
     owner_present: bool,
-    failure: Option<String>,
     idle: Arc<tokio::sync::Notify>,
     finalization: Option<Finalization>,
 }
@@ -251,13 +250,15 @@ fn finish(owners: &mut BTreeMap<i32, Claim>, id: i32) {
     if !claim.owner_present
         && !claim.pending
         && claim.avatar.is_none()
-        && claim.control.as_ref().is_none_or(|control| {
-            !control.autonomous || matches!(*control.done.borrow(), Some(Ok(())))
-        })
+        // Saves are atomic and a restart reloads committed state, so a failed session still releases its account.
+        && claim
+            .control
+            .as_ref()
+            .is_none_or(|control| !control.autonomous || control.done.borrow().is_some())
         && claim
             .finalization
             .as_ref()
-            .is_none_or(|f| matches!(*f.done.borrow(), Some(Ok(()))))
+            .is_none_or(|f| f.done.borrow().is_some())
     {
         let claim = owners.remove(&id).expect("checked claim");
         if let Some(control) = claim.control
@@ -367,11 +368,6 @@ impl Owner {
                     .avatar
                     .or_else(|| claim.finalization.as_ref().map(|f| f.avatar));
                 ensure!(
-                    claim.failure.is_none() || claim.avatar.is_some(),
-                    "cannot close fenced account without an avatar: {:?}",
-                    claim.failure
-                );
-                ensure!(
                     avatar.is_some() || !claim.pending,
                     "cannot close an unpublished accepted entry"
                 );
@@ -404,7 +400,7 @@ impl Owner {
         drop(self);
     }
     pub(crate) fn failed(&self, error: String) {
-        fence_owned(
+        fail_owned(
             &self.registry,
             &[(self.id, self.generation.clone())],
             "session",
@@ -428,7 +424,6 @@ impl Drop for Owner {
             && claim.finalization.is_none()
             && claim.avatar.is_some()
             && !claim.pending
-            && claim.failure.is_none()
         {
             let message = format!(
                 "account={} session={:p} avatar={:?} operation=session stage=retirement: lease retained without acknowledged retirement",
@@ -456,7 +451,7 @@ impl Drop for Owner {
                 None,
             )
         {
-            fence_owned(
+            fail_owned(
                 &self.registry,
                 &[(self.id, self.generation.clone())],
                 "native_drop",
@@ -489,11 +484,10 @@ fn bind(
         claim.avatar.is_none_or(|id| id == avatar),
         "account already owns another avatar"
     );
-    ensure!(claim.failure.is_none(), "account ownership is fenced");
     if claim.avatar.is_none() {
         if let Some(finalization) = &claim.finalization {
             ensure!(
-                matches!(*finalization.done.borrow(), Some(Ok(()))),
+                finalization.done.borrow().is_some(),
                 "previous avatar finalization is not complete"
             );
         }
@@ -503,23 +497,24 @@ fn bind(
     claim.avatar = Some(avatar);
     Ok(())
 }
-fn fence(claim: &mut Claim, account: i32, operation: &str, stage: Stage, error: String) -> String {
+/// Reports a failed account operation to the session's waiters; the account stays usable.
+fn fail(claim: &Claim, account: i32, operation: &str, stage: Stage, error: String) -> String {
     let message = format!(
         "account={account} session={:p} avatar={:?} operation={operation} stage={stage}: {error}",
         Arc::as_ptr(&claim.generation),
         claim.avatar
     );
-    if claim.failure.is_none() {
-        claim.failure = Some(message.clone());
-    }
     if let Some(control) = &claim.control {
-        control
-            .completion
-            .send_replace(Some(Err(claim.failure.clone().expect("fenced claim"))));
+        control.completion.send_if_modified(|current| {
+            current.is_none() && {
+                *current = Some(Err(message.clone()));
+                true
+            }
+        });
     }
     message
 }
-fn fence_owned(
+fn fail_owned(
     registry: &Arc<Mutex<BTreeMap<i32, Claim>>>,
     generations: &[(i32, Arc<()>)],
     operation: &str,
@@ -527,19 +522,19 @@ fn fence_owned(
     error: String,
 ) {
     let reports = {
-        let mut owners = registry.lock().expect("ownership registry poisoned");
+        let owners = registry.lock().expect("ownership registry poisoned");
         generations
             .iter()
             .filter_map(|(account, generation)| {
                 owners
-                    .get_mut(account)
+                    .get(account)
                     .filter(|c| Arc::ptr_eq(&c.generation, generation))
-                    .map(|claim| fence(claim, *account, operation, stage, error.clone()))
+                    .map(|claim| fail(claim, *account, operation, stage, error.clone()))
             })
             .collect::<Vec<_>>()
     };
     for message in reports {
-        report_failure(&message, "owned completion fenced");
+        report_failure(&message, "owned completion failed");
     }
 }
 fn generations(a: &App, accounts: &[i32]) -> Result<Vec<(i32, Arc<()>)>> {
@@ -559,6 +554,15 @@ fn generations(a: &App, accounts: &[i32]) -> Result<Vec<(i32, Arc<()>)>> {
         .collect()
 }
 
+#[derive(Debug)]
+pub(crate) struct AccountBusy;
+impl std::fmt::Display for AccountBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("account already has an active session")
+    }
+}
+impl std::error::Error for AccountBusy {}
+
 impl App {
     pub(crate) fn claim(&self, id: i32) -> Result<Owner> {
         self.try_claim(id)?.context("development world full")
@@ -567,13 +571,10 @@ impl App {
         let _admission = drain::admission(self)?;
         let mut owners = self.owners.lock().expect("ownership registry poisoned");
         self.world.supervisor.ensure_running()?;
+        ensure!(!owners.contains_key(&id), AccountBusy);
         if owners.len() >= self.max_players {
             return Ok(None);
         }
-        ensure!(
-            !owners.contains_key(&id),
-            "account already has an active session"
-        );
         let generation = Arc::new(());
         self.admission_started
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -586,7 +587,6 @@ impl App {
                 script_avatar: None,
                 pending: false,
                 owner_present: true,
-                failure: None,
                 idle: Arc::default(),
                 finalization: None,
             },
@@ -613,11 +613,6 @@ impl App {
             match owners.get_mut(&account) {
                 None => return Ok(()),
                 Some(claim) => {
-                    ensure!(
-                        claim.failure.is_none(),
-                        "persona account is fenced: {:?}",
-                        claim.failure
-                    );
                     let control = claim.control.clone().ok_or(crate::store::Rejected(
                         "Persona admission is busy; retry name choice shortly",
                     ))?;
@@ -626,7 +621,7 @@ impl App {
                         "name collision is not an autonomous session"
                     );
                     if control.cancel.is_closed() {
-                        let message = fence(
+                        let message = fail(
                             claim,
                             account,
                             "persona_completion",
@@ -645,6 +640,10 @@ impl App {
         wait_control(control).await?;
         self.world.supervisor.ensure_running()?;
         Ok(())
+    }
+    pub(super) fn online_avatar(&self, account: i32) -> Option<i32> {
+        let owners = self.owners.lock().expect("ownership registry poisoned");
+        owners.get(&account).and_then(|claim| claim.avatar)
     }
     pub(super) async fn kick(&self, account: i32) -> Result<bool> {
         let control = self
@@ -755,7 +754,7 @@ fn begin_finalization(
     mut transfer: Option<crate::world::TransferReservation>,
 ) -> Result<Finalized> {
     let (completion, done) = tokio::sync::watch::channel(None);
-    let initial_failure = {
+    {
         let mut owners = a.owners.lock().expect("ownership registry poisoned");
         let claim = owners
             .get_mut(&account)
@@ -787,7 +786,6 @@ fn begin_finalization(
             transfer: transfer.as_ref().map(|t| t.key().to_vec()),
             done: done.clone(),
         });
-        claim.failure.clone()
     };
     let app = a.clone();
     let expected = vec![(account, generation.clone())];
@@ -808,22 +806,16 @@ fn begin_finalization(
             tokio::time::timeout(
                 std::time::Duration::from_secs(15),
                 FINALIZING.scope((), async {
-                    let result = if let Some(cause) = &initial_failure {
-                        stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
-                        stop_acknowledged = true;
-                        wait_pending(&app, account, &expected[0].1).await?;
-                        Err(anyhow::Error::msg(cause.clone()))
-                    } else {
-                        stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
-                        stop_acknowledged = true;
-                        super::settle_giver_credits(&app, avatar).await?;
+                    stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
+                    stop_acknowledged = true;
+                    super::settle_giver_credits(&app, avatar).await?;
+                    let result =
                         self::account(&app, vec![account], "finalization", move |app| async move {
                             super::depart_inner_with_transfer(&app, avatar, transfer_key).await
                         })
-                        .await
-                    };
+                        .await;
                     if let Err(error) = &result {
-                        fence_owned(
+                        fail_owned(
                             &app.owners,
                             &expected,
                             "finalization",
@@ -849,24 +841,13 @@ fn begin_finalization(
             Err(_) => Err(anyhow::anyhow!("finalization supervisor panicked")),
         };
         let result = result.map_err(|error| {
-            fence_owned(
+            fail_owned(
                 &app.owners,
                 &expected,
                 "finalization",
                 Stage::Retirement,
                 format!("reason={reason}: {error:#}"),
             );
-            let original = app
-                .owners
-                .lock()
-                .expect("ownership registry poisoned")
-                .get(&account)
-                .filter(|c| Arc::ptr_eq(&c.generation, &expected[0].1))
-                .and_then(|c| c.failure.clone());
-            let cause = match original.or(initial_failure) {
-                Some(cause) => cause,
-                None => format!("{error:#}"),
-            };
             let pending = app
                 .owners
                 .lock()
@@ -875,7 +856,7 @@ fn begin_finalization(
                 .filter(|c| Arc::ptr_eq(&c.generation, &expected[0].1))
                 .is_some_and(|c| c.pending);
             format!(
-                "{cause}; controller_stop={}; pending_work={pending}; finalization_error={error:#}",
+                "controller_stop={}; pending_work={pending}; finalization_error={error:#}",
                 if stop_acknowledged {
                     "acknowledged"
                 } else {
@@ -1005,7 +986,7 @@ impl Drop for Operation {
                 claim.pending = false;
                 claim.idle.notify_waiters();
                 if !self.completed {
-                    reports.push(fence(
+                    reports.push(fail(
                         claim,
                         *account,
                         self.operation,
@@ -1097,15 +1078,6 @@ impl std::fmt::Display for Busy {
 }
 impl std::error::Error for Busy {}
 
-#[derive(Debug)]
-struct Fenced;
-impl std::fmt::Display for Fenced {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("account ownership is fenced")
-    }
-}
-impl std::error::Error for Fenced {}
-
 fn reserve(a: &App, expected: &[(i32, Arc<()>)], operation: &'static str) -> Result<Operation> {
     let mut owners = a.owners.lock().expect("ownership registry poisoned");
     a.world.supervisor.ensure_running()?;
@@ -1118,7 +1090,6 @@ fn reserve(a: &App, expected: &[(i32, Arc<()>)], operation: &'static str) -> Res
             "stale operation generation"
         );
         ensure!(!claim.pending, Busy);
-        ensure!(claim.failure.is_none(), Fenced);
         ensure!(
             claim.finalization.is_none()
                 || FINALIZING.try_with(|_| ()).is_ok()
@@ -1127,7 +1098,7 @@ fn reserve(a: &App, expected: &[(i32, Arc<()>)], operation: &'static str) -> Res
                     && claim
                         .finalization
                         .as_ref()
-                        .is_some_and(|f| matches!(*f.done.borrow(), Some(Ok(())))),
+                        .is_some_and(|f| f.done.borrow().is_some()),
             CloseReason::Controller
         );
     }
@@ -1156,16 +1127,13 @@ pub(super) fn reserve_credit_recipient(
     let mut owners = a.owners.lock().expect("ownership registry poisoned");
     a.world.supervisor.ensure_running()?;
     let source = owners.get(&giver.0).context("causal giver claim missing")?;
-    ensure!(
-        source.matches_avatar(giver.1) && source.failure.is_none(),
-        "stale or fenced causal giver"
-    );
+    ensure!(source.matches_avatar(giver.1), "stale causal giver");
     let target = owners
         .get(&recipient.0)
         .context("causal recipient claim missing")?;
     ensure!(
-        giver.0 != recipient.0 && target.avatar == Some(recipient.1) && target.failure.is_none(),
-        "stale or fenced causal recipient"
+        giver.0 != recipient.0 && target.avatar == Some(recipient.1),
+        "stale causal recipient"
     );
     if target.pending {
         let mut wait = Box::pin(target.idle.clone().notified_owned());
@@ -1190,7 +1158,7 @@ pub(super) fn collector_death_candidate(a: &App, account: i32, avatar: i32) -> R
         .get(&account)
         .context("death candidate claim missing")?;
     ensure!(claim.matches_avatar(avatar), "stale death candidate avatar");
-    Ok(!claim.pending && claim.failure.is_none() && claim.finalization.is_none())
+    Ok(!claim.pending && claim.finalization.is_none())
 }
 pub(super) fn require_progress_owner(a: &App, account: i32, player: i32) -> Result<()> {
     let owners = a.owners.lock().expect("ownership registry poisoned");
@@ -1201,9 +1169,8 @@ pub(super) fn require_progress_owner(a: &App, account: i32, player: i32) -> Resu
         claim.avatar == Some(player)
             && claim.owner_present
             && claim.pending
-            && claim.failure.is_none()
             && claim.finalization.is_none(),
-        "native pause progress owner is stale, unreserved, closing or fenced"
+        "native pause progress owner is stale, unreserved or closing"
     );
     Ok(())
 }
@@ -1220,7 +1187,7 @@ pub(super) fn reserve_player(
             bind(&a.owners, account, &guard.accounts[0].1, player)?;
             Ok(Some(guard))
         }
-        Err(error) if error.is::<Busy>() || error.is::<Fenced>() || error.is::<CloseReason>() => {
+        Err(error) if error.is::<Busy>() || error.is::<CloseReason>() => {
             tracing::debug!(account, player, operation, error=%error, "completion preparation not admitted");
             Ok(None)
         }
@@ -1263,7 +1230,7 @@ where
             if let Err(error) = &result {
                 let stage = *guard.stage.lock().expect("completion stage poisoned");
                 if stage.uncertain() && !rejected(error, stage) {
-                    fence_owned(
+                    fail_owned(
                         &guard.app.owners,
                         &guard.accounts,
                         operation,
@@ -1351,7 +1318,6 @@ pub(super) fn retirement(
             claim.avatar == Some(player),
             "retirement avatar differs from account lease"
         );
-        ensure!(claim.failure.is_none(), "cannot retire fenced account");
         claim.avatar = None;
         Ok(())
     })
@@ -1383,12 +1349,12 @@ impl Drop for LiveTask {
 }
 
 #[cfg(test)]
-pub(crate) fn state(a: &App, account: i32) -> Option<(bool, Option<i32>, bool)> {
+pub(crate) fn state(a: &App, account: i32) -> Option<(bool, Option<i32>)> {
     a.owners
         .lock()
         .unwrap()
         .get(&account)
-        .map(|c| (c.pending, c.avatar, c.failure.is_some()))
+        .map(|c| (c.pending, c.avatar))
 }
 
 pub(crate) fn observe(a: &App, account: i32, operation: &'static str, error: &anyhow::Error) {
@@ -1402,7 +1368,7 @@ pub(crate) fn observe(a: &App, account: i32, operation: &'static str, error: &an
     if let Ok(Some(generation)) =
         ACCOUNTS.try_with(|owned| owned.iter().find(|(id, _)| *id == account).cloned())
     {
-        fence_owned(
+        fail_owned(
             &a.owners,
             &[generation],
             operation,
@@ -1435,7 +1401,7 @@ pub(super) fn failure_reporter(
     let registry = a.owners.clone();
     let generations = generations(a, accounts)?;
     Ok(move |error: String| {
-        fence_owned(
+        fail_owned(
             &registry,
             &generations,
             operation,

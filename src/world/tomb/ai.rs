@@ -381,6 +381,13 @@ impl World {
         let phase = e.stage.context("Tomb movement phase missing")?;
         if d::BOSSES.contains(&kind) {
             if let Some(caller) = self.tomb_guard(id) {
+                self.entities
+                    .get_mut(&id)
+                    .unwrap()
+                    .tomb
+                    .as_mut()
+                    .unwrap()
+                    .circling = false;
                 return Ok((
                     Motion::Protect {
                         anchor: Anchor::BoundEntity(caller),
@@ -424,6 +431,12 @@ impl World {
                 "Tomb boss arena anchor disappeared"
             );
             let orbit = e.orbit.context("Tomb boss orbit missing")?;
+            if !e.tomb.as_ref().unwrap().circling {
+                let center = self.entities[&anchor].pos;
+                let e = self.entities.get_mut(&id).unwrap();
+                e.phase = (e.pos.y - center.y).atan2(e.pos.x - center.x);
+                e.tomb.as_mut().unwrap().circling = true;
+            }
             return Ok((
                 Motion::Orbit {
                     anchor: Anchor::BoundEntity(anchor),

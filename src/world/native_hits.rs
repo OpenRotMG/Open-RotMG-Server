@@ -68,14 +68,25 @@ impl World {
                     .clone()
             })
             .collect();
-        for p in self
+        let mut recipients = Vec::new();
+        for (id, p) in self
             .players
-            .values_mut()
-            .filter(|p| p.known.contains(&owner))
+            .iter_mut()
+            .filter(|(_, p)| p.known.contains(&owner))
         {
             if expect_shoot_ack(p, bullets.clone(), &self.clock) {
                 send(p, 19, body.clone());
+                if p.controller == Controller::Human {
+                    recipients.push([p.character.account, p.character.id, *id]);
+                }
             }
+        }
+        if !recipients.is_empty() {
+            crate::audit::combat(
+                serde_json::json!({"event":"volley_attempt","world":self.name,"world_ms":self.now,"identity":null,
+                "values":{"owner":owner,"recipients":recipients,"shots":bullets.iter().map(|b|serde_json::json!([b.id,b.born,b.start.x,b.start.y,b.angle,b.damage])).collect::<Vec<_>>(),
+                "source_kind":bullets.first().map(|b|b.source_kind),"spec":bullets.first().map(|b|&b.spec)}}),
+            );
         }
     }
 
@@ -94,6 +105,7 @@ impl World {
             age <= Duration::from_secs(5),
             protocol("SHOOT acknowledgement timed out")
         );
+        let generations: Vec<_> = bullets.iter().map(|b| (b.owner, b.id, b.born)).collect();
         for bullet in bullets {
             let key = (bullet.owner, bullet.id);
             // ACK and hit reports share the client FIFO, so an ID's next generation cannot steal an older report.
@@ -111,6 +123,10 @@ impl World {
                 );
             }
         }
+        p.audit_fact(id, &self.name, self.now, "shoot_ack", || {
+            serde_json::json!({"client_ms":time,
+            "age_ms":age.as_millis(),"generations":generations})
+        });
         tracing::debug!(
             player = id,
             client_time = time,
@@ -127,6 +143,13 @@ impl World {
             .get_mut(&id)
             .context("hit report player missing")?;
         let Some(report) = p.visible_projectiles.get_mut(&(owner, bullet)) else {
+            p.audit_fact(
+                id,
+                &self.name,
+                self.now,
+                "hit_unknown",
+                || serde_json::json!({"owner":owner,"bullet":bullet}),
+            );
             tracing::warn!(
                 player = id,
                 owner,
@@ -136,6 +159,8 @@ impl World {
             return Ok(());
         };
         if report.consumed || self.now > report.expires {
+            let values = serde_json::json!({"owner":owner,"bullet":bullet,"born_ms":report.bullet.born,
+                "consumed":report.consumed,"expires_ms":report.expires});
             tracing::warn!(
                 player = id,
                 owner,
@@ -143,11 +168,14 @@ impl World {
                 consumed = report.consumed,
                 "duplicate or expired hit report rejected"
             );
+            p.audit_fact(id, &self.name, self.now, "hit_stale", || values);
             return Ok(());
         }
         report.consumed = true;
         let shot = report.bullet.clone();
         if self.safe || !p.character.alive || p.paused || p.departing || p.death_pending {
+            p.audit_fact(id, &self.name, self.now, "hit_inactive", || serde_json::json!({"owner":owner,"bullet":bullet,"born_ms":shot.born,
+                "safe":self.safe,"alive":p.character.alive,"paused":p.paused,"departing":p.departing,"death_pending":p.death_pending}));
             tracing::debug!(
                 player = id,
                 owner,
@@ -207,14 +235,15 @@ impl World {
             & (crate::condition::bit(crate::condition::INVINCIBLE)
                 | crate::condition::bit(crate::condition::STASIS))
             == 0;
-        let damage =
-            crate::condition::damage(b.damage, self.defense(id)?, flags, b.spec.armor_piercing);
+        let defense = self.defense(id)?;
+        let damage = crate::condition::damage(b.damage, defense, flags, b.spec.armor_piercing);
         if affects {
             for (index, duration) in &b.spec.effects {
                 self.apply_condition(id, *index, *duration)?;
             }
         }
         let p = self.players.get_mut(&id).unwrap();
+        let hp_before = p.character.hp;
         let drained = damage.min(p.character.hp).max(0);
         p.character.hp = (p.character.hp - damage).max(0);
         if p.character.hp == 0 {
@@ -238,6 +267,9 @@ impl World {
             out.i16(damage as i16).u8(0).u8(b.id).i32(b.owner);
             send(p, 47, out.0);
         }
+        p.audit_fact(id, &self.name, self.now, "damage", || serde_json::json!({"owner":b.owner,"bullet":b.id,"born_ms":b.born,
+            "source_kind":b.source_kind,"raw_damage":b.damage,"damage":damage,"defense":defense,"conditions":flags,
+            "hp_before":hp_before,"hp_after":p.character.hp,"echo":echo}));
         tracing::debug!(
             player = id,
             owner = b.owner,

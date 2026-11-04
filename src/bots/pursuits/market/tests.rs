@@ -398,3 +398,142 @@ fn vault_stock_is_fetched_for_a_buyer_and_a_full_vault_trades_speed_up() {
         "{quotes:?}"
     );
 }
+
+#[test]
+fn gear_sells_for_any_fair_potions_and_buyers_counter_with_their_own() {
+    // Live: 228 of 228 bot sessions ended unsold; sellers asked one potion kind and buyers only mirrored exact quotes.
+    // Live ad: "wts Verdant Bow for 1 Dexterity".
+    let c = Content::load(Path::new("data")).unwrap();
+    let staff = 2699;
+    let weak = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == 3 && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    let price = bounded_quote(&goods(SPEED, 8), &goods(staff, 1), &c).unwrap();
+
+    // A buyer who wants the bow but carries Speed answers an ad asking for Dexterity.
+    let (c, mut buyer_view) = nexus_peer([SPEED; 8]);
+    buyer_view.character.class = 775;
+    buyer_view.character.items[0] = weak;
+    buyer_view.character.base_stats[4] = c.classes[&buyer_view.character.class].caps[4];
+    let mut buyer = Market {
+        name: "Buyer".into(),
+        ..Market::default()
+    };
+    assert!(
+        buyer.wanted(&buyer_view, &c, None, staff).unwrap() > 0,
+        "the upgrade is wanted"
+    );
+    let asked = bounded_quote(&goods(DEX, 8), &goods(staff, 1), &c).unwrap()[0].clone();
+    let ad = wts(&[goods(staff, 1), asked], &c);
+    assert!(
+        buyer
+            .receive(&peer_said(&ad), &buyer_view, &c, None)
+            .unwrap()
+    );
+    let reply = buyer.outgoing.clone().expect("a counter in own potions");
+    assert_eq!(reply.text, format!("nty {}", wts(&price, &c)));
+
+    // A seller with a spare bow, maxed in Speed, accepts that fair Speed payment.
+    let (c, mut seller_view) = nexus_peer([staff, -1, -1, -1, -1, -1, -1, -1]);
+    seller_view.character.base_stats[4] = c.classes[&seller_view.character.class].caps[4];
+    let mut seller = Market {
+        name: "Seller".into(),
+        ..Market::default()
+    };
+    assert!(
+        seller
+            .receive(&peer_said(&wts(&price, &c)), &seller_view, &c, None)
+            .unwrap()
+    );
+    assert!(seller.incoming.is_some(), "fair potions buy spare gear");
+}
+
+#[test]
+fn a_buyer_fetches_saved_potions_from_its_vault_for_a_wanted_item() {
+    // Live: 300 of 300 wanted ads in 46 minutes found no potions carried; they were saved in the Vault.
+    let c = Content::load(Path::new("data")).unwrap();
+    let bow = 2699;
+    let weak = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == 3 && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    let asked = bounded_quote(&goods(DEX, 8), &goods(bow, 1), &c).unwrap()[0].clone();
+    let (c, mut v) = nexus_peer([-1; 8]);
+    v.character.class = 775;
+    v.character.items[0] = weak;
+    v.character.base_stats[4] = c.classes[&v.character.class].caps[4];
+    let mut buyer = Market {
+        name: "Buyer".into(),
+        vault: Some(vec![SPEED; 8]),
+        // Live: 0 of 893 wanted ads fetched; Nexus bots hear ads while their own market session is open.
+        session: Some(MarketSession {
+            anchor: (1, 1),
+            until: u64::MAX,
+            next_move: 0,
+            destination: None,
+        }),
+        ..Market::default()
+    };
+    assert!(buyer.wanted(&v, &c, None, bow).unwrap() > 0);
+    assert!(
+        buyer
+            .receive(&peer_said(&wts(&[goods(bow, 1), asked], &c)), &v, &c, None)
+            .unwrap()
+    );
+    let offer = buyer.quote.clone().expect("a purchase paid from the Vault");
+    assert_eq!((offer[0].kind, offer[1].kind), (SPEED, bow));
+    assert!(buyer.sought && buyer.outgoing.is_none());
+    assert_eq!(
+        buyer.quote(&v, &c, None).unwrap(),
+        Some(offer),
+        "the session keeps the purchase"
+    );
+}
+
+#[test]
+fn a_bot_uses_potions_saved_in_any_vault_chest() {
+    // Live: account 2233 kept 8 Speed in chests 1-3 and found no funds in 238 wanted ads; bots read only chest 0.
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    let mut chest = v.objects.remove(0);
+    let mut gear = crate::bots::quest_tests::fixture().1.objects.remove(0);
+    v.objects.clear();
+    v.map.name = "Vault".into();
+    v.character.items[4..].fill(-1);
+    v.character.class = 775;
+    v.character.items[0] = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == 3 && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    chest.kind = 0x504;
+    chest.position = v.position;
+    gear.kind = 0x504;
+    gear.position = v.position;
+    gear.id = 41;
+    gear.contents = vec![2653; 8];
+    chest.id = 42;
+    chest.contents = vec![SPEED, SPEED, SPEED, -1, -1, -1, -1, -1];
+    v.objects.extend([gear, chest]);
+    let mut m = Market {
+        quote: Some([goods(SPEED, 3), goods(2699, 1)]),
+        preparing: true,
+        ..Market::default()
+    };
+    m.observe(&v);
+    // Live: the remembered multi-chest Vault failed drain validation for 11 bots and blocked the deploy.
+    m.validate(v.session.account).unwrap();
+    assert_eq!(m.count(&v, SPEED), 3);
+    assert!(!m.vault_full());
+    let grid = Grid::terrain(&v);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+    let d = m.decide(&v, &c, None, &grid, &mut rng).unwrap().unwrap();
+    assert!(
+        matches!(&d.item, Some(Action::Swap { from, .. }) if from.object == 42 && from.kind == SPEED)
+    );
+}
