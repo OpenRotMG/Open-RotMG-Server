@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {deflateSync} from 'node:zlib';
-import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver} from '../examples/testing/realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival} from '../examples/testing/realm-earned-core.mjs';
 const roots=Array.from({length:49},(_,i)=>i+1),census={message:'finite Realm closure roster bound',origin:-3,heroes:49};
 const credit=(hero,remaining,now=100)=>({message:'qualifying Realm hero defeated',origin:-3,hero,remaining,now});
 const waiting=source=>({message:'quest defeat earned a pending Realm event',source}),admission=(source,entity)=>({message:'quest defeat summoned a Realm event',source,entity});
@@ -31,6 +31,10 @@ test('visible combat targets retain protected phases and prefer a real unprotect
 });
 test('original cohort identity rejects a mismatched class or controller',()=>{
   const spec={class:0x310,level:20,stats:[670,385,50,25,50,50,40,75],equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1)},v={actor:1,controller:'native',lifecycle:{alive:true,death_pending:false,quarantined:false},session:{account:2,character:3},character:{class:0x310,level:20,hp:670,mp:385,base_stats:[...spec.stats],items:[...spec.equipment,...spec.backpack],inventory_revision:4}};assert.equal(originalIdentity('fighter',spec,v).character,3);assert.throws(()=>originalIdentity('fighter',spec,{...v,controller:'game_bot'}));assert.throws(()=>originalIdentity('fighter',spec,{...v,character:{...v.character,class:0x30e}}));
+});
+test('Castle arrival uses the actual nested inspect view and original living identity',()=>{
+  const original={world:'Realm',session:{account:2,character:3}},view={map:{name:"Oryx's Castle"},session:{account:2,character:3},lifecycle:{alive:true}};
+  assertCastleArrival(view,original);assert.throws(()=>assertCastleArrival({...view,world:"Oryx's Castle",map:{name:'Realm'}},original));assert.throws(()=>assertCastleArrival({...view,session:{account:2,character:4}},original));assert.throws(()=>assertCastleArrival({...view,lifecycle:{alive:false}},original));
 });
 test('actual TEXT framing preserves RC4 across fragments and consumes cleanText',()=>{
   const utf=s=>{const b=Buffer.from(s),n=Buffer.alloc(2);n.writeUInt16BE(b.length);return Buffer.concat([n,b]);},body=Buffer.concat([utf('#Oryx the Mad God'),Buffer.alloc(9),utf(''),utf('I HAVE CLOSED THIS REALM!'),utf('')]);

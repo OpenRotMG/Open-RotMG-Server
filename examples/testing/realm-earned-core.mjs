@@ -49,6 +49,9 @@ export function originalIdentity(role,spec,v){
   assert.deepEqual(v.character.items,[...spec.equipment,...spec.backpack]);
   return {role,actor:v.actor,account:v.session.account,character:v.session.character,class:spec.class,items:v.character.items,revision:v.character.inventory_revision,initial:v};
 }
+export function assertCastleArrival(view,original){
+  assert.equal(view.map.name,"Oryx's Castle");assert.equal(view.session.character,original.session.character);assert.equal(view.session.account,original.session.account);assert(view.lifecycle.alive);
+}
 export function localTargets(objects,family,position){
   const candidates=objects.filter(e=>family.some(f=>f.id===e.id)&&e.hp>0&&Math.hypot(e.position.x-position.x,e.position.y-position.y)<=7),mask=(1<<23)|(1<<24)|(1<<21);
   for(const e of candidates)assert(Number.isInteger(e.condition_mask)&&e.condition_mask>=-2147483648&&e.condition_mask<=2147483647,'Combat target requires its observed int32 condition mask');

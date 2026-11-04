@@ -3,7 +3,7 @@ import {readFile,writeFile,readdir,realpath,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
-import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver} from './realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival} from './realm-earned-core.mjs';
 
 export const realmSeed=1344;
 export const fixture={class:0x310,level:20,seed:1344,world:-2,position:{x:78.5,y:42.5},equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
@@ -96,7 +96,7 @@ export async function run(fighter){
   const closing='I HAVE CLOSED THIS REALM! YOU WILL NOT LIVE TO SEE THE LIGHT OF DAY!';assert(wire[0].receiver.texts.some(t=>t.name==='#Oryx the Mad God'&&t.text===closing),'Actual fighter did not receive closure TEXT');
   await act(fighter,{keys:[],duration_ms:3000},'earned-closed-realm');
   for(let n=0;n<14&&(await fighter.observe()).session.world===realm;n++)await act(fighter,{keys:[],duration_ms:10000});
-  const castle=await save('earned-Castle');assert.equal(castle.world,"Oryx's Castle");assert.equal(castle.session.character,first.session.character);assert(castle.lifecycle.alive);
+  const castle=await save('earned-Castle');assertCastleArrival(castle,first);
   await logs();const sealed=events.filter(e=>e.origin===realm&&e.message==='Realm closure deadline reached'&&typeof e.stage==='string'&&e.stage.startsWith('Sealed')),transfers=events.filter(e=>e.origin===realm&&e.message==='Realm closure deadline reached'&&e.stage==='Transferring');assert.equal(sealed.length,1);assert.equal(transfers.length,1);assert.equal(sealed[0].stage,`Sealed { deadline: ${completed.last.now+128000} }`);assert(sealed[0].now>=completed.last.now+120000&&transfers[0].now>=completed.last.now+128000);
   for(const text of ['MY MINIONS HAVE FAILED ME!','BUT NOW YOU SHALL FEEL MY WRATH','COME MEET YOUR DOOM AT THE WALLS OF MY CASTLE!'])assert(wire[0].receiver.texts.some(t=>t.name==='#Oryx the Mad God'&&t.text===text),'Missing actual closure TEXT '+text);
   for(let n=0;n<8&&!events.some(e=>e.origin===realm&&e.message==='safe collective departure completed; replacement published');n++)await act(fighter,{keys:[],duration_ms:500});
