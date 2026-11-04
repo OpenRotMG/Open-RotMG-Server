@@ -191,6 +191,10 @@ impl AccountSave {
             self.characters.len() <= 10000 && self.pictures.len() <= pictures::MAX_PER_ACCOUNT,
             "account save capacity exceeded"
         );
+        ensure!(
+            self.collections.iter().all(|(_, time)| *time > 0),
+            "invalid collection timestamp"
+        );
         let mut ids = BTreeSet::new();
         for row in &self.characters {
             let ch = &row.character;
@@ -332,14 +336,19 @@ pub(crate) fn export(db: &Connection, account: i32, base: [i32; 8]) -> Result<Ac
             ))
         },
     )? {
-        let mut ch = strict_character(&raw, base)?;
+        let receipt = death_awards::decode_receipt(&receipt)?;
+        let mut ch = receipt.character(&raw, base)?;
+        ensure!(
+            crate::backup::known_fields(&serde_json::from_str(&raw)?, &serde_json::to_value(&ch)?),
+            "unknown archived character field"
+        );
         ch.account = origin.account;
         deaths.push(Death {
             character: ch,
             killed_by,
             died_at,
             equipment_fame,
-            receipt: death_awards::decode_receipt(&receipt)?,
+            receipt,
         });
     }
     let (fame_balance, fame_earned) = db.query_row(
@@ -454,13 +463,21 @@ pub struct ImportResult {
     pub disclosure: &'static str,
 }
 pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResult> {
-    let existing: Option<i32> = db
-        .query_row(
+    let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    ensure!(
+        matches!(version, 21 | 22),
+        "unsupported local preview schema {version}"
+    );
+    let existing: Option<i32> = if version == 21 {
+        None
+    } else {
+        db.query_row(
             "SELECT account FROM account_origins WHERE namespace=?1 AND source_account=?2",
             params![save.origin.namespace, save.origin.account],
             |r| r.get(0),
         )
-        .optional()?;
+        .optional()?
+    };
     let next: i32 = db.query_row("SELECT coalesce(max(id),0)+1 FROM accounts", [], |r| {
         r.get(0)
     })?;
@@ -493,6 +510,35 @@ pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResul
         replaced: existing.is_some(),
         disclosure: DISCLOSURE,
     })
+}
+fn retained_trade_participation(db: &Connection, account: i32) -> Result<bool> {
+    let owned: BTreeSet<i32> = rows(
+        db,
+        "SELECT id FROM characters WHERE account=?1",
+        account,
+        |r| r.get(0),
+    )?
+    .into_iter()
+    .collect();
+    let mut q = db.prepare("SELECT owners,writes FROM trade_transactions")?;
+    for row in q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        let (owners, writes) = row?;
+        let owners: Vec<i32> = serde_json::from_str(&owners)?;
+        let value: serde_json::Value = serde_json::from_str(&writes)?;
+        let writes: Vec<InventoryWrite> = serde_json::from_value(value.clone())?;
+        ensure!(
+            crate::backup::known_fields(&value, &serde_json::to_value(&writes)?),
+            "unknown retained trade write field"
+        );
+        if owners.contains(&account)
+            || writes
+                .iter()
+                .any(|w| w.account == account || owned.contains(&w.id))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 pub(super) fn import(
     db: &mut Connection,
@@ -533,6 +579,10 @@ pub(super) fn import(
             .context("character IDs exhausted")?;
     }
     if plan.replaced {
+        ensure!(
+            !retained_trade_participation(&tx, account)?,
+            "replacement cannot preserve retained local trade history; retain state and backup, use a separate local save or full backup restore"
+        );
         let related:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM guild_members WHERE account=?1) OR EXISTS(SELECT 1 FROM discord_links WHERE account=?1) OR EXISTS(SELECT 1 FROM discord_gold_grants WHERE account=?1) OR EXISTS(SELECT 1 FROM discord_realm_close_tokens WHERE account=?1)",[account],|r|r.get(0))?;
         ensure!(
             !related,
@@ -760,21 +810,30 @@ pub(crate) fn verify_database(db: &Connection, content: &Content) -> Result<()> 
     );
     if version == 22 {
         migrate(db, 22)?;
+    } else {
+        let unexpected:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN ('save_namespace','account_origins','portable_assists','portable_consumed_levels','portable_history'))",[],|r|r.get(0))?;
+        ensure!(
+            !unexpected,
+            "schema-21 snapshot contains schema-22 portable metadata; restore the matching schema instead of ignoring it"
+        );
     }
+    check_required_state(db, version)?;
     death_awards::check_schema(db, version)?;
-    gold::check_schema(db, 22)?;
-    discord_gold::check_schema(db, 22)?;
-    guilds::migrate(db, 22)?;
-    email::migrate(db, 22)?;
-    pictures::migrate(db, 22)?;
+    gold::check_schema(db, version)?;
+    discord_gold::check_schema(db, version)?;
+    guilds::migrate(db, version)?;
+    email::migrate(db, version)?;
+    pictures::migrate(db, version)?;
+    character_slots::migrate(db, version)?;
+    vaults::migrate(db, version)?;
+    let bad_collection: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM collections WHERE typeof(found_at)<>'integer' OR found_at<=0)",
+        [],
+        |r| r.get(0),
+    )?;
+    ensure!(!bad_collection, "invalid collection timestamp");
     let base = content.classes.get(&WIZARD).context("Wizard missing")?.base;
     death_awards::validate_state(db, base)?;
-    let mut q = db.prepare("SELECT id FROM accounts")?;
-    for account in q.query_map([], |r| r.get::<_, i32>(0))? {
-        let account = account?;
-        character_slots::read(db, account)?;
-        vaults::read(db, account)?;
-    }
     let mut q = db.prepare("SELECT stats,items,revision,alive FROM characters")?;
     for row in q.query_map([], |r| {
         Ok((

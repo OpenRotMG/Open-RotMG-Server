@@ -33,6 +33,8 @@ def check(binary, data, directory, revision):
         raise RuntimeError('Release community payload missing from backup')
     if bundle['schema'] != 22:
         raise RuntimeError('Release backup is not schema22')
+    if any(not bundle['game'][table] for table in backup.PORTABLE_TABLES):
+        raise RuntimeError('Release portable metadata fixture must be nonempty in every table')
     if any(marker in gzip.decompress(archive.read_bytes()) for marker in [b'BACKUP_FIXTURE_SECRET', b'EMAIL_BACKUP_PRIVATE_CANARY', b'RESET_BACKUP_PRIVATE_CANARY']):
         raise RuntimeError('Release backup exported a login identity')
     restored = directory / 'restored'
@@ -40,6 +42,8 @@ def check(binary, data, directory, revision):
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
     if backup.snapshot(restored / 'game.db', backup.RELOADED_GAME) != bundle['game']:
         raise RuntimeError('Release loading changed restored gameplay records')
+    print(json.dumps({'event': 'release_portable_metadata_roundtrip_passed',
+                      'rows': {table: len(bundle['game'][table]) for table in backup.PORTABLE_TABLES}}))
     result = subprocess.run([str(binary), '--backup-exercise-vault', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError('Release restored vault exercise failed: ' + result.stderr.strip())
@@ -94,6 +98,34 @@ def check(binary, data, directory, revision):
     if after_art != expected:
         raise RuntimeError('Restored art exercise changed existing artwork or unrelated rows')
     backup.validate(dict(bundle, game=after_art))
+    # Isolate retained trade history from integration capabilities before exercising replacement.
+    with closing(sqlite3.connect(written / 'game.db')) as db:
+        source_unchanged = list(db.iterdump())
+    trade_state = directory / 'retained-trade'
+    trade_state.mkdir(mode=0o700)
+    trade_database = trade_state / 'game.db'
+    subprocess.run([str(binary), '--local-save', 'snapshot', str(written), str(data), str(trade_database)], check=True)
+    with closing(sqlite3.connect(trade_database)) as db, db:
+        for table in ['discord_recovery', 'discord_links', 'discord_codes', 'discord_gold_grants', 'discord_realm_close_tokens']:
+            db.execute('DELETE FROM ' + table + ' WHERE account=1')
+    portable = directory / 'retained-trade-account.json'
+    subprocess.run([str(binary), '--local-save', 'export', str(trade_state), str(data), '1', str(portable)], check=True)
+    with closing(sqlite3.connect(trade_database)) as db:
+        unchanged = list(db.iterdump())
+    refused = subprocess.run([str(binary), '--local-save', 'replace', str(trade_state), str(data), str(portable), str(directory / 'pre-trade-refusal.db')],
+                             input='independent-local-password\n', text=True, capture_output=True)
+    if refused.returncode == 0 or 'retained local trade history' not in refused.stderr:
+        raise RuntimeError('Replacement failed to refuse immutable target trade history')
+    with closing(sqlite3.connect(trade_database)) as db:
+        if list(db.iterdump()) != unchanged:
+            raise RuntimeError('Refused trade replacement mutated local credentials, receipts or progress')
+    preserved = backup.export(trade_database, discord, directory / 'after-trade-refusal.gz', version, version, version)
+    if preserved['game'] != backup.snapshot(trade_database, backup.RELOADED_GAME):
+        raise RuntimeError('Refused trade replacement broke global backup validity')
+    print(json.dumps({'event': 'release_retained_trade_refusal_preserved_global_backup', 'unchanged': True}))
+    with closing(sqlite3.connect(written / 'game.db')) as db:
+        if list(db.iterdump()) != source_unchanged:
+            raise RuntimeError('Local trade replacement exercise mutated its export source')
     print(json.dumps({'event': 'release_backup_contract_passed', 'revision': revision}))
 
 

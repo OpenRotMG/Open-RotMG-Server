@@ -7,7 +7,25 @@ fn root() -> PathBuf {
     root
 }
 fn dump(db: &Connection) -> Vec<String> {
-    let mut result = Vec::new();
+    let mut result = vec![format!(
+        "user_version={}",
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
+            .unwrap()
+    )];
+    let mut schema = db
+        .prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name")
+        .unwrap();
+    for row in schema
+        .query_map([], |r| {
+            Ok((0..4)
+                .map(|i| format!("{:?}", r.get_ref(i).unwrap()))
+                .collect::<Vec<_>>()
+                .join("|"))
+        })
+        .unwrap()
+    {
+        result.push(row.unwrap());
+    }
     let mut q = db
         .prepare("SELECT name,sql FROM sqlite_schema WHERE type='table' ORDER BY name")
         .unwrap();
@@ -937,6 +955,353 @@ async fn account_save_full_restore_process_cuts_preserve_old_or_complete_snapsho
         drop(reopened);
     }
     drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_snapshot_required_schema_rejected_before_restore_without_repair() {
+    let root = root();
+    let content = Content::load(Path::new("data")).unwrap();
+    let baseline = root.join("baseline.db");
+    let source = Store::open(&baseline, &content).unwrap();
+    source.list("snapshot-source".into()).await.unwrap();
+    let state = root.join("destination");
+    std::fs::create_dir(&state).unwrap();
+    let target = Store::open(&state.join("game.db"), &content).unwrap();
+    target.list("keep-destination".into()).await.unwrap();
+    let source_before = dump(&Connection::open(&baseline).unwrap());
+    let target_db = Connection::open(state.join("game.db")).unwrap();
+    let before = dump(&target_db);
+    for version in [21, 22] {
+        let mut damages = vec![
+            "DROP TRIGGER character_slot_insert",
+            "DROP TRIGGER character_slot_update",
+            "DROP TRIGGER character_slot_capacity",
+            "DROP INDEX living_characters_by_account",
+            "ALTER TABLE vaults RENAME COLUMN revision TO invalid_revision",
+            "DROP TABLE trade_transactions",
+            "DROP TABLE bot_minds",
+            "DROP TABLE account_lists",
+            "DROP TABLE update_feed",
+            "DROP TABLE email_password_resets",
+            "INSERT INTO collections VALUES(1,2594,0)",
+            "INSERT INTO collections VALUES(1,2594,-1)",
+            "INSERT INTO collections VALUES(1,2594,1.5)",
+            "INSERT INTO collections VALUES(1,2594,'invalid-time')",
+        ];
+        if version == 21 {
+            damages.push("CREATE TABLE account_origins(ignored TEXT)");
+        }
+        for (index, damage) in damages.iter().enumerate() {
+            let bad = root.join(format!("bad-{version}-{index}.db"));
+            crate::account_save::snapshot(&baseline, &bad, &content).unwrap();
+            let db = Connection::open(&bad).unwrap();
+            if version == 21 {
+                db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; PRAGMA user_version=21;").unwrap();
+            }
+            db.execute_batch(damage).unwrap();
+            let unchanged = dump(&db);
+            drop(db);
+            let bytes = std::fs::read(&bad).unwrap();
+            let args = vec![
+                "--local-save".into(),
+                "verify-snapshot".into(),
+                bad.to_str().unwrap().into(),
+                "data".into(),
+            ];
+            assert!(
+                crate::account_save::run(&args).await.is_err(),
+                "accepted {version}: {damage}"
+            );
+            let prebackup = root.join(format!("must-not-create-{version}-{index}.db"));
+            let args = vec![
+                "--local-save".into(),
+                "restore".into(),
+                state.to_str().unwrap().into(),
+                "data".into(),
+                bad.to_str().unwrap().into(),
+                prebackup.to_str().unwrap().into(),
+            ];
+            assert!(
+                crate::account_save::run(&args).await.is_err(),
+                "restored {version}: {damage}"
+            );
+            assert!(!prebackup.exists());
+            assert_eq!(dump(&target_db), before);
+            assert_eq!(dump(&Connection::open(&bad).unwrap()), unchanged);
+            assert_eq!(std::fs::read(&bad).unwrap(), bytes);
+        }
+    }
+    assert_eq!(dump(&Connection::open(&baseline).unwrap()), source_before);
+    drop(target);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_migrated_legacy_paid_death_exports_without_lifetime_but_modern_stays_strict()
+{
+    let root = root();
+    let content = Content::load(Path::new("data")).unwrap();
+    let path = root.join("source.db");
+    let source = Store::open(&path, &content).unwrap();
+    let account = source
+        .register(
+            "legacy-person".into(),
+            "legacy@example.test".into(),
+            "legacy-password".into(),
+        )
+        .await
+        .unwrap();
+    let mut ch = source
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    ch.fame = 19;
+    ch.alive = false;
+    ch.hp = 0;
+    source
+        .death(ch.clone(), "Historical death".into())
+        .await
+        .unwrap();
+    drop(source);
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; UPDATE characters SET stats=json_remove(stats,'$.lifetime'); UPDATE deaths SET snapshot=json_remove(snapshot,'$.lifetime'); UPDATE account_fame SET balance=19,earned=19; PRAGMA user_version=16;").unwrap();
+    let source = Store::open(&path, &content).unwrap();
+    let before = dump(&db);
+    let raw: String = db
+        .query_row("SELECT snapshot FROM deaths", [], |r| r.get(0))
+        .unwrap();
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .unwrap()
+            .get("lifetime")
+            .is_none()
+    );
+    let save = source.export_account_save(account).await.unwrap();
+    assert_eq!(dump(&db), before);
+    assert_eq!(
+        save.deaths[0].receipt.policy,
+        death_awards::ReceiptPolicy::LegacyPaid
+    );
+    assert_eq!(save.deaths[0].receipt.total, 19);
+    assert_eq!(
+        save.deaths[0].character.lifetime.completeness,
+        LifetimeCompleteness::KnownOnly
+    );
+    let local = Store::open(&root.join("local.db"), &content).unwrap();
+    local.list("other-local".into()).await.unwrap();
+    let result = local
+        .import_account_save(save.clone(), "local-password".into(), false)
+        .await
+        .unwrap();
+    let actual = local.export_account_save(result.account).await.unwrap();
+    assert_eq!(actual.deaths[0].receipt, save.deaths[0].receipt);
+    assert_eq!(
+        actual.deaths[0].character.lifetime,
+        save.deaths[0].character.lifetime
+    );
+    assert_eq!((actual.fame_balance, actual.fame_earned), (19, 19));
+    db.execute(
+        "UPDATE deaths SET receipt=json_set(receipt,'$.policy','equipment_only')",
+        [],
+    )
+    .unwrap();
+    let unchanged = dump(&db);
+    assert!(source.export_account_save(account).await.is_err());
+    assert_eq!(dump(&db), unchanged);
+    db.execute("UPDATE deaths SET receipt=json_set(receipt,'$.policy','legacy_paid'),snapshot=json_set(snapshot,'$.unknown_archive_field',1)",[]).unwrap();
+    let unchanged = dump(&db);
+    assert!(source.export_account_save(account).await.is_err());
+    assert_eq!(dump(&db), unchanged);
+    drop(local);
+    drop(source);
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_replacement_retained_trade_participation_refused_but_unrelated_trade_retained()
+ {
+    let (root, content, source, save) = fixture().await;
+    let source_before = dump(&Connection::open(root.join("source/game.db")).unwrap());
+    let local = Store::open(&root.join("local.db"), &content).unwrap();
+    let mut peers = Vec::new();
+    for n in 0..2 {
+        let id = local.list(format!("trade-peer-{n}")).await.unwrap().id;
+        peers.push(
+            local
+                .create(id, content.get(WIZARD).unwrap())
+                .await
+                .unwrap(),
+        );
+    }
+    let imported = local
+        .import_account_save(save.clone(), "local-password".into(), false)
+        .await
+        .unwrap();
+    let write = |ch: &Character| InventoryWrite {
+        id: ch.id,
+        account: ch.account,
+        revision: ch.revision,
+        items: ch.items.clone(),
+    };
+    local
+        .exchange_trade("a".repeat(32), peers.iter().map(write).collect(), None)
+        .await
+        .unwrap();
+    let db = Connection::open(root.join("local.db")).unwrap();
+    let unrelated: String = db
+        .query_row("SELECT writes FROM trade_transactions", [], |r| r.get(0))
+        .unwrap();
+    local
+        .import_account_save(save.clone(), "local-password".into(), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        db.query_row("SELECT writes FROM trade_transactions", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        unrelated
+    );
+    let left = local.load(peers[0].account, peers[0].id).await.unwrap();
+    let right = local.list_id(imported.account).await.unwrap().characters[0].clone();
+    local
+        .exchange_trade("b".repeat(32), vec![write(&left), write(&right)], None)
+        .await
+        .unwrap();
+    let before = dump(&db);
+    let error = local
+        .import_account_save(save, "replace-password".into(), true)
+        .await
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("retained local trade history"));
+    assert_eq!(dump(&db), before);
+    for raw in rows(
+        &db,
+        "SELECT writes FROM trade_transactions WHERE ?1>0",
+        1,
+        |r| r.get::<_, String>(0),
+    )
+    .unwrap()
+    {
+        for w in serde_json::from_str::<Vec<InventoryWrite>>(&raw).unwrap() {
+            assert!(local.load(w.account, w.id).await.is_ok());
+        }
+    }
+    drop(local);
+    assert_eq!(
+        dump(&Connection::open(root.join("source/game.db")).unwrap()),
+        source_before
+    );
+    drop(source);
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_schema21_preview_readonly_login_and_collision_checks() {
+    let (root, content, source, mut save) = fixture().await;
+    let source_before = dump(&Connection::open(root.join("source/game.db")).unwrap());
+    let state = root.join("local");
+    std::fs::create_dir(&state).unwrap();
+    let path = state.join("game.db");
+    let local = Store::open(&path, &content).unwrap();
+    local
+        .register(
+            "preview-owner".into(),
+            "other@local.invalid".into(),
+            "old-password".into(),
+        )
+        .await
+        .unwrap();
+    drop(local);
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; PRAGMA user_version=21;").unwrap();
+    let file = root.join("save.json");
+    std::fs::write(&file, serde_json::to_vec(&save).unwrap()).unwrap();
+    let before = dump(&db);
+    let args = vec![
+        "--local-save".into(),
+        "preview".into(),
+        state.to_str().unwrap().into(),
+        "data".into(),
+        file.to_str().unwrap().into(),
+    ];
+    assert!(crate::account_save::run(&args).await.unwrap());
+    assert_eq!(dump(&db), before);
+    let plan = preview(&db, &save).unwrap();
+    assert_eq!(plan.login, "player-2@local.invalid");
+    assert!(!plan.replaced);
+    db.execute("UPDATE credentials SET email='player-2@local.invalid'", [])
+        .unwrap();
+    let before = dump(&db);
+    assert!(crate::account_save::run(&args).await.is_err());
+    assert_eq!(dump(&db), before);
+    db.execute("UPDATE credentials SET email='other@local.invalid'", [])
+        .unwrap();
+    save.name_chosen = true;
+    save.name = "Guest1".into();
+    std::fs::write(&file, serde_json::to_vec(&save).unwrap()).unwrap();
+    let before = dump(&db);
+    assert!(crate::account_save::run(&args).await.is_err());
+    assert_eq!(dump(&db), before);
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
+            .unwrap(),
+        21
+    );
+    drop(db);
+    assert_eq!(
+        dump(&Connection::open(root.join("source/game.db")).unwrap()),
+        source_before
+    );
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_collection_timestamp_rejected_without_destination_mutation() {
+    let (root, content, source, save) = fixture().await;
+    let source_before = dump(&Connection::open(root.join("source/game.db")).unwrap());
+    let local = Store::open(&root.join("local.db"), &content).unwrap();
+    local.list("keep-local".into()).await.unwrap();
+    let db = Connection::open(root.join("local.db")).unwrap();
+    let before = dump(&db);
+    for time in [0, -1] {
+        let mut bad = save.clone();
+        bad.collections = vec![(0xa22, time)];
+        let bytes = serde_json::to_vec(&bad).unwrap();
+        assert!(AccountSave::decode(&bytes).is_err());
+        assert!(
+            local
+                .import_account_save(bad, "local-password".into(), false)
+                .await
+                .is_err()
+        );
+        assert_eq!(dump(&db), before);
+    }
+    let mut valid = save;
+    valid.collections = vec![(0xa22, 1)];
+    let imported = local
+        .import_account_save(valid, "local-password".into(), false)
+        .await
+        .unwrap();
+    assert_eq!(
+        local
+            .export_account_save(imported.account)
+            .await
+            .unwrap()
+            .collections,
+        vec![(0xa22, 1)]
+    );
+    drop(local);
+    assert_eq!(
+        dump(&Connection::open(root.join("source/game.db")).unwrap()),
+        source_before
+    );
     drop(source);
     std::fs::remove_dir_all(root).unwrap();
 }
