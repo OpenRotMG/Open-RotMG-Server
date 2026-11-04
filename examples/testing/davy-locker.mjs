@@ -53,7 +53,7 @@ export async function run(game){
   await save('peer-purple-discovery',peer);
   // The admission portal lasts one minute; reconnect before traversing the reconstructed layout.
   {
-      const browser=config.native[0],cdp=await connect({port:browser.port,target:browser.target,url:config.origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
+      const browser=config.native[0],cdp=await connect({port:browser.port,target:browser.target,owner:browser.owner,url:config.origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs')});
       try{
         assert((await game.observe()).paused,'Reconnect setup requires the runner pause boundary');
         const previous=await cdp.eval('performance.timeOrigin'),deadline=Date.now()+30000;await cdp.call('Page.reload',{});
