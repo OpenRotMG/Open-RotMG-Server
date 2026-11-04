@@ -39,6 +39,9 @@ pub(super) fn attack_cooldown(
 }
 
 pub(super) fn goto(p: &mut Player, own: bool, body: Vec<u8>) {
+    if own && p.controller == Controller::Human {
+        p.audit_motion.boundary();
+    }
     let Some(output) = &p.tx else { return };
     if p.goto_acks.len() == ACK_LIMIT {
         tracing::error!(
