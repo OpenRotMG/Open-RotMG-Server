@@ -135,8 +135,9 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
             config.realm_count,
         )?,
     };
-    if testing.is_some() {
+    if let Some(testing) = &testing {
         directory.clock.set_paused(true);
+        testing.bind_shared_active_clock(&directory.clock)?;
     }
     let world = world::Handle::supervised(directory, supervisor);
     let control = if dev_control {

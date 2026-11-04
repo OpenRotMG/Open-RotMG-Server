@@ -611,6 +611,7 @@ impl Directory {
             tracing::info!(
                 origin,
                 replacement,
+                directory_tick = self.tick,
                 "safe collective departure completed; replacement published"
             );
         }
@@ -808,6 +809,15 @@ impl Directory {
             "Realm closed; collective Castle route and fresh Realm installed"
         );
         Ok(())
+    }
+    pub(crate) fn native_resurrection_waiting(&self, player: i32, origin: i32) -> bool {
+        self.prepared_seed.is_some()
+            && self.endgame.forced.get(&player).is_some_and(|route| {
+                route.origin == origin
+                    && route.destination == -2
+                    && route.frozen
+                    && !route.select_when_paused
+            })
     }
     pub(super) fn return_to_nexus(&mut self, player: i32, origin: i32, frozen: bool) {
         self.endgame.forced.insert(
