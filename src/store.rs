@@ -53,6 +53,15 @@ impl std::error::Error for Rejected {}
 
 #[derive(Debug)]
 pub struct InvalidCredentials;
+
+#[derive(Debug)]
+pub(crate) struct AuthenticationBusy;
+impl std::fmt::Display for AuthenticationBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("account service busy; retry shortly")
+    }
+}
+impl std::error::Error for AuthenticationBusy {}
 impl std::fmt::Display for InvalidCredentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("invalid email or password")

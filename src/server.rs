@@ -80,6 +80,7 @@ impl App {
 }
 use tokio::sync::mpsc;
 mod account_actions;
+mod account_export;
 pub(crate) mod email;
 #[cfg(test)]
 pub(crate) use account_actions::tests::fixture as test_app;
@@ -3345,6 +3346,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
             a.clone(),
             lifecycle::drain::http_entry,
         ))
+        .merge(account_export::routes(&a))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
         .route("/realmdex/stats", get(realmdex_stats))
