@@ -31,14 +31,14 @@ def check(binary, data, directory, revision):
     bundle = backup.export(written / 'game.db', discord, archive, version, version, version)
     if len(bundle['game']['bot_minds']) != 2 or len(bundle['game']['trade_transactions']) != 1:
         raise RuntimeError('Release community payload missing from backup')
-    if bundle['schema'] != 21:
-        raise RuntimeError('Release backup is not schema21')
+    if bundle['schema'] != 22:
+        raise RuntimeError('Release backup is not schema22')
     if any(marker in gzip.decompress(archive.read_bytes()) for marker in [b'BACKUP_FIXTURE_SECRET', b'EMAIL_BACKUP_PRIVATE_CANARY', b'RESET_BACKUP_PRIVATE_CANARY']):
         raise RuntimeError('Release backup exported a login identity')
     restored = directory / 'restored'
     backup.restore(archive, restored)
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
-    if backup.snapshot(restored / 'game.db', backup.RELOADED_GAME) != bundle['game']:
+    if backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME) != bundle['game']:
         raise RuntimeError('Release loading changed restored gameplay records')
     result = subprocess.run([str(binary), '--backup-exercise-vault', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
     if result.returncode:
@@ -46,7 +46,7 @@ def check(binary, data, directory, revision):
     if json.loads(result.stdout) != {'exercised_vault_chests': 2, 'transfers': 1, 'withdrawals': 1, 'deposits': 1, 'items_conserved': True}:
         raise RuntimeError('Release restored vault exercise returned an invalid receipt')
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
-    before_death = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+    before_death = backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME)
     result = subprocess.run([str(binary), '--backup-exercise-death', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError('Release restored death exercise failed: ' + result.stderr.strip())
@@ -63,7 +63,7 @@ def check(binary, data, directory, revision):
     if type(character) is not int or receipt != {'base_fame': 19, 'equipment_fame': 1, 'total_fame': 20}:
         raise RuntimeError('Release restored death exercise returned an invalid receipt')
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
-    paid = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+    paid = backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME)
     backup.validate(dict(bundle, game=paid))
     expected = deepcopy(before_death)
     created = next(row for row in paid['characters'] if row['id'] == character)
@@ -79,7 +79,7 @@ def check(binary, data, directory, revision):
             row[field] += 20
     if paid != expected:
         raise RuntimeError('Release restored death changed unrelated records or historical payouts')
-    before_art = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+    before_art = backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME)
     next_id = before_art['picture_sequence'][0]['next_id']
     if next_id <= max(row['id'] for row in before_art['pictures']) + 1:
         raise RuntimeError('Art fixture did not preserve a deleted high-water ID')
@@ -88,7 +88,7 @@ def check(binary, data, directory, revision):
         raise RuntimeError('Release restored art exercise failed: ' + result.stderr.strip())
     if json.loads(result.stdout) != {'exercised_pictures': True, 'deleted_id': next_id, 'next_id': next_id + 1}:
         raise RuntimeError('Release restored art exercise returned an invalid receipt')
-    after_art = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+    after_art = backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME)
     expected = deepcopy(before_art)
     expected['picture_sequence'][0]['next_id'] += 1
     if after_art != expected:

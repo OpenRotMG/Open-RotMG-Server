@@ -105,6 +105,33 @@ class UpdateTest(unittest.TestCase):
                     restore.assert_called_once()
                     self.assertNotIn(('exchange',), calls)
 
+    def test_rehearsal_compares_the_schema22_public_restore(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage, work = root / 'stage', root / 'work'
+            stage.mkdir()
+            work.mkdir()
+            (stage / 'REVISION').write_text('a' * 40)
+            game_schema, discord_schema = object(), object()
+            module = SimpleNamespace(
+                RELOADED_ACHIEVEMENT_GAME=game_schema, DISCORD=discord_schema,
+                export=lambda *args: {'game': {'achievement_partners': []}, 'discord': {}},
+                restore=lambda *args: None,
+                snapshot=lambda path, schema: {'achievement_partners': []} if schema is game_schema else {},
+            )
+            process = unittest.mock.Mock(returncode=0)
+            process.poll.return_value = 0
+            with patch.object(update, 'run') as run, patch.object(update, 'copy_db'), \
+                    patch.object(update.shutil, 'copyfile', side_effect=lambda source, target: Path(target).touch()), \
+                    patch.object(update, 'rows', return_value={}), patch.object(update, 'verify_migration'), \
+                    patch.object(update, 'ready', return_value={'players': 0, 'bots': 0, 'qa_actors': 0}), \
+                    patch.object(update.subprocess, 'Popen', return_value=process), \
+                    patch.object(update, 'backup_module', return_value=module):
+                update.rehearse(stage, work, {'state': str(root)})
+                self.assertEqual(run.call_args_list[-1].args[1], '--backup-load')
+            self.assertFalse((work / 'rehearsal-running').exists())
+
     def test_helper_install_tracks_release_and_rejects_invalid_source(self):
         with tempfile.TemporaryDirectory() as directory:
             installed, source = Path(directory) / 'update.py', Path(directory) / 'source.py'
