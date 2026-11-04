@@ -6526,8 +6526,14 @@ impl World {
             let kind = entity.kind;
             let _context = crate::supervision::npc(id, kind);
             let pos = entity.pos;
+            // A dormant Haunted Armor wakes when damaged or when a player comes within reach (bBQRbAoRP_g 2012-04-01 t=150-166).
             if entity.hp == self.content.objects[&kind].hp
-                && (kind == crate::dungeon::abyss::IDOL || kind == 0xd7e && entity.stage.is_none())
+                && (kind == crate::dungeon::abyss::IDOL
+                    || kind == 0xd7e
+                        && entity.stage.is_none()
+                        && !seen
+                            .iter()
+                            .any(|(p, ..)| pos.distance(*p) <= crate::endgame::ARMOR_WAKE_RANGE))
             {
                 continue;
             }

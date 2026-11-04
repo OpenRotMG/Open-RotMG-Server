@@ -681,12 +681,139 @@ pub(crate) fn davy_schedule(kind: u16, stage: u64, age: u64) -> Schedule {
 pub(crate) fn armor_schedule(stage: u64, age: u64) -> Schedule {
     let attacks = match stage {
         0 => vec![],
+        // Awake: 2 Armor Sword Attacks per volley (Japanese wiki "otherwise x2"); spread and cadence are reconstruction.
         1 => vec![Attack::fan(0, 2, 15., 600, 10.)],
-        2 => vec![Attack::fan(0, 6, 60., 200, 10.)],
+        // Regen: one 6-shot ring on entry and one ≈1.3 s later (bBQRbAoRP_g 2012-04-01 t=168.0-172.4).
+        2 => vec![
+            Attack::fan(0, 6, 60., 1, 0.).fixed(0.).once(),
+            Attack::fan(0, 6, 60., 1, 0.).fixed(0.).delay(1300).once(),
+        ],
+        // "Afterwards its Armor Sword Attack fires faster" (Japanese wiki); the rate is reconstruction.
+        3 => vec![Attack::fan(0, 2, 15., 400, 10.)],
         _ => panic!("invalid Suit of Armor phase"),
     };
     Schedule {
         state: stage,
+        age,
+        attacks,
+    }
+}
+/// One Stone Guardian block. Angles are world radians (y grows south, so a clockwise screen turn adds); `age` counts from the block start.
+pub(crate) fn guardian_schedule(
+    block: crate::endgame::GuardianBlock,
+    serial: u64,
+    right: bool,
+    age: u64,
+) -> Schedule {
+    use crate::endgame::{
+        GUARDIAN_RUN_MS, GUARDIAN_SPIN_FIRST_MS, GUARDIAN_SPLIT_MS, GuardianBlock,
+    };
+    let fan = Attack::fan;
+    // A volley fires on the tick its delay passes; re-entering a block (the survivor greys mid-block) must not replay earlier volleys.
+    let at = |attack: Attack, delay: u64| attack.delay(delay).once().enabled(age <= delay + 100);
+    let attacks = match block {
+        // 10 Small White Blasts 36° apart at fixed angles, one due east, every ≈2.0 s from 0.2 s into the walk (HLraOCBJO94 t=637.77-657.6, bBQRbAoRP_g t=341.5-375.5).
+        GuardianBlock::Ring => vec![fan(2, 10, 36., 2000, 20.).fixed(0.).offset(18.).delay(200)],
+        // 5 Blasts ≈10° apart at the player every ≈0.5-0.6 s while charging (5ZRsiTUcKts 2012-04-04 t=131.1-132.8).
+        GuardianBlock::Fan => vec![fan(0, 5, 10., 550, 20.)],
+        // 2 Blasts 180° apart, first at 0°/180°, turning 40° clockwise every 0.20 s on a world 20° grid; both guardians at the same angles (HL t=642.17-647.14, fzg t=252.04-256.7).
+        GuardianBlock::Spin => (0..27u64)
+            .map(|k| {
+                at(
+                    fan(0, 2, 180., 1, 20.).fixed((40. * k as f32 + 90.).to_radians()),
+                    GUARDIAN_SPIN_FIRST_MS + k * 200,
+                )
+            })
+            .collect(),
+        // 4 fixed directions × 2 Blasts ≈10° apart every 1.0 s, the Right ≈0.2 s first (bBQRbAoRP_g t=344.3-349.0, fzg t=232.75-234.78).
+        GuardianBlock::Quad => (0..5u64)
+            .flat_map(|k| {
+                (0..4).map(move |d| {
+                    at(
+                        fan(0, 2, 10., 1, 20.).fixed((-(90. * d as f32 + 5.)).to_radians()),
+                        GUARDIAN_SPLIT_MS + k * 1000 + if right { 0 } else { 200 },
+                    )
+                })
+            })
+            .collect(),
+        // Each 1.0 s cycle: Right fan A (7 × P1, 26° apart, centred east) at 0, Right fan B (8 × P1, 22° apart from -66° to +88°) and Left fan A'
+        // (centred west) at 0.20 s, Left fan B' (B rotated 180°) at 0.38 s; every pass is simultaneous (5ZRsiTUcKts t=144.55-148.56, HL t=659.30-663.34).
+        GuardianBlock::Centre => (0..5u64)
+            .flat_map(|cycle| {
+                let t = GUARDIAN_RUN_MS + cycle * 1000;
+                let (a, b, base): (u64, u64, f32) = if right {
+                    (0, 200, 0.)
+                } else {
+                    (200, 380, 180.)
+                };
+                [
+                    at(fan(1, 7, 26., 1, 20.).fixed(base.to_radians()), t + a),
+                    at(
+                        fan(1, 8, 22., 1, 20.).fixed((base - 11.).to_radians()),
+                        t + b,
+                    ),
+                ]
+            })
+            .collect(),
+        // From its side wall, 2 Blasts mirrored about the inward normal, starting ±120° and closing 10° every 0.20 s to 0° (13 volleys, world-fixed;
+        // 5ZRsiTUcKts t=114.4-117.1, 136.15-138.9; fzg t=226.5-228.9). Only the Left's west wall was filmed; the Right mirrors it.
+        GuardianBlock::Side => {
+            let inward: f32 = if right { 180. } else { 0. };
+            (0..13u64)
+                .map(|k| {
+                    let spread = 2. * (120. - 10. * k as f32);
+                    at(
+                        fan(0, 2, spread, 1, 20.).fixed(inward.to_radians()),
+                        GUARDIAN_RUN_MS + k * 200,
+                    )
+                })
+                .collect()
+        }
+    };
+    Schedule {
+        state: serial * 2 + 1,
+        age,
+        attacks,
+    }
+}
+/// Insect Minion: aimed Stings plus a 6-shot Sting ring 60° apart (bBQRbAoRP_g 2012-04-01 t=285.75, 294.9); once its Commander is hit it turns red and adds
+/// rings of Sting Status (t=299.3-299.6; "If the Commander is attacked, they will turn red and add in frequent rings", RealmEye 2017). Cadences are reconstruction.
+pub(crate) fn insect_schedule(red: bool, age: u64) -> Schedule {
+    let fan = Attack::fan;
+    let mut attacks = vec![fan(0, 1, 0., 250, 10.), Attack::ring(0, 6, 1500, 10.)];
+    if red {
+        attacks.push(Attack::ring(1, 6, 1500, 10.).delay(750));
+    }
+    Schedule {
+        state: u64::from(red),
+        age,
+        attacks,
+    }
+}
+/// The Oryx Brute alternates RING and CHARGE states of random length (bBQRbAoRP_g 2012-04-01 t=37-102).
+pub(crate) fn brute_schedule(charge: bool, serial: u64, age: u64) -> Schedule {
+    let fan = Attack::fan;
+    let attacks = if charge {
+        // Each 2.5 s dash: 0.45 s after it starts, Rush volleys at the player every ≈0.2 s for ≈1.6 s (fzgFSFVN8nY 2012-08-10; second dash 2.45 s after the first).
+        // A volley spans about ±50°: 3 shots 50° apart is the best estimate (LOW).
+        (0..2u64)
+            .flat_map(|dash| {
+                (0..8u64).map(move |k| {
+                    fan(0, 3, 50., 1, 20.)
+                        .delay(dash * 2500 + 450 + k * 200)
+                        .once()
+                })
+            })
+            .collect()
+    } else {
+        // 12 Knight Blast Sm 30° apart, then 12 Brute Lines 0.39-0.45 s later, every ≈2.2 s (4 bursts); a 1.3 s RING had none, so the first comes later.
+        vec![
+            fan(2, 12, 30., 2200, 20.).delay(1500),
+            fan(1, 12, 30., 2200, 20.).delay(1920),
+        ]
+    };
+    Schedule {
+        state: serial * 2 + u64::from(charge),
         age,
         attacks,
     }
@@ -715,34 +842,22 @@ pub(crate) fn endgame_schedule(kind: u16, hp: i32, max_hp: i32, elapsed: u64) ->
                 elapsed,
             ));
         }
-        0xd82 => {
-            state = elapsed / 9000 * 2 + u64::from(elapsed % 9000 >= 5000);
-            if elapsed % 9000 < 5000 {
-                age = elapsed % 9000;
-                vec![ring(1, 5, 1000, 10.)]
-            } else {
-                age = elapsed % 9000 - 5000;
-                vec![
-                    ring(1, 5, 1000, 10.),
-                    ring(2, 5, 750, 10.),
-                    fan(0, 3, 10., 300, 10.),
-                ]
-            }
+        // Five 72°-spaced Lightning Spirals at two fixed sets 36° apart: set A, set B 0.6 s later, then 1.4 s quiet; nothing aims or turns (5ZRsiTUcKts, HLraOCBJO94, bBQRbAoRP_g).
+        // Below half health it bursts 8 Lightning Spirals 45° apart and is removed (exMHglbJ98E 2012-08-15 HP overlay; 5ZRsiTUcKts t=197.9-198.1).
+        0xd7c if hp * 2 < max_hp => {
+            state = 1;
+            vec![fan(0, 8, 45., 1, 0.).fixed(0.).offset(22.5).once()]
         }
-        0xd83 => {
-            state = elapsed / 7500 * 2 + u64::from(elapsed % 7500 >= 5000);
-            if elapsed % 7500 < 5000 {
-                age = elapsed % 7500;
-                vec![fan(0, 3, 20., 350, 10.)]
-            } else {
-                age = elapsed % 7500 - 5000;
-                vec![
-                    fan(0, 1, 0., 50, 10.),
-                    fan(1, 1, 0., 1000, 10.),
-                    fan(2, 1, 0., 450, 10.),
-                ]
-            }
-        }
+        0xd7c => vec![
+            fan(0, 5, 72., 2000, 0.).fixed(36f32.to_radians()),
+            fan(0, 5, 72., 2000, 0.).fixed(0.).delay(600),
+        ],
+        // Swipe Spin (Slowed) bursts: 3 aimed shots, then 2 at the same outer angles 0.14-0.21 s later; spacing 8.5-18.7° (fzgFSFVN8nY, bBQRbAoRP_g).
+        // The burst period is unresolved (3.0 s and 0.45 s readings, both LOW). Bubble, Line and a Knight Blast Sm ring were never seen in ≈38 s of 2012 Knight footage.
+        0xd83 => vec![
+            fan(0, 3, 15., 3000, 10.),
+            fan(0, 2, 30., 3000, 10.).delay(170),
+        ],
         0x1748 => vec![ring(0, 12, 700, 50.).delay(200)],
         0x174a if elapsed >= 10000 => {
             state = 1;
@@ -752,6 +867,8 @@ pub(crate) fn endgame_schedule(kind: u16, hp: i32, max_hp: i32, elapsed: u64) ->
         0x174a | 0x174b => vec![fan(0, 3, 10., 1000, 25.)],
         // Each Goo fires its selected speed-0, 6000 ms MultiHit projectile once: the puddle is the hazard.
         0xdf0 => vec![fan(0, 1, 0., 1, 0.).fixed(0.).once()],
+        // A landed Quiet Bomb rests 0.8 s, then fires one circle of 18 Mute Spells (7 instances, e.g. bBQRbAoRP_g 2012-04-01 t=256.4; HLraOCBJO94 t=616.2-617.0).
+        0xd86 => vec![ring(0, 18, 1, 0.).fixed(0.).delay(800).once()],
         0x944 => vec![
             fan(0, 1, 0., 1500, 8.).chance(1.),
             fan(1, 3, 20., 1500, 8.).delay(500),

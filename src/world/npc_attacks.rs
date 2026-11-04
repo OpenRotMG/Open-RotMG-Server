@@ -241,13 +241,46 @@ impl World {
             return Ok(Some(attacks::oryx2_schedule(phase, age)));
         }
         if e.kind == 0xd7e {
-            let stage = e.stage.context("activated Suit of Armor phase missing")?;
+            let stage = e.stage.unwrap_or(0);
             let age = if stage == 2 {
-                self.now - (e.reaction_until - 1500)
+                self.now
+                    - e.reaction_until
+                        .checked_sub(crate::endgame::ARMOR_REGEN_MS)
+                        .context("Suit of Armor regen clock missing")?
             } else {
                 elapsed
             };
             return Ok(Some(attacks::armor_schedule(stage, age)));
+        }
+        if crate::endgame::GUARDIANS.contains(&e.kind) {
+            return Ok(Some(match self.finale.guardian_clock(id) {
+                Some(clock) if e.stage == Some(1) => attacks::guardian_schedule(
+                    clock.block,
+                    clock.serial,
+                    e.kind == crate::endgame::GUARDIANS[0],
+                    self.now - clock.start,
+                ),
+                // Statues, stone and the grey throw fire nothing.
+                _ => Schedule {
+                    state: 0,
+                    age: 0,
+                    attacks: vec![],
+                },
+            }));
+        }
+        if e.kind == 0xd80 {
+            return Ok(Some(attacks::insect_schedule(e.stage == Some(1), elapsed)));
+        }
+        if e.kind == 0xd82 {
+            let brute = self
+                .finale
+                .brute(id)
+                .context("activated Oryx Brute state missing")?;
+            return Ok(Some(attacks::brute_schedule(
+                brute.charge,
+                brute.serial,
+                self.now - brute.since,
+            )));
         }
         let mut schedule = match attacks::schedule(e.kind, e.hp, elapsed) {
             Some(schedule) => Some(schedule),
