@@ -351,11 +351,13 @@ impl World {
         counted.sort_unstable();
         let excess = counted.len() - self.population_regions[terrain as usize].target;
         // Only bodies without a player within 10 tiles leave, so active areas keep their regrowth.
+        // Breeding causes the overgrowth; culling species that cannot breed back would let them die out.
         let culled: Vec<_> = counted
             .into_iter()
             .filter(|id| {
-                let pos = self.entities[id].pos;
-                self.players.values().all(|p| p.pos.distance(pos) >= 10.)
+                let e = &self.entities[id];
+                population::REPRODUCTION.iter().any(|r| r.0 == e.kind)
+                    && self.players.values().all(|p| p.pos.distance(e.pos) >= 10.)
             })
             .take(excess)
             .collect();
@@ -554,23 +556,25 @@ fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
 
 #[cfg(test)]
 #[test]
-fn culling_an_overgrown_godlands_keeps_its_sprite_gods() -> Result<()> {
+fn culling_an_overgrown_godlands_keeps_every_species() -> Result<()> {
     let path = std::path::Path::new("data");
     let content = Arc::new(Content::load(path)?);
     let source = crate::terrain::realms::sources(path)?.remove(0);
     let mut directory = Directory::configured(path, content, 16, 756, Some(756), vec![source], 2)?;
     let world = &mut directory.worlds[&-3];
-    let sprite_gods = |w: &World| w.entities.values().filter(|e| e.kind == 0x652).count();
-    let before = sprite_gods(world);
-    assert!(before > 0);
+    let count = |w: &World, kinds: &[u16]| {
+        w.entities
+            .values()
+            .filter(|e| kinds.contains(&e.kind))
+            .count()
+    };
+    let (sprite_gods, unbred) = (count(world, &[0x652]), count(world, &[0x6d8, 0x905]));
+    assert!(sprite_gods > 0 && unbred > 0);
     world.compact_population()?;
     // Live, the Godlands bred to 150% and one cull removed every Sprite God.
     world.population_regions[1].target = world.oryx_counted(1).len() / 2;
     world.cull_population(1);
-    assert!(
-        sprite_gods(world) * 4 > before,
-        "{} of {before}",
-        sprite_gods(world)
-    );
+    assert!(count(world, &[0x652]) * 4 > sprite_gods);
+    assert_eq!(count(world, &[0x6d8, 0x905]), unbred);
     Ok(())
 }
