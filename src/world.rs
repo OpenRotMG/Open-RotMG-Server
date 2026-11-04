@@ -4109,8 +4109,7 @@ impl World {
         let rescan = initial || self.players[&id].tile_scan != Some(center);
         if rescan {
             // Selected bookshelves carry BlocksSight; keep unopened rooms undiscovered: https://github.com/OpenRotMG/Open-RotMG-Client/blob/4d171652c410fe4da26065b79441d1c0c2da9f94/client.swf
-            let sight = (self.name == "Snake Pit"
-                || self.name == "Manor of the Immortals")
+            let sight = (self.name == "Snake Pit" || self.name == "Manor of the Immortals")
                 .then(|| self.room_sight(center));
             if let Some(sight) = &sight {
                 tracing::debug!(
