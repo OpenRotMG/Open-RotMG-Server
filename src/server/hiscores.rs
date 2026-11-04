@@ -53,6 +53,12 @@ pub(super) async fn collection(
 ) -> Response {
     json_result(a.store.collection(account).await)
 }
+pub(super) async fn achievements(
+    State(a): State<App>,
+    axum::extract::Path(account): axum::extract::Path<i32>,
+) -> Response {
+    json_result(a.store.achievements(account).await)
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct LinkRequest {

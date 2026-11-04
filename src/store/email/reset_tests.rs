@@ -143,6 +143,7 @@ async fn migration_preserves_schema20_and_refuses_missing_schema21_reset_authori
     let account = register(&store, "migrate-reset").await;
     drop(store);
     let db = Connection::open(dir.join("game.db")).unwrap();
+    crate::store::achievement_tests::schema21_fixture(&db);
     db.execute_batch("DROP TABLE email_password_resets; PRAGMA user_version=20;")
         .unwrap();
     let content = Content::load(Path::new("data")).unwrap();

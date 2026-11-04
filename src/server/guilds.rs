@@ -135,6 +135,9 @@ pub(super) async fn native(
             Request::Invite(name)=>{
                 ensure!(!name.is_empty(),"Usage: /invite <player name>.");
                 a.world.directory(move|d|d.guild_invite(id,&name,now)).await?;
+                committed = true;
+                a.store.achievement_invite(account, guild.context("successful invitation lost guild")?).await?;
+                super::gold::sync(a, account).await?;
                 return Ok("Guild invitation sent.".into());
             },
             Request::Create(name)=>{
@@ -163,6 +166,7 @@ pub(super) async fn native(
         let (guild,target)=a.store.change_guild(account,action).await?;
         committed=true;
         let presentation=a.store.presentation(target).await?;
+        super::gold::sync(a, target).await?;
         let notice=message.clone();
         a.world.directory(move|d|{d.sync_guild(target,presentation,kind==wire::CREATE_GUILD)?;d.guild_notice(guild,&notice);Ok(())}).await?;
         Ok(message)

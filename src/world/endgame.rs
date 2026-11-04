@@ -20,6 +20,7 @@ struct RealmPreparation {
     result: tokio::sync::oneshot::Receiver<Result<(World, World, RealmCycle)>>,
 }
 pub(super) struct RealmRecord {
+    achievement_instance: String,
     pub cycle: RealmCycle,
     pub portal: Option<i32>,
     pub name: usize,
@@ -34,6 +35,7 @@ pub(super) struct RealmRecord {
 impl RealmRecord {
     fn new(cycle: RealmCycle, now: u64) -> Self {
         Self {
+            achievement_instance: format!("{:032x}", rand::random::<u128>()),
             cycle,
             portal: None,
             name: 0,
@@ -513,6 +515,15 @@ impl Directory {
                 }
                 let killer = world.critical_killers.remove(&id);
                 if cycle.defeated(id, now) {
+                    if let Some((account, character)) = world.achievement_killers.remove(&id) {
+                        self.achievement_credits
+                            .push(crate::store::achievements::ClosureCredit {
+                                realm: record.achievement_instance.clone(),
+                                root: id,
+                                account,
+                                character,
+                            });
+                    }
                     if let Some((kind, player)) = killer {
                         world.realm_killed_notice(kind, &player);
                     }

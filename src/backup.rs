@@ -875,3 +875,25 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod schema22_compat_tests {
+    use super::*;
+
+    #[test]
+    fn schema22_compat_backup_validation_preserves_closed_achievement_flags() {
+        let content = content::Content::load(Path::new("data")).unwrap();
+        let mut ch = store::Character::fresh(content.get(content::WIZARD).unwrap()).unwrap();
+        ch.achievements
+            .insert(crate::achievements::Achievement::HitByTruck);
+        let original = serde_json::to_value(&ch).unwrap();
+        validate(vec![original.clone()], false).unwrap();
+        assert!(known_fields(&original, &serde_json::to_value(ch).unwrap()));
+        let mut unknown = original.clone();
+        unknown["achievements"] = serde_json::json!(["future_unknown_flag"]);
+        assert!(validate(vec![unknown], false).is_err());
+        let mut unrecognized = original;
+        unrecognized["future_metadata"] = serde_json::json!(true);
+        assert!(validate(vec![unrecognized], false).is_err());
+    }
+}

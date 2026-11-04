@@ -186,6 +186,7 @@ async fn migration_does_not_grandfather_accounts_or_recreate_missing_verificatio
     let account = register(&store, "migration").await;
     drop(store);
     let db = Connection::open(dir.join("game.db")).unwrap();
+    crate::store::achievement_tests::schema21_fixture(&db);
     db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; PRAGMA user_version=19;").unwrap();
     let content = Content::load(Path::new("data")).unwrap();
     let store = Store::open(&dir.join("game.db"), &content).unwrap();

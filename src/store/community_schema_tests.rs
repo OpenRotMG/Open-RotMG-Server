@@ -61,6 +61,7 @@ async fn community_schema17_migrates_canonical16_and_committed_reopen_preserves_
     let content = Content::load(Path::new("data")).unwrap();
     let (path, account) = fresh_schema_account(&content).await;
     let db = Connection::open(&path).unwrap();
+    crate::store::achievement_tests::schema21_fixture(&db);
     db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; PRAGMA user_version=16;").unwrap();
     let before = canonical_schema_rows(&db);
     let feature_rows = |db: &Connection| -> Vec<String> {
@@ -84,14 +85,14 @@ async fn community_schema17_migrates_canonical16_and_committed_reopen_preserves_
     assert_eq!(canonical_schema_rows(&db), before);
     assert_eq!(feature_rows(&db), features);
     drop(reopened);
-    db.execute_batch("PRAGMA user_version=22").unwrap();
+    db.execute_batch("PRAGMA user_version=23").unwrap();
     let bytes = std::fs::read(&path).unwrap();
     assert!(
         Store::open(&path, &content)
             .err()
             .unwrap()
             .to_string()
-            .contains("unsupported game database schema 22")
+            .contains("unsupported game database schema 23")
     );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }

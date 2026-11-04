@@ -121,6 +121,7 @@ async fn discord_gold_preserves_wallet_spending_and_receipts_across_relink_and_r
             .contains("schema-19 Discord gold receipts")
     );
     db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts;").unwrap();
+    crate::store::achievement_tests::schema21_fixture(&db);
     db.pragma_update(None, "user_version", 18).unwrap();
     let s = Store::open(&path, &content).unwrap();
     assert_eq!(s.gold(account).await.unwrap().balance, 250);
@@ -128,7 +129,7 @@ async fn discord_gold_preserves_wallet_spending_and_receipts_across_relink_and_r
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        21
+        22
     );
 }
 

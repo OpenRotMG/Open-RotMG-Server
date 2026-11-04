@@ -75,6 +75,7 @@ impl World {
             .retain(|_, previous| time.saturating_sub(*previous) < 1000);
         p.ground_hits.insert(i, time);
         let damage = crate::condition::damage(damage, 0, p.conditions(self.now), true);
+        p.achievement_damage(self.clock.now(), damage, p.character.hp)?;
         p.character.hp = (p.character.hp - damage).max(0);
         if p.character.hp == 0 {
             p.death_pending = true;

@@ -57,6 +57,7 @@ fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
         owners: Arc::default(),
         admission_started: Arc::default(),
         admission: Arc::default(),
+        restart: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),

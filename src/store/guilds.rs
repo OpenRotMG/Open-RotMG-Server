@@ -284,6 +284,7 @@ impl Store {
                     let count:i32=tx.query_row("SELECT count(*) FROM guild_members WHERE guild=?1",[guild],|r|r.get(0))?;
                     ensure!(count<50,"Guild is full.");
                     tx.execute("INSERT INTO guild_members(account,guild,rank) VALUES(?1,?2,0)", params![account,guild])?;
+                    achievements::grant(&tx, account, crate::achievements::Achievement::Friends)?;
                     (guild, account)
                 }
                 GuildAction::Rank { name, rank } => {

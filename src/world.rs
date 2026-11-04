@@ -44,6 +44,7 @@ mod ghost_ship;
 mod gods;
 mod ground_dye;
 
+mod achievements;
 mod gold;
 mod golems;
 
@@ -364,6 +365,8 @@ pub struct Player {
     quest: Option<i32>,
     qualified_quest: Option<i32>,
     committed_lifetime: crate::store::FameLifetime,
+    committed_achievements: BTreeSet<crate::achievements::Achievement>,
+    achievement_damage: achievements::DamageWindow,
     statuses: BTreeMap<u8, (u64, u64)>,
     lab_conditions: i32,
     known_since: BTreeMap<i32, u64>,
@@ -570,7 +573,9 @@ impl Player {
             || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
     }
     fn progress_queued(&self) -> bool {
-        self.character.lifetime != self.committed_lifetime || self.rewards_queued()
+        self.character.lifetime != self.committed_lifetime
+            || self.character.achievements != self.committed_achievements
+            || self.rewards_queued()
     }
     fn active(&self) -> bool {
         self.character.alive
@@ -843,6 +848,7 @@ pub struct World {
     portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
     critical_killers: BTreeMap<i32, (u16, String)>,
+    achievement_killers: BTreeMap<i32, (i32, i32)>,
     event_reserves: Vec<realm_events::ReservedEvent>,
     event_waiting: Option<i32>,
     event_choice: Option<u16>,
@@ -934,6 +940,7 @@ struct ExitIntent {
     dungeon: crate::dungeon::HistoricalDungeon,
 }
 struct Grant {
+    achievement_escape: bool,
     entry_portal: Option<i32>,
     entry_witness: Option<dungeon_entry::Witness>,
     exit: Option<ExitIntent>,
@@ -968,6 +975,7 @@ pub struct Directory {
     chat_budgets: BTreeMap<i32, chat::ChatBudget>,
     guild_invites: BTreeMap<i32, guilds::Invitation>,
     endgame: endgame::RealmDirectory,
+    achievement_credits: Vec<crate::store::achievements::ClosureCredit>,
     teleports: BTreeMap<i32, Instant>,
     idle: BTreeMap<i32, u64>,
     next_world: i32,
@@ -1163,6 +1171,7 @@ impl Directory {
             chat_budgets: BTreeMap::new(),
             guild_invites: BTreeMap::new(),
             endgame: endgame::RealmDirectory::default(),
+            achievement_credits: Vec::new(),
             teleports: BTreeMap::new(),
             idle: BTreeMap::new(),
             next_world: 1,
@@ -1776,6 +1785,7 @@ impl Directory {
         self.grants.insert(
             key.clone(),
             Grant {
+                achievement_escape: false,
                 entry_portal: None,
                 entry_witness: None,
                 exit: None,
@@ -2004,6 +2014,7 @@ impl Directory {
                     TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED,
                 )?;
                 grant.exit = None;
+                grant.achievement_escape = false;
             }
         }
         let exit = key
@@ -2016,6 +2027,14 @@ impl Directory {
         };
         if let Some(exit) = exit {
             snapshot.lifetime.realm_exits.insert(exit);
+        }
+        if key.is_some_and(|key| self.grants[key].achievement_escape)
+            && snapshot.alive
+            && snapshot.hp > 0
+        {
+            snapshot
+                .achievements
+                .insert(crate::achievements::Achievement::NotEvenClose);
         }
         w.players.get_mut(&id).unwrap().departure_snapshot = Some(snapshot.clone());
         Ok(Some(snapshot))
@@ -2983,6 +3002,7 @@ impl World {
             portal_requests: vec![],
             critical_deaths: vec![],
             critical_killers: BTreeMap::new(),
+            achievement_killers: BTreeMap::new(),
             event_reserves: vec![],
             event_waiting: None,
             event_choice: None,
@@ -3497,6 +3517,8 @@ impl World {
                 weapon_ticks: VecDeque::from([(-1, ch.items[0], dex)]),
                 native_lag: native_lag::Window::default(),
                 committed_lifetime: ch.lifetime.clone(),
+                committed_achievements: ch.achievements.clone(),
+                achievement_damage: Default::default(),
                 character: ch,
                 pos,
                 departing: false,
@@ -5491,6 +5513,12 @@ impl World {
                 continue;
             }
             snapshot.alive = true;
+            // The per-attempt Nexus observation stays volatile until atomic permanent-death settlement.
+            if p.death_pending {
+                snapshot
+                    .achievements
+                    .remove(&crate::achievements::Achievement::NexusAfterDeath);
+            }
             p.experience_queued = 0;
             p.experience_queue = None;
             p.progress_snapshot = Some(snapshot.clone());
@@ -5529,6 +5557,8 @@ impl World {
             .context("progress owner missing")?;
         p.validate_progress_reservation(&snapshot)?;
         p.acknowledge_lifetime(snapshot.lifetime.clone())?;
+        p.character.achievements.extend(&snapshot.achievements);
+        p.committed_achievements = snapshot.achievements.clone();
         let cleared_dungeon = snapshot.pirate_caves > p.character.pirate_caves
             || snapshot.dungeons != p.character.dungeons
             || snapshot.jungles > p.character.jungles
@@ -5960,6 +5990,26 @@ impl World {
     }
     fn defeat_entity_with_killer(&mut self, id: i32, killer: Option<i32>) -> Result<()> {
         let e = self.remove_entity(id);
+        if let Some(player) = killer.and_then(|character| {
+            self.players.values().find(|p| {
+                p.character.id == character
+                    && p.active()
+                    && p.character.hp > 0
+                    && p.controller != Controller::Autonomous
+            })
+        }) {
+            let root = if crate::endgame::HEROES.contains(&e.kind) {
+                Some(e.id)
+            } else if crate::quest::final_root(e.kind) || matches!(e.kind, 0x678 | 0xd50 | 0xd54) {
+                *e.quest
+            } else {
+                None
+            };
+            if let Some(root) = root {
+                self.achievement_killers
+                    .insert(root, (player.character.account, player.character.id));
+            }
+        }
         // Death credit must survive reward errors; the reference also notifies the Realm before loot behaviors: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L54-L60
         if self.encounter {
             if crate::endgame::HEROES.contains(&e.kind) {

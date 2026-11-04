@@ -557,6 +557,7 @@ impl World {
             let damage =
                 condition::damage(amount, self.defense(id)?, p.conditions(self.now), false);
             let p = self.players.get_mut(&id).unwrap();
+            p.achievement_damage(self.clock.now(), damage, p.character.hp)?;
             p.character.hp = (p.character.hp - damage).max(0);
             if p.character.hp == 0 {
                 p.death_pending = true;

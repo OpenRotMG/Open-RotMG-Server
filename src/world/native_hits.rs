@@ -216,6 +216,7 @@ impl World {
         }
         let p = self.players.get_mut(&id).unwrap();
         let drained = damage.min(p.character.hp).max(0);
+        p.achievement_damage(self.clock.now(), damage, p.character.hp)?;
         p.character.hp = (p.character.hp - damage).max(0);
         if p.character.hp == 0 {
             p.death_pending = true;
