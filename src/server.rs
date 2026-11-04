@@ -92,7 +92,8 @@ mod hiscores;
 pub(crate) mod testing;
 mod updates;
 use account_actions::{
-    discord_announce, discord_gold, discord_kick, discord_recover, reset_password,
+    discord_announce, discord_close_realm, discord_give_realm_close, discord_gold, discord_kick,
+    discord_recover, reset_password,
 };
 use hiscores::{collection, discord_link, graveyard, hiscores};
 #[cfg(test)]
@@ -3323,6 +3324,11 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/api/account/link/complete", post(browser_link::complete))
         .route("/api/account/link/callback", get(browser_link::callback))
         .route("/internal/discord/gold", post(discord_gold))
+        .route(
+            "/internal/discord/realm-close/give",
+            post(discord_give_realm_close),
+        )
+        .route("/internal/discord/close-realm", post(discord_close_realm))
         .route("/internal/discord/kick", post(discord_kick))
         .route("/internal/discord/recover", post(discord_recover))
         .route("/api/account/recover", post(reset_password))
