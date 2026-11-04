@@ -156,15 +156,18 @@ else:
 assert rows(source / 'game.db') == source_before
 preview = save('preview', state, data, portable)
 assert preview['login'] == 'player-1@local.invalid' and not preview['replaced']
-result = save('import', state, data, portable, out / 'unused-first-backup.db', secret=password)
+verified_input = json.loads(portable.read_bytes())
+assert (preview['name'], preview['exported_at'], preview['character_count']) == (verified_input['name'], verified_input['exported_at'], len(verified_input['characters']))
+result = save('import', state, data, portable, out / 'unused-first-backup.db', preview['expected'], secret=password)
 assert result['login'] == 'player-1@local.invalid'
 report['import'] = result
 save('verify-account', portable, data)
+replacement = save('preview', state, data, portable)
 # Cancellation/EOF or failed pre-backup must not touch a populated destination.
 before = rows(state / 'game.db')
-save('replace', state, data, portable, out / 'cancelled.db', secret=b'', success=False)
+save('replace', state, data, portable, out / 'cancelled.db', replacement['expected'], secret=b'', success=False)
 assert rows(state / 'game.db') == before
-save('replace', state, data, portable, out / 'absent' / 'failed.db', secret=password, success=False)
+save('replace', state, data, portable, out / 'absent' / 'failed.db', replacement['expected'], secret=password, success=False)
 assert rows(state / 'game.db') == before
 report['assertions'].extend(['source-read-only', 'independent-login', 'cancelled-import-unchanged', 'failed-backup-unchanged'])
 config = out / 'server.json'
@@ -214,7 +217,7 @@ for index in range(8):
 assert len(list(out.glob('manual-*.db'))) == 8
 save('verify-snapshot', backup, data)
 old = rows(state / 'game.db')
-save('replace', state, data, portable, out / 'pre-replace.db', secret=b'replacement-password\n')
+save('replace', state, data, portable, out / 'pre-replace.db', replacement['expected'], secret=b'replacement-password\n')
 assert rows(out / 'pre-replace.db') == old
 save('restore', state, data, backup, out / 'pre-restore.db')
 assert rows(state / 'game.db') == rows(backup)

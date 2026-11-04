@@ -3,11 +3,12 @@ use crate::{
     state_lock::StateLock,
     store::{
         Store,
-        account_save::{AccountSave, DISCLOSURE, MAX_BYTES},
+        account_save::{AccountSave, DISCLOSURE, ImportExpectation, ImportResult, MAX_BYTES},
     },
 };
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, OpenFlags};
+use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
     io::{IsTerminal, Read, Write},
@@ -99,12 +100,38 @@ fn restore_cut(progress: rusqlite::backup::Progress) {
         }
     }
 }
-fn read_save(path: &Path) -> Result<AccountSave> {
+fn read_save(path: &Path) -> Result<(AccountSave, String)> {
     let mut bytes = Vec::new();
     File::open(path)?
         .take(MAX_BYTES + 1)
         .read_to_end(&mut bytes)?;
-    AccountSave::decode(&bytes)
+    Ok((
+        AccountSave::decode(&bytes)?,
+        format!("{:x}", Sha256::digest(&bytes)),
+    ))
+}
+#[derive(serde::Serialize)]
+struct Preview<'a> {
+    #[serde(flatten)]
+    result: ImportResult,
+    exported_at: u64,
+    name: &'a str,
+    character_count: usize,
+    expected: String,
+}
+fn destination_plan(
+    state: &Path,
+    save: &AccountSave,
+    content: &Content,
+    fresh: ImportResult,
+) -> Result<ImportResult> {
+    if !state.join("game.db").exists() {
+        return Ok(fresh);
+    }
+    let db = readonly(&state.join("game.db"))?;
+    let tx = db.unchecked_transaction()?;
+    verify(&tx, content)?;
+    crate::store::account_save::preview(&tx, save)
 }
 fn password() -> Result<String> {
     ensure!(
@@ -127,7 +154,7 @@ pub(crate) async fn run(args: &[String]) -> Result<bool> {
     let args: Vec<_> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         [_, "verify-account", file, data] => {
-            let saved = read_save(Path::new(file))?;
+            let (saved, _) = read_save(Path::new(file))?;
             let content = Content::load(Path::new(data))?;
             let validation = Store::open(Path::new(":memory:"), &content)?;
             validation
@@ -139,28 +166,45 @@ pub(crate) async fn run(args: &[String]) -> Result<bool> {
             );
         }
         [_, "preview", state, data, file] => {
-            let saved = read_save(Path::new(file))?;
+            let (saved, input_sha256) = read_save(Path::new(file))?;
             let content = Content::load(Path::new(data))?;
             let validation = Store::open(Path::new(":memory:"), &content)?;
             let fresh = validation
                 .import_account_save(saved.clone(), "validation-only-password".into(), false)
                 .await?;
             let state = Path::new(state);
-            let result = if state.join("game.db").exists() {
-                let _lock = StateLock::acquire(state)?;
-                let db = readonly(&state.join("game.db"))?;
-                let db = db.unchecked_transaction()?;
-                verify(&db, &content)?;
-                crate::store::account_save::preview(&db, &saved)?
+            let _lock = if state.join("game.db").exists() {
+                Some(StateLock::acquire(state)?)
             } else {
-                fresh
+                None
             };
-            println!("{}", serde_json::to_string(&result)?);
+            let result = destination_plan(state, &saved, &content, fresh)?;
+            let expected = crate::store::account_save::expected(&saved, &result, &input_sha256)?;
+            println!(
+                "{}",
+                serde_json::to_string(&Preview {
+                    result,
+                    exported_at: saved.exported_at,
+                    name: &saved.name,
+                    character_count: saved.characters.len(),
+                    expected
+                })?
+            );
         }
         [_, "verify-snapshot", file, data] => {
             let content = Content::load(Path::new(data))?;
-            verify(&readonly(Path::new(file))?, &content)?;
-            println!("{}", serde_json::json!({"verified":true}));
+            let db = readonly(Path::new(file))?;
+            let tx = db.unchecked_transaction()?;
+            verify(&tx, &content)?;
+            let schema: i32 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            let account_count: i64 =
+                tx.query_row("SELECT count(*) FROM accounts", [], |r| r.get(0))?;
+            let character_count: i64 =
+                tx.query_row("SELECT count(*) FROM characters", [], |r| r.get(0))?;
+            println!(
+                "{}",
+                serde_json::json!({"verified":true,"schema":schema,"scope":"all-local-accounts","account_count":account_count,"character_count":character_count})
+            );
         }
         [_, "snapshot", state, data, output] => {
             let content = Content::load(Path::new(data))?;
@@ -215,23 +259,38 @@ pub(crate) async fn run(args: &[String]) -> Result<bool> {
             data,
             input,
             backup,
+            expected,
         ] => {
-            let save = read_save(Path::new(input))?;
+            crate::store::account_save::validate_expected(expected)?;
+            let (save, input_sha256) = read_save(Path::new(input))?;
             let password = password()?;
             let content = Content::load(Path::new(data))?;
             // Run the same domain transaction in isolation before opening or migrating the destination.
             let validation = Store::open(Path::new(":memory:"), &content)?;
-            validation
+            let fresh = validation
                 .import_account_save(save.clone(), password.clone(), false)
                 .await?;
             let state = Path::new(state);
-            std::fs::create_dir_all(state)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(state, std::fs::Permissions::from_mode(0o700))?;
+            if !state.exists() {
+                std::fs::create_dir_all(state)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(state, std::fs::Permissions::from_mode(0o700))?;
+                }
             }
             let _lock = StateLock::acquire(state)?;
+            let plan = destination_plan(state, &save, &content, fresh)
+                .context("local import identity unavailable; re-preview this file")?;
+            let expectation = ImportExpectation {
+                input_sha256,
+                expected: expected.to_string(),
+            };
+            crate::store::account_save::check_expected(&save, &plan, &expectation)?;
+            ensure!(
+                plan.replaced == (*operation == "replace"),
+                "import/replacement identity changed; re-preview this file and choose the confirmed operation"
+            );
             let db = state.join("game.db");
             if db.exists() {
                 snapshot(&db, Path::new(backup), &content)?;
@@ -243,12 +302,15 @@ pub(crate) async fn run(args: &[String]) -> Result<bool> {
             }
             let store = Store::open(&db, &content)?;
             let result = store
-                .import_account_save(save, password, *operation == "replace")
+                .import_expected_account_save(save, password, *operation == "replace", expectation)
                 .await?;
             println!("{}", serde_json::to_string(&result)?);
         }
+        [_, "import" | "replace", ..] => anyhow::bail!(
+            "import/replace requires STATE DATA FILE PREBACKUP EXPECTED; re-preview this file (password via protected stdin)"
+        ),
         _ => anyhow::bail!(
-            "usage: --local-save verify-account FILE DATA | preview STATE DATA FILE | verify-snapshot FILE DATA | snapshot STATE DATA OUTPUT | restore STATE DATA INPUT PREBACKUP | export STATE DATA ACCOUNT OUTPUT | import/replace STATE DATA INPUT PREBACKUP (password via protected stdin)"
+            "usage: --local-save verify-account FILE DATA | preview STATE DATA FILE | verify-snapshot FILE DATA | snapshot STATE DATA OUTPUT | restore STATE DATA INPUT PREBACKUP | export STATE DATA ACCOUNT OUTPUT | import/replace STATE DATA INPUT PREBACKUP EXPECTED (password via protected stdin)"
         ),
     }
     Ok(true)

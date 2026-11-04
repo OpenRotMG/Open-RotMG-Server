@@ -112,7 +112,8 @@ def check(binary, data, directory, revision):
     subprocess.run([str(binary), '--local-save', 'export', str(trade_state), str(data), '1', str(portable)], check=True)
     with closing(sqlite3.connect(trade_database)) as db:
         unchanged = list(db.iterdump())
-    refused = subprocess.run([str(binary), '--local-save', 'replace', str(trade_state), str(data), str(portable), str(directory / 'pre-trade-refusal.db')],
+    preview = json.loads(subprocess.check_output([str(binary), '--local-save', 'preview', str(trade_state), str(data), str(portable)]))
+    refused = subprocess.run([str(binary), '--local-save', 'replace', str(trade_state), str(data), str(portable), str(directory / 'pre-trade-refusal.db'), preview['expected']],
                              input='independent-local-password\n', text=True, capture_output=True)
     if refused.returncode == 0 or 'retained local trade history' not in refused.stderr:
         raise RuntimeError('Replacement failed to refuse immutable target trade history')

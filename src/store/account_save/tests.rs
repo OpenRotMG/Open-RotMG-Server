@@ -1305,3 +1305,438 @@ async fn account_save_collection_timestamp_rejected_without_destination_mutation
     drop(source);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn account_save_cli_child() {
+    let Ok(args) = std::env::var("ACCOUNT_SAVE_CLI_ARGS") else {
+        return;
+    };
+    let args: Vec<String> = serde_json::from_str(&args).unwrap();
+    if let Err(error) = crate::account_save::run(&args).await {
+        eprintln!("{error:#}");
+        std::process::exit(2);
+    }
+}
+fn cli(args: &[&str], password: &[u8]) -> (bool, serde_json::Value, String) {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "store::account_save::tests::account_save_cli_child",
+            "--nocapture",
+        ])
+        .env(
+            "ACCOUNT_SAVE_CLI_ARGS",
+            serde_json::to_string(&[&["--local-save"][..], args].concat()).unwrap(),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(password).unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    for secret in [
+        "private-cli-password",
+        "replacement-cli-password",
+        "backup-fixture-password",
+        "$argon2",
+    ] {
+        assert!(!stdout.contains(secret) && !stderr.contains(secret));
+    }
+    let value = stdout
+        .lines()
+        .filter_map(|line| {
+            line.find('{')
+                .and_then(|i| serde_json::from_str(&line[i..]).ok())
+        })
+        .next()
+        .unwrap_or(serde_json::Value::Null);
+    (output.status.success(), value, stderr)
+}
+fn cli_ok(args: &[&str], password: &[u8]) -> serde_json::Value {
+    let (success, value, error) = cli(args, password);
+    assert!(success, "{error}");
+    assert!(value.is_object());
+    value
+}
+fn write_input(root: &Path, save: &AccountSave) -> PathBuf {
+    let file = root.join("incoming.json");
+    std::fs::write(&file, serde_json::to_vec(save).unwrap()).unwrap();
+    file
+}
+fn schema21(db: &Connection) {
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; PRAGMA user_version=21;").unwrap();
+}
+
+#[tokio::test]
+async fn account_save_cli_preview_metadata_expected_and_snapshot_counts_preserve_credentials() {
+    let (root, content, source, save) = fixture().await;
+    let source_before = dump(&Connection::open(root.join("source/game.db")).unwrap());
+    let file = write_input(&root, &save);
+    let state = root.join("local");
+    let file = file.to_str().unwrap();
+    let state = state.to_str().unwrap();
+    let preview = cli_ok(&["preview", state, "data", file], b"");
+    assert_eq!(preview.as_object().unwrap().len(), 8);
+    assert_eq!(preview["exported_at"], save.exported_at);
+    assert_eq!(preview["name"], save.name);
+    assert_eq!(preview["character_count"], save.characters.len());
+    assert_eq!(preview["login"], "player-1@local.invalid");
+    let expected = preview["expected"].as_str().unwrap();
+    assert!(key(expected));
+    let digest = format!("{:x}", Sha256::digest(std::fs::read(file).unwrap()));
+    let canonical = serde_json::to_vec(&(
+        "account-import-v1",
+        &digest,
+        &save.origin.namespace,
+        save.origin.account,
+        1,
+        "player-1@local.invalid",
+        false,
+    ))
+    .unwrap();
+    assert_eq!(expected, format!("{:x}", Sha256::digest(canonical)));
+    assert_eq!(
+        cli_ok(&["preview", state, "data", file], b"")["expected"],
+        expected
+    );
+    assert!(!Path::new(state).join("game.db").exists());
+    let backup = root.join("first.db");
+    let (ok, _, error) = cli(
+        &[
+            "import",
+            state,
+            "data",
+            file,
+            backup.to_str().unwrap(),
+            &"0".repeat(64),
+        ],
+        b"private-cli-password\n",
+    );
+    assert!(!ok && error.contains("re-preview"));
+    assert!(!Path::new(state).join("game.db").exists() && !backup.exists());
+    let imported = cli_ok(
+        &[
+            "import",
+            state,
+            "data",
+            file,
+            backup.to_str().unwrap(),
+            expected,
+        ],
+        b"private-cli-password\n",
+    );
+    assert_eq!(imported["login"], preview["login"]);
+    assert!(!backup.exists());
+    let replacement = cli_ok(&["preview", state, "data", file], b"");
+    assert_eq!(replacement["replaced"], true);
+    let local = Store::open(&Path::new(state).join("game.db"), &content).unwrap();
+    let peer = local
+        .list("unrelated-after-confirmation".into())
+        .await
+        .unwrap()
+        .id;
+    let other = local
+        .create(peer, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    // Progress/peers are not fingerprinted: the confirmed target identity stays the same.
+    assert_eq!(
+        cli_ok(&["preview", state, "data", file], b"")["expected"],
+        replacement["expected"]
+    );
+    let before = dump(&Connection::open(Path::new(state).join("game.db")).unwrap());
+    let result = cli_ok(
+        &[
+            "replace",
+            state,
+            "data",
+            file,
+            backup.to_str().unwrap(),
+            replacement["expected"].as_str().unwrap(),
+        ],
+        b"replacement-cli-password\n",
+    );
+    assert_eq!(result["login"], replacement["login"]);
+    assert_eq!(dump(&Connection::open(&backup).unwrap()), before);
+    let verified = cli_ok(&["verify-snapshot", backup.to_str().unwrap(), "data"], b"");
+    assert_eq!(
+        verified,
+        serde_json::json!({"verified":true,"schema":22,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
+    );
+    assert_eq!(local.load(peer, other.id).await.unwrap().items, other.items);
+    assert_eq!(
+        local
+            .authenticate(
+                "player-1@local.invalid".into(),
+                "replacement-cli-password".into()
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    let historical = Store::open(&backup, &content).unwrap();
+    assert_eq!(
+        historical
+            .authenticate(
+                "player-1@local.invalid".into(),
+                "private-cli-password".into()
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        dump(&Connection::open(root.join("source/game.db")).unwrap()),
+        source_before
+    );
+    drop(historical);
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_cli_stale_missing_malformed_and_input_changed_fail_before_backup_or_schema21_migration()
+ {
+    let (root, content, source, save) = fixture().await;
+    let file = write_input(&root, &save);
+    let input = std::fs::read(&file).unwrap();
+    let state = root.join("local");
+    std::fs::create_dir(&state).unwrap();
+    let local = Store::open(&state.join("game.db"), &content).unwrap();
+    local
+        .register(
+            "keep-owner".into(),
+            "keep@example.invalid".into(),
+            "private-cli-password".into(),
+        )
+        .await
+        .unwrap();
+    drop(local);
+    let db = Connection::open(state.join("game.db")).unwrap();
+    schema21(&db);
+    let state = state.to_str().unwrap();
+    let file = file.to_str().unwrap();
+    let backup = root.join("before.db");
+    let backup = backup.to_str().unwrap();
+    let initial = dump(&db);
+    let confirmed = cli_ok(&["preview", state, "data", file], b"");
+    assert_eq!(dump(&db), initial);
+    assert_eq!(confirmed["login"], "player-2@local.invalid");
+    let expected = confirmed["expected"].as_str().unwrap();
+    for token in [
+        None,
+        Some(String::new()),
+        Some("abc".to_string()),
+        Some("A".repeat(64)),
+        Some("0".repeat(64)),
+    ] {
+        let mut args = vec!["import", state, "data", file, backup];
+        if let Some(token) = token.as_deref() {
+            args.push(token)
+        }
+        let before = dump(&db);
+        let (ok, _, error) = cli(&args, b"private-cli-password\n");
+        assert!(!ok && error.contains("re-preview"), "{error}");
+        assert_eq!(dump(&db), before);
+        assert!(!Path::new(backup).exists());
+    }
+    std::fs::write(file, [input.as_slice(), b"\n"].concat()).unwrap();
+    let (ok, _, error) = cli(
+        &["import", state, "data", file, backup, expected],
+        b"private-cli-password\n",
+    );
+    assert!(!ok && error.contains("re-preview"));
+    assert_eq!(dump(&db), initial);
+    assert!(!Path::new(backup).exists());
+    std::fs::write(file, &input).unwrap();
+    db.execute("UPDATE credentials SET email='player-2@local.invalid'", [])
+        .unwrap();
+    let before = dump(&db);
+    let (ok, _, error) = cli(
+        &["import", state, "data", file, backup, expected],
+        b"private-cli-password\n",
+    );
+    assert!(!ok && error.contains("re-preview"));
+    assert_eq!(dump(&db), before);
+    assert!(!Path::new(backup).exists());
+    db.execute("UPDATE credentials SET email='keep@example.invalid'", [])
+        .unwrap();
+    db.execute(
+        "INSERT INTO accounts(guid,name) VALUES('allocated-drift','Guest2')",
+        [],
+    )
+    .unwrap();
+    db.execute("INSERT INTO account_fame VALUES(2,0,0)", [])
+        .unwrap();
+    vaults::provision(&db, 2).unwrap();
+    verify_database(&db, &content).unwrap();
+    let before = dump(&db);
+    let (ok, _, error) = cli(
+        &["import", state, "data", file, backup, expected],
+        b"private-cli-password\n",
+    );
+    assert!(!ok && error.contains("re-preview"));
+    assert_eq!(dump(&db), before);
+    assert!(!Path::new(backup).exists());
+    db.execute("DELETE FROM vaults WHERE account=2", [])
+        .unwrap();
+    db.execute("DELETE FROM account_fame WHERE account=2", [])
+        .unwrap();
+    db.execute("DELETE FROM accounts WHERE id=2", []).unwrap();
+    assert_eq!(dump(&db), initial);
+    assert_eq!(
+        cli_ok(&["preview", state, "data", file], b"")["expected"],
+        expected
+    );
+    let result = cli_ok(
+        &["import", state, "data", file, backup, expected],
+        b"private-cli-password\n",
+    );
+    assert_eq!(result["login"], confirmed["login"]);
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
+            .unwrap(),
+        22
+    );
+    let verified = cli_ok(&["verify-snapshot", backup, "data"], b"");
+    assert_eq!(
+        verified,
+        serde_json::json!({"verified":true,"schema":21,"scope":"all-local-accounts","account_count":1,"character_count":0})
+    );
+    let local = Store::open(&Path::new(state).join("game.db"), &content).unwrap();
+    assert_eq!(
+        local
+            .authenticate("keep@example.invalid".into(), "private-cli-password".into())
+            .await
+            .unwrap(),
+        1
+    );
+    drop(local);
+    drop(db);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_expected_transaction_rechecks_identity_and_cli_origin_replaced_drift_without_writes()
+ {
+    let (root, content, source, save) = fixture().await;
+    let file = write_input(&root, &save);
+    let digest = format!("{:x}", Sha256::digest(std::fs::read(&file).unwrap()));
+    let state = root.join("local");
+    std::fs::create_dir(&state).unwrap();
+    let local = Store::open(&state.join("game.db"), &content).unwrap();
+    let db = Connection::open(state.join("game.db")).unwrap();
+    let mut plan = preview(&db, &save).unwrap();
+    let token = expected(&save, &plan, &digest).unwrap();
+    local.list("allocated-after-preview".into()).await.unwrap();
+    let before = dump(&db);
+    assert!(
+        local
+            .import_expected_account_save(
+                save.clone(),
+                "private-cli-password".into(),
+                false,
+                ImportExpectation {
+                    input_sha256: digest.clone(),
+                    expected: token
+                }
+            )
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("re-preview")
+    );
+    assert_eq!(dump(&db), before);
+    plan = preview(&db, &save).unwrap();
+    for field in ["account", "login", "replaced", "origin"] {
+        let mut forged = ImportResult {
+            account: plan.account,
+            login: plan.login.clone(),
+            replaced: plan.replaced,
+            disclosure: DISCLOSURE,
+        };
+        let mut other = save.clone();
+        match field {
+            "account" => forged.account += 1,
+            "login" => forged.login = "another@local.invalid".into(),
+            "replaced" => forged.replaced = !forged.replaced,
+            "origin" => other.origin.namespace = "f".repeat(64),
+            _ => unreachable!(),
+        };
+        let token = expected(&other, &forged, &digest).unwrap();
+        let before = dump(&db);
+        assert!(
+            local
+                .import_expected_account_save(
+                    save.clone(),
+                    "private-cli-password".into(),
+                    false,
+                    ImportExpectation {
+                        input_sha256: digest.clone(),
+                        expected: token
+                    }
+                )
+                .await
+                .is_err()
+        );
+        assert_eq!(dump(&db), before);
+    }
+    let token = expected(&save, &plan, &digest).unwrap();
+    local
+        .import_expected_account_save(
+            save.clone(),
+            "private-cli-password".into(),
+            false,
+            ImportExpectation {
+                input_sha256: digest,
+                expected: token,
+            },
+        )
+        .await
+        .unwrap();
+    let state = state.to_str().unwrap();
+    let file = file.to_str().unwrap();
+    let confirmed = cli_ok(&["preview", state, "data", file], b"");
+    assert_eq!(confirmed["replaced"], true);
+    let backup = root.join("refused.db");
+    let backup = backup.to_str().unwrap();
+    db.execute("INSERT INTO portable_history VALUES(1,0,0,0)", [])
+        .unwrap();
+    db.execute("UPDATE account_origins SET account=1", [])
+        .unwrap();
+    verify_database(&db, &content).unwrap();
+    for mapping_present in [true, false] {
+        if !mapping_present {
+            db.execute("DELETE FROM account_origins", []).unwrap();
+        }
+        let before = dump(&db);
+        let (ok, _, error) = cli(
+            &[
+                "replace",
+                state,
+                "data",
+                file,
+                backup,
+                confirmed["expected"].as_str().unwrap(),
+            ],
+            b"replacement-cli-password\n",
+        );
+        assert!(!ok && error.contains("re-preview"), "{error}");
+        assert!(!Path::new(backup).exists());
+        assert_eq!(dump(&db), before);
+    }
+    drop(db);
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}

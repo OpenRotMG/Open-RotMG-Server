@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
 pub const MAX_BYTES: u64 = 32 * 1024 * 1024;
@@ -462,6 +463,45 @@ pub struct ImportResult {
     pub replaced: bool,
     pub disclosure: &'static str,
 }
+pub(crate) struct ImportExpectation {
+    pub input_sha256: String,
+    pub expected: String,
+}
+pub(crate) fn expected(
+    save: &AccountSave,
+    plan: &ImportResult,
+    input_sha256: &str,
+) -> Result<String> {
+    let identity = serde_json::to_vec(&(
+        "account-import-v1",
+        input_sha256,
+        &save.origin.namespace,
+        save.origin.account,
+        plan.account,
+        &plan.login,
+        plan.replaced,
+    ))?;
+    Ok(format!("{:x}", Sha256::digest(identity)))
+}
+pub(crate) fn validate_expected(expected: &str) -> Result<()> {
+    ensure!(
+        key(expected),
+        "required preview expectation is malformed; re-preview this file"
+    );
+    Ok(())
+}
+pub(crate) fn check_expected(
+    save: &AccountSave,
+    plan: &ImportResult,
+    expectation: &ImportExpectation,
+) -> Result<()> {
+    validate_expected(&expectation.expected)?;
+    ensure!(
+        expectation.expected == expected(save, plan, &expectation.input_sha256)?,
+        "preview expectation is malformed or changed; re-preview this file and confirm again"
+    );
+    Ok(())
+}
 pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResult> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
@@ -546,12 +586,17 @@ pub(super) fn import(
     password: &str,
     replace: bool,
     base: [i32; 8],
+    expectation: Option<ImportExpectation>,
 ) -> Result<ImportResult> {
     save.validate()?;
     accounts::password(password)?;
     let hash = accounts::hash(password)?;
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let plan = preview(&tx, save)?;
+    let plan =
+        preview(&tx, save).context("local import identity unavailable; re-preview this file")?;
+    if let Some(expectation) = expectation {
+        check_expected(save, &plan, &expectation)?;
+    }
     ensure!(
         !plan.replaced || replace,
         "origin already imported; explicit replacement and backup required"
@@ -779,11 +824,32 @@ impl Store {
         })
         .await
     }
+    // Private domain validation has no staged file; CLI commits use the checked entry point.
     pub(crate) async fn import_account_save(
         &self,
         save: AccountSave,
         password: String,
         replace: bool,
+    ) -> Result<ImportResult> {
+        self.import_account_save_with_expectation(save, password, replace, None)
+            .await
+    }
+    pub(crate) async fn import_expected_account_save(
+        &self,
+        save: AccountSave,
+        password: String,
+        replace: bool,
+        expectation: ImportExpectation,
+    ) -> Result<ImportResult> {
+        self.import_account_save_with_expectation(save, password, replace, Some(expectation))
+            .await
+    }
+    async fn import_account_save_with_expectation(
+        &self,
+        save: AccountSave,
+        password: String,
+        replace: bool,
+        expectation: Option<ImportExpectation>,
     ) -> Result<ImportResult> {
         let base = self.legacy_base;
         for ch in save
@@ -797,7 +863,7 @@ impl Store {
                 self.content.permanent_companion(kind)?;
             }
         }
-        self.call(move |db| import(db, &save, &password, replace, base))
+        self.call(move |db| import(db, &save, &password, replace, base, expectation))
             .await
     }
 }
