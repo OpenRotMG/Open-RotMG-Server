@@ -11,6 +11,7 @@ import {parseArgs} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import {connect} from './record-demo.mjs';
+import {captureNativeBootstrap} from './native-chat.mjs';
 
 const exec = promisify(execFile), root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let activeCase=false;
@@ -170,7 +171,7 @@ export async function runCase(scenario, options) {
   const out=options.runDir,state=archive?archive.state:join(out,'state');assert.equal(await realpath(dirname(out)),dirname(out),'Run parent must be canonical, not a symlink');await mkdir(out,{mode:0o700});activeCase=true;
   const previousOwner=process.env.PI_BROWSER_OWNER;
   const controller=new AbortController(), children=[], files=[], participants=[], ownedBrowsers=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
-  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState;
+  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState,bootstrapIdentity;
   const elapsed=()=>Math.round(performance.now()-started);
   let failureClient;
   let saveTurn=Promise.resolve();
@@ -336,10 +337,12 @@ export async function runCase(scenario, options) {
       await call('Emulation.setFocusEmulationEnabled',{enabled:true});await click();await click();
       });
       report.bootstrapStep='wait-character-load';
-      await waitFor(async()=>{const actors=[...participants.map(c=>c.actor),actor],s=await api({op:'native_state',actors});assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');return s.actors.length===actors.length&&s.actors.every(a=>a.stage==='ready');},'Normal character LOAD did not complete');
+      let readyIdentity;
+      await waitFor(async()=>{const registered=[...participants.map(c=>({actor:c.actor,account:c.account})),{actor,account}],actors=registered.map(c=>c.actor),s=await api({op:'native_state',actors});assert(s.native_state_version===1&&Array.isArray(s.actors),'Native bootstrap identity v1 requires matching atomic native_state DTO');assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');if(s.actors.length!==actors.length||!s.actors.every(a=>a.stage==='ready'))return false;readyIdentity=captureNativeBootstrap(s,registered,bootstrapIdentity);return true;},'Normal character LOAD did not complete');
       report.bootstrapStep='publish-participant';
       participants.push({actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env.DISPLAY});
-      await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state,browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
+      bootstrapIdentity=readyIdentity;
+      await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state,native_bootstrap:bootstrapIdentity,browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
       report.bootstrapStep='pause-native-client';
       await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
       report.bootstrapStep='ready';await save();check();
