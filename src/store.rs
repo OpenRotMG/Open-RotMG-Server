@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, path::Path, sync::mpsc};
 use tokio::sync::oneshot;
 
 mod account_actions;
+pub(crate) mod account_save;
 mod accounts;
 pub(crate) use accounts::email as validate_email;
 pub(crate) mod browser_link;
@@ -653,7 +654,24 @@ impl Store {
         ensure!(
             matches!(
                 version,
-                0 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21
+                0 | 5
+                    | 6
+                    | 7
+                    | 8
+                    | 9
+                    | 10
+                    | 11
+                    | 12
+                    | 13
+                    | 14
+                    | 15
+                    | 16
+                    | 17
+                    | 18
+                    | 19
+                    | 20
+                    | 21
+                    | 22
             ),
             "unsupported game database schema {version}"
         );
@@ -862,7 +880,8 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 21)?;
+        account_save::migrate(&migration, version)?;
+        migration.pragma_update(None, "user_version", 22)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -1784,11 +1803,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 )?,
                 "assist giver missing {giver}"
             );
-            Ok(db.query_row(
-                "SELECT count(*) FROM level_credits WHERE giver=?1",
-                [giver],
-                |r| r.get(0),
-            )?)
+            Ok(db.query_row(account_save::ASSIST_COUNT, [giver], |r| r.get(0))?)
         })
         .await
     }
@@ -1811,7 +1826,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "death snapshot lost committed progress or equipment");
             ch.lifetime.follows(&saved.lifetime)?;
-            ch.lifetime.level_assists=ch.lifetime.level_assists.max(tx.query_row("SELECT count(*) FROM level_credits WHERE giver=?1",[ch.id],|r|r.get::<_,u64>(0))?);
+            ch.lifetime.level_assists=ch.lifetime.level_assists.max(tx.query_row(account_save::ASSIST_COUNT,[ch.id],|r|r.get::<_,u64>(0))?);
             let history=death_awards::history(&tx,&ch)?;
             let wallet=tx.query_row("SELECT balance,earned FROM account_fame WHERE account=?1",[ch.account],|r|Ok((r.get(0)?,r.get(1)?))).context("account fame wallet missing")?;
             let guild=guilds::membership(&tx,ch.account)?.map(|m|tx.query_row("SELECT fame,earned FROM guilds WHERE id=?1",[m.id],|r|Ok((r.get(0)?,r.get(1)?)))).transpose()?;

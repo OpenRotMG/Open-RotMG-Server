@@ -1,0 +1,942 @@
+use super::*;
+use rand::SeedableRng;
+use std::path::PathBuf;
+fn root() -> PathBuf {
+    let root = std::env::temp_dir().join(format!("account-save-{}", rand::random::<u64>()));
+    std::fs::create_dir(&root).unwrap();
+    root
+}
+fn dump(db: &Connection) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut q = db
+        .prepare("SELECT name,sql FROM sqlite_schema WHERE type='table' ORDER BY name")
+        .unwrap();
+    for row in q
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .unwrap()
+    {
+        let (name, sql) = row.unwrap();
+        result.push(sql);
+        let mut q = db
+            .prepare(&format!("SELECT * FROM \"{name}\" ORDER BY rowid"))
+            .unwrap();
+        let n = q.column_count();
+        for row in q
+            .query_map([], |r| {
+                Ok((0..n)
+                    .map(|i| format!("{:?}", r.get_ref(i).unwrap()))
+                    .collect::<Vec<_>>()
+                    .join("|"))
+            })
+            .unwrap()
+        {
+            result.push(format!("{name}:{}", row.unwrap()));
+        }
+    }
+    result
+}
+async fn fixture() -> (PathBuf, Content, Store, AccountSave) {
+    let root = root();
+    let source = root.join("source");
+    crate::backup::run(&[
+        "--backup-fixture".into(),
+        source.to_str().unwrap().into(),
+        "data".into(),
+    ])
+    .await
+    .unwrap();
+    let content = Content::load(Path::new("data")).unwrap();
+    let store = Store::open(&source.join("game.db"), &content).unwrap();
+    let deleted = store.create(2, content.get(WIZARD).unwrap()).await.unwrap();
+    store.delete_character(2, deleted.id).await.unwrap();
+    let mut living = store.create(2, content.get(WIZARD).unwrap()).await.unwrap();
+    living.lifetime.level_assists = 7;
+    let generator = content
+        .objects
+        .values()
+        .find(|o| o.companion.as_ref().is_some_and(|c| c.permanent))
+        .unwrap();
+    living.pet_kind = Some(
+        content
+            .companion_kind(&generator.companion.as_ref().unwrap().object)
+            .unwrap(),
+    );
+    living.xp_boost.active = true;
+    living.xp_boost.bonus_exp = 0;
+    living.tex1 = 0x01ff0000;
+    living.tex2 = 0x04000006;
+    living
+        .gain_experience(&content, 50, &mut rand::rngs::StdRng::seed_from_u64(37))
+        .unwrap();
+    store
+        .progress_with_assists(
+            living.clone(),
+            vec![LevelAssist {
+                reached_level: 2,
+                giver: 1,
+            }],
+        )
+        .await
+        .unwrap();
+    let mut peer = store.load(1, 1).await.unwrap();
+    peer.gain_experience(&content, 500, &mut rand::rngs::StdRng::seed_from_u64(38))
+        .unwrap();
+    store
+        .progress_with_assists(
+            peer,
+            vec![LevelAssist {
+                reached_level: 5,
+                giver: living.id,
+            }],
+        )
+        .await
+        .unwrap();
+    store.call(|db| {
+        db.execute("INSERT INTO discord_realm_close_tokens VALUES('PRIVATE_REQUEST_CANARY',2,'PRIVATE_DISCORD_CANARY','PRIVATE_ACTOR_CANARY',NULL)",[])?;
+        db.execute("INSERT INTO discord_realm_close_tokens VALUES('PRIVATE_SPENT_CANARY',2,'PRIVATE_DISCORD_CANARY','PRIVATE_ACTOR_CANARY','PRIVATE_USED_CANARY')",[])?;
+        db.execute("INSERT INTO email_send_attempts VALUES(2,'PRIVATE_IP_CANARY',123)",[])?;
+        Ok(())
+    }).await.unwrap();
+    let save = store.export_account_save(2).await.unwrap();
+    (root, content, store, save)
+}
+#[tokio::test]
+async fn account_save_complete_linked_human_roundtrip_privacy_auth_and_future_earnings() {
+    let (root, content, source, _save) = fixture().await;
+    let source_db = Connection::open(root.join("source/game.db")).unwrap();
+    let before = dump(&source_db);
+    let bytes = serde_json::to_vec(&source.export_account_save(2).await.unwrap()).unwrap();
+    let text = String::from_utf8(bytes.clone()).unwrap();
+    for canary in [
+        "PRIVATE_",
+        "BACKUP_FIXTURE_SECRET",
+        "example.invalid",
+        "backup-fixture-password",
+        "password_hash",
+        "discord_id",
+        "actor_id",
+        "used_request",
+        "guild_members",
+        "bot_minds",
+        "trade_transactions",
+    ] {
+        assert!(!text.contains(canary), "privacy canary {canary}");
+    }
+    assert_eq!(dump(&source_db), before);
+    let save = AccountSave::decode(&bytes).unwrap();
+    assert!(save.guild_fame > 0);
+    assert_eq!((save.realm_unused, save.realm_spent), (1, 1));
+    assert_eq!(save.characters.len(), 4);
+    assert_eq!(save.deaths.len(), 2);
+    assert!(!save.claims.is_empty());
+    assert_eq!(save.pictures.len(), 1);
+    let dest = root.join("local.db");
+    let local = Store::open(&dest, &content).unwrap();
+    let unrelated = local
+        .register(
+            "unrelated".into(),
+            "unrelated@example.test".into(),
+            "other-password".into(),
+        )
+        .await
+        .unwrap();
+    let peer = local
+        .create(unrelated, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    local
+        .save_picture(
+            unrelated,
+            "Unrelated".into(),
+            2,
+            "".into(),
+            save.pictures[0].png.clone(),
+            false,
+        )
+        .await
+        .unwrap();
+    local
+        .save_picture(
+            unrelated,
+            "Unrelated Two".into(),
+            2,
+            "".into(),
+            save.pictures[0].png.clone(),
+            false,
+        )
+        .await
+        .unwrap();
+    let result = local
+        .import_account_save(save.clone(), "new-local-password".into(), false)
+        .await
+        .unwrap();
+    assert_eq!(result.account, 2);
+    assert_eq!(
+        local
+            .authenticate(result.login.clone(), "new-local-password".into())
+            .await
+            .unwrap(),
+        result.account
+    );
+    assert!(
+        local
+            .authenticate(result.login.clone(), "backup-fixture-password".into())
+            .await
+            .is_err()
+    );
+    assert!(
+        local
+            .authenticate(
+                "backup-false@example.invalid".into(),
+                "backup-fixture-password".into()
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        local
+            .authenticate("BACKUP_FIXTURE_SECRET_false".into(), "".into())
+            .await
+            .is_err()
+    );
+    assert_eq!(local.load(unrelated, peer.id).await.unwrap(), peer);
+    let carried = local.export_account_save(result.account).await.unwrap();
+    fn normalized(mut saved: AccountSave) -> serde_json::Value {
+        saved.exported_at = 1;
+        let ids: BTreeMap<_, _> = saved
+            .characters
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.character.id, i as i32 + 1))
+            .collect();
+        for row in &mut saved.characters {
+            row.character.id = ids[&row.character.id];
+        }
+        for death in &mut saved.deaths {
+            death.character.id = ids[&death.character.id];
+        }
+        for (_, id) in &mut saved.claims {
+            *id = ids[id];
+        }
+        for (i, picture) in saved.pictures.iter_mut().enumerate() {
+            picture.id = i as i32 + 1;
+        }
+        serde_json::to_value(saved).unwrap()
+    }
+    assert_eq!(normalized(carried.clone()), normalized(save.clone()));
+    let source_unlocks = source.list_id(2).await.unwrap().best_levels;
+    let local_unlocks = local.list_id(result.account).await.unwrap().best_levels;
+    for kind in content.classes.keys() {
+        assert_eq!(
+            content.unlocked(*kind, &source_unlocks).unwrap(),
+            content.unlocked(*kind, &local_unlocks).unwrap()
+        );
+    }
+    let purchased = source.export_account_save(1).await.unwrap();
+    let purchased_local = Store::open(Path::new(":memory:"), &content).unwrap();
+    let purchased_result = purchased_local
+        .import_account_save(purchased.clone(), "purchased-password".into(), false)
+        .await
+        .unwrap();
+    assert_eq!(
+        normalized(
+            purchased_local
+                .export_account_save(purchased_result.account)
+                .await
+                .unwrap()
+        ),
+        normalized(purchased)
+    );
+    assert_eq!(carried.origin.namespace, save.origin.namespace);
+    assert_eq!(carried.fame_earned, save.fame_earned);
+    assert_eq!(carried.realm_spent, 1);
+    assert_ne!(carried.pictures[0].id, save.pictures[0].id);
+    assert_eq!(carried.pictures[0].png, save.pictures[0].png);
+    assert_eq!(
+        local.picture(carried.pictures[0].id).await.unwrap(),
+        save.pictures[0].png
+    );
+    assert_eq!(
+        carried
+            .deaths
+            .iter()
+            .map(|d| d.receipt.total)
+            .collect::<Vec<_>>(),
+        save.deaths
+            .iter()
+            .map(|d| d.receipt.total)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(carried.claims.len(), save.claims.len());
+    let mut living = local.list_id(result.account).await.unwrap().characters[0].clone();
+    assert_eq!(local.assist_count(living.id).await.unwrap(), 7);
+    let mut peer = local.load(unrelated, peer.id).await.unwrap();
+    peer.gain_experience(&content, 50, &mut rand::rngs::StdRng::seed_from_u64(39))
+        .unwrap();
+    let assist = LevelAssist {
+        reached_level: 2,
+        giver: living.id,
+    };
+    local
+        .progress_with_assists(peer.clone(), vec![assist.clone()])
+        .await
+        .unwrap();
+    local
+        .progress_with_assists(peer, vec![assist])
+        .await
+        .unwrap();
+    assert_eq!(local.assist_count(living.id).await.unwrap(), 8);
+    living.alive = false;
+    living.hp = 0;
+    local
+        .death(living.clone(), "Local after import".into())
+        .await
+        .unwrap();
+    assert!(local.death(living.clone(), "Replay".into()).await.is_err());
+    let after = local.export_account_save(result.account).await.unwrap();
+    assert_eq!(
+        after
+            .deaths
+            .last()
+            .unwrap()
+            .character
+            .lifetime
+            .level_assists,
+        8
+    );
+    assert_eq!(after.claims, carried.claims);
+    assert!(
+        !after
+            .deaths
+            .last()
+            .unwrap()
+            .receipt
+            .rows
+            .iter()
+            .any(|r| r.kind == death_awards::BonusKind::LegacyBuilder)
+    );
+    let gold = local.presentation(result.account).await.unwrap().credits;
+    local.reward_first_bug(result.account).await.unwrap();
+    let rewarded = local.presentation(result.account).await.unwrap().credits;
+    assert_eq!(rewarded, gold + 50);
+    local.reward_first_bug(result.account).await.unwrap();
+    assert_eq!(
+        local.presentation(result.account).await.unwrap().credits,
+        rewarded
+    );
+    drop(local);
+    let reopened = Store::open(&dest, &content).unwrap();
+    assert_eq!(
+        reopened
+            .authenticate(result.login, "new-local-password".into())
+            .await
+            .unwrap(),
+        2
+    );
+    drop(reopened);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[tokio::test]
+async fn account_save_unknown_future_corrupt_collision_and_rollback() {
+    let (root, content, source, save) = fixture().await;
+    let local = Store::open(&root.join("local.db"), &content).unwrap();
+    let account = local
+        .register(
+            "collision".into(),
+            "player-2@local.invalid".into(),
+            "collision-password".into(),
+        )
+        .await
+        .unwrap();
+    let db = Connection::open(root.join("local.db")).unwrap();
+    let before = dump(&db);
+    assert!(
+        local
+            .import_account_save(save.clone(), "new-password".into(), false)
+            .await
+            .is_err()
+    );
+    assert_eq!(dump(&db), before);
+    local
+        .call(move |db| {
+            db.execute(
+                "UPDATE credentials SET email='other@example.test' WHERE account=?1",
+                [account],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut invalid = save.clone();
+    invalid.fame_earned += 1;
+    let before = dump(&db);
+    assert!(
+        local
+            .import_account_save(invalid, "new-password".into(), false)
+            .await
+            .is_err()
+    );
+    assert_eq!(dump(&db), before);
+    let imported = local
+        .import_account_save(save.clone(), "new-password".into(), false)
+        .await
+        .unwrap();
+    let before = dump(&db);
+    assert!(
+        local
+            .import_account_save(save.clone(), "new-password".into(), false)
+            .await
+            .is_err()
+    );
+    assert_eq!(dump(&db), before);
+    let mut wrong = save.clone();
+    wrong.origin.namespace = "0".repeat(64);
+    assert!(
+        local
+            .import_account_save(wrong, "new-password".into(), true)
+            .await
+            .is_err()
+    );
+    assert_eq!(dump(&db), before);
+    for path in ["outer", "character", "lifetime", "receipt"] {
+        let mut value = serde_json::to_value(&save).unwrap();
+        let target = match path {
+            "outer" => &mut value,
+            "character" => &mut value["characters"][0]["character"],
+            "lifetime" => &mut value["characters"][0]["character"]["lifetime"],
+            _ => &mut value["deaths"][0]["receipt"],
+        };
+        target["PRIVATE_UNKNOWN_CANARY"] = true.into();
+        assert!(AccountSave::decode(&serde_json::to_vec(&value).unwrap()).is_err());
+    }
+    let mut future = save.clone();
+    future.format = 2;
+    assert!(AccountSave::decode(&serde_json::to_vec(&future).unwrap()).is_err());
+    assert!(AccountSave::decode(b"{").is_err());
+    assert!(AccountSave::decode(&vec![0; MAX_BYTES as usize + 1]).is_err());
+    let mut art = save.clone();
+    art.pictures[0].png[20] ^= 1;
+    assert!(
+        local
+            .import_account_save(art, "new-password".into(), true)
+            .await
+            .is_err()
+    );
+    assert_eq!(dump(&db), before);
+    let mut texture = save.clone();
+    texture.characters[0].character.tex1 = 0xff000001;
+    assert!(texture.validate().is_err());
+    let mut duplicate = save.clone();
+    duplicate.characters.push(duplicate.characters[0].clone());
+    assert!(duplicate.validate().is_err());
+    local
+        .import_account_save(save, "replacement-password".into(), true)
+        .await
+        .unwrap();
+    assert!(
+        local
+            .authenticate(imported.login.clone(), "new-password".into())
+            .await
+            .is_err()
+    );
+    assert!(
+        local
+            .authenticate(imported.login, "replacement-password".into())
+            .await
+            .is_ok()
+    );
+    drop(source);
+    drop(local);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_replacement_peer_edges_consumed_levels_and_shared_history_refusals() {
+    let (root, content, source, save) = fixture().await;
+    let local = Store::open(&root.join("local.db"), &content).unwrap();
+    let peer_account = local.list("local-peer".into()).await.unwrap().id;
+    let mut peer = local
+        .create(peer_account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let imported = local
+        .import_account_save(save.clone(), "new-password".into(), false)
+        .await
+        .unwrap();
+    let mut living = local.list_id(imported.account).await.unwrap().characters[0].clone();
+    peer.gain_experience(&content, 50, &mut rand::rngs::StdRng::seed_from_u64(40))
+        .unwrap();
+    local
+        .progress_with_assists(
+            peer.clone(),
+            vec![LevelAssist {
+                reached_level: 2,
+                giver: living.id,
+            }],
+        )
+        .await
+        .unwrap();
+    living
+        .gain_experience(&content, 150, &mut rand::rngs::StdRng::seed_from_u64(41))
+        .unwrap();
+    local
+        .progress_with_assists(
+            living.clone(),
+            vec![LevelAssist {
+                reached_level: 3,
+                giver: peer.id,
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(local.assist_count(peer.id).await.unwrap(), 1);
+    for _ in 0..2 {
+        local
+            .import_account_save(save.clone(), "replacement-password".into(), true)
+            .await
+            .unwrap();
+        assert_eq!(local.assist_count(peer.id).await.unwrap(), 1);
+    }
+    let new_living = local.list_id(imported.account).await.unwrap().characters[0].clone();
+    assert!(
+        local
+            .progress_with_assists(
+                peer.clone(),
+                vec![LevelAssist {
+                    reached_level: 2,
+                    giver: new_living.id
+                }]
+            )
+            .await
+            .is_err()
+    );
+    peer.gain_experience(&content, 150, &mut rand::rngs::StdRng::seed_from_u64(42))
+        .unwrap();
+    local
+        .progress_with_assists(
+            peer,
+            vec![LevelAssist {
+                reached_level: 3,
+                giver: new_living.id,
+            }],
+        )
+        .await
+        .unwrap();
+    assert_eq!(local.assist_count(new_living.id).await.unwrap(), 8);
+    let db = Connection::open(root.join("local.db")).unwrap();
+    local.call(move |db|{
+        db.execute("INSERT INTO discord_realm_close_tokens VALUES('new-local-entitlement',?1,'local-discord','local-actor',NULL)",[imported.account])?;Ok(())
+    }).await.unwrap();
+    let before = dump(&db);
+    assert!(
+        local
+            .import_account_save(save.clone(), "replacement-password".into(), true)
+            .await
+            .is_err()
+    );
+    assert_eq!(dump(&db), before);
+    local
+        .call(|db| {
+            db.execute("DELETE FROM discord_realm_close_tokens", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    local
+        .change_guild(imported.account, GuildAction::Create("Local Guild".into()))
+        .await
+        .unwrap();
+    let before = dump(&db);
+    assert!(
+        local
+            .import_account_save(save.clone(), "replacement-password".into(), true)
+            .await
+            .is_err()
+    );
+    assert_eq!(dump(&db), before);
+    // A former member can leave an aggregate shared liability even after membership changes.
+    local
+        .call(move |db| {
+            db.execute(
+                "UPDATE guild_members SET account=?2 WHERE account=?1",
+                params![imported.account, peer_account],
+            )?;
+            db.execute("UPDATE guilds SET earned=?1", [save.fame_earned])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mut older = local.export_account_save(imported.account).await.unwrap();
+    older.fame_earned = 0;
+    older.fame_balance = 0;
+    older.deaths.clear();
+    older.claims.clear();
+    older.characters.retain(|c| c.character.alive);
+    let before = dump(&db);
+    let error = local
+        .import_account_save(older, "replacement-password".into(), true)
+        .await
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("shared history"));
+    assert_eq!(dump(&db), before);
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_full_snapshot_restore_and_failed_backup_leave_destination_unchanged() {
+    let (root, content, source, save) = fixture().await;
+    let path = root.join("source/game.db");
+    let before = dump(&Connection::open(&path).unwrap());
+    let snapshot = root.join("full.db");
+    crate::account_save::snapshot(&path, &snapshot, &content).unwrap();
+    assert_eq!(dump(&Connection::open(&snapshot).unwrap()), before);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&snapshot).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    assert!(crate::account_save::snapshot(&path, &snapshot, &content).is_err());
+    assert_eq!(dump(&Connection::open(&path).unwrap()), before);
+    assert!(
+        crate::account_save::snapshot(&path, &root.join("missing/backup.db"), &content).is_err()
+    );
+    assert_eq!(dump(&Connection::open(&path).unwrap()), before);
+    let dest = root.join("destination");
+    std::fs::create_dir(&dest).unwrap();
+    let local = Store::open(&dest.join("game.db"), &content).unwrap();
+    local
+        .import_account_save(save, "new-password".into(), false)
+        .await
+        .unwrap();
+    let backup = root.join("pre-restore.db");
+    let local_before = dump(&Connection::open(dest.join("game.db")).unwrap());
+    crate::account_save::run(&[
+        "--local-save".into(),
+        "restore".into(),
+        dest.to_str().unwrap().into(),
+        "data".into(),
+        snapshot.to_str().unwrap().into(),
+        backup.to_str().unwrap().into(),
+    ])
+    .await
+    .unwrap();
+    assert_eq!(dump(&Connection::open(&backup).unwrap()), local_before);
+    assert_eq!(
+        dump(&Connection::open(dest.join("game.db")).unwrap()),
+        before
+    );
+    assert_eq!(
+        local
+            .authenticate(
+                "backup-false@example.invalid".into(),
+                "backup-fixture-password".into()
+            )
+            .await
+            .unwrap(),
+        2
+    );
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_unnamed_name_semantics_and_unrelated_display_collision() {
+    let root = root();
+    let content = Content::load(Path::new("data")).unwrap();
+    let source = Store::open(&root.join("source.db"), &content).unwrap();
+    let id = source
+        .register(
+            "unnamed".into(),
+            "unnamed@example.test".into(),
+            "source-password".into(),
+        )
+        .await
+        .unwrap();
+    source
+        .create(id, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let save = source.export_account_save(id).await.unwrap();
+    assert!(!save.name_chosen);
+    let local = Store::open(&root.join("dest.db"), &content).unwrap();
+    local.list("unrelated-guest".into()).await.unwrap();
+    let result = local
+        .import_account_save(save.clone(), "new-password".into(), false)
+        .await
+        .unwrap();
+    let actual = local.export_account_save(result.account).await.unwrap();
+    assert!(!actual.name_chosen);
+    assert_eq!(actual.name, "Guest2");
+    assert_eq!(actual.characters[0].character.name, "Guest2");
+    let mut collision = save;
+    collision.origin.namespace = "0".repeat(64);
+    collision.name_chosen = true;
+    collision.name = "Guest2".into();
+    let db = Connection::open(root.join("dest.db")).unwrap();
+    let before = dump(&db);
+    assert!(
+        local
+            .import_account_save(collision, "new-password".into(), false)
+            .await
+            .is_err()
+    );
+    assert_eq!(dump(&db), before);
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_process_cuts_are_atomic_for_import_and_replacement() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
+    fn gate(root: &Path) -> ! {
+        let mut ready = std::fs::File::create(root.join("ready")).unwrap();
+        ready.write_all(b"ready").unwrap();
+        ready.sync_all().unwrap();
+        loop {
+            std::thread::park();
+        }
+    }
+    let content = Content::load(Path::new("data")).unwrap();
+    if let Ok(directory) = std::env::var("ACCOUNT_SAVE_CUT_ROOT") {
+        let directory = PathBuf::from(directory);
+        let store = Store::open(&directory.join("game.db"), &content).unwrap();
+        let cut = std::env::var("ACCOUNT_SAVE_CUT").unwrap();
+        let boundary = directory.clone();
+        store
+            .call(move |db| {
+                match cut.as_str() {
+                    "first_write" => db.update_hook(Some(
+                        move |_: rusqlite::hooks::Action, _: &str, _: &str, _: i64| gate(&boundary),
+                    )),
+                    "before_commit" => db.commit_hook(Some(move || gate(&boundary))),
+                    "committed" => db.wal_hook(Some(|_, _| {
+                        gate(Path::new(&std::env::var("ACCOUNT_SAVE_CUT_ROOT").unwrap()))
+                    })),
+                    _ => panic!("unknown cut"),
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let save =
+            AccountSave::decode(&std::fs::read(directory.join("save.json")).unwrap()).unwrap();
+        store
+            .import_account_save(
+                save,
+                "cut-password".into(),
+                std::env::var("ACCOUNT_SAVE_MODE").unwrap() == "replace",
+            )
+            .await
+            .unwrap();
+        panic!("cut not reached");
+    }
+    let (root, content, source, save) = fixture().await;
+    for mode in ["import", "replace"] {
+        let baseline = root.join(format!("baseline-{mode}.db"));
+        let local = Store::open(&baseline, &content).unwrap();
+        local.list("unrelated".into()).await.unwrap();
+        if mode == "replace" {
+            local
+                .import_account_save(save.clone(), "before-password".into(), false)
+                .await
+                .unwrap();
+        }
+        let before = dump(&Connection::open(&baseline).unwrap());
+        for cut in ["first_write", "before_commit", "committed"] {
+            let directory = root.join(format!("{mode}-{cut}"));
+            std::fs::create_dir(&directory).unwrap();
+            crate::account_save::snapshot(&baseline, &directory.join("game.db"), &content).unwrap();
+            std::fs::write(
+                directory.join("save.json"),
+                serde_json::to_vec(&save).unwrap(),
+            )
+            .unwrap();
+            let log = std::fs::File::create(directory.join("child.log")).unwrap();
+            let mut child=Command::new(std::env::current_exe().unwrap()).args(["--exact","store::account_save::tests::account_save_process_cuts_are_atomic_for_import_and_replacement","--nocapture"]).env("ACCOUNT_SAVE_CUT_ROOT",&directory).env("ACCOUNT_SAVE_CUT",cut).env("ACCOUNT_SAVE_MODE",mode).stdout(Stdio::from(log.try_clone().unwrap())).stderr(Stdio::from(log)).spawn().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while !directory.join("ready").exists() {
+                if let Some(status) = child.try_wait().unwrap() {
+                    panic!(
+                        "child exited {status}: {}",
+                        std::fs::read_to_string(directory.join("child.log")).unwrap()
+                    );
+                }
+                if Instant::now() > deadline {
+                    child.kill().unwrap();
+                    child.wait().unwrap();
+                    panic!("cut deadline");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            child.kill().unwrap();
+            child.wait().unwrap();
+            let reopened = Store::open(&directory.join("game.db"), &content).unwrap();
+            let db = Connection::open(directory.join("game.db")).unwrap();
+            verify_database(&db, &content).unwrap();
+            if cut != "committed" {
+                assert_eq!(dump(&db), before, "{mode}/{cut}");
+            } else {
+                assert_eq!(
+                    reopened
+                        .authenticate("player-2@local.invalid".into(), "cut-password".into())
+                        .await
+                        .unwrap(),
+                    2
+                );
+                let actual = reopened.export_account_save(2).await.unwrap();
+                assert_eq!(
+                    (
+                        actual.characters.len(),
+                        actual.deaths.len(),
+                        actual.realm_unused
+                    ),
+                    (save.characters.len(), save.deaths.len(), save.realm_unused)
+                );
+            }
+            drop(reopened);
+        }
+        drop(local);
+    }
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_schema21_snapshot_precedes_migration_and_preserves_old_credentials() {
+    let root = root();
+    let content = Content::load(Path::new("data")).unwrap();
+    let path = root.join("game.db");
+    let store = Store::open(&path, &content).unwrap();
+    let account = store
+        .register(
+            "old-local".into(),
+            "old@local.invalid".into(),
+            "old-local-password".into(),
+        )
+        .await
+        .unwrap();
+    store
+        .create(account, content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    drop(store);
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE discord_realm_close_tokens; PRAGMA user_version=21;").unwrap();
+    let before = dump(&db);
+    let backup = root.join("before-migration.db");
+    crate::account_save::snapshot(&path, &backup, &content).unwrap();
+    assert_eq!(dump(&db), before);
+    assert_eq!(dump(&Connection::open(&backup).unwrap()), before);
+    let migrated = Store::open(&path, &content).unwrap();
+    assert_eq!(
+        migrated
+            .authenticate("old@local.invalid".into(), "old-local-password".into())
+            .await
+            .unwrap(),
+        account
+    );
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
+            .unwrap(),
+        22
+    );
+    assert_eq!(
+        Connection::open(&backup)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
+            .unwrap(),
+        21
+    );
+    drop(migrated);
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_full_restore_process_cuts_preserve_old_or_complete_snapshot() {
+    use std::{
+        process::{Command, Stdio},
+        time::{Duration, Instant},
+    };
+    if let Ok(directory) = std::env::var("ACCOUNT_SAVE_RESTORE_CUT_ROOT") {
+        let args = vec![
+            "--local-save".into(),
+            "restore".into(),
+            directory.clone(),
+            "data".into(),
+            format!("{directory}/replacement.db"),
+            format!("{directory}/pre-restore.db"),
+        ];
+        crate::account_save::run(&args).await.unwrap();
+        panic!("restore cut not reached");
+    }
+    let (root, content, source, _) = fixture().await;
+    let original = root.join("original.db");
+    let local = Store::open(&original, &content).unwrap();
+    local
+        .register(
+            "original-local".into(),
+            "original@local.invalid".into(),
+            "original-password".into(),
+        )
+        .await
+        .unwrap();
+    let old = dump(&Connection::open(&original).unwrap());
+    let new = dump(&Connection::open(root.join("source/game.db")).unwrap());
+    for cut in ["before_commit", "committed"] {
+        let directory = root.join(cut);
+        std::fs::create_dir(&directory).unwrap();
+        crate::account_save::snapshot(&original, &directory.join("game.db"), &content).unwrap();
+        crate::account_save::snapshot(
+            &root.join("source/game.db"),
+            &directory.join("replacement.db"),
+            &content,
+        )
+        .unwrap();
+        let log = std::fs::File::create(directory.join("child.log")).unwrap();
+        let mut child=Command::new(std::env::current_exe().unwrap()).args(["--exact","store::account_save::tests::account_save_full_restore_process_cuts_preserve_old_or_complete_snapshot","--nocapture"]).env("ACCOUNT_SAVE_RESTORE_CUT_ROOT",&directory).env("ACCOUNT_SAVE_RESTORE_CUT",cut).stdout(Stdio::from(log.try_clone().unwrap())).stderr(Stdio::from(log)).spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !directory.join("ready").exists() {
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!(
+                    "restore child exited {status}: {}",
+                    std::fs::read_to_string(directory.join("child.log")).unwrap()
+                );
+            }
+            if Instant::now() > deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("restore cut deadline");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(
+            dump(&Connection::open(directory.join("pre-restore.db")).unwrap()),
+            old
+        );
+        let reopened = Store::open(&directory.join("game.db"), &content).unwrap();
+        assert_eq!(
+            dump(&Connection::open(directory.join("game.db")).unwrap()),
+            if cut == "committed" { &new } else { &old }.clone()
+        );
+        drop(reopened);
+    }
+    drop(local);
+    drop(source);
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -26,7 +26,7 @@ fn retire_mind_fields(value: &mut Value) -> Result<()> {
 }
 
 // Deserialization ignores unknown fields; exporting their original JSON could leak credentials.
-fn known_fields(value: &Value, saved: &Value) -> bool {
+pub(crate) fn known_fields(value: &Value, saved: &Value) -> bool {
     match (value, saved) {
         (Value::Object(input), Value::Object(output)) => input.iter().all(|(key, value)| {
             output

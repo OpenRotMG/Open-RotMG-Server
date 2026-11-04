@@ -1,3 +1,4 @@
+mod account_save;
 mod audit;
 mod backup;
 mod bots;
@@ -50,6 +51,9 @@ fn validate_client_assets(client: &std::path::Path) -> Result<()> {
     Ok(())
 }
 async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()> {
+    if account_save::run(&args).await? {
+        return Ok(());
+    }
     if backup::run(&args).await? {
         return Ok(());
     }
