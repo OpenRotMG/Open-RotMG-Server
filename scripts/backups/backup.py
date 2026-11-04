@@ -51,6 +51,9 @@ EMAIL_SQL = {
 EMAIL_TABLES = {'verified_emails': ('account', 'email', 'verified_at'), 'email_verifications': ('account', 'email', 'hash', 'issued_at', 'expires_at'), 'email_send_attempts': ('account', 'ip_hash', 'issued_at')}
 RESET_SQL = 'CREATE TABLE email_password_resets(account INTEGER PRIMARY KEY REFERENCES credentials(account),email TEXT NOT NULL,hash TEXT NOT NULL UNIQUE,issued_at INTEGER NOT NULL,expires_at INTEGER NOT NULL)'
 RESET_TABLES = {'email_password_resets': ('account', 'email', 'hash', 'issued_at', 'expires_at')}
+# Discord identities make unspent Realm Close tokens private, like email state; restores start without them.
+REALM_CLOSE_SQL = 'CREATE TABLE discord_realm_close_tokens(request_id TEXT PRIMARY KEY NOT NULL,account INTEGER NOT NULL REFERENCES accounts(id),discord_id TEXT NOT NULL,actor_id TEXT NOT NULL,used_request TEXT UNIQUE)'
+REALM_CLOSE_TABLES = {'discord_realm_close_tokens': ('request_id', 'account', 'discord_id', 'actor_id', 'used_request')}
 GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
@@ -70,7 +73,8 @@ RELOADED_COMMUNITY_GAME = {**RELOADED_PICTURES_GAME, 'trade_transactions': COMMU
 RELOADED_DEATH_FAME_GAME = {**RELOADED_COMMUNITY_GAME, 'deaths': DEATH_FAME_GAME['deaths'], 'legacy_claims': DEATH_FAME_GAME['legacy_claims'], 'level_credits': DEATH_FAME_GAME['level_credits']}
 RELOADED_DISCORD_GOLD_GAME = {**RELOADED_DEATH_FAME_GAME, 'discord_gold_grants': DISCORD_GOLD_GAME['discord_gold_grants']}
 RELOADED_EMAIL_GAME = {**RELOADED_DISCORD_GOLD_GAME, **EMAIL_TABLES}
-RELOADED_GAME = {**RELOADED_EMAIL_GAME, **RESET_TABLES}
+RESET_GAME = {**RELOADED_EMAIL_GAME, **RESET_TABLES}
+RELOADED_GAME = {**RESET_GAME, **REALM_CLOSE_TABLES}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -190,12 +194,12 @@ def snapshot(path, schema, *, include_schema=False):
         if 'discord_gold_grants' in schema:
             if db.execute("SELECT sql FROM sqlite_schema WHERE name='discord_gold_grants'").fetchone() != (DISCORD_GOLD_SQL,):
                 raise ValueError('Unsupported Discord gold grant metadata')
-        for table, expected in {**EMAIL_SQL, 'email_password_resets': RESET_SQL}.items():
+        for table, expected in {**EMAIL_SQL, 'email_password_resets': RESET_SQL, 'discord_realm_close_tokens': REALM_CLOSE_SQL}.items():
             if table in schema and db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (table,)).fetchone() != (expected,):
                 raise ValueError('Unsupported email verification metadata: ' + table)
         result = {}
         for table, columns in schema.items():
-            if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets', *EMAIL_TABLES, *RESET_TABLES}:
+            if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets', *EMAIL_TABLES, *RESET_TABLES, *REALM_CLOSE_TABLES}:
                 continue
             selected = tuple(c for c in columns if c != 'guid')
             rows = db.execute('SELECT ' + ','.join(selected) + ' FROM ' + table + ' ORDER BY ' + ','.join(selected[:2])).fetchall()
@@ -546,7 +550,7 @@ def gold_reward_sql(version):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, RELOADED_GAME], include_schema=True)
     if 'credentials' in matched and (('email_verifications' in matched) != (stored_version >= 20)):
         raise ValueError('Unsupported email verification schema version')
     if 'credentials' in matched and (('email_password_resets' in matched) != (stored_version >= 21)):
