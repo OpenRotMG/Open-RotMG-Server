@@ -82,7 +82,64 @@ impl Stream {
     }
 }
 
+#[derive(Default)]
+struct CombatBuffer {
+    started: Option<Instant>,
+    bytes: usize,
+    facts: Vec<Value>,
+}
+impl CombatBuffer {
+    fn flush(&mut self) {
+        if self.facts.is_empty() {
+            return;
+        }
+        emit(
+            "combat_batch",
+            json!({"facts":std::mem::take(&mut self.facts)}),
+        );
+        self.started = None;
+        self.bytes = 0;
+    }
+    fn push(&mut self, data: Value) {
+        let bytes = data.to_string().len();
+        if self.bytes + bytes > 16 * 1024 {
+            self.flush();
+        }
+        if self.facts.is_empty() {
+            self.started = Some(Instant::now());
+        }
+        self.facts.push(data);
+        self.bytes += bytes;
+        if self.facts.len() == 32 || self.bytes >= 16 * 1024 {
+            self.flush();
+        }
+    }
+}
+static COMBAT: OnceLock<Mutex<CombatBuffer>> = OnceLock::new();
+pub fn combat(data: Value) {
+    COMBAT
+        .get_or_init(|| Mutex::new(CombatBuffer::default()))
+        .lock()
+        .expect("combat audit poisoned")
+        .push(data);
+}
+pub fn flush_combat(force: bool) {
+    if let Some(buffer) = COMBAT.get() {
+        let mut buffer = buffer.lock().expect("combat audit poisoned");
+        if force
+            || buffer
+                .started
+                .is_some_and(|at| at.elapsed().as_millis() >= 100)
+        {
+            buffer.flush();
+        }
+    }
+}
 pub fn record(kind: &str, data: Value) {
+    flush_combat(false);
+    emit(kind, data);
+}
+fn emit(kind: &str, data: Value) {
     static STREAM: OnceLock<Mutex<Stream>> = OnceLock::new();
     let mut stream = STREAM
         .get_or_init(|| Mutex::new(Stream::new()))
@@ -242,6 +299,26 @@ mod tests {
         assert_eq!(stream.bytes_left, 256 * 1024 - 1);
         assert!(stream.admit(10));
         assert_eq!(stream.bytes_left, 1024 * 1024);
+    }
+
+    #[test]
+    fn combat_buffers_bound_count_and_bytes_without_discarding_fact_values() {
+        let mut buffer = CombatBuffer::default();
+        for _ in 0..31 {
+            buffer.push(json!({"world_ms":0}));
+        }
+        assert_eq!(buffer.facts.len(), 31);
+        buffer.push(json!({"world_ms":1}));
+        assert!(buffer.facts.is_empty());
+        buffer.push(json!({"values":[1,2,3]}));
+        assert_eq!(buffer.facts[0]["values"], json!([1, 2, 3]));
+        for _ in 0..10 {
+            buffer.push(json!({"values":vec![1;1200]}));
+            assert!(buffer.bytes < 16 * 1024);
+        }
+        buffer.flush();
+        assert_eq!(buffer.bytes, 0);
+        assert!(buffer.started.is_none());
     }
 
     #[test]

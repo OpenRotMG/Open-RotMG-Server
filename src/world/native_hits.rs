@@ -82,8 +82,7 @@ impl World {
             }
         }
         if !recipients.is_empty() {
-            crate::audit::record(
-                "combat",
+            crate::audit::combat(
                 serde_json::json!({"event":"volley_attempt","world":self.name,"world_ms":self.now,"identity":null,
                 "values":{"owner":owner,"recipients":recipients,"shots":bullets.iter().map(|b|serde_json::json!([b.id,b.born,b.start.x,b.start.y,b.angle,b.damage])).collect::<Vec<_>>(),
                 "source_kind":bullets.first().map(|b|b.source_kind),"spec":bullets.first().map(|b|&b.spec)}}),

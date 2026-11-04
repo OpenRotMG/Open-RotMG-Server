@@ -430,8 +430,7 @@ impl Player {
         values: impl FnOnce() -> serde_json::Value,
     ) {
         if self.controller == Controller::Human {
-            crate::audit::record(
-                "combat",
+            crate::audit::combat(
                 serde_json::json!({"event":event,"world":world,"world_ms":now,
                 "identity":[self.character.account,self.character.id,id],"values":values()} ),
             );
@@ -3630,6 +3629,7 @@ impl World {
         self.clear_companions(id);
         let mut p = self.players.remove(&id).unwrap();
         if p.controller == Controller::Human {
+            crate::audit::flush_combat(true);
             p.audit_motion
                 .flush(p.character.account, p.character.id, id, &self.name, true);
         }
@@ -7364,6 +7364,7 @@ impl World {
         self.now += 50;
         self.admissions.retain(|_, a| a.expires > self.now);
         self.tick += 1;
+        crate::audit::flush_combat(false);
         if self.tick.is_multiple_of(100) {
             for (id, p) in &mut self.players {
                 if p.controller == Controller::Human {
