@@ -1520,3 +1520,49 @@ async fn realm_close_token_starts_the_ordinary_closure_once() {
     let again = directory.force_realm_closure(player).unwrap_err();
     assert_eq!(again.to_string(), "This Realm is already closing.");
 }
+
+#[cfg(test)]
+#[test]
+fn pending_event_does_not_block_other_defeats_in_the_realm_cycle() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    let mut directory = Directory::test_with_seed(data, content.clone(), 85, 787901).unwrap();
+    let initial = directory.endgame.realms[&-3].cycle.remaining.clone();
+    let other = directory.endgame.realms[&1].cycle.remaining.clone();
+    let world = directory.worlds.get_mut(&-3).unwrap();
+    let defeated: Vec<_> = world
+        .actors()
+        .filter(|e| HEROES.contains(&e.kind))
+        .take(2)
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(defeated.len(), 2);
+    assert!(defeated.iter().all(|id| initial.contains(id)));
+    let sites: Vec<_> = world.event_reserves.iter().map(|e| e.root.pos).collect();
+    assert!(!sites.is_empty());
+    for (index, position) in sites.into_iter().enumerate() {
+        let mut character = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+        character.id = i32::try_from(index + 1).unwrap();
+        character.account = character.id;
+        let player = world.enter(character, None).unwrap();
+        world.players.get_mut(&player).unwrap().pos = position;
+    }
+    for id in &defeated {
+        world.defeat_entity(*id).unwrap();
+    }
+    // Model an already-earned event while actual player occupancy blocks every reserved site.
+    world.event_waiting = Some(defeated[0]);
+    let reserves = world.event_reserves.len();
+    for _ in 0..2 {
+        directory.endgame_step(&[-3]);
+        let world = &directory.worlds[&-3];
+        assert_eq!(world.event_waiting, Some(defeated[0]));
+        assert_eq!(world.event_reserves.len(), reserves);
+        assert_eq!(world.critical_deaths, vec![defeated[0]]);
+        let mut expected = initial.clone();
+        expected.remove(&defeated[1]);
+        assert_eq!(directory.endgame.realms[&-3].cycle.remaining, expected);
+        assert!(directory.endgame.realms[&-3].cycle.admits() && world.admission_open);
+        assert_eq!(directory.endgame.realms[&1].cycle.remaining, other);
+    }
+}
