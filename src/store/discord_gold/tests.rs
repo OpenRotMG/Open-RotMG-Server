@@ -131,3 +131,58 @@ async fn discord_gold_preserves_wallet_spending_and_receipts_across_relink_and_r
         21
     );
 }
+
+#[tokio::test]
+async fn realm_close_tokens_grant_once_per_request_spend_once_and_refund() {
+    let content = Content::load(Path::new("data")).unwrap();
+    let dir = std::env::temp_dir().join(format!("realm-close-{}", rand::random::<u64>()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("game.db");
+    let s = Store::open(&path, &content).unwrap();
+    let account = s
+        .register(
+            "owner".into(),
+            "owner@example.org".into(),
+            "password".into(),
+        )
+        .await
+        .unwrap();
+    let grant =
+        |request: &str| s.grant_realm_close_token(TARGET.into(), request.into(), ACTOR.into());
+    assert!(
+        grant(REQUEST).await.is_err(),
+        "unlinked users cannot receive tokens"
+    );
+    let code = s.issue_discord_code(account).await.unwrap();
+    s.redeem_discord_code(code, TARGET.into()).await.unwrap();
+    assert_eq!(grant(REQUEST).await.unwrap(), (account, 1));
+    assert_eq!(
+        grant(REQUEST).await.unwrap(),
+        (account, 1),
+        "replay grants nothing"
+    );
+    assert_eq!(grant("1558662335076376581").await.unwrap(), (account, 2));
+    let spend = |request: &str| s.spend_realm_close_token(TARGET.into(), request.into());
+    assert_eq!(spend("1558662335076376590").await.unwrap(), account);
+    assert_eq!(spend("1558662335076376591").await.unwrap(), account);
+    let empty = spend("1558662335076376592").await.unwrap_err();
+    assert_eq!(empty.to_string(), "You have no Realm Close tokens.");
+    s.refund_realm_close_token("1558662335076376591".into())
+        .await
+        .unwrap();
+    assert!(
+        s.refund_realm_close_token("1558662335076376591".into())
+            .await
+            .is_err()
+    );
+    drop(s);
+    let s = Store::open(&path, &content).unwrap();
+    assert_eq!(
+        s.spend_realm_close_token(TARGET.into(), "1558662335076376593".into())
+            .await
+            .unwrap(),
+        account,
+        "refunded token survives restart"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

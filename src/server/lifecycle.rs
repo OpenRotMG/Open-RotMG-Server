@@ -635,6 +635,10 @@ impl App {
         self.world.supervisor.ensure_running()?;
         Ok(())
     }
+    pub(super) fn online_avatar(&self, account: i32) -> Option<i32> {
+        let owners = self.owners.lock().expect("ownership registry poisoned");
+        owners.get(&account).and_then(|claim| claim.avatar)
+    }
     pub(super) async fn kick(&self, account: i32) -> Result<bool> {
         let control = self
             .owners

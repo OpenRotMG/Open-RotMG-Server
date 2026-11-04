@@ -94,7 +94,38 @@ impl ForcedTransfer {
         Packet { id: 39, body: o.0 }
     }
 }
+fn seal_realm(world: &mut World, grants: &mut BTreeMap<Vec<u8>, Grant>, origin: i32) {
+    world.admission_open = false;
+    world.oryx_notice("I HAVE CLOSED THIS REALM! YOU WILL NOT LIVE TO SEE THE LIGHT OF DAY!");
+    grants.retain(|_, g| g.destination != origin);
+    world.admissions.clear();
+}
 impl Directory {
+    /// Starts the ordinary closure countdown for the Realm a player is standing in.
+    pub(crate) fn force_realm_closure(&mut self, player: i32) -> Result<String> {
+        let origin = self.location(player)?;
+        let now = self.tick * 50;
+        let record = self
+            .endgame
+            .realms
+            .get_mut(&origin)
+            .filter(|record| record.enabled)
+            .context("You must be inside a Realm to close it.")?;
+        ensure!(record.cycle.admits(), "This Realm is already closing.");
+        record.cycle.remaining.clear();
+        record.cycle.stage = RealmStage::Closing {
+            deadline: now + crate::endgame::CLOSE_DELAY_MS,
+        };
+        let world = self
+            .worlds
+            .get_mut(&origin)
+            .context("Realm world missing")?;
+        let name = world.players[&player].character.name.clone();
+        world.broadcast_text("", &format!("{name} used a Realm Close token!"));
+        seal_realm(world, &mut self.grants, origin);
+        tracing::info!(origin, player, %name, "Realm closure started by a Discord token");
+        Ok(name)
+    }
     pub fn stage_unlock(&mut self, plan: InventoryPlan) -> Result<InventoryPlan> {
         let Some(portal) = plan.unlock else {
             return Ok(plan);
@@ -493,12 +524,7 @@ impl Directory {
                         "qualifying Realm hero defeated"
                     );
                     if !cycle.admits() {
-                        world.admission_open = false;
-                        world.oryx_notice(
-                            "I HAVE CLOSED THIS REALM! YOU WILL NOT LIVE TO SEE THE LIGHT OF DAY!",
-                        );
-                        self.grants.retain(|_, g| g.destination != *origin);
-                        world.admissions.clear();
+                        seal_realm(world, &mut self.grants, *origin);
                     }
                 }
             }
@@ -1418,4 +1444,68 @@ fn prepare_realm_closure_preserves_other_cycle_and_refuses_reservations() {
     assert!(d.endgame.realms[&-3].cycle.admits() && d.worlds[&-3].admission_open);
     assert_eq!(d.endgame.realms[&1].cycle.remaining, other);
     assert!(d.endgame.realms[&1].cycle.admits() && d.worlds[&1].admission_open);
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn realm_close_token_starts_the_ordinary_closure_once() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+    let account = store.list("realm-close-token".into()).await.unwrap();
+    let character = store
+        .create(account.id, content.get(crate::content::WIZARD).unwrap())
+        .await
+        .unwrap();
+    let mut directory = Directory::prepared(data, content.clone(), 16, 12351, 2).unwrap();
+    let map = Map {
+        width: 40,
+        height: 40,
+        cells: vec![
+            crate::content::Cell {
+                ground: 0x46,
+                object: None,
+                config: String::new(),
+                terrain: 0,
+                region: 0,
+            };
+            1600
+        ],
+        spawns: vec![(14.5, 20.5)],
+    };
+    let mut world = World::with_ids(content, Arc::new(map), directory.ids.clone()).unwrap();
+    world.name = "Realm".into();
+    world.encounter = true;
+    let hero = world
+        .insert_entity(HEROES[0], Pos { x: 30.5, y: 30.5 }, vec![])
+        .unwrap();
+    let (packets, mut inbox) = mpsc::channel(64);
+    let (lost, _) = watch::channel(None);
+    let player = world
+        .enter(character.clone(), Some(Output { packets, lost }))
+        .unwrap();
+    while inbox.try_recv().is_ok() {}
+    directory.worlds.insert(-3, world);
+    directory.endgame.realms.remove(&-3);
+    directory
+        .bind_realm_heroes(-3, BTreeSet::from([hero]))
+        .unwrap();
+    assert_eq!(
+        directory.force_realm_closure(player).unwrap(),
+        character.name
+    );
+    let texts: Vec<_> = std::iter::from_fn(|| inbox.try_recv().ok())
+        .filter(|p| p.id == wire::TEXT)
+        .map(|p| String::from_utf8_lossy(&p.body).into_owned())
+        .collect();
+    assert_eq!(texts.len(), 2);
+    assert!(texts[0].contains(&format!("{} used a Realm Close token!", character.name)));
+    assert!(texts[1].contains("I HAVE CLOSED THIS REALM!"));
+    assert!(!directory.worlds[&-3].admission_open);
+    assert!(matches!(
+        directory.endgame.realms[&-3].cycle.stage,
+        RealmStage::Closing { .. }
+    ));
+    let again = directory.force_realm_closure(player).unwrap_err();
+    assert_eq!(again.to_string(), "This Realm is already closing.");
 }

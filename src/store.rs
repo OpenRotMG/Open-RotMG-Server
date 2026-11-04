@@ -767,6 +767,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             ))?;
         }
         discord_gold::check_schema(&migration, 19)?;
+        migration.execute_batch(discord_gold::REALM_CLOSE_SCHEMA)?;
         email::migrate(&migration, version)?;
         if !credits_exist {
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
