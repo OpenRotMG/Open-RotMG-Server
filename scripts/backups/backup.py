@@ -56,9 +56,10 @@ REALM_CLOSE_SQL = 'CREATE TABLE discord_realm_close_tokens(request_id TEXT PRIMA
 REALM_CLOSE_TABLES = {'discord_realm_close_tokens': ('request_id', 'account', 'discord_id', 'actor_id', 'used_request')}
 ACHIEVEMENT_SQL = {'achievement_partners': 'CREATE TABLE achievement_partners(account INTEGER NOT NULL REFERENCES accounts(id),peer INTEGER NOT NULL REFERENCES accounts(id),PRIMARY KEY(account,peer),CHECK(account<>peer))', 'achievement_dungeons': "CREATE TABLE achievement_dungeons(account INTEGER NOT NULL REFERENCES accounts(id),dungeon TEXT NOT NULL CHECK(dungeon IN ('pirate-cave','snake-pit','sprite-world','undead-lair','abyss-of-demons','ocean-trench','spider-den','mad-lab','forbidden-jungle','manor-of-the-immortals','beachzone','davy-jones-locker','tomb-of-the-ancients')),PRIMARY KEY(account,dungeon))", 'achievement_realm_credits': 'CREATE TABLE achievement_realm_credits(account INTEGER NOT NULL REFERENCES accounts(id),realm TEXT NOT NULL CHECK(length(realm)=32),root INTEGER NOT NULL CHECK(root>0),PRIMARY KEY(account,realm,root))'}
 ACHIEVEMENT_TABLES = {'achievement_partners': ('account', 'peer'), 'achievement_dungeons': ('account', 'dungeon'), 'achievement_realm_credits': ('account', 'realm', 'root')}
-ACHIEVEMENT_REWARDS = ('not_even_close', 'nexus_after_death', 'friends', 'potential', 'trader', 'hit_by_truck', 'realm_closer', 'baby_max', 'merchant', 'dungeon_master', 'max', 'no')
+ACHIEVEMENT_REWARDS22 = ('not_even_close', 'nexus_after_death', 'friends', 'potential', 'trader', 'hit_by_truck', 'realm_closer', 'baby_max', 'merchant', 'dungeon_master', 'max', 'no')
+ACHIEVEMENT_REWARDS = (*ACHIEVEMENT_REWARDS22, 'ah_7uck')
 ACHIEVEMENT_GAME = {**DISCORD_GOLD_GAME, **ACHIEVEMENT_TABLES}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: ACHIEVEMENT_GAME}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: ACHIEVEMENT_GAME, 23: ACHIEVEMENT_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -571,7 +572,7 @@ def validate_achievements(game):
 
 
 def gold_reward_types(version):
-    return ('discord_link', 'collection_top_half') + (('first_bug_report',) if version >= 11 else ()) + (('class_star_blue', 'class_star_red', 'class_star_orange', 'class_star_yellow', 'class_star_white') if version >= 18 else ()) + (tuple('achievement_' + name for name in ACHIEVEMENT_REWARDS) if version >= 22 else ())
+    return ('discord_link', 'collection_top_half') + (('first_bug_report',) if version >= 11 else ()) + (('class_star_blue', 'class_star_red', 'class_star_orange', 'class_star_yellow', 'class_star_white') if version >= 18 else ()) + (tuple('achievement_' + name for name in (ACHIEVEMENT_REWARDS if version >= 23 else ACHIEVEMENT_REWARDS22)) if version >= 22 else ())
 
 
 def gold_reward_sql(version):

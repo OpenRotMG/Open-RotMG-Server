@@ -31,8 +31,8 @@ def check(binary, data, directory, revision):
     bundle = backup.export(written / 'game.db', discord, archive, version, version, version)
     if len(bundle['game']['bot_minds']) != 2 or len(bundle['game']['trade_transactions']) != 1:
         raise RuntimeError('Release community payload missing from backup')
-    if bundle['schema'] != 22:
-        raise RuntimeError('Release backup is not schema22')
+    if bundle['schema'] != 23:
+        raise RuntimeError('Release backup is not schema23')
     if any(marker in gzip.decompress(archive.read_bytes()) for marker in [b'BACKUP_FIXTURE_SECRET', b'EMAIL_BACKUP_PRIVATE_CANARY', b'RESET_BACKUP_PRIVATE_CANARY']):
         raise RuntimeError('Release backup exported a login identity')
     restored = directory / 'restored'

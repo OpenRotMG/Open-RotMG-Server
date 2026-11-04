@@ -15,10 +15,10 @@ pub(super) fn schema21_fixture(db: &Connection) {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        22
+        23
     );
-    schema22_compat::check(db, 22).unwrap();
-    gold::check_schema(db, 22).unwrap();
+    schema22_compat::check(db, 23).unwrap();
+    gold::check_schema(db, 23).unwrap();
     for (name, _) in schema22_compat::TABLES {
         assert_eq!(
             db.query_row(&format!("SELECT count(*) FROM {name}"), [], |r| r
@@ -422,7 +422,7 @@ async fn achievement_schema22_preserves_old_rows_dates_wallets_and_rejects_missi
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        22
+        23
     );
     drop(db);
     let store = Store::open(&path, &content).unwrap();
@@ -447,7 +447,7 @@ async fn achievement_schema22_preserves_old_rows_dates_wallets_and_rejects_missi
             .err()
             .unwrap()
             .to_string()
-            .contains("schema-22")
+            .contains("schema-23")
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -553,7 +553,7 @@ async fn achievement_trade_gold_failure_rolls_back_both_inventories_receipt_and_
 }
 
 #[tokio::test]
-async fn achievement_catalog_rewards_once375_and_public_queries_are_private_and_read_only() {
+async fn achievement_catalog_rewards_once400_and_public_queries_are_private_and_read_only() {
     let content = content();
     let store = Store::open(Path::new(":memory:"), &content).unwrap();
     let ch = actor(&store, &content, "achievement-public").await;
@@ -570,7 +570,7 @@ async fn achievement_catalog_rewards_once375_and_public_queries_are_private_and_
     store.compete(account).await.unwrap();
     let initial = store.hiscores(vec![]).await.unwrap();
     assert_eq!(initial["players"][0]["achievements"], 0);
-    assert_eq!(initial["achievement_catalog"].as_array().unwrap().len(), 12);
+    assert_eq!(initial["achievement_catalog"].as_array().unwrap().len(), 13);
     store
         .call(move |db| {
             let tx = db.transaction()?;
@@ -583,10 +583,10 @@ async fn achievement_catalog_rewards_once375_and_public_queries_are_private_and_
         })
         .await
         .unwrap();
-    assert_eq!(wallet(&store, account).await, 475);
+    assert_eq!(wallet(&store, account).await, 500);
     let before = paid(&store, account).await;
     let profile = store.achievements(account).await.unwrap();
-    assert_eq!(profile["earned"].as_array().unwrap().len(), 12);
+    assert_eq!(profile["earned"].as_array().unwrap().len(), 13);
     assert_eq!(profile.as_object().unwrap().len(), 3);
     for row in profile["earned"].as_array().unwrap() {
         assert!(row["earned_at"].as_i64().unwrap() > 0);
@@ -594,7 +594,7 @@ async fn achievement_catalog_rewards_once375_and_public_queries_are_private_and_
     }
     assert_eq!(
         store.hiscores(vec![]).await.unwrap()["players"][0]["achievements"],
-        12
+        13
     );
     assert_eq!(paid(&store, account).await, before);
     let bot = store
@@ -602,14 +602,4 @@ async fn achievement_catalog_rewards_once375_and_public_queries_are_private_and_
         .await
         .unwrap();
     assert!(store.achievements(bot.account).await.is_err());
-    if let Ok(out) = std::env::var("QA_RESULTS_DIR") {
-        let scores = serde_json::json!({"players":[{"account":900001,"name":"SYNTHETIC adventurer","achievements":1,"collection":0,"total_fame":0,"base_fame":0,"stars":0,"quests":0}],"achievement_catalog":CATALOG});
-        let profile = serde_json::json!({"account":900001,"name":"SYNTHETIC adventurer","earned":[{"id":Achievement::Trader,"earned_at":1735689600}]});
-        std::fs::write(
-            Path::new(&out).join("achievement-api-fixture.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({"scores":scores,"profile":profile}))
-                .unwrap(),
-        )
-        .unwrap();
-    }
 }

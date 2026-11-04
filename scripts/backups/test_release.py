@@ -92,7 +92,7 @@ class ReleaseContract(unittest.TestCase):
                 self.assertEqual([row[0] for row in rewards], ['achievement_trader', 'discord_link', 'first_bug_report', 'achievement_trader', 'discord_link'])
                 self.assertTrue(all(row[1] is None for row in rewards[:-1]))
                 self.assertGreater(rewards[-1][1], 0)
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 22)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 23)
                 for table, column, default in [('characters', 'revision', '0'), ('characters', 'alive', '1'), ('deaths', 'died_at', 'unixepoch()')]:
                     with self.subTest(default=table + '.' + column):
                         self.assertEqual(db.execute('SELECT dflt_value FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone(), (default,))
@@ -106,7 +106,20 @@ class ReleaseContract(unittest.TestCase):
                 for row in [(owner, 'discord_link', 123, None), (owner, 'invalid', 123, None), (owner, 'collection_top_half', 0, None), (owner, 'collection_top_half', 123, 0), (99999, 'discord_link', 123, None)]:
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
-            self.assertEqual(bundle['schema'], 22)
+            self.assertEqual(bundle['schema'], 23)
+            known22 = deepcopy(bundle)
+            self.assertFalse(any(row['reward'] == 'achievement_ah_7uck' for row in known22['game']['gold_rewards']))
+            known22['schema'] = 22
+            archive22 = Path(temporary) / 'known22.gz'
+            archive22.write_bytes(gzip.compress(json.dumps(known22).encode()))
+            restored22 = Path(temporary) / 'known22'
+            backup.restore(archive22, restored22)
+            revision22 = Path(temporary) / 'contract/REVISION'
+            reexport22 = backup.export(restored22 / 'game.db', restored22 / 'levels.sqlite', Path(temporary) / 'known22-reexport.gz', revision22, revision22, revision22)
+            self.assertEqual(reexport22['schema'], 22)
+            self.assertEqual(reexport22['game'], known22['game'])
+            subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored22 / 'game.db'), str(root / 'data')], check=True)
+            self.assertEqual(backup.snapshot(restored22 / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME), known22['game'])
             canonical16 = legacy_copy(bundle)
             canonical16['schema'] = 16
             for table in ['bot_minds', 'trade_transactions']:
@@ -231,7 +244,7 @@ class ReleaseContract(unittest.TestCase):
                     backup.export(malformed_db, Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'malformed-death.gz', revision, revision, revision)
                 self.assertEqual(malformed_db.read_bytes(), original)
                 self.assertFalse((Path(temporary) / 'malformed-death.gz').exists())
-            for version in [0, 11, 12, 13, 14, 15, 16, 19, 20, 21, 23]:
+            for version in [0, 11, 12, 13, 14, 15, 16, 19, 20, 21, 24]:
                 with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
                     source.backup(future)
                     future.execute(f'PRAGMA user_version={version}')

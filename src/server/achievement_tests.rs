@@ -347,7 +347,112 @@ async fn achievement_http_profiles_preserve_competitor_privacy_and_never_award_o
         .await
         .unwrap();
     assert_eq!(scores["players"][0]["achievements"], 2);
-    assert_eq!(scores["achievement_catalog"].as_array().unwrap().len(), 12);
+    assert_eq!(scores["achievement_catalog"].as_array().unwrap().len(), 13);
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
+async fn achievement_thirteen_actual_public_dtos_are_private_and_match_the_site_catalogue() {
+    async fn capture(response: Response, expected: StatusCode) -> (serde_json::Value, Vec<u8>) {
+        assert_eq!(response.status(), expected);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let body = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+            .await
+            .unwrap();
+        (serde_json::from_slice(&body).unwrap(), body.to_vec())
+    }
+    let (_dir, a) = account_actions::tests::fixture();
+    let mut accounts = Vec::new();
+    for name in ["Synthetica", "Dtoempty"] {
+        let account = a
+            .store
+            .register(
+                format!("synthetic-thirteen-{name}"),
+                format!("{name}@example.invalid"),
+                "synthetic-dto-password".into(),
+            )
+            .await
+            .unwrap();
+        a.store.choose_name(account, name.into()).await.unwrap();
+        a.store.compete(account).await.unwrap();
+        let mut ch = a
+            .store
+            .create(account, a.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        if accounts.is_empty() {
+            ch.base = a.content.classes[&WIZARD].caps;
+            ch.level = 20;
+            ch.exp = 18050;
+            a.store.progress(ch.clone()).await.unwrap();
+            // Seeded unit state exercises serialization, not a claim of normal gameplay earning.
+            ch.achievements
+                .insert(crate::achievements::Achievement::Ah7uck);
+            ch.hp = 0;
+            ch.alive = false;
+            a.store
+                .death(ch, "synthetic DTO fixture".into())
+                .await
+                .unwrap();
+        }
+        accounts.push(account);
+    }
+    let account = accounts[0];
+    let private = a
+        .store
+        .list("synthetic-private-thirteen".into())
+        .await
+        .unwrap()
+        .id;
+    let before = a.store.presentation(account).await.unwrap().credits;
+    let (profile, profile_bytes) = capture(
+        hiscores::achievements(State(a.clone()), axum::extract::Path(account)).await,
+        StatusCode::OK,
+    )
+    .await;
+    let (scores, score_bytes) =
+        capture(hiscores::hiscores(State(a.clone())).await, StatusCode::OK).await;
+    let (_, graveyard_bytes) = capture(
+        hiscores::graveyard(State(a.clone()), Query(HashMap::new())).await,
+        StatusCode::OK,
+    )
+    .await;
+    let (_, denial_bytes) = capture(
+        hiscores::achievements(State(a.clone()), axum::extract::Path(private)).await,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(profile.as_object().unwrap().len(), 3);
+    assert_eq!(profile["earned"].as_array().unwrap().len(), 3);
+    assert!(
+        profile["earned"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["id"] == "ah_7uck")
+    );
+    assert_eq!(scores["players"].as_array().unwrap().len(), 2);
+    let catalogue = scores["achievement_catalog"].as_array().unwrap();
+    assert_eq!(catalogue.len(), 13);
+    assert_eq!(
+        catalogue
+            .iter()
+            .map(|d| d["gold"].as_u64().unwrap())
+            .sum::<u64>(),
+        400
+    );
+    assert_eq!(a.store.presentation(account).await.unwrap().credits, before);
+    if let Ok(out) = std::env::var("QA_RESULTS_DIR") {
+        let out = PathBuf::from(out);
+        for (name, bytes) in [
+            ("actual-profile.json", profile_bytes),
+            ("actual-hiscores.json", score_bytes),
+            ("actual-graveyard.json", graveyard_bytes),
+            ("actual-private-denial.json", denial_bytes),
+        ] {
+            std::fs::write(out.join(name), bytes).unwrap();
+        }
+        std::fs::write(out.join("actual-dto-scope.json"),serde_json::to_vec(&serde_json::json!({"synthetic_store_only":true,"actual_existing_public_handlers_and_json_response_bodies":true,"profile_account":account,"private_account":private,"no_earned400_claim":true})).unwrap()).unwrap();
+    }
 }

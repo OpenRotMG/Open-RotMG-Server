@@ -21,6 +21,8 @@ impl Store {
         ch.items[slot] = -1;
         ch.achievements
             .remove(&crate::achievements::Achievement::NexusAfterDeath);
+        ch.achievements
+            .remove(&crate::achievements::Achievement::Ah7uck);
         let stats = ch.effective(&content)?;
         ch.hp = stats[0];
         ch.mp = stats[1];

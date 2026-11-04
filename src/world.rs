@@ -44,6 +44,8 @@ mod ghost_ship;
 mod gods;
 mod ground_dye;
 
+#[cfg(test)]
+mod achievement_entry_tests;
 mod achievements;
 mod gold;
 mod golems;
@@ -367,6 +369,8 @@ pub struct Player {
     committed_lifetime: crate::store::FameLifetime,
     committed_achievements: BTreeSet<crate::achievements::Achievement>,
     achievement_damage: achievements::DamageWindow,
+    dungeon_entered: Option<Instant>,
+    entered_at: Instant,
     statuses: BTreeMap<u8, (u64, u64)>,
     lab_conditions: i32,
     known_since: BTreeMap<i32, u64>,
@@ -940,6 +944,8 @@ struct ExitIntent {
     dungeon: crate::dungeon::HistoricalDungeon,
 }
 struct Grant {
+    achievement_entry_completed: bool,
+    dungeon_entered: Option<Instant>,
     achievement_escape: bool,
     entry_portal: Option<i32>,
     entry_witness: Option<dungeon_entry::Witness>,
@@ -1761,6 +1767,13 @@ impl Directory {
             reserved || self.grants.len() + self.endgame.forced.len() < 64,
             controller("transfer grant capacity reserved for collective departures")
         );
+        let dungeon_entered = origin.and_then(|source| {
+            self.worlds[&source]
+                .players
+                .values()
+                .find(|p| p.character.account == account && p.character.id == character)
+                .and_then(|p| p.dungeon_entered)
+        });
         let name = world.name.clone();
         let mut key = vec![0; 16];
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key);
@@ -1785,6 +1798,8 @@ impl Directory {
         self.grants.insert(
             key.clone(),
             Grant {
+                achievement_entry_completed: false,
+                dungeon_entered,
                 achievement_escape: false,
                 entry_portal: None,
                 entry_witness: None,
@@ -3519,6 +3534,8 @@ impl World {
                 committed_lifetime: ch.lifetime.clone(),
                 committed_achievements: ch.achievements.clone(),
                 achievement_damage: Default::default(),
+                dungeon_entered: None,
+                entered_at: self.clock.now(),
                 character: ch,
                 pos,
                 departing: false,
@@ -5513,11 +5530,14 @@ impl World {
                 continue;
             }
             snapshot.alive = true;
-            // The per-attempt Nexus observation stays volatile until atomic permanent-death settlement.
+            // Per-attempt fatal observations stay volatile until atomic permanent-death settlement.
             if p.death_pending {
                 snapshot
                     .achievements
                     .remove(&crate::achievements::Achievement::NexusAfterDeath);
+                snapshot
+                    .achievements
+                    .remove(&crate::achievements::Achievement::Ah7uck);
             }
             p.experience_queued = 0;
             p.experience_queue = None;

@@ -58,6 +58,17 @@ impl Player {
         hp_before: i32,
     ) -> Result<()> {
         if self.controller != Controller::Autonomous
+            && self.character.level == 20
+            && hp_before > 0
+            && damage >= hp_before
+            && self.dungeon_entered.is_some_and(|entered| {
+                now.checked_duration_since(entered)
+                    .is_some_and(|elapsed| elapsed <= std::time::Duration::from_millis(1700))
+            })
+        {
+            self.character.achievements.insert(Achievement::Ah7uck);
+        }
+        if self.controller != Controller::Autonomous
             && self
                 .achievement_damage
                 .record(now, damage, damage.min(hp_before).max(0))?

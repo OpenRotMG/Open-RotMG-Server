@@ -92,7 +92,7 @@ fn ledger(path: &Path) -> Vec<(i32, String, i64, Option<i64>)> {
 }
 
 #[tokio::test]
-async fn schema22_promotion_fresh_store_has22_without_awards() {
+async fn schema23_promotion_fresh_store_has23_without_awards() {
     let (dir, content, store, ch) = fixture(false).await;
     let path = dir.join("game.db");
     let before = snapshot(&path);
@@ -107,8 +107,8 @@ async fn schema22_promotion_fresh_store_has22_without_awards() {
     let reopened = Store::open(&path, &content).unwrap();
     assert_eq!(snapshot(&path), before);
     let db = Connection::open(&path).unwrap();
-    gold::check_schema(&db, 22).unwrap();
-    check(&db, 22).unwrap();
+    gold::check_schema(&db, 23).unwrap();
+    check(&db, 23).unwrap();
     for (name, _) in TABLES {
         assert!(
             db.query_row(
@@ -130,7 +130,7 @@ async fn schema22_promotion_fresh_store_has22_without_awards() {
 }
 
 #[tokio::test]
-async fn schema22_compat_known22_reopen_retains_every_logical_row_and_pending_gold() {
+async fn schema23_known23_reopen_retains_every_logical_row_and_pending_gold() {
     let (dir, content, store, ch) = fixture(true).await;
     let path = dir.join("game.db");
     let before = snapshot(&path);
@@ -287,7 +287,7 @@ async fn schema22_compat_real_writers_preserve_flags_ledger_wallet_dates_and_rep
 async fn schema22_compat_missing_malformed_unknown_and_mixed_fail_without_logical_writes() {
     let mut mutations = vec![
         "DROP TABLE gold_rewards".to_owned(),
-        "PRAGMA user_version=23".into(),
+        "PRAGMA user_version=24".into(),
         "PRAGMA user_version=999".into(),
         "PRAGMA user_version=21".into(),
     ];
@@ -350,12 +350,12 @@ fn schema22_compat_actual_serde_and_gold_message_keep_closed_known_metadata() {
     assert!(serde_json::from_value::<Character>(bad).is_err());
     let rewards = CATALOG.iter().map(|d| d.id.reward().to_owned()).collect();
     let message = gold::Gold {
-        balance: 375,
+        balance: 400,
         rewards,
     }
     .message()
     .unwrap();
-    assert!(message.starts_with("You received 375 Gold for "));
+    assert!(message.starts_with("You received 400 Gold for "));
     for definition in CATALOG {
         assert!(message.contains(definition.name));
     }
@@ -370,7 +370,7 @@ fn schema22_compat_actual_serde_and_gold_message_keep_closed_known_metadata() {
 }
 
 #[tokio::test]
-async fn schema22_recovery_successful_resurrection_invalidates_only_pending_dead_attempt() {
+async fn schema23_recovery_successful_resurrection_invalidates_only_pending_dead_attempt() {
     let (dir, content, store, mut ch) = fixture(true).await;
     ch.achievements.insert(Achievement::NexusAfterDeath);
     let path = dir.join("game.db");
@@ -459,7 +459,7 @@ async fn schema22_recovery_successful_resurrection_invalidates_only_pending_dead
 }
 
 #[tokio::test]
-async fn schema22_recovery_pending_nexus_cleanup_survives_fresh_store_reopen() {
+async fn schema23_recovery_pending_nexus_cleanup_survives_fresh_store_reopen() {
     let (dir, content, store, mut ch) = fixture(true).await;
     ch.achievements.insert(Achievement::NexusAfterDeath);
     let path = dir.join("game.db");
@@ -524,8 +524,8 @@ async fn schema22_recovery_pending_nexus_cleanup_survives_fresh_store_reopen() {
 }
 
 #[tokio::test]
-async fn schema22_promotion_ambiguous_nexus_rejects_both_locations_before_write() {
-    for version in [21, 22] {
+async fn schema23_promotion_ambiguous_nexus_rejects_both_locations_before_write() {
+    for version in [21, 23] {
         for archived in [false, true] {
             let (dir, content, store, mut ch) = fixture(false).await;
             let path = dir.join("game.db");
@@ -574,7 +574,7 @@ async fn schema22_promotion_ambiguous_nexus_rejects_both_locations_before_write(
 }
 
 #[tokio::test]
-async fn schema22_promotion_paid_nexus_history_retained_and_receipt_not_validation_bypass() {
+async fn schema23_promotion_paid_nexus_history_retained_and_receipt_not_validation_bypass() {
     for mutation in [
         None,
         Some(
@@ -629,7 +629,7 @@ async fn schema22_promotion_paid_nexus_history_retained_and_receipt_not_validati
 }
 
 #[tokio::test]
-async fn schema22_promotion_unpaid_observation_cannot_enter_reusable_progress_or_potion() {
+async fn schema23_promotion_unpaid_observation_cannot_enter_reusable_progress_or_potion() {
     let (dir, content, store, mut ch) = fixture(false).await;
     let path = dir.join("game.db");
     ch.achievements.insert(Achievement::NexusAfterDeath);
@@ -682,7 +682,7 @@ async fn schema22_promotion_unpaid_observation_cannot_enter_reusable_progress_or
 }
 
 #[tokio::test]
-async fn schema22_promotion_nexus_receipt_dates_validate_stored_types_without_pending_flags() {
+async fn schema23_promotion_nexus_receipt_dates_validate_stored_types_without_pending_flags() {
     for (field, value, stored_type, valid) in [
         ("awarded_at", "'not-a-date'", "text", false),
         ("notified_at", "'not-a-date'", "text", false),
@@ -751,7 +751,7 @@ async fn schema22_promotion_nexus_receipt_dates_validate_stored_types_without_pe
 }
 
 #[tokio::test]
-async fn schema22_main_integration_preserves_realm_close_state_and_public_backup_contract() {
+async fn schema23_main_integration_preserves_realm_close_state_and_public_backup_contract() {
     let dir =
         std::env::temp_dir().join(format!("achievement-main-tokens-{}", rand::random::<u64>()));
     std::fs::create_dir(&dir).unwrap();
@@ -816,7 +816,7 @@ async fn schema22_main_integration_preserves_realm_close_state_and_public_backup
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        22
+        23
     );
     assert_eq!(store.presentation(account).await.unwrap().credits, 200);
     store
@@ -827,7 +827,7 @@ async fn schema22_main_integration_preserves_realm_close_state_and_public_backup
                 [account],
             )?;
             tx.execute(
-                "UPDATE accounts SET credits=credits+10 WHERE id=?1",
+                "UPDATE accounts SET credits=credits+35 WHERE id=?1",
                 [account],
             )?;
             tx.execute(
@@ -841,6 +841,10 @@ async fn schema22_main_integration_preserves_realm_close_state_and_public_backup
             tx.execute(
                 "INSERT INTO achievement_realm_credits VALUES(?1,?2,1)",
                 params![account, "a".repeat(32)],
+            )?;
+            tx.execute(
+                "INSERT INTO gold_rewards VALUES(?1,'achievement_ah_7uck',112,223)",
+                [account],
             )?;
             tx.commit()?;
             Ok(())
@@ -856,7 +860,7 @@ async fn schema22_main_integration_preserves_realm_close_state_and_public_backup
         snapshot(&path) == before_reopen,
         "schema22 reopen changed logical state"
     );
-    assert_eq!(reopened.presentation(account).await.unwrap().credits, 210);
+    assert_eq!(reopened.presentation(account).await.unwrap().credits, 235);
     let result = std::process::Command::new("python3")
         .args([
             "scripts/backups/test_achievements.py",
@@ -879,6 +883,79 @@ async fn schema22_main_integration_preserves_realm_close_state_and_public_backup
         tokens(&Connection::open(&restored_path).unwrap()).is_empty(),
         "public archive intentionally omits private tokens; startup creates an empty private table"
     );
-    assert_eq!(restored.presentation(account).await.unwrap().credits, 210);
+    assert_eq!(restored.presentation(account).await.unwrap().credits, 235);
     assert_eq!(ledger(&restored_path), ledger(&path));
+}
+
+#[tokio::test]
+async fn schema23_known22_paid_history_tokens_migrate_transactionally_without_awards() {
+    let (dir, content, store, ch) = fixture(true).await;
+    assert_eq!(store.lifecycle_pending_jobs(), 0);
+    drop(store);
+    let path = dir.join("game.db");
+    let db = Connection::open(&path).unwrap();
+    db.execute("INSERT INTO discord_realm_close_tokens VALUES('1558662335076376580',?1,'1558662335076376578','1558662335076376579',NULL)",[ch.account]).unwrap();
+    db.execute_batch("ALTER TABLE gold_rewards RENAME TO owned23_gold;")
+        .unwrap();
+    db.execute_batch(GOLD).unwrap();
+    db.execute_batch("INSERT INTO gold_rewards SELECT * FROM owned23_gold; DROP TABLE owned23_gold; PRAGMA user_version=22;").unwrap();
+    gold::check_schema(&db, 22).unwrap();
+    let history = ledger(&path);
+    let before = snapshot(&path);
+    db.execute_batch("CREATE VIEW old_gold_rewards AS SELECT 1;")
+        .unwrap();
+    let rollback = snapshot(&path);
+    assert!(
+        Store::open(&path, &content).is_err(),
+        "ledger migration collision must roll back"
+    );
+    assert!(snapshot(&path) == rollback);
+    db.execute_batch("DROP VIEW old_gold_rewards;").unwrap();
+    let altered = GOLD.replace("awarded_at>0", "awarded_at>=0");
+    db.execute_batch("ALTER TABLE gold_rewards RENAME TO owned22_rows;")
+        .unwrap();
+    db.execute_batch(&altered).unwrap();
+    db.execute_batch(
+        "INSERT INTO gold_rewards SELECT * FROM owned22_rows; DROP TABLE owned22_rows;",
+    )
+    .unwrap();
+    let unknown = snapshot(&path);
+    assert!(
+        Store::open(&path, &content).is_err(),
+        "unknown22 fingerprint must not be accepted"
+    );
+    assert!(snapshot(&path) == unknown);
+    db.execute_batch("ALTER TABLE gold_rewards RENAME TO owned_unknown_rows;")
+        .unwrap();
+    db.execute_batch(GOLD).unwrap();
+    db.execute_batch(
+        "INSERT INTO gold_rewards SELECT * FROM owned_unknown_rows; DROP TABLE owned_unknown_rows;",
+    )
+    .unwrap();
+    assert!(snapshot(&path) == before);
+    drop(db);
+    let current = Store::open(&path, &content).unwrap();
+    assert_eq!(ledger(&path), history);
+    assert_eq!(current.presentation(ch.account).await.unwrap().credits, 135);
+    let mut expected = before;
+    expected.retain(|line| {
+        !line.starts_with("version:") && !line.starts_with("gold_rewards:CREATE TABLE")
+    });
+    let mut actual = snapshot(&path);
+    actual.retain(|line| {
+        !line.starts_with("version:") && !line.starts_with("gold_rewards:CREATE TABLE")
+    });
+    assert!(
+        actual == expected,
+        "only schema marker and exact gold CHECK may change"
+    );
+    assert_eq!(current.lifecycle_pending_jobs(), 0);
+    drop(current);
+    let settled = snapshot(&path);
+    let reopened = Store::open(&path, &content).unwrap();
+    assert!(snapshot(&path) == settled);
+    assert_eq!(
+        reopened.presentation(ch.account).await.unwrap().credits,
+        135
+    );
 }

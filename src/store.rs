@@ -676,6 +676,7 @@ impl Store {
                     | 20
                     | 21
                     | 22
+                    | 23
             ),
             "unsupported game database schema {version}"
         );
@@ -711,7 +712,7 @@ impl Store {
         schema22_compat::check(&c, version)?;
         if version >= 21 {
             death_awards::validate_state(&c, legacy_base)?;
-            achievements::check_legacy_nexus(&c)?;
+            achievements::check_legacy_death_attempts(&c)?;
         }
         discord_gold::check_schema(&c, version)?;
         let credits_exist: bool = c.query_row(
@@ -890,7 +891,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 22)?;
+        migration.pragma_update(None, "user_version", 23)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(

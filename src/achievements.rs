@@ -13,6 +13,8 @@ pub(crate) enum Achievement {
     BabyMax,
     Merchant,
     DungeonMaster,
+    #[serde(rename = "ah_7uck")]
+    Ah7uck,
     Max,
     No,
 }
@@ -27,7 +29,7 @@ pub(crate) struct Definition {
     pub criterion: &'static str,
 }
 // These are new project achievements, not reconstructed historical rewards: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1376
-pub(crate) const CATALOG: [Definition; 12] = [
+pub(crate) const CATALOG: [Definition; 13] = [
     Definition {
         id: NotEvenClose,
         name: "Not even close",
@@ -99,6 +101,13 @@ pub(crate) const CATALOG: [Definition; 12] = [
         criterion: "Complete each of the 13 ordinary dungeon types at least once across your account's characters.",
     },
     Definition {
+        id: Ah7uck,
+        name: "Ah 7uck",
+        difficulty: "Medium",
+        gold: 25,
+        criterion: "Die permanently at level 20 within 1.7 seconds of entering a dungeon.",
+    },
+    Definition {
         id: Max,
         name: "Max",
         difficulty: "Hard",
@@ -126,6 +135,7 @@ impl Achievement {
             BabyMax => "achievement_baby_max",
             Merchant => "achievement_merchant",
             DungeonMaster => "achievement_dungeon_master",
+            Ah7uck => "achievement_ah_7uck",
             Max => "achievement_max",
             No => "achievement_no",
         }
