@@ -72,6 +72,7 @@ mod population_density;
 mod realm_events;
 mod realm_voice;
 
+pub(crate) mod realm_population;
 mod realm_portal;
 mod realm_quests;
 
@@ -997,6 +998,8 @@ pub struct Directory {
     templates: BTreeMap<String, Arc<Map>>,
     realms: Vec<Arc<crate::terrain::realms::Source>>,
     realm_rng: rand::rngs::StdRng,
+    portal_rng: rand::rngs::StdRng,
+    portal_positions: Vec<Pos>,
     content: Arc<Content>,
     ids: Arc<AtomicI32>,
     grants: BTreeMap<Vec<u8>, Grant>,
@@ -1004,6 +1007,7 @@ pub struct Directory {
     chat_budgets: BTreeMap<i32, chat::ChatBudget>,
     guild_invites: BTreeMap<i32, guilds::Invitation>,
     endgame: endgame::RealmDirectory,
+    realm_population: realm_population::Population,
     teleports: BTreeMap<i32, Instant>,
     idle: BTreeMap<i32, u64>,
     next_world: i32,
@@ -1163,7 +1167,10 @@ impl Directory {
         realms: Vec<crate::terrain::realms::Source>,
         realm_count: usize,
     ) -> Result<Self> {
-        ensure!((2..=3).contains(&realm_count), "realm_count must be 2 or 3");
+        ensure!(
+            (1..=realm_population::MAX_CURRENT).contains(&realm_count),
+            "initial realm_count must be between 1 and 8"
+        );
         ensure!(!realms.is_empty(), "Realm layout pool is empty");
         crate::endgame::validate(&content)?;
         let mut templates = BTreeMap::new();
@@ -1192,6 +1199,8 @@ impl Directory {
             templates,
             realms: realms.into_iter().map(Arc::new).collect(),
             realm_rng: rand::rngs::StdRng::seed_from_u64(seed),
+            portal_rng: rand::rngs::StdRng::seed_from_u64(seed ^ u64::from_le_bytes(*b"entrance")),
+            portal_positions: Vec::new(),
             content,
             ids: Arc::new(AtomicI32::new(1000)),
             grants: BTreeMap::new(),
@@ -1199,6 +1208,7 @@ impl Directory {
             chat_budgets: BTreeMap::new(),
             guild_invites: BTreeMap::new(),
             endgame: endgame::RealmDirectory::default(),
+            realm_population: realm_population::Population::default(),
             teleports: BTreeMap::new(),
             idle: BTreeMap::new(),
             next_world: 1,
@@ -1219,6 +1229,7 @@ impl Directory {
             let world = d.make(template, name, safe, None)?;
             d.worlds.insert(id, world);
         }
+        d.portal_positions = d.worlds[&-2].realm_portal_positions()?;
         for slot in 0..realm_count {
             let origin = if slot == 0 {
                 -3
@@ -1232,10 +1243,19 @@ impl Directory {
             d.bind_realm_heroes(origin, d.worlds[&origin].hero_identities())?;
             let name =
                 (seed as usize % realm_portal::NAMES.len() + slot) % realm_portal::NAMES.len();
-            let portal = d.install_realm_portal(origin, None)?;
+            let portal = d.install_realm_portal(slot)?;
+            let position = d.worlds[&-2].entities[&portal].pos;
+            tracing::info!(
+                realm = origin,
+                portal,
+                x = position.x,
+                y = position.y,
+                "Realm entrance bound"
+            );
             let record = d.endgame.realms.get_mut(&origin).unwrap();
             record.name = name;
             record.portal = Some(portal);
+            record.portal_slot = slot;
         }
         d.sync_realm_portal();
         Ok(d)
@@ -1692,6 +1712,11 @@ impl Directory {
         )?;
         // Entrances expire before their dungeons; preserve RECONNECT's exact world identity: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/incoming/Reconnect.as
         world.return_route = return_route;
+        if let Some(DungeonReturn::Realm(origin)) = return_route
+            && let Some(record) = self.endgame.realms.get_mut(&origin)
+        {
+            record.empty_since = None;
+        }
         let id = self.next_world;
         self.next_world = id
             .checked_add(1)
@@ -1933,6 +1958,11 @@ impl Directory {
                 expires: self.tick + 2400,
             },
         );
+        for id in origin.into_iter().chain(std::iter::once(destination)) {
+            if let Some(record) = self.endgame.realms.get_mut(&id) {
+                record.empty_since = None;
+            }
+        }
         tracing::info!(
             account,
             character,
@@ -2424,6 +2454,7 @@ impl Directory {
     // Another world's completion or a timer must not publish this world's queued effects early.
     fn coordinate(&mut self, ready: &[i32]) {
         self.endgame_step(ready);
+        self.realm_population_step(self.clock.now());
         self.sync_realm_portal();
         self.worlds.release_world(&-2);
         let requesting: Vec<_> = self
