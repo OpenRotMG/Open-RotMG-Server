@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) const CAPACITY_TRIGGER: &str = "CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END;";
+
 #[cfg(test)]
 mod hall_tests;
 
@@ -65,7 +67,8 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
 CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),guild INTEGER NOT NULL REFERENCES guilds(id),rank INTEGER NOT NULL CHECK(rank IN (0,10,20,30,40)),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647));
 CREATE UNIQUE INDEX one_guild_founder ON guild_members(guild) WHERE rank=40;
 CREATE INDEX guild_roster ON guild_members(guild);
-CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END;")?;
+")?;
+        db.execute_batch(CAPACITY_TRIGGER)?;
     }
     let broken: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check('guild_members')) OR EXISTS(SELECT 1 FROM guilds g LEFT JOIN guild_members m ON m.guild=g.id GROUP BY g.id HAVING count(m.account) NOT BETWEEN 1 AND 50 OR sum(m.rank=40)>1 OR coalesce(sum(m.fame),0)>g.earned)", [], |r|r.get(0))?;
     ensure!(

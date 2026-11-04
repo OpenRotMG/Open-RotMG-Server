@@ -39,6 +39,53 @@ impl KnownStoreLayout {
     pub(super) fn portable(self) -> bool {
         matches!(self, Self::Portable22 | Self::Combined24)
     }
+    fn check_objects(self, db: &Connection, version: i32) -> Result<()> {
+        let mut canonical = super::character_slots::TRIGGERS
+            .iter()
+            .map(|sql| (12, *sql))
+            .chain(std::iter::once((9, super::guilds::CAPACITY_TRIGGER)))
+            .filter(|(minimum, _)| version >= *minimum)
+            .map(|(_, sql)| {
+                (
+                    sql.split_whitespace().nth(2).unwrap(),
+                    sql.trim_end_matches(';'),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        // Rebuilding Gold must not drop or rewrite SQL dependencies outside the known layouts.
+        let mut objects=db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE type IN ('view','trigger') OR (type='index' AND tbl_name='gold_rewards') ORDER BY name")?;
+        let objects = objects.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        for object in objects {
+            let (kind, name, sql) = object?;
+            let supported =
+                kind == "index" && name == "sqlite_autoindex_gold_rewards_1" && sql.is_none()
+                    || kind == "trigger"
+                        && canonical
+                            .remove(name.as_str())
+                            .is_some_and(|expected| Some(expected) == sql.as_deref());
+            ensure!(
+                supported,
+                "unsupported {kind} {name} in {self:?} schema-{version}; preserve input for review"
+            );
+        }
+        ensure!(
+            canonical.is_empty(),
+            "missing canonical trigger {:?} in {self:?} schema-{version}; preserve input for review",
+            canonical.keys().next()
+        );
+        let child:Option<String>=db.query_row("SELECT s.name FROM sqlite_schema s JOIN pragma_foreign_key_list(s.name) fk WHERE s.type='table' AND fk.[table] COLLATE NOCASE='gold_rewards' LIMIT 1",[],|r|r.get(0)).optional()?;
+        ensure!(
+            child.is_none(),
+            "unsupported foreign key to Gold from table {child:?} in {self:?} schema-{version}; preserve input for review"
+        );
+        Ok(())
+    }
     pub(super) fn read(db: &Connection, version: i32) -> Result<Self> {
         fn group(
             db: &Connection,
@@ -112,6 +159,7 @@ impl KnownStoreLayout {
                 "schema-{version} gold reward metadata mismatch; restore the reviewed ledger"
             );
         }
+        layout.check_objects(db, version)?;
         if portable {
             super::account_save::check_schema(db)?;
         }

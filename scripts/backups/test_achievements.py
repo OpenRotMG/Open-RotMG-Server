@@ -1,13 +1,48 @@
-"""Schema23 backup integration on a synthetic Store supplied by the Rust unit test."""
+"""Schema24 backup integration on a synthetic Store supplied by the Rust unit test."""
 from contextlib import closing
 from copy import deepcopy
 import gzip
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
 from unittest.mock import patch
 import backup
+
+
+def assert_source_sql_refusals(path, discord, revision, parent):
+    cases = [
+        ('extra-index', 'CREATE INDEX extra_gold ON gold_rewards(awarded_at)'),
+        ('direct-trigger', "CREATE TRIGGER extra_gold BEFORE INSERT ON gold_rewards BEGIN SELECT RAISE(ABORT,'guard trigger fired'); END;"),
+        ('dependent-view', 'CREATE VIEW extra_gold AS SELECT account,reward FROM gold_rewards'),
+        ('other-trigger', "CREATE TRIGGER extra_account BEFORE UPDATE ON accounts BEGIN SELECT count(*) FROM gold_rewards; SELECT RAISE(ABORT,'guard trigger fired'); END;"),
+        ('altered-trigger', "DROP TRIGGER guild_capacity; CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members BEGIN SELECT RAISE(ABORT,'guard trigger fired'); END;"),
+        ('child-fk', 'CREATE TABLE custom_gold_child(account INTEGER,reward TEXT,FOREIGN KEY(account,reward) REFERENCES GOLD_REWARDS(account,reward) ON DELETE CASCADE); INSERT INTO custom_gold_child SELECT account,reward FROM gold_rewards LIMIT 1;'),
+    ]
+    directory = Path(parent) / 'sql-source-refusals'
+    directory.mkdir(mode=0o700)
+    evidence = []
+    for name, sql in cases:
+        database, output = directory / (name + '.db'), directory / (name + '.gz')
+        with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as source, closing(sqlite3.connect(database)) as db:
+            source.backup(db)
+            db.executescript(sql)
+            db.commit()
+            before = list(db.iterdump())
+        try:
+            backup.export(database, discord, output, revision, revision, revision)
+        except ValueError as error:
+            assert 'Unsupported' in str(error), str(error)
+            message = str(error)
+        else:
+            raise AssertionError('Noncanonical SQL accepted: ' + name)
+        with closing(sqlite3.connect(database)) as db:
+            after = list(db.iterdump())
+        assert after == before and not output.exists(), name
+        evidence.append({'case': name, 'before': before, 'after': after, 'error': message, 'noPublishedArtifact': True})
+    if 'QA_RESULTS_DIR' in os.environ:
+        (Path(os.environ['QA_RESULTS_DIR']) / 'python-gold-object-refusals.json').write_text(json.dumps(evidence, indent=2) + '\n')
 
 
 def check(path):
@@ -28,6 +63,8 @@ def check(path):
         db.execute('CREATE TABLE levels(guild_id TEXT,user_id TEXT,username TEXT,xp INTEGER,last_xp_at INTEGER,last_message_id TEXT,PRIMARY KEY(guild_id,user_id))')
     revision = parent / 'backup-test-revision'
     revision.write_text('a' * 40)
+
+    assert_source_sql_refusals(path, discord, revision, parent)
 
     # This fixture has no character/community payloads; isolate only their external CLI codecs.
     def empty_characters(values, **options):

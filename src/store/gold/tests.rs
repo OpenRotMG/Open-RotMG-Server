@@ -246,7 +246,7 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
         [account],
     )
     .unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts;").unwrap();
+    db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts;").unwrap();
     db.pragma_update(None, "user_version", 17).unwrap();
     let rows = || {
         db.prepare("SELECT account,reward,awarded_at,notified_at FROM gold_rewards ORDER BY reward")
@@ -295,7 +295,7 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
             .err()
             .unwrap()
             .to_string()
-            .contains("schema-23 gold reward metadata mismatch")
+            .contains("schema-24 gold reward metadata mismatch")
     );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }

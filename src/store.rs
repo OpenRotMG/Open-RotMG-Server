@@ -763,7 +763,6 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        gold::check_schema(&c, version)?;
         let layout = schema22_compat::KnownStoreLayout::read(&c, version)?;
         if version >= 21 {
             death_awards::validate_state(&c, legacy_base)?;

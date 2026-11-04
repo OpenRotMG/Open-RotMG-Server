@@ -984,7 +984,7 @@ async fn schema24_known22_paid_history_tokens_migrate_transactionally_without_aw
     let rollback = snapshot(&path);
     assert!(
         Store::open(&path, &content).is_err(),
-        "ledger migration collision must roll back"
+        "noncanonical view must refuse before migration"
     );
     assert!(snapshot(&path) == rollback);
     db.execute_batch("DROP VIEW old_gold_rewards;").unwrap();
@@ -1026,6 +1026,64 @@ async fn schema24_known22_paid_history_tokens_migrate_transactionally_without_aw
     );
 }
 
+async fn known_layout_fixture(
+    version: i32,
+    achievement: bool,
+    portable: bool,
+) -> (std::path::PathBuf, Arc<Content>) {
+    let (dir, content, store, mut ch) = fixture(achievement).await;
+    ch.level = 20;
+    ch.exp = 18050;
+    store.progress(ch.clone()).await.unwrap();
+    let account = ch.account;
+    let character = ch.id;
+    store.call(move |db| {
+        if !achievement {
+            db.execute("INSERT INTO gold_rewards VALUES(?1,'discord_link',111,222)",[account])?;
+            db.execute("INSERT INTO gold_rewards VALUES(?1,'first_bug_report',333,NULL)",[account])?;
+        }
+        db.execute("INSERT INTO discord_realm_close_tokens VALUES('source-unused',?1,'private-discord','private-actor',NULL)",[account])?;
+        db.execute("INSERT INTO discord_realm_close_tokens VALUES('source-used',?1,'private-discord','private-actor','private-used')",[account])?;
+        if portable {
+            db.execute("INSERT INTO account_origins VALUES(?1,?2,17)",params![account,"b".repeat(64)])?;
+            db.execute("INSERT INTO portable_assists VALUES(?1,7)",[character])?;
+            db.execute("INSERT INTO portable_consumed_levels VALUES(?1,2)",[character])?;
+            db.execute("INSERT INTO portable_history VALUES(?1,99,3,2)",[account])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(store.lifecycle_pending_jobs(), 0);
+    drop(store);
+    let path = dir.join("game.db");
+    let db = Connection::open(&path).unwrap();
+    // These fresh owned fixtures model exact historical layouts, never convert held inputs.
+    if !achievement {
+        for (table, _) in TABLES {
+            db.execute_batch(&format!("DROP TABLE {table};")).unwrap();
+        }
+    }
+    if !portable {
+        db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace;").unwrap();
+    }
+    db.execute_batch("ALTER TABLE gold_rewards RENAME TO synthetic_current_gold;")
+        .unwrap();
+    db.execute_batch(if version >= 23 {
+        GOLD23
+    } else if achievement {
+        GOLD
+    } else {
+        gold::SCHEMA18
+    })
+    .unwrap();
+    db.execute_batch("INSERT INTO gold_rewards SELECT * FROM synthetic_current_gold; DROP TABLE synthetic_current_gold;").unwrap();
+    db.pragma_update(None, "user_version", version).unwrap();
+    let layout = KnownStoreLayout::read(&db, version).unwrap();
+    assert_eq!(layout.achievements(), achievement);
+    assert_eq!(layout.portable(), portable);
+    drop(db);
+    (dir, content)
+}
+
 #[tokio::test]
 async fn schema24_known_layouts_preserve_history_and_private_snapshot_before_atomic_upgrade() {
     for (version, achievement, portable) in [
@@ -1033,53 +1091,10 @@ async fn schema24_known_layouts_preserve_history_and_private_snapshot_before_ato
         (22, true, false),
         (22, false, true),
         (23, true, false),
+        (24, true, true),
     ] {
-        let (dir, content, store, mut ch) = fixture(achievement).await;
-        ch.level = 20;
-        ch.exp = 18050;
-        store.progress(ch.clone()).await.unwrap();
-        let account = ch.account;
-        let character = ch.id;
-        store.call(move |db| {
-            db.execute("INSERT INTO discord_realm_close_tokens VALUES('source-unused',?1,'private-discord','private-actor',NULL)",[account])?;
-            db.execute("INSERT INTO discord_realm_close_tokens VALUES('source-used',?1,'private-discord','private-actor','private-used')",[account])?;
-            if portable {
-                db.execute("INSERT INTO account_origins VALUES(?1,?2,17)",params![account,"b".repeat(64)])?;
-                db.execute("INSERT INTO portable_assists VALUES(?1,7)",[character])?;
-                db.execute("INSERT INTO portable_consumed_levels VALUES(?1,2)",[character])?;
-                db.execute("INSERT INTO portable_history VALUES(?1,99,3,2)",[account])?;
-            }
-            Ok(())
-        }).await.unwrap();
-        assert_eq!(store.lifecycle_pending_jobs(), 0);
-        drop(store);
+        let (dir, content) = known_layout_fixture(version, achievement, portable).await;
         let path = dir.join("game.db");
-        let db = Connection::open(&path).unwrap();
-        // These fresh owned fixtures model exact historical layouts, never convert held inputs.
-        if !achievement {
-            for (table, _) in TABLES {
-                db.execute_batch(&format!("DROP TABLE {table};")).unwrap();
-            }
-        }
-        if !portable {
-            db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace;").unwrap();
-        }
-        db.execute_batch("ALTER TABLE gold_rewards RENAME TO synthetic_current_gold;")
-            .unwrap();
-        db.execute_batch(if version == 23 {
-            GOLD23
-        } else if achievement {
-            GOLD
-        } else {
-            gold::SCHEMA18
-        })
-        .unwrap();
-        db.execute_batch("INSERT INTO gold_rewards SELECT * FROM synthetic_current_gold; DROP TABLE synthetic_current_gold;").unwrap();
-        db.pragma_update(None, "user_version", version).unwrap();
-        let layout = KnownStoreLayout::read(&db, version).unwrap();
-        assert_eq!(layout.achievements(), achievement);
-        assert_eq!(layout.portable(), portable);
-        drop(db);
         let before = snapshot(&path);
         let rewards = ledger(&path);
         let private = dir.join("before-upgrade.private.db");
@@ -1128,5 +1143,68 @@ async fn schema24_unknown_partial_mixed_and_missing_namespace_never_repair_input
         let before = snapshot(&path);
         assert!(Store::open(&path, &content).is_err(), "must reject {sql}");
         assert!(snapshot(&path) == before, "must not repair {sql}");
+    }
+}
+
+#[tokio::test]
+async fn schema24_noncanonical_gold_dependencies_reject_before_writes_for_every_known_layout() {
+    for (version, achievement, portable) in [
+        (21, false, false),
+        (22, true, false),
+        (22, false, true),
+        (23, true, false),
+        (24, true, true),
+    ] {
+        for (name, sql) in [
+            (
+                "extra-index",
+                "CREATE INDEX extra_gold ON gold_rewards(awarded_at)",
+            ),
+            (
+                "direct-trigger",
+                "CREATE TRIGGER extra_gold BEFORE INSERT ON gold_rewards BEGIN SELECT RAISE(ABORT,'guard trigger fired'); END;",
+            ),
+            (
+                "dependent-view",
+                "CREATE VIEW extra_gold AS SELECT account,reward FROM gold_rewards",
+            ),
+            (
+                "other-trigger",
+                "CREATE TRIGGER extra_account BEFORE UPDATE ON accounts BEGIN SELECT count(*) FROM gold_rewards; SELECT RAISE(ABORT,'guard trigger fired'); END;",
+            ),
+            (
+                "altered-trigger",
+                "DROP TRIGGER guild_capacity; CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members BEGIN SELECT RAISE(ABORT,'guard trigger fired'); END;",
+            ),
+            (
+                "child-fk",
+                "CREATE TABLE custom_gold_child(account INTEGER,reward TEXT,FOREIGN KEY(account,reward) REFERENCES GOLD_REWARDS(account,reward) ON DELETE CASCADE); INSERT INTO custom_gold_child SELECT account,reward FROM gold_rewards LIMIT 1;",
+            ),
+        ] {
+            let (dir, content) = known_layout_fixture(version, achievement, portable).await;
+            let path = dir.join("game.db");
+            Connection::open(&path).unwrap().execute_batch(sql).unwrap();
+            let before = snapshot(&path);
+            let evidence = std::env::var_os("QA_RESULTS_DIR").map(|d| {
+                std::path::PathBuf::from(d).join(format!(
+                    "gold-objects-{version}-{achievement}-{portable}-{name}.json"
+                ))
+            });
+            if let Some(file) = &evidence {
+                std::fs::write(file, serde_json::to_vec_pretty(&before).unwrap()).unwrap();
+            }
+            let error = Store::open(&path, &content)
+                .err()
+                .expect("unsupported SQL must refuse before application DDL");
+            assert!(
+                error.to_string().contains("unsupported"),
+                "{name}: {error:#}"
+            );
+            let after = snapshot(&path);
+            assert_eq!(after, before, "{version}/{achievement}/{portable}/{name}");
+            if let Some(file) = evidence {
+                std::fs::write(file,serde_json::to_vec_pretty(&serde_json::json!({"before":before,"after":after,"error":error.to_string(),"noApplicationDdlOrTriggerExecution":true})).unwrap()).unwrap();
+            }
+        }
     }
 }

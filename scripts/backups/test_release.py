@@ -83,6 +83,8 @@ class ReleaseContract(unittest.TestCase):
             self.assertEqual(value['dungeons'], [1, 2, 3])
             self.assertEqual(value['abysses'], 5)
             self.assertEqual(value['tombs'], 9)
+            from test_achievements import assert_source_sql_refusals
+            assert_source_sql_refusals(Path(temporary) / 'contract/written/game.db', Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'contract/REVISION', Path(temporary))
             bundle = json.loads(gzip.decompress((Path(temporary) / 'contract/state.json.gz').read_bytes()))
             exported = next(row for row in bundle['game']['characters'] if row['id'] == value['id'])
             self.assertEqual(json.loads(exported['stats'])['tombs'], 9)

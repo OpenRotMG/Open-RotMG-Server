@@ -1856,7 +1856,7 @@ async fn account_save_expected_transaction_rechecks_identity_and_cli_origin_repl
 }
 
 #[tokio::test]
-async fn account_save_cli_failure_outcome_prewrite_retry_and_rolled_back_postwrite_unknown() {
+async fn account_save_cli_prewrite_retry_and_noncanonical_trigger_refusal_preserve_state() {
     let (root, content, source, save) = fixture().await;
     let file = write_input(&root, &save);
     let file = file.to_str().unwrap();
@@ -1893,9 +1893,13 @@ async fn account_save_cli_failure_outcome_prewrite_retry_and_rolled_back_postwri
     );
     assert_eq!(result["login"], confirmed["login"]);
     let db = Connection::open(&dbpath).unwrap();
-    db.execute_batch("CREATE TRIGGER fail_after_character_deletion BEFORE UPDATE ON accounts WHEN OLD.id=2 BEGIN SELECT RAISE(ABORT,'PRIVATE_FAILURE_CANARY'); END;").unwrap();
     let confirmed = cli_ok(&["preview", state, "data", file], b"");
+    db.execute_batch("CREATE TRIGGER fail_after_character_deletion BEFORE UPDATE ON accounts WHEN OLD.id=2 BEGIN SELECT RAISE(ABORT,'PRIVATE_FAILURE_CANARY'); END;").unwrap();
     let before = dump(&db);
+    let (ok, failure, _) = cli(&["preview", state, "data", file], b"");
+    assert!(!ok);
+    assert_eq!(failure["outcome"], "unchanged");
+    assert_eq!(dump(&db), before);
     let backup = root.join("pre-replace.db");
     let (ok, failure, _) = cli(
         &[
@@ -1909,8 +1913,8 @@ async fn account_save_cli_failure_outcome_prewrite_retry_and_rolled_back_postwri
         b"replacement-cli-password\n",
     );
     assert!(!ok);
-    assert_eq!(failure["outcome"], "unknown");
-    assert!(backup.is_file());
+    assert_eq!(failure["outcome"], "unchanged");
+    assert!(!backup.exists());
     assert_eq!(dump(&db), before);
     for operation in ["verify-account", "preview"] {
         let bad = root.join("PRIVATE_FAILURE_CANARY.json");

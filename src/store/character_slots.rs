@@ -1,5 +1,11 @@
 use super::*;
 
+pub(super) const TRIGGERS: &[&str] = &[
+    "CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;",
+    "CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;",
+    "CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END;",
+];
+
 #[derive(Debug)]
 pub struct SlotReplay;
 impl std::fmt::Display for SlotReplay {
@@ -82,9 +88,10 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
 CREATE TABLE character_slot_purchases(account INTEGER NOT NULL REFERENCES accounts(id),timer INTEGER NOT NULL CHECK(typeof(timer)='integer' AND timer BETWEEN -2147483648 AND 2147483647),slots INTEGER NOT NULL CHECK(typeof(slots)='integer' AND slots BETWEEN 2 AND 14),PRIMARY KEY(account,timer),UNIQUE(account,slots));
 DROP INDEX IF EXISTS one_living_character;
 CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1;
-CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
-CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
-CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END;")?;
+")?;
+        for trigger in TRIGGERS {
+            db.execute_batch(trigger)?;
+        }
     }
     for name in [
         "living_characters_by_account",

@@ -1015,11 +1015,10 @@ pub(crate) fn verify_database(db: &Connection, content: &Content) -> Result<()> 
         matches!(version, 21..=24),
         "unsupported local snapshot schema {version}"
     );
-    super::schema22_compat::KnownStoreLayout::read(db, version)?;
+    gold::check_schema(db, version)?;
     super::achievements::check_legacy_death_attempts(db)?;
     check_required_state(db, version)?;
     death_awards::check_schema(db, version)?;
-    gold::check_schema(db, version)?;
     discord_gold::check_schema(db, version)?;
     guilds::migrate(db, version)?;
     email::migrate(db, version)?;

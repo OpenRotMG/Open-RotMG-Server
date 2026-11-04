@@ -154,6 +154,27 @@ def validate_pictures(game):
         raise ValueError('Release picture validator returned an invalid receipt')
 
 
+CANONICAL_TRIGGERS = {
+    'character_slot_insert': (12, "CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END"),
+    'character_slot_update': (12, "CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END"),
+    'character_slot_capacity': (12, "CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END"),
+    'guild_capacity': (9, "CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END"),
+}
+
+
+def check_source_objects(db, version):
+    canonical = {name: sql for name, (minimum, sql) in CANONICAL_TRIGGERS.items() if version >= minimum}
+    for kind, name, sql in db.execute("SELECT type,name,sql FROM sqlite_schema WHERE type IN ('view','trigger') OR (type='index' AND tbl_name='gold_rewards') ORDER BY name"):
+        supported = (kind == 'index' and name == 'sqlite_autoindex_gold_rewards_1' and sql is None) or (kind == 'trigger' and name in canonical and canonical.pop(name) == sql)
+        if not supported:
+            raise ValueError(f'Unsupported {kind} {name} for schema {version}; preserve input for review')
+    if canonical:
+        raise ValueError(f'Missing canonical trigger {next(iter(canonical))} for schema {version}; preserve input for review')
+    child = db.execute("SELECT s.name FROM sqlite_schema s JOIN pragma_foreign_key_list(s.name) fk WHERE s.type='table' AND fk.[table] COLLATE NOCASE='gold_rewards' LIMIT 1").fetchone()
+    if child:
+        raise ValueError(f'Unsupported foreign key to Gold from table {child[0]} for schema {version}; preserve input for review')
+
+
 def snapshot(path, schema, *, include_schema=False):
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + '?mode=ro', uri=True)) as db, db:
         db.execute('BEGIN')
@@ -226,6 +247,8 @@ def snapshot(path, schema, *, include_schema=False):
         if version >= 18 and 'gold_rewards' in schema:
             if db.execute("SELECT sql FROM sqlite_schema WHERE name='gold_rewards'").fetchone() != (gold_reward_sql(version, 'achievement_partners' in schema),):
                 raise ValueError('Gold reward metadata mismatch for known schema layout')
+        if 'characters' in schema:
+            check_source_objects(db, version)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets', *EMAIL_TABLES, *RESET_TABLES, *REALM_CLOSE_TABLES}:
@@ -704,7 +727,7 @@ CREATE TABLE guilds(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQ
 CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),guild INTEGER NOT NULL REFERENCES guilds(id),rank INTEGER NOT NULL CHECK(rank IN (0,10,20,30,40)),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647));
 CREATE UNIQUE INDEX one_guild_founder ON guild_members(guild) WHERE rank=40;
 CREATE INDEX guild_roster ON guild_members(guild);
-CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END;'''
+'''
     if bundle['schema'] >= 10:
         definitions['game'] += '\n' + gold_reward_sql(bundle['schema'], 'achievement_partners' in bundle['game']) + ';'
     if bundle['schema'] >= 12:
@@ -713,9 +736,7 @@ ALTER TABLE accounts ADD COLUMN character_slots INTEGER NOT NULL DEFAULT 1 CHECK
 CREATE TABLE character_slot_purchases(account INTEGER NOT NULL REFERENCES accounts(id),timer INTEGER NOT NULL CHECK(typeof(timer)='integer' AND timer BETWEEN -2147483648 AND 2147483647),slots INTEGER NOT NULL CHECK(typeof(slots)='integer' AND slots BETWEEN 2 AND 14),PRIMARY KEY(account,timer),UNIQUE(account,slots));
 DROP INDEX one_living_character;
 CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1;
-CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
-CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
-CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END;'''
+'''
     if bundle['schema'] >= 13:
         definitions['game'] += """
 ALTER TABLE accounts ADD COLUMN vault_mask INTEGER NOT NULL DEFAULT 1 CHECK(typeof(vault_mask)='integer' AND vault_mask BETWEEN 1 AND 1048575 AND (vault_mask & 1)=1);
@@ -734,6 +755,9 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         definitions['game'] += '\n' + PORTABLE_SQL
     if bundle['schema'] in (23, 24) or 'achievement_partners' in bundle['game']:
         definitions['game'] += '\n' + ';\n'.join(ACHIEVEMENT_SQL.values()) + ';'
+    for minimum, sql in CANONICAL_TRIGGERS.values():
+        if bundle['schema'] >= minimum:
+            definitions['game'] += '\n' + sql + ';'
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')
