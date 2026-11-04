@@ -229,8 +229,9 @@ impl World {
     pub(super) fn earn_realm_event(&mut self, source: i32) -> Result<EventAdmission> {
         // Reserve space, not visible arenas: SpawnEvent paints the site with its boss: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/Oryx.cs#L797-L813
         if let Some(waiting) = self.event_waiting {
+            // Holding other defeats behind a blocked site froze closure credit for hours in production.
             if waiting != source {
-                return Ok(EventAdmission::Waiting);
+                return Ok(EventAdmission::Miss);
             }
         } else {
             if self.event_reserves.is_empty() || !self.event_rng.gen_bool(0.25) {
@@ -795,6 +796,33 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_event_does_not_withhold_other_quest_credit() {
+        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let map = Map {
+            width: 8,
+            height: 8,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x18,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0,
+                };
+                64
+            ],
+            spawns: vec![(4.5, 4.5)],
+        };
+        let mut world = World::new(content, Arc::new(map)).unwrap();
+        world.event_waiting = Some(1);
+        assert!(matches!(
+            world.earn_realm_event(2).unwrap(),
+            EventAdmission::Miss
+        ));
+        assert_eq!(world.event_waiting, Some(1));
+    }
 
     #[test]
     fn event_sites_accept_inland_biomes_and_reject_lowlands_and_shore() {
