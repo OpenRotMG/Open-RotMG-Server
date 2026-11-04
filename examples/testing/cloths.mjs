@@ -15,7 +15,7 @@ export async function run(game){
   const out=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),samples=[],captured=new Set();
   const browser=config.native.find(b=>b.actor===game.actor);assert(browser);
-  const cdp=await connect({port:browser.port,target:browser.target,url:config.origin+'/',helper:config.browserTools});
+  const cdp=await connect({port:browser.port,target:browser.target,owner:browser.owner,url:config.origin+'/',helper:config.browserTools});
   try{
   const rect=await cdp.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()');assert(rect.width===800&&rect.height===600);
   async function change(change){

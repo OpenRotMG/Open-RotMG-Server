@@ -222,6 +222,105 @@ fn each_generated_sarcophagus_owns_eight_worshippers() {
 }
 
 #[test]
+fn jackal_replacements_keep_their_original_producer() {
+    let (mut world, player) = fixture();
+    let lords: Vec<_> = world
+        .actors()
+        .filter(|e| e.kind == 0xd19)
+        .map(|e| e.id)
+        .take(2)
+        .collect();
+    assert_eq!(lords.len(), 2);
+    for &lord in &lords {
+        world.entities.get_mut(&lord).unwrap().activated = Some(world.now);
+        world.tomb_mechanics(lord, None).unwrap();
+    }
+    let owned = |world: &World, lord| -> std::collections::BTreeSet<_> {
+        (0xd16..=0xd18)
+            .flat_map(|kind| world.tomb_owned(lord, kind))
+            .collect()
+    };
+    let original = owned(&world, lords[0]);
+    let neighbors = owned(&world, lords[1]);
+    assert!(!original.is_empty() && !neighbors.is_empty());
+    assert!(original.is_disjoint(&neighbors));
+    let victim = *original.first().unwrap();
+    world
+        .damage_enemy(player, victim, 1_000_000, true, &[], None)
+        .unwrap();
+    world.now += 4000;
+    world.tomb_mechanics(lords[0], None).unwrap();
+    let replacements = owned(&world, lords[0]);
+    assert_eq!(replacements.len(), original.len());
+    assert!(!replacements.contains(&victim));
+    assert_eq!(
+        replacements.intersection(&original).count(),
+        original.len() - 1
+    );
+    assert_eq!(owned(&world, lords[1]), neighbors);
+    world
+        .damage_enemy(player, lords[0], 1_000_000, true, &[], None)
+        .unwrap();
+    assert!(!world.entities.contains_key(&lords[0]));
+    assert_eq!(owned(&world, lords[0]), replacements);
+    assert_eq!(owned(&world, lords[1]), neighbors);
+    assert_eq!(world.players[&player].character.tombs, 0);
+}
+
+#[test]
+fn returning_worshippers_heal_only_their_own_room() {
+    for kind in [0xd2a, 0xd2b] {
+        let (mut world, player) = fixture();
+        let sarcs: Vec<_> = world
+            .actors()
+            .filter(|e| e.kind == d::SARCOPHAGUS)
+            .map(|e| e.id)
+            .collect();
+        let guards = |anchor| {
+            world
+                .actors()
+                .filter(|e| {
+                    e.tomb.as_ref().is_some_and(|b| b.anchor == Some(anchor))
+                        && matches!(e.kind, 0xd2a | 0xd2b)
+                })
+                .map(|e| e.id)
+                .collect::<Vec<_>>()
+        };
+        let own = guards(sarcs[0]);
+        let foreign = guards(sarcs[1])[0];
+        let healer = *own
+            .iter()
+            .find(|&&id| world.entities[&id].kind == kind)
+            .unwrap();
+        let peer = *own
+            .iter()
+            .find(|&&id| world.entities[&id].kind != kind)
+            .unwrap();
+        let sick = *own.iter().find(|&&id| id != healer && id != peer).unwrap();
+        let pos = world.entities[&sarcs[0]].pos;
+        for id in [healer, peer, sick, foreign] {
+            let e = world.entities.get_mut(&id).unwrap();
+            e.pos = pos;
+            e.hp = world.content.objects[&e.kind].hp - 100;
+        }
+        world.apply_condition(sick, condition::SICK, 1000).unwrap();
+        let e = world.entities.get_mut(&healer).unwrap();
+        e.stage = Some(2);
+        e.activated = Some(world.now);
+        world.tomb_mechanics(healer, None).unwrap();
+        for (id, missing) in [(healer, 0), (peer, 0), (sick, 100), (foreign, 100)] {
+            let e = &world.entities[&id];
+            assert_eq!(e.hp, world.content.objects[&e.kind].hp - missing);
+        }
+        assert_eq!(
+            world.entities[&foreign].tomb.as_ref().unwrap().anchor,
+            Some(sarcs[1])
+        );
+        assert_eq!(world.players[&player].character.tombs, 0);
+    }
+}
+
+#[test]
 fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reentry() {
     let (mut world, player) = fixture();
     let objectives: Vec<_> = world

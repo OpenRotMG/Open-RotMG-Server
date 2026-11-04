@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateNativeChat,guardNativeInput,dispatchNativeChat,holdNativeInput} from './native-chat.mjs';
+import {nativeBootstrapIdentity,captureNativeBootstrap,validateNativeChat,guardNativeInput,dispatchNativeChat,holdNativeInput} from './native-chat.mjs';
 
 const input=chat=>({keys:[],duration_ms:1000,chat});
 function controller(beforeSend=()=>{}) {
@@ -25,7 +25,7 @@ function lifecycle(beforeSend=()=>{},afterSend=()=>{}) {
     events.push({method,...params});
     await afterSend(method,params);
   };
-  return {inputHold,events,hold:(...args)=>holdNativeInput(inputHold,call,bindings,...args)};
+  return {inputHold,events,call,hold:(keys,mouse,ms,dragTo,chat)=>holdNativeInput(inputHold,call,bindings,keys,mouse,ms,dragTo,chat,Date.now()+10000)};
 }
 
 test('native-chat refuses invalid or mixed input before any effects',async()=>{
@@ -190,4 +190,45 @@ test('holdNativeInput confirms cleanup on undispatched DOWN timeout and blocks t
   down.resolve();await flush();
   assert.deepEqual(c.events,[{method:'Input.dispatchKeyEvent',type:'keyUp',key:'w',code:'KeyW',windowsVirtualKeyCode:87}]);
   release.resolve();await rejection;assert.equal(c.inputHold.current,null);
+});
+
+function ready(actor,account,player=100+actor,world=-2){
+  return {actor,account,character:actor,class:0x310,player,world,world_name:'Nexus',client_time:100,stage:'ready',observation:{actor,controller:'native',session:{account,character:actor,player,world},character:{class:0x310,level:1,experience:0,items:[],inventory_revision:0},lifecycle:{alive:true,death_pending:false,quarantined:false}}};
+}
+const atomic=actors=>({native_state_version:1,runtime:'synthetic-test-runtime',stopped:null,actors});
+test('bootstrap pins original identities across enrollment without freezing legitimate progression',()=>{
+  const registered=[{actor:1,account:11}],first=captureNativeBootstrap(atomic([ready(1,11)]),registered);
+  const changed=ready(1,11,201,1);changed.world_name='Realm';
+  Object.assign(changed.observation.character,{level:2,experience:50,items:[1],inventory_revision:1});
+  const next=captureNativeBootstrap(atomic([changed,ready(2,22)]),[...registered,{actor:2,account:22}],first);
+  assert.deepEqual(next.actors,[...first.actors,{actor:2,account:22,character:2,class:0x310}]);
+  const identity=nativeBootstrapIdentity(next,[1,2]);assert.equal(identity.runtime,first.runtime);
+  assert(Object.isFrozen(identity.identities.get(1)));
+});
+test('bootstrap refuses malformed receipts, replacements, foreign sessions and changed epochs',()=>{
+  const registered=[{actor:1,account:11}],state=atomic([ready(1,11)]),original=captureNativeBootstrap(state,registered);
+  for(const mutate of [s=>s.runtime='',s=>s.native_state_version=2,s=>s.stopped='halt',s=>s.actors.push(s.actors[0]),s=>s.actors[0].stage='transferring',s=>s.actors[0].account=12,s=>s.actors[0].character=2,s=>s.actors[0].observation.session.player=999,s=>s.actors[0].observation.lifecycle.alive=false,s=>s.actors[0].observation.lifecycle.quarantined=true]){
+    const invalid=structuredClone(state);mutate(invalid);assert.throws(()=>captureNativeBootstrap(invalid,registered),/Native bootstrap identity/);
+  }
+  for(const mutate of [r=>r.runtime='different-epoch',r=>r.actors[0].class=0x30e,r=>r.actors[0].account=12]){
+    const previous=structuredClone(original);mutate(previous);assert.throws(()=>captureNativeBootstrap(state,registered,previous),/Native bootstrap identity/);
+  }
+  for(const mutate of [r=>r.extra=true,r=>r.actors=[],r=>r.actors[0].class=0,r=>r.actors[0].extra=true]){
+    const invalid=structuredClone(original);mutate(invalid);assert.throws(()=>nativeBootstrapIdentity(invalid,[1]),/Native bootstrap identity/);
+  }
+});
+test('raw DOWN retains the original preparation deadline after a delayed managed call',async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:100});
+  const down=Promise.withResolvers(),c=lifecycle(async(method,params)=>{if(params.type==='keyDown')await down.promise;});
+  const hold=holdNativeInput(c.inputHold,c.call,{w:['KeyW',87]},['w'],undefined,100,undefined,undefined,200);
+  const rejection=assert.rejects(hold,/preparation deadline/);
+  await flush();t.mock.timers.tick(100);down.resolve();await rejection;
+  assert.deepEqual(c.events,[{method:'Input.dispatchKeyEvent',type:'keyUp',key:'w',code:'KeyW',windowsVirtualKeyCode:87}]);
+  assert.equal(c.inputHold.current,null);
+});
+test('holds reject missing or nonfinite preparation deadlines before input',async()=>{
+  for(const deadline of [undefined,NaN,Infinity,0,-1]){
+    const c=lifecycle();await assert.rejects(holdNativeInput(c.inputHold,c.call,{w:['KeyW',87]},['w'],undefined,100,undefined,undefined,deadline),/finite positive existing preparation deadline/);
+    assert.deepEqual(c.events,[]);assert.equal(c.inputHold.current,null);
+  }
 });

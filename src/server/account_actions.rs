@@ -62,6 +62,81 @@ pub(super) async fn discord_gold(
         .await,
     )
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RealmCloseGrant {
+    discord_id: String,
+    request_id: String,
+    actor_id: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RealmCloseUse {
+    discord_id: String,
+    request_id: String,
+}
+pub(super) async fn discord_give_realm_close(
+    State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<RealmCloseGrant>,
+) -> Response {
+    if let Some(response) = private_denial(&a, peer, &headers) {
+        return response;
+    }
+    json_result(
+        a.store
+            .grant_realm_close_token(request.discord_id, request.request_id, request.actor_id)
+            .await
+            .map(|(_, tokens)| serde_json::json!({"tokens":tokens})),
+    )
+}
+pub(super) async fn discord_close_realm(
+    State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<RealmCloseUse>,
+) -> Response {
+    if let Some(response) = private_denial(&a, peer, &headers) {
+        return response;
+    }
+    json_result(
+        async {
+            // Finish the spend/closure (or refund) even if Discord's HTTP deadline expires.
+            tokio::spawn(async move {
+                let account = a
+                    .store
+                    .spend_realm_close_token(request.discord_id, request.request_id.clone())
+                    .await?;
+                let closed = match a.online_avatar(account) {
+                    Some(player) => {
+                        a.world
+                            .directory(move |d| d.force_realm_closure(player))
+                            .await
+                    }
+                    None => Err(anyhow::anyhow!(
+                        "Your linked game account is not online; log in and enter a Realm first."
+                    )),
+                };
+                match closed {
+                    Ok(name) => Ok(serde_json::json!({"name":name})),
+                    Err(error) => {
+                        a.store
+                            .refund_realm_close_token(request.request_id)
+                            .await
+                            .with_context(|| {
+                                format!("{error:#}; refunding the token also failed")
+                            })?;
+                        Err(error)
+                    }
+                }
+            })
+            .await
+            .context("Realm close task failed")?
+        }
+        .await,
+    )
+}
 pub(super) async fn discord_announce(
     State(a): State<App>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

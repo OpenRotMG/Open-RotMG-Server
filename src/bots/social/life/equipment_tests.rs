@@ -543,7 +543,7 @@ async fn equipment_drop_rejects_native_window_opened_after_check_capture_without
     assert!(rejection.contains("equipment drop rejected; no delivery inferred"));
     assert_eq!(
         crate::server::lifecycle::state(&s.app, before.session.account),
-        Some((false, Some(id), false))
+        Some((false, Some(id)))
     );
     let after = s.view().await;
     let peer_after = s.app.world.player_view(peer).await.unwrap();

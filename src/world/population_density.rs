@@ -346,14 +346,18 @@ impl World {
         counts
     }
     pub(super) fn cull_population(&mut self, terrain: u8) {
-        let counted = self.oryx_counted(terrain);
+        let mut counted = self.oryx_counted(terrain);
+        // Compaction stores families first, so slot order culled every Sprite God; oldest bodies go first instead.
+        counted.sort_unstable();
         let excess = counted.len() - self.population_regions[terrain as usize].target;
         // Only bodies without a player within 10 tiles leave, so active areas keep their regrowth.
+        // Breeding causes the overgrowth; culling species that cannot breed back would let them die out.
         let culled: Vec<_> = counted
             .into_iter()
             .filter(|id| {
-                let pos = self.entities[id].pos;
-                self.players.values().all(|p| p.pos.distance(pos) >= 10.)
+                let e = &self.entities[id];
+                population::REPRODUCTION.iter().any(|r| r.0 == e.kind)
+                    && self.players.values().all(|p| p.pos.distance(e.pos) >= 10.)
             })
             .take(excess)
             .collect();
@@ -547,5 +551,30 @@ fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
                 .count()
         );
     }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn culling_an_overgrown_godlands_keeps_every_species() -> Result<()> {
+    let path = std::path::Path::new("data");
+    let content = Arc::new(Content::load(path)?);
+    let source = crate::terrain::realms::sources(path)?.remove(0);
+    let mut directory = Directory::configured(path, content, 16, 756, Some(756), vec![source], 2)?;
+    let world = &mut directory.worlds[&-3];
+    let count = |w: &World, kinds: &[u16]| {
+        w.entities
+            .values()
+            .filter(|e| kinds.contains(&e.kind))
+            .count()
+    };
+    let (sprite_gods, unbred) = (count(world, &[0x652]), count(world, &[0x6d8, 0x905]));
+    assert!(sprite_gods > 0 && unbred > 0);
+    world.compact_population()?;
+    // Live, the Godlands bred to 150% and one cull removed every Sprite God.
+    world.population_regions[1].target = world.oryx_counted(1).len() / 2;
+    world.cull_population(1);
+    assert!(count(world, &[0x652]) * 4 > sprite_gods);
+    assert_eq!(count(world, &[0x6d8, 0x905]), unbred);
     Ok(())
 }

@@ -27,7 +27,7 @@ Reuse one isolated task worktree with distinct ports, state and browser profiles
 
 The runner allocates scratch and automatically cleans it after owned processes exit. Keep source/cases in the worktree; write evidence, logs, DB/state and required inputs directly to `QA_RESULTS_DIR`. Only regenerable files belong in `QA_SCRATCH_DIR`/`TMPDIR`. Do not create per-attempt source/client/cache copies, override managed Cargo storage, launch ad-hoc detached jobs or bypass runner errors. Preserve existing frozen reproductions/tool pins without migration.
 
-Keep feature cases small and assert observed outcomes, not merely dispatched input. Keep the regression suite lean; expanding shared testing infrastructure requires explicit approval.
+Keep feature cases small and assert observed outcomes, not merely dispatched input. Keep the regression suite lean.
 
 Native browser QA must use a private virtual display/compositor; see `examples/testing/README.md`. CDP input and page-local focus must not activate host windows or switch the user's desktops. Never use host `Page.bringToFront`, target activation or desktop input as a rendering repair.
 

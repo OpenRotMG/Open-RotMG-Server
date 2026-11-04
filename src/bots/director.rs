@@ -71,7 +71,7 @@ async fn fill(
             continue;
         }
         let stars = if let Some(account) = app.store.shore_account(profile.identity.into()).await? {
-            // Live: a session whose completion failed stays fenced; admitting it again crashed the worker.
+            // Live: an earlier session can still hold the account while it closes; admitting it again crashed the worker.
             if app
                 .owners
                 .lock()
