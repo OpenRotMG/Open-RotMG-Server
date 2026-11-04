@@ -222,6 +222,52 @@ fn each_generated_sarcophagus_owns_eight_worshippers() {
 }
 
 #[test]
+fn jackal_replacements_keep_their_original_producer() {
+    let (mut world, player) = fixture();
+    let lords: Vec<_> = world
+        .actors()
+        .filter(|e| e.kind == 0xd19)
+        .map(|e| e.id)
+        .take(2)
+        .collect();
+    assert_eq!(lords.len(), 2);
+    for &lord in &lords {
+        world.entities.get_mut(&lord).unwrap().activated = Some(world.now);
+        world.tomb_mechanics(lord, None).unwrap();
+    }
+    let owned = |world: &World, lord| -> std::collections::BTreeSet<_> {
+        (0xd16..=0xd18)
+            .flat_map(|kind| world.tomb_owned(lord, kind))
+            .collect()
+    };
+    let original = owned(&world, lords[0]);
+    let neighbors = owned(&world, lords[1]);
+    assert!(!original.is_empty() && !neighbors.is_empty());
+    assert!(original.is_disjoint(&neighbors));
+    let victim = *original.first().unwrap();
+    world
+        .damage_enemy(player, victim, 1_000_000, true, &[], None)
+        .unwrap();
+    world.now += 4000;
+    world.tomb_mechanics(lords[0], None).unwrap();
+    let replacements = owned(&world, lords[0]);
+    assert_eq!(replacements.len(), original.len());
+    assert!(!replacements.contains(&victim));
+    assert_eq!(
+        replacements.intersection(&original).count(),
+        original.len() - 1
+    );
+    assert_eq!(owned(&world, lords[1]), neighbors);
+    world
+        .damage_enemy(player, lords[0], 1_000_000, true, &[], None)
+        .unwrap();
+    assert!(!world.entities.contains_key(&lords[0]));
+    assert_eq!(owned(&world, lords[0]), replacements);
+    assert_eq!(owned(&world, lords[1]), neighbors);
+    assert_eq!(world.players[&player].character.tombs, 0);
+}
+
+#[test]
 fn numbered_artifacts_keep_stasis_and_original_boss_bindings_across_player_reentry() {
     let (mut world, player) = fixture();
     let objectives: Vec<_> = world
