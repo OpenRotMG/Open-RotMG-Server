@@ -314,6 +314,22 @@ mod tests {
         d.worlds.get_mut(&-3).unwrap().defeat_entity(other).unwrap();
         d.endgame_step(&[-3]);
         assert_eq!(d.pending_achievement_credits(), credits);
+        let content = d.worlds[&-3].content.clone();
+        d.worlds.remove(&-3);
+        d.endgame.realms.remove(&-3);
+        assert_eq!(d.pending_achievement_credits(), credits);
+        let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+        let account = store.list("retired-credit".into()).await.unwrap().id;
+        let character = store
+            .create_prepared(account, content.get(ch.class).unwrap(), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            (account, character.id),
+            (credits[0].account, credits[0].character)
+        );
+        store.achievement_closure(credits[0].clone()).await.unwrap();
+        store.achievement_closure(credits[0].clone()).await.unwrap();
         d.finish_achievement_credit(&credits[0]).unwrap();
         assert!(d.pending_achievement_credits().is_empty());
     }

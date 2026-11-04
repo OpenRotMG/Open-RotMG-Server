@@ -554,6 +554,15 @@ fn generations(a: &App, accounts: &[i32]) -> Result<Vec<(i32, Arc<()>)>> {
         .collect()
 }
 
+#[derive(Debug)]
+pub(crate) struct AccountBusy;
+impl std::fmt::Display for AccountBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("account already has an active session")
+    }
+}
+impl std::error::Error for AccountBusy {}
+
 impl App {
     pub(crate) fn claim(&self, id: i32) -> Result<Owner> {
         self.try_claim(id)?.context("development world full")
@@ -562,13 +571,10 @@ impl App {
         let _admission = drain::admission(self)?;
         let mut owners = self.owners.lock().expect("ownership registry poisoned");
         self.world.supervisor.ensure_running()?;
+        ensure!(!owners.contains_key(&id), AccountBusy);
         if owners.len() >= self.max_players {
             return Ok(None);
         }
-        ensure!(
-            !owners.contains_key(&id),
-            "account already has an active session"
-        );
         let generation = Arc::new(());
         self.admission_started
             .store(true, std::sync::atomic::Ordering::Relaxed);

@@ -115,7 +115,7 @@ class UpdateTest(unittest.TestCase):
             (stage / 'REVISION').write_text('a' * 40)
             game_schema, discord_schema = object(), object()
             module = SimpleNamespace(
-                RELOADED_ACHIEVEMENT_GAME=game_schema, DISCORD=discord_schema,
+                RELOADED_GAME=game_schema, DISCORD=discord_schema,
                 export=lambda *args: {'game': {'achievement_partners': []}, 'discord': {}},
                 restore=lambda *args: None,
                 snapshot=lambda path, schema: {'achievement_partners': []} if schema is game_schema else {},

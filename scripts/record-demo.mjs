@@ -48,7 +48,8 @@ export async function socket(url, Socket = WebSocket, onEvent) {
     close() { fail('CDP connection released'); ws.close(); },
   };
 }
-export async function connect({port, target, url, helper, onEvent}) {
+export async function connect({port, target, url, helper, onEvent, owner}) {
+  requireValue(owner===undefined||typeof owner==='string'&&owner.length>0, 'Browser owner must be a nonempty explicit receipt when supplied');
   requireValue(Number.isInteger(port) && port >= 1024 && port <= 65535, 'Explicit local Chrome port required');
   requireValue(helper && path.isAbsolute(helper), 'Explicit absolute managed-CDP helper path required');
   const helpers = await import(pathToFileURL(helper).href);
@@ -57,7 +58,7 @@ export async function connect({port, target, url, helper, onEvent}) {
   requireValue(matches.length === 1, 'Fresh owned target/URL missing or ambiguous');
   const raw = await socket(matches[0].webSocketDebuggerUrl, WebSocket, onEvent);
   try {
-    const call = await helpers.managedCDP(port, target, helpers.scriptOwner(), raw.call);
+    const call = await helpers.managedCDP(port, target, owner===undefined?helpers.scriptOwner():owner, raw.call);
     return {call, close:raw.close, async eval(expression) {
       const r = await call('Runtime.evaluate', {expression, returnByValue:true, awaitPromise:true});
       requireValue(!r.exceptionDetails, `Page evaluation failed: ${JSON.stringify(r.exceptionDetails)}`);

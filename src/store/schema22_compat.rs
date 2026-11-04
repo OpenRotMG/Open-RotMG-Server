@@ -21,21 +21,103 @@ pub(super) const TABLES: [(&str, &str); 3] = [
     ),
 ];
 
-pub(super) fn check(db: &Connection, version: i32) -> Result<()> {
-    for (name, expected) in TABLES {
-        let sql: Option<String> = db
-            .query_row("SELECT sql FROM sqlite_schema WHERE name=?1", [name], |r| {
-                r.get(0)
-            })
-            .optional()?;
-        ensure!(
-            if matches!(version, 22 | 23) {
-                sql.as_deref() == Some(expected)
-            } else {
-                sql.is_none()
-            },
-            "schema-{version} incompatible achievement metadata {name}; preserve state for review"
-        );
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum KnownStoreLayout {
+    Legacy,
+    Achievement22,
+    Portable22,
+    Achievement23,
+    Combined24,
+}
+impl KnownStoreLayout {
+    pub(super) fn achievements(self) -> bool {
+        matches!(
+            self,
+            Self::Achievement22 | Self::Achievement23 | Self::Combined24
+        )
     }
-    Ok(())
+    pub(super) fn portable(self) -> bool {
+        matches!(self, Self::Portable22 | Self::Combined24)
+    }
+    pub(super) fn read(db: &Connection, version: i32) -> Result<Self> {
+        fn group(
+            db: &Connection,
+            definitions: impl IntoIterator<Item = (&'static str, &'static str)>,
+        ) -> Result<bool> {
+            let mut count = 0;
+            let mut total = 0;
+            for (name, expected) in definitions {
+                total += 1;
+                let sql: Option<String> = db
+                    .query_row("SELECT sql FROM sqlite_schema WHERE name=?1", [name], |r| {
+                        r.get(0)
+                    })
+                    .optional()?;
+                if let Some(sql) = sql {
+                    ensure!(
+                        sql == expected,
+                        "incompatible store metadata {name}; preserve input for review"
+                    );
+                    count += 1;
+                }
+            }
+            ensure!(
+                count == 0 || count == total,
+                "partial store feature metadata; preserve input for review"
+            );
+            Ok(count == total)
+        }
+        let achievements = group(db, TABLES)?;
+        let portable = group(
+            db,
+            super::account_save::SCHEMA
+                .split(';')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    (
+                        s.split_whitespace()
+                            .nth(2)
+                            .unwrap()
+                            .split('(')
+                            .next()
+                            .unwrap(),
+                        s,
+                    )
+                }),
+        )?;
+        let layout = match (version, achievements, portable) {
+            (0 | 5..=21, false, false) => Self::Legacy,
+            (22, true, false) => Self::Achievement22,
+            (22, false, true) => Self::Portable22,
+            (23, true, false) => Self::Achievement23,
+            (24, true, true) => Self::Combined24,
+            _ => anyhow::bail!(
+                "unsupported schema-{version} feature layout; preserve input for review"
+            ),
+        };
+        if version >= 18 {
+            let sql: String = db.query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='gold_rewards'",
+                [],
+                |r| r.get(0),
+            )?;
+            let expected = match layout {
+                Self::Achievement22 => GOLD,
+                Self::Achievement23 | Self::Combined24 => GOLD23,
+                _ => super::gold::SCHEMA18,
+            };
+            ensure!(
+                sql == expected.trim_end_matches(';'),
+                "schema-{version} gold reward metadata mismatch; restore the reviewed ledger"
+            );
+        }
+        if portable {
+            super::account_save::check_schema(db)?;
+        }
+        Ok(layout)
+    }
+}
+pub(super) fn check(db: &Connection, version: i32) -> Result<()> {
+    KnownStoreLayout::read(db, version).map(|_| ())
 }

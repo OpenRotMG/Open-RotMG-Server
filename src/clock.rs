@@ -9,6 +9,9 @@ struct State {
     excluded: Duration,
 }
 impl Clock {
+    pub(crate) fn shares_source(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
     pub fn now(&self) -> Instant {
         let state = self.0.lock().expect("game clock poisoned");
         state.paused.unwrap_or_else(Instant::now) - state.excluded

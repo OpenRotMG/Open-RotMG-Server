@@ -20,23 +20,7 @@ const CLASS_QUESTS: [(&str, i32, &str); 5] = [
 ];
 
 pub(super) fn check_schema(db: &Connection, version: i32) -> Result<()> {
-    if version >= 18 {
-        let sql: String = db.query_row(
-            "SELECT sql FROM sqlite_schema WHERE name='gold_rewards'",
-            [],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            sql == match version {
-                23 => SCHEMA,
-                22 => super::schema22_compat::GOLD,
-                _ => SCHEMA18,
-            }
-            .trim_end_matches(';'),
-            "schema-{version} gold reward metadata mismatch; restore the reviewed ledger"
-        );
-    }
-    Ok(())
+    super::schema22_compat::check(db, version)
 }
 
 pub(super) fn migrate(db: &Connection, version: i32, exists: bool) -> Result<()> {
@@ -52,7 +36,7 @@ pub(super) fn migrate(db: &Connection, version: i32, exists: bool) -> Result<()>
     Ok(())
 }
 
-fn details(reward: &str) -> Result<(i32, &'static str)> {
+pub(super) fn details(reward: &str) -> Result<(i32, &'static str)> {
     Ok(match reward {
         DISCORD => (AMOUNT, "linking your Discord account"),
         COLLECTION => (

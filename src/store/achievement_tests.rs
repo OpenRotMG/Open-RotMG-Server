@@ -15,10 +15,10 @@ pub(super) fn schema21_fixture(db: &Connection) {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        23
+        24
     );
-    schema22_compat::check(db, 23).unwrap();
-    gold::check_schema(db, 23).unwrap();
+    schema22_compat::check(db, 24).unwrap();
+    gold::check_schema(db, 24).unwrap();
     for (name, _) in schema22_compat::TABLES {
         assert_eq!(
             db.query_row(&format!("SELECT count(*) FROM {name}"), [], |r| r
@@ -36,6 +36,20 @@ pub(super) fn schema21_fixture(db: &Connection) {
         .unwrap(),
         0
     );
+    for name in [
+        "account_origins",
+        "portable_assists",
+        "portable_consumed_levels",
+        "portable_history",
+    ] {
+        assert_eq!(
+            db.query_row(&format!("SELECT count(*) FROM {name}"), [], |r| r
+                .get::<_, i32>(0))
+                .unwrap(),
+            0
+        );
+    }
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace;").unwrap();
     db.execute_batch("DROP TABLE achievement_partners; DROP TABLE achievement_dungeons; DROP TABLE achievement_realm_credits; ALTER TABLE gold_rewards RENAME TO schema22_gold;").unwrap();
     db.execute_batch(gold::SCHEMA18).unwrap();
     db.execute_batch(
@@ -422,7 +436,7 @@ async fn achievement_schema22_preserves_old_rows_dates_wallets_and_rejects_missi
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        23
+        24
     );
     drop(db);
     let store = Store::open(&path, &content).unwrap();
@@ -442,12 +456,10 @@ async fn achievement_schema22_preserves_old_rows_dates_wallets_and_rejects_missi
     db.execute_batch("DROP TABLE achievement_partners;")
         .unwrap();
     drop(db);
+    let error = Store::open(&path, &content).err().unwrap();
     assert!(
-        Store::open(&path, &content)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("schema-23")
+        error.to_string().contains("partial store feature metadata"),
+        "{error:#}"
     );
     std::fs::remove_dir_all(root).unwrap();
 }

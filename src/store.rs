@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, path::Path, sync::mpsc};
 use tokio::sync::oneshot;
 
 mod account_actions;
+pub(crate) mod account_save;
 mod accounts;
 pub(crate) mod achievements;
 mod schema22_compat;
@@ -54,6 +55,15 @@ impl std::error::Error for Rejected {}
 
 #[derive(Debug)]
 pub struct InvalidCredentials;
+
+#[derive(Debug)]
+pub(crate) struct AuthenticationBusy;
+impl std::fmt::Display for AuthenticationBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("account service busy; retry shortly")
+    }
+}
+impl std::error::Error for AuthenticationBusy {}
 impl std::fmt::Display for InvalidCredentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("invalid email or password")
@@ -628,6 +638,61 @@ pub(crate) fn decode_legacy_character(raw: &str, legacy_base: [i32; 8]) -> Resul
     }
     decode_character(&value.to_string(), legacy_base)
 }
+pub(super) fn check_required_state(db: &Connection, version: i32) -> Result<()> {
+    for (since, table, reason) in [
+        (
+            16,
+            "trade_transactions",
+            "schema-16 trade receipts missing; restore committed settlements instead of allowing duplicate payment",
+        ),
+        (
+            16,
+            "bot_minds",
+            "schema-16 account minds missing; restore reviewed state instead of erasing purposes",
+        ),
+        (
+            10,
+            "gold_rewards",
+            "gold reward history missing; restore reviewed state instead of allowing duplicate grants",
+        ),
+        (
+            5,
+            "account_fame",
+            "schema-5 fame wallet table missing; restore reviewed state instead of recreating balances",
+        ),
+        (
+            6,
+            "account_lists",
+            "schema-6 account lists missing; restore reviewed state instead of clearing preferences",
+        ),
+        (
+            7,
+            "update_feed",
+            "schema-7 update feed missing; restore reviewed state instead of clearing published news",
+        ),
+    ] {
+        if version >= since {
+            let exists: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
+                [table],
+                |r| r.get(0),
+            )?;
+            ensure!(exists, "{reason}");
+        }
+    }
+    if version >= 8 {
+        let credits: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='credits')",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(
+            credits,
+            "schema-8 gold balance missing; restore reviewed state instead of recreating balances"
+        );
+    }
+    Ok(())
+}
 impl Store {
     pub fn open(path: &Path, content: &Content) -> Result<Self> {
         let legacy_base = content
@@ -677,9 +742,11 @@ impl Store {
                     | 21
                     | 22
                     | 23
+                    | 24
             ),
             "unsupported game database schema {version}"
         );
+        check_required_state(&c, version)?;
         let trades_exist: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='trade_transactions')", [], |r| r.get(0))?;
         let minds_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='bot_minds')",
@@ -691,25 +758,13 @@ impl Store {
             "experimental community schema {version} conflicts with canonical migrations; preserve this database and request an explicit migration"
         );
         death_awards::check_schema(&c, version)?;
-        ensure!(
-            version < 16 || trades_exist,
-            "schema-16 trade receipts missing; restore committed settlements instead of allowing duplicate payment"
-        );
-        ensure!(
-            version < 16 || minds_exist,
-            "schema-16 account minds missing; restore reviewed state instead of erasing purposes"
-        );
         let rewards_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='gold_rewards')",
             [],
             |r| r.get(0),
         )?;
-        ensure!(
-            version < 10 || rewards_exist,
-            "gold reward history missing; restore reviewed state instead of allowing duplicate grants"
-        );
         gold::check_schema(&c, version)?;
-        schema22_compat::check(&c, version)?;
+        let layout = schema22_compat::KnownStoreLayout::read(&c, version)?;
         if version >= 21 {
             death_awards::validate_state(&c, legacy_base)?;
             achievements::check_legacy_death_attempts(&c)?;
@@ -720,34 +775,11 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        ensure!(
-            version < 8 || credits_exist,
-            "schema-8 gold balance missing; restore reviewed state instead of recreating balances"
-        );
         let wallet_exists: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_fame')",
             [],
             |r| r.get(0),
         )?;
-        ensure!(
-            version < 5 || wallet_exists,
-            "schema-5 fame wallet table missing; restore reviewed state instead of recreating balances"
-        );
-        let lists_exist: bool = c.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='account_lists')",
-            [], |r| r.get(0),
-        )?;
-        ensure!(
-            version < 6 || lists_exist,
-            "schema-6 account lists missing; restore reviewed state instead of clearing preferences"
-        );
-        let updates_exist: bool = c.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type=\'table\' AND name=\'update_feed\')", [], |r| r.get(0),
-        )?;
-        ensure!(
-            version < 7 || updates_exist,
-            "schema-7 update feed missing; restore reviewed state instead of clearing published news"
-        );
         if version >= 17 {
             guilds::migrate(&c, version)?;
             death_awards::validate_state(&c, legacy_base)?;
@@ -787,7 +819,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
  CREATE TABLE IF NOT EXISTS bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)));")?;
         guilds::migrate(&migration, version)?;
         gold::migrate(&migration, version, rewards_exist)?;
-        achievements::migrate(&migration, version)?;
+        achievements::migrate(&migration, !layout.achievements())?;
         if version < 19 {
             migration.execute_batch(&discord_gold::SCHEMA.replacen(
                 "CREATE TABLE",
@@ -891,7 +923,9 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        migration.pragma_update(None, "user_version", 23)?;
+        account_save::migrate(&migration, !layout.portable())?;
+        schema22_compat::check(&migration, 24)?;
+        migration.pragma_update(None, "user_version", 24)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -1820,11 +1854,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 )?,
                 "assist giver missing {giver}"
             );
-            Ok(db.query_row(
-                "SELECT count(*) FROM level_credits WHERE giver=?1",
-                [giver],
-                |r| r.get(0),
-            )?)
+            Ok(db.query_row(account_save::ASSIST_COUNT, [giver], |r| r.get(0))?)
         })
         .await
     }
@@ -1847,7 +1877,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 && serde_json::from_str::<Vec<i32>>(&items)? == ch.items,
                 "death snapshot lost committed progress or equipment");
             ch.lifetime.follows(&saved.lifetime)?;
-            ch.lifetime.level_assists=ch.lifetime.level_assists.max(tx.query_row("SELECT count(*) FROM level_credits WHERE giver=?1",[ch.id],|r|r.get::<_,u64>(0))?);
+            ch.lifetime.level_assists=ch.lifetime.level_assists.max(tx.query_row(account_save::ASSIST_COUNT,[ch.id],|r|r.get::<_,u64>(0))?);
             let history=death_awards::history(&tx,&ch)?;
             let wallet=tx.query_row("SELECT balance,earned FROM account_fame WHERE account=?1",[ch.account],|r|Ok((r.get(0)?,r.get(1)?))).context("account fame wallet missing")?;
             let guild=guilds::membership(&tx,ch.account)?.map(|m|tx.query_row("SELECT fame,earned FROM guilds WHERE id=?1",[m.id],|r|Ok((r.get(0)?,r.get(1)?)))).transpose()?;

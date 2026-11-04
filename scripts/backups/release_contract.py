@@ -31,22 +31,30 @@ def check(binary, data, directory, revision):
     bundle = backup.export(written / 'game.db', discord, archive, version, version, version)
     if len(bundle['game']['bot_minds']) != 2 or len(bundle['game']['trade_transactions']) != 1:
         raise RuntimeError('Release community payload missing from backup')
-    if bundle['schema'] != 23:
-        raise RuntimeError('Release backup is not schema23')
+    if bundle['schema'] != 24:
+        raise RuntimeError('Release backup is not schema24')
+    if any(not bundle['game'][table] for table in backup.PORTABLE_TABLES):
+        raise RuntimeError('Release portable metadata fixture must be nonempty in every table')
+    if any(not bundle['game'][table] for table in backup.ACHIEVEMENT_TABLES):
+        raise RuntimeError('Release achievement fixture must be nonempty in every table')
+    if len([r for r in bundle['game']['gold_rewards'] if r['account'] == 2 and r['reward'].startswith('achievement_')]) != 13:
+        raise RuntimeError('Release fixture must retain all thirteen achievement receipts')
     if any(marker in gzip.decompress(archive.read_bytes()) for marker in [b'BACKUP_FIXTURE_SECRET', b'EMAIL_BACKUP_PRIVATE_CANARY', b'RESET_BACKUP_PRIVATE_CANARY']):
         raise RuntimeError('Release backup exported a login identity')
     restored = directory / 'restored'
     backup.restore(archive, restored)
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
-    if backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME) != bundle['game']:
+    if backup.snapshot(restored / 'game.db', backup.RELOADED_GAME) != bundle['game']:
         raise RuntimeError('Release loading changed restored gameplay records')
+    print(json.dumps({'event': 'release_portable_metadata_roundtrip_passed',
+                      'rows': {table: len(bundle['game'][table]) for table in backup.PORTABLE_TABLES}}))
     result = subprocess.run([str(binary), '--backup-exercise-vault', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError('Release restored vault exercise failed: ' + result.stderr.strip())
     if json.loads(result.stdout) != {'exercised_vault_chests': 2, 'transfers': 1, 'withdrawals': 1, 'deposits': 1, 'items_conserved': True}:
         raise RuntimeError('Release restored vault exercise returned an invalid receipt')
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
-    before_death = backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME)
+    before_death = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
     result = subprocess.run([str(binary), '--backup-exercise-death', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError('Release restored death exercise failed: ' + result.stderr.strip())
@@ -63,7 +71,7 @@ def check(binary, data, directory, revision):
     if type(character) is not int or receipt != {'base_fame': 19, 'equipment_fame': 1, 'total_fame': 20}:
         raise RuntimeError('Release restored death exercise returned an invalid receipt')
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
-    paid = backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME)
+    paid = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
     backup.validate(dict(bundle, game=paid))
     expected = deepcopy(before_death)
     created = next(row for row in paid['characters'] if row['id'] == character)
@@ -79,7 +87,7 @@ def check(binary, data, directory, revision):
             row[field] += 20
     if paid != expected:
         raise RuntimeError('Release restored death changed unrelated records or historical payouts')
-    before_art = backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME)
+    before_art = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
     next_id = before_art['picture_sequence'][0]['next_id']
     if next_id <= max(row['id'] for row in before_art['pictures']) + 1:
         raise RuntimeError('Art fixture did not preserve a deleted high-water ID')
@@ -88,12 +96,63 @@ def check(binary, data, directory, revision):
         raise RuntimeError('Release restored art exercise failed: ' + result.stderr.strip())
     if json.loads(result.stdout) != {'exercised_pictures': True, 'deleted_id': next_id, 'next_id': next_id + 1}:
         raise RuntimeError('Release restored art exercise returned an invalid receipt')
-    after_art = backup.snapshot(restored / 'game.db', backup.RELOADED_ACHIEVEMENT_GAME)
+    after_art = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
     expected = deepcopy(before_art)
     expected['picture_sequence'][0]['next_id'] += 1
     if after_art != expected:
         raise RuntimeError('Restored art exercise changed existing artwork or unrelated rows')
     backup.validate(dict(bundle, game=after_art))
+    with closing(sqlite3.connect(written / 'game.db')) as db:
+        source_unchanged = list(db.iterdump())
+    denied_output = directory / 'unsupported-progress.json'
+    denied = subprocess.run([str(binary), '--local-save', 'export', str(written), str(data), '2', str(denied_output)], text=True, capture_output=True)
+    if denied.returncode == 0 or denied_output.exists() or 'format1 cannot represent owned achievement progress' not in json.loads(denied.stdout)['error']:
+        raise RuntimeError('Unrepresentable achievement progress published a partial account save')
+    # Isolate retained trade history from integration capabilities before exercising replacement.
+    trade_state = directory / 'retained-trade'
+    trade_state.mkdir(mode=0o700)
+    trade_database = trade_state / 'game.db'
+    subprocess.run([str(binary), '--local-save', 'snapshot', str(written), str(data), str(trade_database)], check=True)
+    with closing(sqlite3.connect(trade_database)) as db, db:
+        # Isolate the pre-existing retained-trade refusal on this fresh synthetic copy.
+        for table in backup.ACHIEVEMENT_TABLES:
+            db.execute('DELETE FROM ' + table)
+        db.execute("UPDATE characters SET stats=json_remove(stats,'$.achievements') WHERE account=1")
+        db.execute("UPDATE deaths SET snapshot=json_remove(snapshot,'$.achievements') WHERE character IN (SELECT id FROM characters WHERE account=1)")
+        for table in ['discord_recovery', 'discord_links', 'discord_codes', 'discord_gold_grants', 'discord_realm_close_tokens']:
+            db.execute('DELETE FROM ' + table + ' WHERE account=1')
+    paid_save = directory / 'representable-paid-account.json'
+    subprocess.run([str(binary), '--local-save', 'export', str(trade_state), str(data), '1', str(paid_save)], check=True)
+    fresh = directory / 'portable-fresh'
+    fresh_preview = json.loads(subprocess.check_output([str(binary), '--local-save', 'preview', str(fresh), str(data), str(paid_save)]))
+    imported = json.loads(subprocess.check_output([str(binary), '--local-save', 'import', str(fresh), str(data), str(paid_save), str(directory / 'unused-fresh-backup.db'), fresh_preview['expected']], input='independent-local-password\n', text=True))
+    reexported = directory / 'representable-paid-reexport.json'
+    subprocess.run([str(binary), '--local-save', 'export', str(fresh), str(data), str(imported['account']), str(reexported)], check=True)
+    original, carried = json.loads(paid_save.read_bytes()), json.loads(reexported.read_bytes())
+    if carried['gold'] != original['gold'] or carried['rewards'] != original['rewards'] or carried['origin'] != original['origin']:
+        raise RuntimeError('Fresh portable import changed representable paid wallet/date/notified history')
+    with closing(sqlite3.connect(trade_database)) as db, db:
+        db.execute("DELETE FROM gold_rewards WHERE account=1 AND reward GLOB 'achievement_*'")
+    portable = directory / 'retained-trade-account.json'
+    subprocess.run([str(binary), '--local-save', 'export', str(trade_state), str(data), '1', str(portable)], check=True)
+    with closing(sqlite3.connect(trade_database)) as db:
+        unchanged = list(db.iterdump())
+    preview = json.loads(subprocess.check_output([str(binary), '--local-save', 'preview', str(trade_state), str(data), str(portable)]))
+    refused = subprocess.run([str(binary), '--local-save', 'replace', str(trade_state), str(data), str(portable), str(directory / 'pre-trade-refusal.db'), preview['expected']],
+                             input='independent-local-password\n', text=True, capture_output=True)
+    failure = json.loads(refused.stdout)
+    if refused.returncode == 0 or set(failure) != {'protocol', 'operation', 'outcome', 'error'} or failure['protocol'] != 1 or failure['operation'] != 'replace' or failure['outcome'] != 'unknown' or not isinstance(failure['error'], str) or not 0 < len(failure['error']) <= 512:
+        raise RuntimeError('Replacement failed to report conservative post-activation failure')
+    with closing(sqlite3.connect(trade_database)) as db:
+        if list(db.iterdump()) != unchanged:
+            raise RuntimeError('Refused trade replacement mutated local credentials, receipts or progress')
+    preserved = backup.export(trade_database, discord, directory / 'after-trade-refusal.gz', version, version, version)
+    if preserved['game'] != backup.snapshot(trade_database, backup.RELOADED_GAME):
+        raise RuntimeError('Refused trade replacement broke global backup validity')
+    print(json.dumps({'event': 'release_retained_trade_refusal_preserved_global_backup', 'unchanged': True}))
+    with closing(sqlite3.connect(written / 'game.db')) as db:
+        if list(db.iterdump()) != source_unchanged:
+            raise RuntimeError('Local trade replacement exercise mutated its export source')
     print(json.dumps({'event': 'release_backup_contract_passed', 'revision': revision}))
 
 

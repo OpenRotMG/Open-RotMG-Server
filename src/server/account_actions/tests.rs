@@ -1,40 +1,57 @@
 use super::*;
 
 pub(crate) fn fixture() -> (PathBuf, App) {
-    fixture_with_realm_seed(None)
+    fixture_with_control(false)
 }
-fn fixture_with_realm_seed(production_seed: Option<u64>) -> (PathBuf, App) {
+pub(crate) fn fixture_with_native_control() -> (PathBuf, App) {
+    fixture_with_control(true)
+}
+fn fixture_with_control(native: bool) -> (PathBuf, App) {
     let dir = std::env::temp_dir().join(format!("session-actions-{}", rand::random::<u64>()));
     std::fs::create_dir(&dir).unwrap();
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let testing = native.then(|| {
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .unwrap();
+        std::fs::write(
+            dir.join("testing.json"),
+            br#"{"schema":1,"provenance":"prepared"}"#,
+        )
+        .unwrap();
+        super::super::testing::Testing::open(&dir).unwrap().unwrap()
+    });
+    let directory = if native {
+        crate::world::Directory::prepared(
+            std::path::Path::new("data"),
+            content.clone(),
+            16,
+            12351,
+            2,
+        )
+    } else {
+        crate::world::Directory::test_with_seed(
+            std::path::Path::new("data"),
+            content.clone(),
+            16,
+            12351,
+        )
+    }
+    .unwrap();
+    if let Some(testing) = &testing {
+        directory.clock.set_paused(true);
+        testing.bind_shared_active_clock(&directory.clock).unwrap();
+    }
     let app = App {
         diagnostics: Arc::new(
             super::super::diagnostics::Diagnostics::open(dir.join("bug-reports")).unwrap(),
         ),
         started: std::time::Instant::now(),
         thinking: tokio::runtime::Handle::current(),
-        testing: None,
+        testing,
         society: Arc::default(),
         cctv: Arc::default(),
         store: Store::open(&dir.join("game.db"), &content).unwrap(),
-        world: Handle::spawn(
-            match production_seed {
-                Some(seed) => crate::world::Directory::with_seed(
-                    std::path::Path::new("data"),
-                    content.clone(),
-                    16,
-                    seed,
-                    2,
-                ),
-                None => crate::world::Directory::test_with_seed(
-                    std::path::Path::new("data"),
-                    content.clone(),
-                    16,
-                    12351,
-                ),
-            }
-            .unwrap(),
-        ),
+        world: Handle::spawn(directory),
         keys: Arc::new(Keys::load(&dir).unwrap()),
         content,
         swf: Arc::default(),

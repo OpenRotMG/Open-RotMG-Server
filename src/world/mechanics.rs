@@ -554,10 +554,12 @@ impl World {
             if p.paused || p.pos.distance(position) >= radius {
                 continue;
             }
-            let damage =
-                condition::damage(amount, self.defense(id)?, p.conditions(self.now), false);
+            let flags = p.conditions(self.now);
+            let defense = self.defense(id)?;
+            let damage = condition::damage(amount, defense, flags, false);
             let p = self.players.get_mut(&id).unwrap();
             p.achievement_damage(self.clock.now(), damage, p.character.hp)?;
+            let hp_before = p.character.hp;
             p.character.hp = (p.character.hp - damage).max(0);
             if p.character.hp == 0 {
                 p.death_pending = true;
@@ -565,6 +567,9 @@ impl World {
                 p.bot_goal = None;
                 p.bot_aim = None;
             }
+            p.audit_fact(id, &self.name, self.now, "area_damage", || serde_json::json!({"source_kind":kind,
+                "position":[position.x,position.y],"radius":radius,"raw_damage":amount,"damage":damage,
+                "conditions":flags,"defense":defense,"hp_before":hp_before,"hp_after":p.character.hp}));
             tracing::debug!(
                 player = id,
                 kind,

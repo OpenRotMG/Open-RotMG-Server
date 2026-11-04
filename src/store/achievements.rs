@@ -59,13 +59,13 @@ pub(super) fn check_reusable_observation(tx: &Transaction<'_>, ch: &Character) -
     Ok(())
 }
 
-pub(super) fn migrate(tx: &Transaction<'_>, version: i32) -> Result<()> {
-    if version < 22 {
+pub(super) fn migrate(tx: &Transaction<'_>, create: bool) -> Result<()> {
+    if create {
         for (_, sql) in TABLES {
             tx.execute_batch(sql)?;
         }
     }
-    super::schema22_compat::check(tx, 23)
+    Ok(())
 }
 fn human(tx: &Transaction<'_>, account: i32) -> Result<bool> {
     ensure!(

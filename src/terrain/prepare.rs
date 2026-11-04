@@ -713,6 +713,19 @@ pub(super) fn valid_hash(hash: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
+fn is_source_link(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // Junctions and other reparse points can redirect source reads just like symlinks.
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
 pub(super) fn safe_path(root: &Path, relative: &str) -> Result<PathBuf> {
     ensure!(!relative.is_empty(), "empty recipe path");
     let mut path = root.to_path_buf();
@@ -723,8 +736,8 @@ pub(super) fn safe_path(root: &Path, relative: &str) -> Result<PathBuf> {
         path.push(name);
         match path.symlink_metadata() {
             Ok(meta) => ensure!(
-                !meta.file_type().is_symlink(),
-                "symlink recipe path {relative}"
+                !is_source_link(&meta),
+                "symlink/reparse recipe path {relative}"
             ),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
             Err(e) => return Err(e).with_context(|| format!("inspect {}", path.display())),
@@ -1408,32 +1421,77 @@ fn lava_choice(pixels: usize, support: &str) -> serde_json::Value {
     serde_json::json!({"rgb":"d44a00","pixels":pixels,"support_sha256_le_u32":support,
         "cell":{"ground":244,"object":null,"config":"","terrain":1,"region":0}})
 }
-fn strict_source_paths(root: &Path, paths: &[&str]) -> Result<()> {
+fn canonical_source_root(root: &Path) -> bool {
     let normalized: PathBuf = root.components().collect();
+    // Host roots accept either Windows separator; signed keys below have only one spelling.
+    let host_byte = |&byte: &u8| {
+        if cfg!(windows) && byte == b'/' {
+            b'\\'
+        } else {
+            byte
+        }
+    };
+    !root.as_os_str().is_empty()
+        && (!root.has_root() || root.is_absolute())
+        && normalized
+            .as_os_str()
+            .as_encoded_bytes()
+            .iter()
+            .map(host_byte)
+            .eq(root.as_os_str().as_encoded_bytes().iter().map(host_byte))
+        && root.components().all(|c| match c {
+            Component::RootDir | Component::Normal(_) => true,
+            Component::Prefix(prefix) => {
+                matches!(prefix.kind(), std::path::Prefix::Disk(_)) && root.is_absolute()
+            }
+            _ => false,
+        })
+}
+fn canonical_source_key(relative: &str) -> bool {
+    !relative
+        .bytes()
+        .any(|b| b < b' ' || matches!(b, b'\\' | b':' | b'<' | b'>' | b'"' | b'|' | b'?' | b'*'))
+        && relative.split('/').all(|part| {
+            let stem = part
+                .split('.')
+                .next()
+                .unwrap()
+                .trim_end_matches(' ')
+                .to_ascii_uppercase();
+            !part.is_empty()
+                && !matches!(part, "." | "..")
+                && !part.ends_with(['.', ' '])
+                && !matches!(
+                    stem.as_str(),
+                    "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+                )
+                && !((stem.starts_with("COM") || stem.starts_with("LPT"))
+                    && matches!(
+                        &stem[3..],
+                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    ))
+        })
+}
+fn strict_source_paths(root: &Path, paths: &[&str]) -> Result<()> {
     ensure!(
-        !root.as_os_str().is_empty()
-            && normalized.as_os_str() == root.as_os_str()
-            && root
-                .components()
-                .all(|c| matches!(c, Component::RootDir | Component::Normal(_))),
+        canonical_source_root(root),
         "noncanonical strict-source root {}",
         root.display()
     );
     let absolute = std::path::absolute(root)?;
     for ancestor in absolute.ancestors() {
+        let metadata = ancestor
+            .symlink_metadata()
+            .with_context(|| format!("inspect strict-source ancestor {}", ancestor.display()))?;
         ensure!(
-            !ancestor.is_symlink(),
-            "strict-source symlink ancestor {}",
+            !is_source_link(&metadata),
+            "strict-source symlink/reparse ancestor {}",
             ancestor.display()
         );
     }
     for &relative in paths {
-        let path = Path::new(relative);
-        let normalized: PathBuf = path.components().collect();
         ensure!(
-            normalized.to_str() == Some(relative)
-                && path.components().all(|c| matches!(c, Component::Normal(_)))
-                && !relative.is_empty(),
+            canonical_source_key(relative),
             "noncanonical strict-source path {relative}"
         );
         safe_path(&absolute, relative)?;
@@ -2142,4 +2200,247 @@ fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
         assert!(scope.validate_loaded(&map, &content).is_err());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod source_path_tests {
+    use super::*;
+
+    #[test]
+    fn strict_source_portable_keys() -> Result<()> {
+        let root = Path::new("data/realms");
+        for key in [
+            "world02.json",
+            "world02/source-policy.json",
+            "classic-world-02-reconstruction.wmap",
+            "sub dir/file.json",
+            ".hidden/résumé.json",
+            "COM10.txt",
+        ] {
+            assert!(canonical_source_key(key), "{key:?}");
+            strict_source_paths(root, &[key])?;
+        }
+        for key in [
+            "",
+            ".",
+            "..",
+            "./world02.json",
+            "world02/../world02.json",
+            "world02/./source-policy.json",
+            "world02//source-policy.json",
+            "world02/",
+            "/world02.json",
+            "//server/share/file",
+            "world02\\source-policy.json",
+            "\\world02.json",
+            "C:world02.json",
+            "C:/world02.json",
+            "C:\\world02.json",
+            "\\\\server\\share\\file",
+            "\\\\?\\C:\\file",
+            "\\\\.\\NUL",
+            "//?/C:/file",
+            "world02/file:stream",
+            "world02/file\0.json",
+            "world02./file",
+            "world02 /file",
+            "world02/file.",
+            "world02/file ",
+            "NUL",
+            "aux.json",
+            "sub/Con.txt",
+            "PRN",
+            "COM1.txt",
+            "lpt9",
+            "COM¹.txt",
+            "LPT²",
+            "NUL .txt",
+            "CONIN$",
+            "conout$.txt",
+            "world02/*.json",
+            "world02/f?le",
+            "world02/fi|le",
+            "world02/\"file",
+            "world02/<file>",
+            "world02/fi\nle",
+        ] {
+            assert!(!canonical_source_key(key), "{key:?}");
+            let error = strict_source_paths(root, &[key]).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("noncanonical strict-source path"),
+                "{key:?}: {error:#}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn strict_source_host_root_spellings() {
+        for root in [
+            "data",
+            "data/realms",
+            "installed runtime with spaces/data/realms",
+        ] {
+            assert!(canonical_source_root(Path::new(root)), "{root:?}");
+        }
+        assert!(canonical_source_root(Path::new(env!("CARGO_MANIFEST_DIR"))));
+        for root in [
+            "",
+            ".",
+            "..",
+            "./data",
+            "data/./realms",
+            "data/../realms",
+            "data//realms",
+            "data/realms/",
+        ] {
+            assert!(!canonical_source_root(Path::new(root)), "{root:?}");
+        }
+        #[cfg(unix)]
+        for root in ["/", "/installed runtime with spaces/data/realms"] {
+            assert!(canonical_source_root(Path::new(root)), "{root:?}");
+        }
+    }
+
+    #[test]
+    fn strict_source_reviewed_recipe_catalog() -> Result<()> {
+        for root in [
+            PathBuf::from("data/realms"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("data/realms"),
+        ] {
+            let catalog = recipes(&root)?;
+            assert_eq!(catalog.len(), 13);
+            for recipe in catalog.values() {
+                let Recipe::ReviewedCellsV1(reviewed) = recipe else {
+                    panic!("expected reviewed recipe {}", recipe.id());
+                };
+                assert_eq!(reviewed.dimensions()?, [reviewed.width, reviewed.height]);
+                strict_source_paths(&root, &recipe.inputs())?;
+                strict_source_paths(&root, &[recipe.output()])?;
+                for input in recipe.inputs() {
+                    assert!(safe_path(&root, input)?.is_file(), "{input}");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strict_source_windows_drive_prefix_and_forward_slash_key() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("strict source paths {}", rand::random::<u64>()));
+        std::fs::create_dir(&root)?;
+        std::fs::create_dir(root.join("world02"))?;
+        std::fs::write(root.join("world02/source-policy.json"), b"source-path-test")?;
+        assert!(
+            matches!(root.components().next(), Some(Component::Prefix(p)) if matches!(p.kind(), std::path::Prefix::Disk(_)))
+        );
+        let key = "world02/source-policy.json";
+        let rendered: PathBuf = Path::new(key).components().collect();
+        assert_ne!(rendered.to_str(), Some(key));
+        for spelling in [
+            root.clone(),
+            PathBuf::from(root.to_str().unwrap().replace('\\', "/")),
+        ] {
+            strict_source_paths(&spelling, &[key])?;
+            assert_eq!(
+                std::fs::read(safe_path(&spelling, key)?)?,
+                b"source-path-test"
+            );
+        }
+        for root in [
+            r"C:relative",
+            r"C:",
+            r"\rooted",
+            r"\\server\share\realms",
+            r"\\?\C:\realms",
+            r"\\.\C:\realms",
+            r"D:\runtime\.\realms",
+            r"D:\runtime\..\realms",
+            r"D:\runtime\\realms",
+            "D:\\runtime\\realms\\",
+        ] {
+            assert!(!canonical_source_root(Path::new(root)), "{root:?}");
+        }
+        for root in [
+            r"D:\",
+            r"D:\installed runtime with spaces\data\realms",
+            "D:/installed runtime with spaces/data/realms",
+        ] {
+            assert!(canonical_source_root(Path::new(root)), "{root:?}");
+        }
+        std::fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn strict_source_rejects_linked_inputs_and_root_ancestors() -> Result<()> {
+        #[cfg(unix)]
+        let temporary = std::env::temp_dir().canonicalize()?;
+        #[cfg(windows)]
+        let temporary = std::env::temp_dir();
+        let base = temporary.join(format!("strict source links {}", rand::random::<u64>()));
+        let root = base.join("root");
+        let outside = base.join("outside");
+        std::fs::create_dir(&base)?;
+        std::fs::create_dir(&root)?;
+        std::fs::create_dir(root.join("inside"))?;
+        strict_source_paths(&root, &["inside/file"])?;
+        std::fs::create_dir(&outside)?;
+        std::fs::write(outside.join("canary"), b"must-not-change")?;
+        let links = [
+            (root.join("linked"), &outside),
+            (base.join("linked-root"), &root),
+        ];
+        for (link, target) in &links {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(target, link)?;
+            #[cfg(windows)]
+            {
+                let output = std::process::Command::new("cmd.exe")
+                    .args(["/D", "/C", "mklink", "/J"])
+                    .arg(link)
+                    .arg(target)
+                    .output()?;
+                ensure!(output.status.success(), "create test junction: {output:?}");
+            }
+        }
+        let input_error = strict_source_paths(&root, &["linked/canary"]).unwrap_err();
+        assert!(
+            input_error
+                .to_string()
+                .contains("symlink/reparse recipe path"),
+            "{input_error:#}"
+        );
+        assert!(safe_path(&root, "linked/canary").is_err());
+        let ancestor_error =
+            strict_source_paths(&base.join("linked-root/inside"), &["file"]).unwrap_err();
+        assert!(
+            ancestor_error
+                .to_string()
+                .contains("symlink/reparse ancestor"),
+            "{ancestor_error:#}"
+        );
+        let io_error = strict_source_paths(&outside.join("canary/child"), &["file"]).unwrap_err();
+        assert!(
+            io_error
+                .to_string()
+                .contains("inspect strict-source ancestor"),
+            "{io_error:#}"
+        );
+        // Unlink junctions explicitly before recursive cleanup so target data is never traversed.
+        for (link, _) in &links {
+            #[cfg(unix)]
+            std::fs::remove_file(link)?;
+            #[cfg(windows)]
+            std::fs::remove_dir(link)?;
+        }
+        assert_eq!(std::fs::read(outside.join("canary"))?, b"must-not-change");
+        std::fs::remove_dir_all(base)?;
+        Ok(())
+    }
 }
