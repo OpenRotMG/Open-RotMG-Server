@@ -1387,13 +1387,23 @@ fn cli_env(
         );
         assert_eq!(value.as_object().unwrap().len(), 4);
         assert_eq!(value["protocol"], 1);
-        let operation = match args.first().copied() {
-            Some(
-                op @ ("import" | "replace" | "restore" | "snapshot" | "export" | "preview"
-                | "verify-account" | "verify-snapshot"),
-            ) => op,
-            _ => "invalid",
-        };
+        let operation = args
+            .first()
+            .copied()
+            .filter(|op| {
+                matches!(
+                    *op,
+                    "import"
+                        | "replace"
+                        | "restore"
+                        | "snapshot"
+                        | "export"
+                        | "preview"
+                        | "verify-account"
+                        | "verify-snapshot"
+                )
+            })
+            .unwrap_or("invalid");
         assert_eq!(value["operation"], operation);
         assert!(matches!(
             value["outcome"].as_str(),
