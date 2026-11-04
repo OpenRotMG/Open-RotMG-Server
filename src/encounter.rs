@@ -402,7 +402,7 @@ pub fn stage(kind: u16, hp: i32, elapsed: u64) -> u64 {
     }
 }
 pub fn movement(kind: u16, hp: i32, elapsed: u64) -> (Motion, f32) {
-    if kind == crate::dungeon::spider::BOSS && elapsed < 2000 {
+    if kind == crate::dungeon::spider::BOSS && elapsed < crate::dungeon::spider::ATTACK_MS {
         return (Motion::Stationary, 0.);
     }
     if crate::dungeon::abyss::ROSTER.contains(&kind) {

@@ -6146,6 +6146,9 @@ impl World {
                         "Manor completion requires one authored arena marker"
                     );
                     sites[0]
+                } else if defeated.kind == crate::dungeon::spider::BOSS {
+                    // The Realm Portal appears at the arena centre (Build 122.3, 2012-03-31; 2 videos), not where she wandered to.
+                    defeated.home
                 } else {
                     defeated.pos
                 };
@@ -6585,7 +6588,8 @@ impl World {
                 0x61a => 12.,
                 0x6d8 => 12.,
                 0x91a => 7.,
-                crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
+                crate::dungeon::spider::BOSS => crate::dungeon::spider::WAKE,
+                crate::dungeon::lab::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
                 0x925 => 30.,

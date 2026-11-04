@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
-export const fixture={class:0x30e,level:20,seed:1308,world:'spider-den',worldSeed:1308,position:{x:61.5,y:5.5},equipment:[0xb08,0xb24,0xb05,0xac5],backpack:Array(8).fill(-1),stats:null};
+const arachna=w=>{const b=w.encounter_markers.find(e=>e.kind===0x936);assert(b,'Arachna missing');return b.position;};
+export const fixture={class:0x30e,level:20,seed:1308,world:'spider-den',worldSeed:1308,position:w=>{const b=arachna(w);return{x:b.x-9,y:b.y};},equipment:[0xb08,0xb24,0xb05,0xac5],backpack:Array(8).fill(-1),stats:null};
 export async function run(game){
   const samples=[];
   async function save(name){
@@ -23,7 +24,7 @@ export async function run(game){
   const before=await save('prepared-arena');
   const boss=before.diagnostic.entities.find(e=>e.kind===0x936);assert(boss);
   await game.act({keys:[],duration_ms:700},{name:'arachna-before',when:()=>true});
-  await walk({x:72.5,y:7.5},boss.id);
+  await walk({x:boss.pos.x,y:boss.pos.y-9},boss.id);
   for(let shot=0;shot<40;shot++){
     const s=await game.inspect(),enemy=s.diagnostic.entities.find(e=>e.id===boss.id);
     if(!enemy)break;

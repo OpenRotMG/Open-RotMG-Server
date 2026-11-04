@@ -351,18 +351,25 @@ pub(crate) fn schedule(kind: u16, hp: i32, elapsed: u64) -> Option<Schedule> {
             vec![fan(projectile, count, 11., interval, 10.).delay(interval)]
         }
         0x21b => vec![],
-        0x21c => vec![fan(0, 1, 0., 1000, 10.).predict(1.)],
-        0x21d..=0x21f => vec![fan(0, 1, 0., 500, 10.).predict(1.)],
-        0x220 => vec![fan(0, 3, 20., 500, 10.)],
+        // Straight at the target, no lead seen: hatchlings every ≈0.9-1 s within 9 tiles; the adults every ≈0.4 s
+        // (medians 0.37-0.38 s over 18 intervals), the Black Den Spider only within 3 tiles; Brown 3 shots 9° apart (24 pairs, 9.17 ± 0.70°).
+        0x21c => vec![fan(0, 1, 0., 1000, 9.)],
+        0x21d => vec![fan(0, 1, 0., 400, 3.)],
+        0x21e | 0x21f => vec![fan(0, 1, 0., 400, 9.)],
+        0x220 => vec![fan(0, 3, 9., 400, 9.)],
+        // From ≈3.0 s after the toss: a ring of 12 Green Magic at fixed 0°, 30° … 330° every ≈3.2 s (2.6-3.8 s), a Green Blob (Weak) at the
+        // nearest player every ≈1.5 s and single Green Magic between (LOW); aim lead unknown, so none.
         0x936 => {
-            state = u64::from(elapsed >= 2000);
-            age = elapsed.saturating_sub(2000);
+            let start = crate::dungeon::spider::ATTACK_MS;
+            state = u64::from(elapsed >= start);
+            age = elapsed.saturating_sub(start);
             vec![
-                ring(0, 12, 1000, 3000.)
-                    .fixed(22.5f32.to_radians())
+                fan(0, 12, 30., 3200, 3000.)
+                    .fixed(0.)
+                    .offset(15.)
                     .enabled(state == 1),
-                fan(0, 1, 0., 1000, 10.).predict(1.).enabled(state == 1),
-                fan(1, 1, 0., 2000, 10.).predict(1.).enabled(state == 1),
+                fan(1, 1, 0., 1500, 20.).enabled(state == 1),
+                fan(0, 1, 0., 750, 20.).enabled(state == 1),
             ]
         }
         0x937..=0x93f => {
