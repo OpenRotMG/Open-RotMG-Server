@@ -15,9 +15,19 @@ struct GuardianMove {
     orbit: Option<(u64, f32)>,
 }
 
+/// An Oryx 1 summon in flight to its slot.
+pub(super) struct Toss {
+    pub(super) at: u64,
+    pub(super) parent: i32,
+    pub(super) kind: u16,
+    pub(super) pos: Pos,
+}
+
 #[derive(Default)]
 pub(super) struct Actors {
     pub(super) bosses: BTreeMap<i32, BossBrain>,
+    pub(super) oryx: BTreeMap<i32, finale::oryx1::Brain>,
+    pub(super) tosses: Vec<Toss>,
     guardians: BTreeMap<i32, GuardianBrain>,
     guardians_wake: Option<u64>,
     duo: Option<GuardianDuo>,
@@ -111,7 +121,7 @@ impl World {
         }
         Ok(())
     }
-    fn finale_wave(&mut self, parent: i32, wave: finale::Wave) -> Result<()> {
+    pub(super) fn finale_wave(&mut self, parent: i32, wave: finale::Wave) -> Result<()> {
         ensure!(
             wave.lifetime > 0,
             "endgame wave requires a bounded lifetime"
@@ -127,28 +137,14 @@ impl World {
             e.expires
                 .set(self.now.checked_add(wave.lifetime), id, &mut self.timed_ids);
             e.activated.get_or_insert(self.now);
-            if matches!(e.kind, 0x174a | 0x174b | 0x944) {
-                let rate = match e.kind {
-                    0x174a => 1.,
-                    0x174b => 1.3,
-                    0x944 => 0.1,
-                    _ => unreachable!(),
-                };
+            if e.kind == 0x944 {
                 e.orbit = Some(realm_events::Orbit {
-                    speed: crate::encounter::nr_speed(
-                        rate + self.rng.gen_range(-rate * 0.1..rate * 0.1),
-                    ),
-                    radius: if e.kind == 0x944 {
-                        self.rng.gen_range(0.5..1.5)
-                    } else if e.kind == 0x174a {
-                        1.
-                    } else {
-                        9.
-                    },
+                    speed: crate::encounter::nr_speed(0.1 + self.rng.gen_range(-0.01..0.01)),
+                    radius: self.rng.gen_range(0.5..1.5),
                     direction: -1.,
                 });
             }
-            if matches!(e.kind, 0x1748 | 0x174a | 0x174b | 0xde4) {
+            if e.kind == 0xde4 {
                 e.condition |= condition::bit(condition::INVULNERABLE);
             }
         }
@@ -339,11 +335,10 @@ impl World {
             }
             return Ok(());
         }
-        if kind == 0x174a && elapsed >= 10000 && self.entities[&id].size != 200 {
-            self.entities.get_mut(&id).unwrap().size = 200;
-            tracing::debug!(entity = id, "inner Guardian Element grew");
+        if kind == ORYX {
+            return self.oryx_step(id);
         }
-        if matches!(kind, ORYX | ORYX2) {
+        if kind == ORYX2 {
             let mut brain = self.finale.bosses.entry(id).or_default().clone();
             let facts = brain.update(kind, hp, self.content.objects[&kind].hp, elapsed)?;
             let e = self.entities.get_mut(&id).unwrap();
@@ -364,7 +359,7 @@ impl World {
             }
             self.finale.bosses.insert(id, brain);
         }
-        if matches!(kind, 0x1748 | 0x174a | 0x174b | 0xde4) {
+        if kind == 0xde4 || finale::oryx1::shielded(kind) {
             self.entities.get_mut(&id).unwrap().condition |=
                 condition::bit(condition::INVULNERABLE);
         }
@@ -390,14 +385,6 @@ impl World {
             self.finale_wave(id, finale::Wave { count, ..*wave })?;
         }
         match kind {
-            ORYX if target.is_some()
-                && matches!(
-                    self.finale.bosses[&id].phase(),
-                    Some(OryxPhase::Artifacts | OryxPhase::Rage)
-                ) =>
-            {
-                self.throw_grenade(id, target.unwrap(), 4., 120)?
-            }
             // Quiet Bombs land and rest ≈1 s (HLraOCBJO94 t=616.2-617.0); the 10-tile reach is from a later comparator (2012 wiki: "very long reach"): https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/logic/db/BehaviorDb.OryxCastle.cs#L303-L320
             0xd87 if target.is_some_and(|p| pos.distance(p) <= 10.) => {
                 self.manor_toss(id, 0xd86, target.unwrap(), 850)?
@@ -569,7 +556,6 @@ impl World {
     pub(super) fn finale_movement(
         &mut self,
         id: i32,
-        target: Option<Pos>,
         elapsed: u64,
     ) -> Result<(crate::encounter::Motion, f32)> {
         use crate::encounter::{Anchor, Motion, nr_speed};
@@ -645,17 +631,8 @@ impl World {
                     ),
                 });
             }
-            0x174a | 0x174b => {
-                let orbit = e
-                    .orbit
-                    .context("Guardian Element orbit was not initialized at birth")?;
-                return Ok((
-                    Motion::Orbit {
-                        anchor: Anchor::Parent,
-                        radius: orbit.radius,
-                    },
-                    orbit.speed,
-                ));
+            0x1742..=0x1747 | 0x174a..=0x174e if e.orbit.is_some() => {
+                return Ok(self.oryx_orbit(id));
             }
             0x944 => {
                 if let Some((_, anchor)) = self
@@ -684,26 +661,7 @@ impl World {
                     nr_speed(0.2),
                 ));
             }
-            ORYX if self
-                .finale
-                .bosses
-                .get(&id)
-                .context("moving Oryx brain missing")?
-                .phase()
-                == Some(OryxPhase::Rage) =>
-            {
-                return Ok(if target.is_some() {
-                    (
-                        Motion::Chase {
-                            sight: 10.,
-                            stop: 1.,
-                        },
-                        nr_speed(0.85),
-                    )
-                } else {
-                    (Motion::Stationary, 0.)
-                });
-            }
+            ORYX => return self.oryx_motion(id),
             ORYX2
                 if self
                     .finale
@@ -871,6 +829,9 @@ impl World {
                 self.cleared = true;
                 tracing::info!("actual Guardian pair defeated; Chamber binding requested");
             }
+        }
+        if defeated.kind == ORYX {
+            self.oryx_defeated(defeated.id);
         }
         if matches!(defeated.kind, ORYX | ORYX2) {
             ensure!(!self.cleared, "Oryx completion replayed");
