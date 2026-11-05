@@ -145,7 +145,7 @@ class ReleaseContract(unittest.TestCase):
                 self.assertEqual(exported['game'], historical['game'])
                 self.assertEqual(exported['schema'], version)
                 subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--local-save', 'verify-snapshot', str(restored / 'game.db'), str(root / 'data')], check=True)
-                subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored / 'game.db'), str(root / 'data')], check=True)
+                subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored), str(root / 'data')], check=True)
                 migrated = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
                 for table in backup.PORTABLE_TABLES:
                     if not portable:
