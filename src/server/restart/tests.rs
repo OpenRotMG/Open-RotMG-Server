@@ -143,12 +143,16 @@ async fn call(
 }
 
 async fn achievement_fixture() -> (std::path::PathBuf, App) {
+    achievement_fixture_with_capacity(16).await
+}
+async fn achievement_fixture_with_capacity(capacity: usize) -> (std::path::PathBuf, App) {
     let (dir, mut app) = crate::server::test_app();
+    app.max_players = capacity;
     app.world = Handle::spawn(
         crate::world::Directory::prepared(
             std::path::Path::new("data"),
             app.content.clone(),
-            16,
+            capacity,
             1376,
             2,
         )
@@ -489,4 +493,190 @@ async fn production_handler_preserves_private_authorization_and_shutdown_and_dra
     );
     drop(app);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry() {
+    let (dir, app) = achievement_fixture_with_capacity(85).await;
+    let castle = app
+        .world
+        .directory(|d| d.prepared_instance(crate::endgame::CASTLE))
+        .await
+        .unwrap();
+    let mut owners = Vec::new();
+    let mut characters = Vec::new();
+    for index in 0..86 {
+        let account = app
+            .store
+            .list(format!("update-boundary-{index}"))
+            .await
+            .unwrap()
+            .id;
+        let character = app
+            .store
+            .create(account, app.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        if index < 85 {
+            let owner = app.claim_session(account).unwrap();
+            let snapshot = character.clone();
+            let id = app
+                .world
+                .directory(move |d| {
+                    let world = d.worlds.get_mut(&castle).unwrap();
+                    let id = world.enter(snapshot, None)?;
+                    assert!(world.players[&id].controller == crate::world::Controller::Human);
+                    Ok(id)
+                })
+                .await
+                .unwrap();
+            owner.bind(id).unwrap();
+            owners.push(owner);
+        } else {
+            assert!(
+                app.claim_session(account)
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("full")
+            );
+        }
+        characters.push(character);
+    }
+    assert_eq!(
+        app.world
+            .directory(|d| Ok(d.update_achievement_actors().len()))
+            .await
+            .unwrap(),
+        85
+    );
+    assert!(
+        app.store
+            .achievement_update(characters.clone())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("invalid intentional update achievement batch")
+    );
+    for character in &characters {
+        assert_eq!(achievement_balance(&app, character.account).await, 100);
+    }
+    let receipt = begin_achievement_update(&app, 'a').await;
+    elapsed_for_unit_test(&app);
+    let consume = serde_json::json!({"operation":"consume","receipt":receipt});
+    assert_eq!(
+        call(&app, consume.clone(), "127.0.0.1:1", true).await.1["state"],
+        "consumed"
+    );
+    assert_eq!(
+        call(&app, consume, "127.0.0.1:1", true).await.0,
+        StatusCode::CONFLICT
+    );
+    for (index, character) in characters.iter().enumerate() {
+        assert_eq!(
+            achievement_balance(&app, character.account).await,
+            if index < 85 { 200 } else { 100 }
+        );
+    }
+    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM gold_rewards WHERE reward='achievement_no'",
+            [],
+            |r| r.get::<_, i32>(0)
+        )
+        .unwrap(),
+        85
+    );
+    drop(owners);
+}
+
+#[tokio::test]
+async fn achievement_generic_shutdown_drain_never_awards_no() {
+    let (dir, app) = achievement_fixture().await;
+    let (owner, _, character) =
+        achievement_actor(&app, "generic-drain-no", Some(crate::endgame::CASTLE), true).await;
+    assert!(app.restart.lock().unwrap().current.is_none());
+    super::super::drain_shutdown(&app, std::future::ready(Ok(())))
+        .await
+        .unwrap();
+    assert_eq!(achievement_balance(&app, character.account).await, 100);
+    assert!(app.restart.lock().unwrap().current.is_none());
+    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM gold_rewards WHERE reward='achievement_no'",
+            [],
+            |r| r.get::<_, i32>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(owner);
+}
+
+#[tokio::test]
+async fn achievement_consumed_intent_survives_discarded_ack_and_later_drain_failure() {
+    let (dir, app) = achievement_fixture().await;
+    let (owner, _, character) =
+        achievement_actor(&app, "lost-update-ack", Some(crate::endgame::CASTLE), true).await;
+    let receipt = begin_achievement_update(&app, 'a').await;
+    elapsed_for_unit_test(&app);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "authorization",
+        format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+    );
+    let response = request(
+        State(app.clone()),
+        ConnectInfo("127.0.0.1:1".parse().unwrap()),
+        headers,
+        Json(Request::Consume {
+            receipt: serde_json::from_value(receipt.clone()).unwrap(),
+        }),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    // Discard the actual handler response without acknowledging it to a client.
+    drop(response);
+    assert_eq!(achievement_balance(&app, character.account).await, 200);
+    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
+    let paid: (i64, Option<i64>) = db.query_row("SELECT awarded_at,notified_at FROM gold_rewards WHERE account=?1 AND reward='achievement_no'", [character.account], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    db.execute_batch("CREATE TRIGGER fixture_later_drain_failure BEFORE UPDATE ON characters BEGIN SELECT RAISE(ABORT,'fixture post-consume save failure'); END;").unwrap();
+    let error = super::super::drain_shutdown(&app, std::future::ready(Ok(())))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("shutdown drain failed"));
+    let exact: Receipt = serde_json::from_value(receipt.clone()).unwrap();
+    let mut service = app.restart.lock().unwrap();
+    assert_eq!(service.current.as_ref().unwrap().status.state, "consumed");
+    assert!(service.consume(&exact, Instant::now()).is_err());
+    assert!(service.begin("b".repeat(64), Instant::now()).is_err());
+    assert!(service.finish(&exact, true, Instant::now()).is_err());
+    drop(service);
+    assert_eq!(
+        call(
+            &app,
+            serde_json::json!({"operation":"consume","receipt":receipt}),
+            "127.0.0.1:1",
+            true
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(achievement_balance(&app, character.account).await, 200);
+    assert_eq!(db.query_row("SELECT awarded_at,notified_at FROM gold_rewards WHERE account=?1 AND reward='achievement_no'", [character.account], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,Option<i64>>(1)?))).unwrap(), paid);
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM gold_rewards WHERE reward='achievement_no'",
+            [],
+            |r| r.get::<_, i32>(0)
+        )
+        .unwrap(),
+        1
+    );
+    db.execute_batch("DROP TRIGGER fixture_later_drain_failure")
+        .unwrap();
+    drop(owner);
 }
