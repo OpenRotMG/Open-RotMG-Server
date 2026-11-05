@@ -282,8 +282,13 @@ class ReleaseContract(unittest.TestCase):
                 with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
                     source.backup(future)
                     future.execute(f'PRAGMA user_version={version}')
-                with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'schema version'):
+                before = (Path(temporary) / 'future.db').read_bytes()
+                expected = (f'Unsupported trigger character_slot_capacity for schema {version}' if version in (0, 11)
+                            else 'Gold reward metadata mismatch for known schema layout' if version in (19, 20, 21)
+                            else 'schema version')
+                with self.subTest(version=version), self.assertRaisesRegex(ValueError, expected):
                     backup.export(Path(temporary) / 'future.db', Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'future.gz', revision, revision, revision)
+                self.assertEqual((Path(temporary) / 'future.db').read_bytes(), before)
                 self.assertFalse((Path(temporary) / 'future.gz').exists())
             legacy = legacy_copy(bundle)
             del legacy['game']['pictures'], legacy['game']['picture_sequence']
