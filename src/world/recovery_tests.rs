@@ -60,7 +60,11 @@ fn potion_publication_is_silent_atomic_and_reports_only_actual_restoration() {
             let before = p.character.clone();
             let (packets, mut inbox) = mpsc::channel(64);
             let (lost, _) = watch::channel(None);
-            p.tx = Some(Output { packets, lost });
+            p.tx = Some(Output {
+                trace: None,
+                packets,
+                lost,
+            });
             let slot = Slot {
                 object: id,
                 slot: 4,

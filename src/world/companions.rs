@@ -444,7 +444,9 @@ impl World {
                         }
                         let cap = p.effective(&self.content, self.now)?[0];
                         let amount = (cap - p.character.hp).clamp(0, 10);
+                        let before = p.character.hp;
                         p.character.hp += amount;
+                        p.audit_hp(*target, &self.name, self.now, "companion", before);
                         if amount > 0 {
                             healed.push((*target, amount));
                         }
@@ -502,7 +504,9 @@ impl World {
                 }
                 if let Some((target, _, cap)) = target {
                     let p = self.players.get_mut(&target).unwrap();
+                    let before = p.character.hp;
                     p.character.hp = (p.character.hp + 25).min(cap);
+                    p.audit_hp(target, &self.name, self.now, "companion", before);
                     self.companion_effect(target, 1.);
                 }
                 continue;

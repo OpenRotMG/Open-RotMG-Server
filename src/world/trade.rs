@@ -869,7 +869,17 @@ mod community_tests {
                 .unwrap();
             let (packets, receiver) = mpsc::channel(64);
             let (lost, _) = watch::channel(None);
-            players.push(w.enter(character, Some(Output { packets, lost })).unwrap());
+            players.push(
+                w.enter(
+                    character,
+                    Some(Output {
+                        trace: None,
+                        packets,
+                        lost,
+                    }),
+                )
+                .unwrap(),
+            );
             receivers.push(receiver);
         }
         let ids = [players[0], players[1]];

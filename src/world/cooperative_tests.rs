@@ -99,7 +99,16 @@ fn teleport_to_progress_save_target_preserves_its_reservation_and_commit() {
         ch.account = 2;
         let (packets, _rx) = tokio::sync::mpsc::channel(128);
         let (lost, _) = tokio::sync::watch::channel(None);
-        let target = world.enter(ch, Some(Output { packets, lost })).unwrap();
+        let target = world
+            .enter(
+                ch,
+                Some(Output {
+                    trace: None,
+                    packets,
+                    lost,
+                }),
+            )
+            .unwrap();
         world.players.get_mut(&sender).unwrap().known.insert(target);
         let q = world.players.get_mut(&target).unwrap();
         q.controller = controller;
@@ -225,7 +234,11 @@ fn progress_save_target_teleport_keeps_all_other_refusals_and_quarantine() {
                 if state == "output_lost" {
                     lose(&lost, "injected_output_loss");
                 }
-                q.tx = Some(Output { packets, lost });
+                q.tx = Some(Output {
+                    trace: None,
+                    packets,
+                    lost,
+                });
                 if state == "output_lost" {
                     output_rx = Some(rx);
                 }

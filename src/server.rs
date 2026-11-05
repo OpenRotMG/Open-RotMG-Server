@@ -1167,6 +1167,7 @@ struct Session {
     transfer: Option<PreparedTransfer>,
     runtime: Option<tokio::runtime::Handle>,
     diagnostics: diagnostics::ConnectionDiagnostics,
+    trace: crate::audit::Trace,
 }
 fn collision_report(other: bool, r: &mut Reader<'_>) -> Result<()> {
     // Reports cannot grant hits: the actor advances and resolves projectiles itself.
@@ -1502,6 +1503,7 @@ async fn handle_inner(
         transfer: _,
         runtime,
         diagnostics,
+        trace,
     } = session;
     if *reconnecting {
         tracing::debug!(
@@ -1698,6 +1700,7 @@ async fn handle_inner(
             let output = crate::world::Output {
                 packets: tx.clone(),
                 lost: lost.clone(),
+                trace: Some(trace.clone()),
             };
             let vault = if a.world.call(|w| Ok(w.name == "Vault")).await? {
                 Some(a.store.vaults(account).await?)
@@ -2359,8 +2362,25 @@ async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
     shutdown: &mut tokio::sync::watch::Receiver<bool>,
     cancel: Option<tokio::sync::watch::Receiver<bool>>,
     drain: &mut tokio::sync::watch::Receiver<u64>,
+    evidence: (&crate::audit::Trace, Option<u64>),
 ) -> std::result::Result<(), CloseReason> {
-    tokio::select! {
+    let (trace, encoding) = evidence;
+    let sending = std::time::Instant::now();
+    let attempted = if let Message::Binary(bytes) = &message {
+        let id = *bytes.get(4).expect("encoded game frame header");
+        Some((
+            id,
+            trace.event(
+                "write_attempt",
+                Some(id),
+                None,
+                serde_json::json!({"encoding":encoding,"body_bytes":bytes.len()-5}),
+            ),
+        ))
+    } else {
+        None
+    };
+    let result = tokio::select! {
         biased;
         _ = drain.changed() => Err(CloseReason::Shutdown),
         _ = async { if lost.borrow().is_none() { let _ = lost.changed().await; } } => Err(CloseReason::Output),
@@ -2371,7 +2391,11 @@ async fn send_frame<S: futures_util::Sink<Message> + Unpin>(
             Ok(Err(_)) => Err(CloseReason::Transport),
             Err(_) => Err(CloseReason::Deadline),
         }
+    };
+    if let Some((id, attempt)) = attempted {
+        trace.event("write_result",Some(id),None,serde_json::json!({"attempt":attempt,"returned_ok":result.is_ok(),"duration_us":sending.elapsed().as_micros()}));
     }
+    result
 }
 
 // Actor-awaiting handlers can starve a one-packet drain: https://docs.rs/tokio/1.53.2/tokio/macro.select.html#fairness
@@ -2450,7 +2474,6 @@ async fn connection_io<S, I>(
     let (tx, mut rx) = mpsc::channel::<Packet>(64);
     let (lost, mut lost_rx) = tokio::sync::watch::channel(None);
     // Actor work and output backpressure must not manufacture late, clustered input receipts.
-    let (mut incoming, input_task) = input::receive(wsin, lost.clone(), a.world.clock.clone());
     let mut shutdown = a.shutdown.subscribe();
     let deadline = tokio::time::sleep(std::time::Duration::from_secs(10));
     tokio::pin!(deadline);
@@ -2465,6 +2488,11 @@ async fn connection_io<S, I>(
         browser.lock().expect("browser poisoned").reports = Some(report_sender);
     }
     session.diagnostics.browser = browser;
+    let trace = session.trace.clone();
+    let (mut incoming, input_task) =
+        input::receive(wsin, lost.clone(), a.world.clock.clone(), trace.clone());
+    let mut diagnostics_timer = tokio::time::interval(std::time::Duration::from_secs(30));
+    diagnostics_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut reconnect_sent = false;
     let mut deferred = None;
     let mut ping = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -2478,6 +2506,9 @@ async fn connection_io<S, I>(
     let mut close_reason = CloseReason::Transport;
     macro_rules! send {
         ($message:expr) => {
+            send!($message, None)
+        };
+        ($message:expr,$encoding:expr) => {
             send_frame(
                 &mut wsout,
                 $message,
@@ -2485,6 +2516,7 @@ async fn connection_io<S, I>(
                 &mut shutdown,
                 session.account.as_ref().and_then(|o| o.cancel.clone()),
                 &mut drain,
+                (&trace, $encoding),
             )
             .await
             .map_err(|reason| {
@@ -2529,17 +2561,18 @@ async fn connection_io<S, I>(
                 }
             },
             event=async { match deferred.take() { Some(event) => Some(event), None => incoming.recv().await } }=>match event {
-                Some(Incoming::Command(packet, received, bytes))=>{
+                Some(Incoming::Command(packet, received, bytes, trace_sequence))=>{
                     if incoming.is_closed() { break; }
                     if a.testing.as_ref().is_some_and(|t| t.stopped.borrow().is_some()) { if terminal_drain {continue;} break; }
                     if !session.reconnecting {
                         let id=packet.id;
                         let queue_before=incoming.len();
                         let (mut packets, mut _bytes) = (vec![(packet, received)], vec![bytes]);
+                        let mut trace_sequences=vec![trace_sequence];
                         // Serial world round trips per packet cannot keep up with boss volleys while ticks overrun.
                         while INPUTS.contains(&id) && let Ok(next) = incoming.try_recv() {
                             match next {
-                                Incoming::Command(packet, received, bytes) if INPUTS.contains(&packet.id) => { packets.push((packet, received)); _bytes.push(bytes); }
+                                Incoming::Command(packet, received, bytes, sequence) if INPUTS.contains(&packet.id) => { packets.push((packet, received)); _bytes.push(bytes); trace_sequences.push(sequence); }
                                 other => { deferred = Some(other); break; }
                             }
                         }
@@ -2548,6 +2581,7 @@ async fn connection_io<S, I>(
                             session.diagnostics.processed(packet.id);
                             audit.observe(packet, *received);
                         }
+                        trace.event("processing_start",Some(id),None,serde_json::json!({"receipts":trace_sequences,"queued":queue_before}));
                         let handling = std::time::Instant::now();
                         let queued=a.world.clock.now().saturating_duration_since(received);
                         let requests=Arc::new(Mutex::new(crate::performance::Requests::default()));
@@ -2563,9 +2597,10 @@ async fn connection_io<S, I>(
                                 Some(packet)=rx.recv(), if session_player.is_some() && closed.is_none() && !reconnect_sent=>{
                                     let (id, queued, sending)=(packet.id, rx.len()+1, std::time::Instant::now());
                                     let nonce=(id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
+                                    let writing=trace.writing(&packet,queued);
                                     let frame=codec.frame(id,packet.body);
                                     if let (Some(testing),Some(player),Some(nonce))=(&testing,session_player,nonce) { testing.note_native_frame(nonce,player,&frame); }
-                                    match send_frame(&mut wsout,Message::Binary(frame.into()),&mut lost_rx,&mut shutdown,cancel.clone(),&mut drain).await {
+                                    match send_frame(&mut wsout,Message::Binary(frame.into()),&mut lost_rx,&mut shutdown,cancel.clone(),&mut drain,(&trace,Some(writing))).await {
                                         Ok(())=>{
                                             sent.push((id, queued, sending.elapsed(), std::time::Instant::now()));
                                             if id==39 {reconnect_sent=true;deadline.as_mut().reset(tokio::time::Instant::now()+std::time::Duration::from_secs(10));}
@@ -2575,6 +2610,7 @@ async fn connection_io<S, I>(
                                 },
                             }}
                         };
+                        trace.event("processing_end",Some(id),None,serde_json::json!({"receipts":trace_sequences,"returned_ok":result.is_ok(),"duration_us":handling.elapsed().as_micros()}));
                         for (id, queued, sending, at) in sent {
                             session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(queued);
                             session.diagnostics.packets_out += 1;
@@ -2660,10 +2696,12 @@ async fn connection_io<S, I>(
                     let reconnect=id==39;
                     session.diagnostics.queue_high_water = session.diagnostics.queue_high_water.max(queued);
                     let nonce = (packet.id==wire::PING && packet.body.len()==4).then(|| i32::from_be_bytes(packet.body[..4].try_into().unwrap()));
+                    let writing=trace.writing(&packet,queued);
                     let frame = codec.frame(packet.id,packet.body);
                     if let (Some(testing),Some(player),Some(nonce)) = (&a.testing,session.player,nonce) { testing.note_native_frame(nonce,player,&frame); }
                     let sending = std::time::Instant::now();
-                    if send!(Message::Binary(frame.into())).is_err(){break 'connection;}
+                    let result=send!(Message::Binary(frame.into()),Some(writing));
+                    if result.is_err(){break 'connection;}
                     session.diagnostics.packets_out += 1;
                     if let Some(gap)=session.diagnostics.queued_packet_sent(id,std::time::Instant::now()) {
                         tracing::warn!(target:"lag",player=session.player,world=session.diagnostics.world,gap_ms=gap.as_secs_f64()*1000.,"player update stall");
@@ -2675,10 +2713,13 @@ async fn connection_io<S, I>(
                         || testing_stop.as_ref().is_some_and(|stop| stop.borrow().is_some()) {break;}
                 }
             },
-            _=audit_timer.tick()=>audit.flush(session.account.as_ref().map(|o|o.id),session.player,session.diagnostics.world,false),
+            _=audit_timer.tick()=>{audit.flush(session.account.as_ref().map(|o|o.id),session.player,session.diagnostics.world,false);trace.flush(false);},
+            _=diagnostics_timer.tick(),if session.player.is_some()=>diagnostics::audit_session(&a,&session).await,
             _=ping.tick()=>{if session.account.is_some() && !a.world.clock.paused(){serial+=1;let mut o=Writer::new();o.i32(serial);
                 session.diagnostics.sent(serial);
-                if send!(Message::Binary(codec.frame(wire::PING,o.0).into())).is_err(){break;}}}
+                let packet=Packet{id:wire::PING,body:o.0};
+                let encoding=trace.writing(&packet,0);
+                if send!(Message::Binary(codec.frame(packet.id,packet.body).into()),Some(encoding)).is_err(){break;}}}
         }
     }
     // The input task closes its queue right after naming a cause, so the loop can see the closed queue first.
@@ -2686,6 +2727,7 @@ async fn connection_io<S, I>(
         close_reason = CloseReason::Output;
     }
     input_task.abort();
+    trace.flush(true);
     audit.flush(
         session.account.as_ref().map(|o| o.id),
         session.player,
@@ -2714,6 +2756,7 @@ async fn connection_io<S, I>(
             &session.diagnostics,
             serde_json::json!({"reason":close_reason.to_string(),"cause":*lost_rx.borrow(),
             "input_queue_packets":incoming.len(),"output_queue_packets":rx.len(),"last_frame_age_ms":input_task.last_frame_age_ms()}),
+            trace.session(),
         );
         if std::panic::AssertUnwindSafe(diagnostic)
             .catch_unwind()
@@ -2743,6 +2786,7 @@ async fn connection_io<S, I>(
             tracing::error!(player=?session.player,error=%error,"disconnect finalization failed");
         }
     }
+    trace.flush(true);
 }
 pub(crate) async fn automatic_transfer(
     a: &App,
@@ -3471,6 +3515,7 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf, desktop: bool) -> 
         "start",
         serde_json::json!({"revision":a.diagnostics.source_revision,"binary_sha256":a.diagnostics.binary_sha256,"prepared":a.testing.is_some()}),
     );
+    crate::audit::record("trace_policy", crate::audit::trace_policy());
     let mut audit_shutdown = a.shutdown.subscribe();
     tokio::spawn(async move {
         let mut timer = tokio::time::interval(std::time::Duration::from_secs(5));

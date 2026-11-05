@@ -323,7 +323,14 @@ fn native_entry_uses_ingress_time_and_keeps_monotonic_moves() {
     let (packets, _packets) = mpsc::channel(128);
     let (lost, _lost) = watch::channel(None);
     let id = world
-        .enter(character, Some(Output { packets, lost }))
+        .enter(
+            character,
+            Some(Output {
+                trace: None,
+                packets,
+                lost,
+            }),
+        )
         .unwrap();
     assert_eq!(world.players[&id].last_move_at, 1000);
     assert_eq!(
@@ -908,7 +915,11 @@ fn native_sentinel_and_intentional_goto_ack_keep_their_protocol_roles() {
     let (tx, mut rx) = mpsc::channel(16);
     let (lost, _) = watch::channel(None);
     let p = world.players.get_mut(&id).unwrap();
-    p.tx = Some(Output { packets: tx, lost });
+    p.tx = Some(Output {
+        trace: None,
+        packets: tx,
+        lost,
+    });
     let mut body = Writer::new();
     body.i32(id).f32(p.pos.x).f32(p.pos.y);
     reconciliation::goto(p, true, body.0);

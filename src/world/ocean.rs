@@ -776,7 +776,9 @@ impl World {
                     );
                     continue;
                 }
+                let hp_before = p.character.hp;
                 p.character.hp = (p.character.hp - 10).max(0);
+                p.audit_hp(*id, &self.name, self.now, "suffocation", hp_before);
                 if p.character.hp == 0 {
                     p.death_pending = true;
                     p.killer = "suffocation".into();

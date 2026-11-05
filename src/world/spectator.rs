@@ -418,6 +418,7 @@ fn unwatched_bot_ticks_are_not_encoded_and_the_first_watched_tick_is_complete() 
     let bot = world.players.get_mut(&id).unwrap();
     bot.controller = Controller::Autonomous;
     bot.tx = Some(Output {
+        trace: None,
         packets,
         lost: tokio::sync::watch::channel(None).0,
     });

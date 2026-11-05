@@ -457,7 +457,11 @@ mod tests {
         let (packets, mut inbox) = mpsc::channel(64);
         let (lost, _) = watch::channel(None);
         let p = w.players.get_mut(&player).unwrap();
-        p.tx = Some(Output { packets, lost });
+        p.tx = Some(Output {
+            trace: None,
+            packets,
+            lost,
+        });
         let pos = p.pos;
         let boss = w.spawn_entity(BOSS, pos, vec![]).unwrap();
         let lamps: Vec<_> = (0..8)

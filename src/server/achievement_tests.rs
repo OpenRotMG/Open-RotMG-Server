@@ -25,6 +25,7 @@ async fn achievement_dead_empty_escape_uses_real_dispatch_before_and_after_perma
         let (tx, mut rx) = mpsc::channel(256);
         let (lost, _) = watch::channel(None);
         let output = Output {
+            trace: None,
             packets: tx.clone(),
             lost: lost.clone(),
         };
@@ -169,6 +170,7 @@ async fn achievement_guild_real_invite_queue_and_join_dispatch_award_but_prepare
         let (tx, rx) = mpsc::channel(256);
         let (lost, _) = watch::channel(None);
         let output = Output {
+            trace: None,
             packets: tx.clone(),
             lost: lost.clone(),
         };

@@ -34,7 +34,16 @@ fn pentaract_streams_follow_owned_corpses_visibility_and_completion() {
     ch.account = 1;
     let (packets, mut inbox) = mpsc::channel(64);
     let (lost, _) = watch::channel(None);
-    let player = w.enter(ch, Some(Output { packets, lost })).unwrap();
+    let player = w
+        .enter(
+            ch,
+            Some(Output {
+                trace: None,
+                packets,
+                lost,
+            }),
+        )
+        .unwrap();
     while inbox.try_recv().is_ok() {}
     let check = |inbox: &mut mpsc::Receiver<Packet>, count, color| {
         let frames: Vec<_> = std::iter::from_fn(|| inbox.try_recv().ok())
