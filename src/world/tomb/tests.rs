@@ -242,6 +242,55 @@ fn jackal_healers_keep_target_families_and_sick_guards_separate() {
 }
 
 #[test]
+fn selected_boss_projectiles_preserve_return_reach_and_parametric_motion() {
+    let (world, _) = fixture();
+    let near = |actual: (f32, f32), expected: (f32, f32)| {
+        assert!(
+            (actual.0 - expected.0).abs() < 0.0001 && (actual.1 - expected.1).abs() < 0.0001,
+            "{actual:?} != {expected:?}"
+        );
+    };
+    // Firing trigger ranges are not the client-defined outward reach of returning shots.
+    for (kind, index, reach, turn_ms) in [
+        (d::NUT, 1, 8., 2000.),
+        (d::NUT, 2, 8., 2000.),
+        (d::NUT, 3, 4., 2000.),
+        (d::NUT, 4, 8., 2000.),
+        (d::GEB, 1, 7.2, 1800.),
+        (d::BES, 1, 15., 2500.),
+    ] {
+        let shot = &world.content.get(kind).unwrap().projectiles[&index];
+        assert!(shot.boomerang && shot.multi_hit && !shot.passes_cover);
+        assert_eq!(shot.lifetime, 2. * turn_ms);
+        for (time, distance) in [
+            (0., 0.),
+            (turn_ms / 2., reach / 2.),
+            (turn_ms, reach),
+            (turn_ms * 1.5, reach / 2.),
+            (turn_ms * 2., 0.),
+        ] {
+            near(shot.offset(0, 0., time), (distance, 0.));
+            near(
+                shot.offset(1, std::f32::consts::FRAC_PI_2, time),
+                (0., distance),
+            );
+        }
+    }
+    let fireball = &world.content.get(d::GEB).unwrap().projectiles[&4];
+    assert!(fireball.parametric && !fireball.multi_hit);
+    for id in 0..4 {
+        let x = 3. * 0.5_f32.sqrt() * if id % 2 == 0 { -1. } else { 1. };
+        let y = if id < 2 { 3. } else { -3. };
+        near(fireball.offset(id, 0., 250.), (x, y));
+        near(
+            fireball.offset(id, std::f32::consts::FRAC_PI_2, 250.),
+            (-y, x),
+        );
+        near(fireball.offset(id, 0., 2000.), (0., 0.));
+    }
+}
+
+#[test]
 fn each_generated_sarcophagus_owns_eight_worshippers() {
     let (world, _) = fixture();
     for sarcophagus in world.actors().filter(|e| e.kind == d::SARCOPHAGUS) {
