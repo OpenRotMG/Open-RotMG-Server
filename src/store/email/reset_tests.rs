@@ -143,7 +143,7 @@ async fn migration_preserves_schema20_and_refuses_missing_schema21_reset_authori
     let account = register(&store, "migrate-reset").await;
     drop(store);
     let db = Connection::open(dir.join("game.db")).unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; PRAGMA user_version=20;")
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=20;")
         .unwrap();
     let content = Content::load(Path::new("data")).unwrap();
     let store = Store::open(&dir.join("game.db"), &content).unwrap();

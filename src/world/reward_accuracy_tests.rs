@@ -32,6 +32,168 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
 }
 
 #[tokio::test]
+async fn original_source_survives_pickup_but_player_redeposits_do_not_create_discoveries() {
+    let (mut w, store, _) = reward_world().await;
+    let player = *w.players.keys().next().unwrap();
+    w.players.get_mut(&player).unwrap().controller = Controller::Human;
+    let pos = w.players[&player].pos;
+    let account = w.players[&player].character.account;
+    w.loot_bags(pos, Some(account), &[0xa22; 9], 0x91f).unwrap();
+    for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
+        assert_eq!(
+            bag.drop_source.as_deref(),
+            Some(w.content.objects[&0x91f].name.as_str())
+        );
+    }
+    let bag = *w.bag_expiry.keys().next().unwrap();
+    let ground = Slot {
+        object: bag,
+        slot: 0,
+        kind: 0xa22,
+    };
+    let inventory = Slot {
+        object: player,
+        slot: 11,
+        kind: -1,
+    };
+    let plan = w.swap(player, ground, inventory).unwrap();
+    assert_eq!(
+        plan.collected,
+        Some(crate::store::CollectedItem {
+            item: 0xa22,
+            source: w.content.objects[&0x91f].name.clone()
+        })
+    );
+    let revision = store
+        .exchange_collected(
+            vec![crate::store::InventoryWrite {
+                id: plan.character,
+                account: plan.account,
+                revision: plan.revision,
+                items: plan.items.clone(),
+            }],
+            vec![],
+            plan.collected.clone(),
+        )
+        .await
+        .unwrap()[0];
+    w.finish_inventory(plan, Ok(revision)).unwrap();
+    assert!(!w.entities[&bag].drop_slots.contains(&0));
+    let plan = w
+        .swap(
+            player,
+            Slot {
+                kind: 0xa22,
+                ..inventory
+            },
+            Slot { kind: -1, ..ground },
+        )
+        .unwrap();
+    assert!(plan.collected.is_none());
+    w.finish_inventory(plan, Ok(revision + 1)).unwrap();
+    let plan = w.swap(player, ground, inventory).unwrap();
+    assert!(plan.collected.is_none());
+    w.finish_inventory(plan, Ok(revision + 2)).unwrap();
+    w.players.get_mut(&player).unwrap().character.items[11] = -1;
+    for container in [
+        w.loot_bag(pos, None, vec![0xa22]).unwrap(),
+        w.spawn_entity(0x501, pos, vec![0xa22, -1, -1, -1, -1, -1, -1, -1])
+            .unwrap(),
+    ] {
+        let plan = w
+            .swap(
+                player,
+                Slot {
+                    object: container,
+                    ..ground
+                },
+                inventory,
+            )
+            .unwrap();
+        assert!(plan.collected.is_none());
+        let revision = plan.revision + 1;
+        w.finish_inventory(plan, Ok(revision)).unwrap();
+        w.players.get_mut(&player).unwrap().character.items[11] = -1;
+    }
+}
+
+#[tokio::test]
+async fn generated_landmark_chest_loot_has_its_chest_source() {
+    let (mut w, _store, _) = reward_world().await;
+    let player = *w.players.keys().next().unwrap();
+    w.players.get_mut(&player).unwrap().controller = Controller::Human;
+    let pos = w.players[&player].pos;
+    for kind in [
+        crate::dungeon::jungle::COIL,
+        0x925,
+        0x675,
+        0x678,
+        0x67d,
+        0x668,
+    ] {
+        let mut picked = false;
+        for seed in 0..64 {
+            for id in w.entities.keys().copied().collect::<Vec<_>>() {
+                w.remove_entity(id);
+            }
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            if kind == crate::dungeon::jungle::COIL {
+                w.spawn_coil_site(pos).unwrap();
+            } else {
+                w.spawn_landmark_chests(kind, pos).unwrap();
+            }
+            let source = format!("{} chest", w.content.objects[&kind].name);
+            for chest in w.entities.values().filter(|e| e.kind == 0x501) {
+                assert_eq!(chest.kind, 0x501);
+                assert_eq!(chest.drop_source.as_deref(), Some(source.as_str()));
+                assert_eq!(
+                    chest.drop_slots.len(),
+                    chest.items.iter().filter(|i| **i >= 0).count()
+                );
+            }
+            if let Some((id, slot, item)) = w.entities.values().find_map(|e| {
+                e.items
+                    .iter()
+                    .enumerate()
+                    .find(|(_, i)| {
+                        **i >= 0 && w.content.objects[&(**i as u16)].class == "Equipment"
+                    })
+                    .map(|(slot, item)| (e.id, slot, *item))
+            }) {
+                let plan = w
+                    .swap(
+                        player,
+                        Slot {
+                            object: id,
+                            slot,
+                            kind: item,
+                        },
+                        Slot {
+                            object: player,
+                            slot: 11,
+                            kind: -1,
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(
+                    plan.collected,
+                    Some(crate::store::CollectedItem {
+                        item: item as u16,
+                        source
+                    })
+                );
+                let revision = plan.revision + 1;
+                w.finish_inventory(plan, Ok(revision)).unwrap();
+                w.players.get_mut(&player).unwrap().character.items[11] = -1;
+                picked = true;
+                break;
+            }
+        }
+        assert!(picked, "no equipment generated for chest {kind:#x}");
+    }
+}
+
+#[tokio::test]
 async fn ent_tincture_death_preserves_rolls_and_has_one_eligible_owner() {
     let (mut w, _store, owners) = reward_world().await;
     assert!(w.content.objects[&0xb0c].soulbound);
@@ -168,7 +330,7 @@ async fn private_loot_reentry_deadline_and_committed_pickup() {
                 items: plan.items.clone(),
             }],
             plan.vaults.clone(),
-            plan.collected,
+            plan.collected.clone(),
         )
         .await
         .unwrap();
@@ -548,6 +710,10 @@ async fn god_gear_death_roll_is_once_per_candidate_with_private_colored_bags() {
             for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
                 assert_eq!(bag.items.len(), 8);
                 assert_eq!(
+                    bag.drop_source.as_deref(),
+                    Some(w.content.objects[&0x651].name.as_str())
+                );
+                assert_eq!(
                     owners[..contributors]
                         .iter()
                         .filter(|(account, _)| bag.accessible(*account))
@@ -590,9 +756,15 @@ async fn god_loot_chunks_scatter_inside_corpse_tile_without_changing_owners_or_r
             shared: vec![0xa9f; 9],
             shared_owners: shared_owners.clone(),
         };
-        w.god_loot_bags(pos, loot).unwrap();
+        w.god_loot_bags(pos, loot, 0x91f).unwrap();
         let bags: Vec<_> = w.bag_expiry.keys().map(|id| &w.entities[id]).collect();
         assert_eq!(bags.len(), 6);
+        for bag in &bags {
+            assert_eq!(
+                bag.drop_source.as_deref(),
+                Some(w.content.objects[&0x91f].name.as_str())
+            );
+        }
         let positions: BTreeSet<_> = bags
             .iter()
             .map(|b| (b.pos.x.to_bits(), b.pos.y.to_bits()))

@@ -746,7 +746,7 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
     lifecycle::stage(Stage::Reservation);
     let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
     lifecycle::stage(Stage::Store);
-    let collector = plan.collected.map(|_| plan.account);
+    let collector = plan.collected.as_ref().map(|_| plan.account);
     let result = if let Some(pet) = plan.companion.as_ref().filter(|pet| pet.permanent) {
         a.store
             .select_companion(
@@ -839,7 +839,7 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                     items: plan.items.clone(),
                 }],
                 plan.vaults.clone(),
-                plan.collected,
+                plan.collected.clone(),
             )
             .await
             .and_then(|mut revisions| {

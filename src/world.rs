@@ -167,6 +167,8 @@ pub struct EntityData {
     pub items: Vec<i32>,
     #[serde(skip)]
     drop_slots: BTreeSet<usize>,
+    #[serde(skip)]
+    drop_source: Option<String>,
     pub extra_stats: Vec<(u8, i32)>,
     bag_owners: Vec<i32>,
     pub reserved: bool,
@@ -223,6 +225,7 @@ impl std::fmt::Debug for Entity {
         out.field("statuses", &self.statuses);
         out.field("items", &self.items);
         out.field("drop_slots", &self.drop_slots);
+        out.field("drop_source", &self.drop_source);
         out.field("extra_stats", &self.extra_stats);
         out.field("bag_owners", &self.bag_owners);
         out.field("reserved", &self.reserved);
@@ -754,7 +757,7 @@ pub struct InventoryPlan {
     pub(crate) vault_purchase: Option<shop::VaultPurchase>,
     pub dropped: Option<i32>,
     pub unlock: Option<PortalPlan>,
-    pub collected: Option<u16>,
+    pub collected: Option<crate::store::CollectedItem>,
     pub purchase: Option<(i32, crate::store::Purchase)>,
     loot_slot: Option<(i32, usize)>,
 }
@@ -3000,6 +3003,7 @@ impl World {
                             statuses: BTreeMap::new(),
                             items: o.equipment.clone(),
                             drop_slots: BTreeSet::new(),
+                            drop_source: None,
                             extra_stats: if o.class == "Portal" {
                                 vec![(37, 1)]
                             } else {
@@ -3387,6 +3391,7 @@ impl World {
                     statuses: BTreeMap::new(),
                     items,
                     drop_slots: BTreeSet::new(),
+                    drop_source: None,
                     extra_stats,
                     bag_owners: Vec::new(),
                     reserved: false,
@@ -5347,7 +5352,13 @@ impl World {
                     && self.players[&id].controller == Controller::Human
                     && self.content.get(source.kind as u16)?.class == "Equipment"
                 {
-                    plan.collected = Some(source.kind as u16);
+                    plan.collected = Some(crate::store::CollectedItem {
+                        item: source.kind as u16,
+                        source: self.entities[container]
+                            .drop_source
+                            .clone()
+                            .context("generated loot lacks its original source")?,
+                    });
                 }
             }
         }
@@ -6129,14 +6140,23 @@ impl World {
         tracing::info!(entity = id, owner, kind, "loot bag allocated");
         Ok(id)
     }
-    fn loot_bags(&mut self, pos: Pos, owner: Option<i32>, items: &[i32]) -> Result<()> {
+    fn loot_bags(
+        &mut self,
+        pos: Pos,
+        owner: Option<i32>,
+        items: &[i32],
+        source: u16,
+    ) -> Result<()> {
+        let source = self.content.get(source)?.name.clone();
         for chunk in items.chunks(8) {
             let bag = self.loot_bag(pos, owner, chunk.to_vec())?;
-            self.entities.get_mut(&bag).unwrap().drop_slots = (0..chunk.len()).collect();
+            let entity = self.entities.get_mut(&bag).unwrap();
+            entity.drop_slots = (0..chunk.len()).collect();
+            entity.drop_source = Some(source.clone());
         }
         Ok(())
     }
-    fn god_loot_bags(&mut self, pos: Pos, loot: crate::loot::GodLoot) -> Result<()> {
+    fn god_loot_bags(&mut self, pos: Pos, loot: crate::loot::GodLoot, source: u16) -> Result<()> {
         // Keep Kithio's half-tile scatter selectable and inside the corpse tile; cosmetic RNG must not change rewards: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L142-L146
         let mut placement =
             rand::rngs::StdRng::seed_from_u64(self.ids.load(Ordering::Relaxed) as u64);
@@ -6154,7 +6174,7 @@ impl World {
         for (owner, items) in loot.private {
             let items: Vec<_> = items.into_iter().map(i32::from).collect();
             for chunk in items.chunks(8) {
-                self.loot_bags(scatter(), Some(owner), chunk)?;
+                self.loot_bags(scatter(), Some(owner), chunk, source)?;
             }
         }
         if !loot.shared_owners.is_empty() {
@@ -6174,6 +6194,7 @@ impl World {
                     entity.bag_owners = loot.shared_owners.clone();
                 }
                 entity.drop_slots = (0..chunk.len()).collect();
+                entity.drop_source = Some(self.content.get(source)?.name.clone());
                 tracing::info!(entity = bag, ?owner, owners = ?entity.bag_owners, "god equipment bag allocated");
             }
         }
@@ -6411,7 +6432,7 @@ impl World {
             })
             && self.rng.gen_bool(0.2)
         {
-            self.loot_bags(defeated.pos, None, &[0xc25])?;
+            self.loot_bags(defeated.pos, None, &[0xc25], defeated.kind)?;
         }
         let private = crate::loot::private(defeated.kind);
         let threshold = crate::loot::damage_threshold(&self.content, defeated.kind);
@@ -6439,14 +6460,14 @@ impl World {
         }
         if defeated.kind == crate::dungeon::beach::BUM {
             // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
-            return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e]);
+            return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e], defeated.kind);
         }
         if crate::loot::potion_damage(defeated.kind).is_some()
             || matches!(defeated.kind, 0x91d | 0x91e)
         {
             let loot =
                 crate::loot::god_loot(&self.content, defeated.kind, &eligible, &mut self.rng);
-            return self.god_loot_bags(defeated.pos, loot);
+            return self.god_loot_bags(defeated.pos, loot, defeated.kind);
         }
         let mut drops = BTreeMap::<i32, Vec<i32>>::new();
         let attempts = crate::loot::attempts(defeated.kind, eligible.len());
@@ -6523,7 +6544,7 @@ impl World {
         }
         for (owner, items) in drops {
             let pos = self.ocean_bag_position(defeated)?;
-            self.loot_bags(pos, (owner >= 0).then_some(owner), &items)?;
+            self.loot_bags(pos, (owner >= 0).then_some(owner), &items, defeated.kind)?;
         }
         Ok(())
     }
