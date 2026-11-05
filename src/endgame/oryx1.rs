@@ -210,6 +210,8 @@ pub struct Brain {
     said: u8,
     tossed: bool,
     healed: u64,
+    #[cfg(test)]
+    pending_fixture_phase: Option<Phase>,
 }
 impl Brain {
     pub fn new(now: u64) -> Self {
@@ -222,7 +224,15 @@ impl Brain {
             said: 0,
             tossed: false,
             healed: 0,
+            #[cfg(test)]
+            pending_fixture_phase: None,
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn for_phase_fixture(phase: Phase) -> (Self, u64) {
+        let mut brain = Self::new(0);
+        brain.pending_fixture_phase = Some(phase);
+        (brain, length(phase))
     }
     pub fn phase(&self) -> Phase {
         self.phase
@@ -251,6 +261,11 @@ impl Brain {
         self.healing()
     }
     pub fn update(&mut self, hp: i32, now: u64, rng: &mut impl Rng) -> Vec<Event> {
+        #[cfg(test)]
+        if let Some(phase) = self.pending_fixture_phase.take() {
+            self.enter(phase, now);
+            return vec![Event::Begin(phase), Event::Green];
+        }
         let mut events = vec![];
         if self.phase != Rage && hp <= RAGE_HP {
             // Rage cuts into whatever phase runs (29 s into Cosmic, 4 s after "All who look…"); no phase or taunt follows it.
