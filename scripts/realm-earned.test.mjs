@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance} from '../examples/testing/realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim} from '../examples/testing/realm-earned-core.mjs';
 const roots=Array.from({length:49},(_,i)=>i+1),census={message:'finite Realm closure roster bound',origin:-3,heroes:49};
 const credit=(hero,remaining,now=100)=>({message:'qualifying Realm hero defeated',origin:-3,hero,remaining,now});
 const waiting=source=>({message:'quest defeat earned a pending Realm event',source}),admission=(source,entity)=>({message:'quest defeat summoned a Realm event',source,entity});
@@ -42,6 +42,10 @@ test('route respects collision and rejects a genuinely unreachable encounter',()
 test('actual runtime hazards and solids prohibit navigation and invalid projections fail',()=>{
   const live={width:3,height:3,blocked:[[1,1]],damaging_ground:[[2,0]]},m=collisionMap(live);assert.equal(m.blocked[2],1);assert.equal(m.blocked[4],1);assert.equal(m.blocked[0],0);assert.throws(()=>collisionMap({...live,damaging_ground:undefined}),/Actual runtime/);assert.throws(()=>collisionMap({...live,blocked:[[-1,0]]}),/outside map/);assert.throws(()=>collisionMap({...live,width:0}),/dimensions/);
   assert.equal(collisionMap({...live,blocked:[],damaging_ground:[]}).blocked[2],0);
+});
+test('held aim binds a live observed point without claiming the enemy survives resume',()=>{
+  const view={position:{x:1,y:1},objects:[{id:4,hp:100,position:{x:2,y:1}}]};assert.deepEqual(observedAim(view,4,0),{x:350,y:325});const aim=observedAim(view,4,-Math.PI/4);assert(aim.x>=0&&aim.x<600&&aim.y>=0&&aim.y<600);view.objects[0].hp=0;assert.throws(()=>observedAim(view,4,0),/living enemy/);
+  assert.throws(()=>observedAim(view,9,0),/observed neighborhood/);view.objects[0].hp=100;view.objects[0].position.x=NaN;assert.throws(()=>observedAim(view,4,0),/finite/);
 });
 test('visible combat targets retain protected phases and prefer a real unprotected family member',()=>{
   const objects=[{id:1,hp:10,position:{x:1,y:1},condition_mask:1<<23},{id:2,hp:100,position:{x:2,y:1},condition_mask:0}],family=[{id:1},{id:2}];assert.equal(localTargets(objects,family,{x:0,y:0})[0].id,2);assert.equal(localTargets(objects.slice(0,1),family,{x:0,y:0})[0].id,1);assert.throws(()=>localTargets([{...objects[0],condition_mask:undefined}],family,{x:0,y:0}),/int32/);

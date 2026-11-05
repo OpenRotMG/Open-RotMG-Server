@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import {readFile,writeFile,readdir,realpath,stat} from 'node:fs/promises';
+import {readFile,writeFile,appendFile,readdir,realpath,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
-import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance} from './realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim} from './realm-earned-core.mjs';
 
 export const realmSeed=1344;
 export const fixture={class:0x310,level:20,seed:1344,world:-2,position:{x:78.5,y:42.5},equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
@@ -95,7 +95,8 @@ export async function run(fighter){
     if(!family.length){assert(ledger.snapshot().waiting.length>0,'Pending ledger has neither a living family nor an actual waiting event');await act(fighter,{keys:[],duration_ms:3000});continue;}
     const view=(await fighter.inspect()).view,visible=localTargets(view.objects,family,v.position),target=visible[0];
     if(!target){const points=route(collision,v.position,family[0].pos);assert(points.length>1,'Nearby pending family is absent from the native neighborhood');await walk(fighter,points[1]);}
-    else{const heal=v.character.hp<v.character.stats.max_hp*.8&&v.character.mp>=85;await act(fighter,{keys:heal?[' ']:[],duration_ms:1500,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});}
+    // An in-flight shot can finish this target during resume; a held aim is not a live-entity assertion.
+    else{const heal=v.character.hp<v.character.stats.max_hp*.8&&v.character.mp>=85,mouse=observedAim(view,target.id,-Math.PI/4);await appendFile(join(out,'earned-aims.jsonl'),JSON.stringify({actor:fighter.actor,character:view.session.character,gameMs:view.time_ms,tick:view.tick,target:target.id,targetHP:target.hp,targetPosition:target.position,playerPosition:view.position,mouse,claim:'planned held aim at last observed position, not dispatch-time liveness or a hit receipt'})+'\n');await act(fighter,{keys:heal?[' ']:[],duration_ms:1500,mouse});}
     if(iteration%10===0)await save('combat-'+iteration);
   }
   await logs();const completed=ledger.complete();tail=true;await writeFile(join(out,'earned-ledger.json'),JSON.stringify(completed));

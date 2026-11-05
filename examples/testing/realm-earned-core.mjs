@@ -80,6 +80,9 @@ export function recoveryState(character){
 export function assertCastleArrival(view,original){
   assert.equal(view.map.name,"Oryx's Castle");assert.equal(view.session.character,original.session.character);assert.equal(view.session.account,original.session.account);assert(view.lifecycle.alive);
 }
+export function observedAim(view,entity,angle){
+  const target=view.objects.find(e=>e.id===entity&&e.hp>0);assert(target,'Aim requires a living enemy in the observed neighborhood');const dx=target.position.x-view.position.x,dy=target.position.y-view.position.y,x=50*(dx*Math.cos(angle)+dy*Math.sin(angle)),y=50*(-dx*Math.sin(angle)+dy*Math.cos(angle)),scale=Math.max(1,Math.hypot(x,y)/270);assert([x,y,angle].every(Number.isFinite),'Aim geometry must be finite');return {x:300+x/scale,y:325+y/scale};
+}
 export function localTargets(objects,family,position){
   const candidates=objects.filter(e=>family.some(f=>f.id===e.id)&&e.hp>0&&Math.hypot(e.position.x-position.x,e.position.y-position.y)<=7),mask=(1<<23)|(1<<24)|(1<<21);
   for(const e of candidates)assert(Number.isInteger(e.condition_mask)&&e.condition_mask>=-2147483648&&e.condition_mask<=2147483647,'Combat target requires its observed int32 condition mask');
