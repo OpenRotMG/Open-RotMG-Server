@@ -442,6 +442,13 @@ impl World {
             quest = *e.quest,
             "named quest transformed without rewards"
         );
+        // Keep the required Egg discoverable without changing XML Quest flags or crediting before Reborn dies: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Phoenix.cs
+        if kind == 0x6c2 {
+            let level = self
+                .quest_target_level(&self.entities[&new])
+                .expect("bound Egg continuation lacks quest level");
+            self.quests_by_level.entry(level).or_default().insert(new);
+        }
         Ok(new)
     }
     pub(super) fn quest_spawn_survivors(
@@ -1717,6 +1724,7 @@ fn phoenix_egg_pulses_only_after_its_shield_expires() {
     let mut character = Character::fresh(world.content.get(0x30e).unwrap()).unwrap();
     character.id = 1;
     character.account = 1;
+    character.level = 20;
     let player = world.enter(character, None).unwrap();
     world
         .spawn_named_quest(0x675, Pos { x: 12.5, y: 12.5 })
@@ -1731,6 +1739,8 @@ fn phoenix_egg_pulses_only_after_its_shield_expires() {
         .unwrap()
         .id;
     assert!(!world.entities.contains_key(&lord));
+    assert!(!world.content.objects[&0x6c2].quest);
+    assert_eq!(world.quest_target(player), Some(egg));
     for (elapsed, size) in [
         (0, 130),
         (750, 130),
@@ -1770,6 +1780,7 @@ fn phoenix_egg_pulses_only_after_its_shield_expires() {
     assert_eq!(world.players[&player].character.exp, 0);
     assert!(world.critical_deaths.is_empty());
     let reborn = reborn.id;
+    assert_eq!(world.quest_target(player), Some(reborn));
     let p = world.players.get_mut(&player).unwrap();
     p.pos = Pos { x: 14.5, y: 12.5 };
     p.motion.at = world.now;
@@ -1791,6 +1802,16 @@ fn phoenix_egg_pulses_only_after_its_shield_expires() {
         assert_eq!(shots.len(), count);
         assert!(shots.iter().all(|(index, _)| *index == 1));
     }
+    world
+        .damage_enemy(player, reborn, 10000, false, &[], None)
+        .unwrap();
+    assert_eq!(world.critical_deaths, [lord]);
+    assert_eq!(world.quest_target(player), None);
+    let unbound = world
+        .spawn_entity(0x6c2, Pos { x: 12.5, y: 12.5 }, vec![])
+        .unwrap();
+    assert_eq!(world.quest_target(player), None);
+    world.remove_entity(unbound);
 }
 
 #[cfg(test)]

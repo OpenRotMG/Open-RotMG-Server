@@ -1724,3 +1724,58 @@ fn pending_event_does_not_block_other_defeats_in_the_realm_cycle() {
         assert_eq!(directory.endgame.realms[&1].cycle.remaining, other);
     }
 }
+
+#[cfg(test)]
+#[test]
+fn instant_damage_quest_clear_starts_closure() {
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut directory =
+        Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 85, 1344).unwrap();
+    let other = directory.endgame.realms[&1].cycle.remaining.clone();
+    let mut character = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+    character.id = 1;
+    character.account = 1;
+    character.level = 20;
+    let world = directory.worlds.get_mut(&-3).unwrap();
+    let player = world.enter(character, None).unwrap();
+    world.players.get_mut(&player).unwrap().lab_conditions =
+        crate::condition::bit(crate::condition::INVINCIBLE);
+    // Fixture movement and instant damage isolate actual quest/death accounting from raid navigation.
+    for _ in 0..100_000 {
+        if !directory.endgame.realms[&-3].cycle.admits() {
+            assert!(directory.endgame.realms[&-3].cycle.remaining.is_empty());
+            assert!(!directory.worlds[&-3].admission_open);
+            assert_eq!(directory.endgame.realms[&1].cycle.remaining, other);
+            return;
+        }
+        let world = directory.worlds.get_mut(&-3).unwrap();
+        let family = world.quest_target(player).map(|id| {
+            let root = world.entities[&id].quest.unwrap_or(id);
+            world
+                .actors()
+                .filter(|e| e.id == root || e.quest == Some(root) || e.parent == Some(root))
+                .map(|e| e.id)
+                .collect::<Vec<_>>()
+        });
+        if let Some(ids) = family {
+            world.players.get_mut(&player).unwrap().pos = world.entities[&ids[0]].pos;
+            for id in ids {
+                if world.entities.contains_key(&id) {
+                    world
+                        .damage_enemy(player, id, 1_000_000, true, &[], None)
+                        .unwrap();
+                }
+            }
+        } else {
+            let (x, y) = world.map.spawns[0];
+            world.players.get_mut(&player).unwrap().pos = Pos { x, y };
+        }
+        world.step();
+        directory.tick += 1;
+        directory.endgame_step(&[-3]);
+    }
+    panic!(
+        "quest-guided clear never closed Realm; remaining roots: {:?}",
+        directory.endgame.realms[&-3].cycle.remaining
+    );
+}

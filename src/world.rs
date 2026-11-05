@@ -3455,11 +3455,8 @@ impl World {
             self.npc_global_ids.insert(id);
         }
         self.non_population_ids.insert(id);
-        if definition.quest {
-            self.quests_by_level
-                .entry(definition.quest_level)
-                .or_default()
-                .insert(id);
+        if let Some(level) = self.quest_target_level(e) {
+            self.quests_by_level.entry(level).or_default().insert(id);
         }
     }
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
@@ -3511,15 +3508,14 @@ impl World {
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
-        let definition = &self.content.objects[&entity.kind];
-        if definition.quest {
+        if let Some(level) = self.quest_target_level(&entity) {
             let ids = self
                 .quests_by_level
-                .get_mut(&definition.quest_level)
+                .get_mut(&level)
                 .expect("quest index missing");
             assert!(ids.remove(&id), "indexed quest missing");
             if ids.is_empty() {
-                self.quests_by_level.remove(&definition.quest_level);
+                self.quests_by_level.remove(&level);
             }
         }
         if let Some(slot) = entity.population_slot {
@@ -4031,6 +4027,15 @@ impl World {
     fn defense(&self, id: i32) -> Result<i32> {
         let p = &self.players[&id];
         Ok(p.effective(&self.content, self.now)?[3])
+    }
+    fn quest_target_level(&self, entity: &Entity) -> Option<Option<i32>> {
+        let kind = if entity.kind == 0x6c2 && entity.quest.is_some() {
+            0x6c1
+        } else {
+            entity.kind
+        };
+        let definition = &self.content.objects[&kind];
+        definition.quest.then_some(definition.quest_level)
     }
     fn quest_target(&self, id: i32) -> Option<i32> {
         if self.safe {
