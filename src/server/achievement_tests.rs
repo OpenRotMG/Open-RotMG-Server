@@ -362,7 +362,7 @@ async fn achievement_thirteen_actual_public_dtos_are_private_and_match_the_site_
             .unwrap();
         (serde_json::from_slice(&body).unwrap(), body.to_vec())
     }
-    let (_dir, a) = account_actions::tests::fixture();
+    let (_dir, mut a) = account_actions::tests::fixture();
     let mut accounts = Vec::new();
     for name in ["Synthetica", "Dtoempty"] {
         let account = a
@@ -399,6 +399,10 @@ async fn achievement_thirteen_actual_public_dtos_are_private_and_match_the_site_
         accounts.push(account);
     }
     let account = accounts[0];
+    Arc::make_mut(&mut a.content).reviewed_accounts = vec![crate::content::Review {
+        account,
+        reviewed_on: "2026-11-05".into(),
+    }];
     let private = a
         .store
         .list("synthetic-private-thirteen".into())
@@ -433,6 +437,10 @@ async fn achievement_thirteen_actual_public_dtos_are_private_and_match_the_site_
             .any(|d| d["id"] == "ah_7uck")
     );
     assert_eq!(scores["players"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        scores["reviewed_accounts"],
+        serde_json::json!([{"account":account,"reviewed_on":"2026-11-05"}])
+    );
     let catalogue = scores["achievement_catalog"].as_array().unwrap();
     assert_eq!(catalogue.len(), 13);
     assert_eq!(
