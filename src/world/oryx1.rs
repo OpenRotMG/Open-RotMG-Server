@@ -340,8 +340,6 @@ mod tests {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
         let map = Map::load(std::path::Path::new("data/oryx-chamber.wmap"), &content).unwrap();
         let mut world = World::new(content.clone(), Arc::new(map)).unwrap();
-        // Phase coverage must not depend on the World's entropy seed.
-        world.rng = rand::rngs::StdRng::seed_from_u64(7);
         world.name = "Oryx's Chamber".into();
         world.encounter = true;
         world.prepare_endgame().unwrap();
