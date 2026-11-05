@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -137,10 +138,10 @@ def group_processes(group):
 
 
 def unit_state(unit):
-    result = subprocess.run(['systemctl', '--user', 'show', unit, '--property=LoadState,ActiveState,InvocationID'],
+    result = subprocess.run(['systemctl', '--user', 'show', unit, '--property=LoadState,ActiveState,InvocationID,MainPID'],
                             capture_output=True, text=True)
     values = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
-    if result.returncode or not {'LoadState', 'ActiveState', 'InvocationID'} <= values.keys():
+    if result.returncode or not {'LoadState', 'ActiveState', 'InvocationID', 'MainPID'} <= values.keys() or not values['MainPID'].isdigit():
         raise RuntimeError(f'Cannot establish job service state: {unit}: {result.stderr.strip()}')
     return values
 
@@ -267,10 +268,26 @@ def run_job(directory):
     results = directory / 'results'
     env = {**os.environ, 'TMPDIR': str(temporary), 'QA_SCRATCH_DIR': str(temporary),
            'QA_RESULTS_DIR': str(results), 'QA_JOB_DIR': str(directory)}
-    with (results / 'stdout.log').open('ab', buffering=0) as out, (results / 'stderr.log').open('ab', buffering=0) as err:
-        process = subprocess.Popen(row['command'], cwd=row['source'], env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
-        code = process.wait()
-    save(directory / 'command.json', {'returncode': code, 'finished': time.time()})
+    process, interrupted, forwarded = None, False, False
+
+    def interrupt(signum, _frame):
+        nonlocal interrupted, forwarded
+        interrupted = True
+        if process is not None and not forwarded:
+            forwarded = True
+            process.send_signal(signum)
+
+    # Reap the command and let its guardian finish instead of killing the receipt writer too.
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        with (results / 'stdout.log').open('ab', buffering=0) as out, (results / 'stderr.log').open('ab', buffering=0) as err:
+            process = subprocess.Popen(row['command'], cwd=row['source'], env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
+            if interrupted:
+                interrupt(signal.SIGTERM, None)
+            code = process.wait()
+        save(directory / 'command.json', {'returncode': code, 'finished': time.time()})
+    finally:
+        signal.signal(signal.SIGTERM, previous)
     if code == 0 and row.get('service'):
         address = os.environ['NOTIFY_SOCKET']
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notify:
@@ -379,7 +396,10 @@ def main(argv=None):
             state = unit_state(row['unit'])
             if state['InvocationID'] != row.get('invocation'):
                 raise RuntimeError('Cannot cancel a different or unrecorded service invocation')
-            return subprocess.call(['systemctl', '--user', 'stop', row['unit']])
+            code = subprocess.call(['systemctl', '--user', 'stop', row['unit']])
+            if code == 0 and not (directory / 'command.json').exists():
+                print('QA stopped without a command wait receipt; preserving the unknown return.', file=sys.stderr)
+            return code
         if args.timeout < 1:
             raise RuntimeError('--timeout must be positive')
         if ROOT.stat().st_uid != os.getuid():
@@ -403,7 +423,7 @@ def main(argv=None):
         unit = load(directory)['unit']
         inherit = [f'--setenv={key}' for key in os.environ if key not in ('INVOCATION_ID', 'NOTIFY_SOCKET', 'JOURNAL_STREAM', 'SYSTEMD_EXEC_PID') and not key.startswith(('LISTEN_', 'WATCHDOG_'))]
         launch = ['systemd-run', '--user', '--quiet', '--collect', '--service-type=exec', '--unit=' + unit,
-                  '--property=ExitType=cgroup', '--property=KillMode=control-group', '--property=Restart=no',
+                  '--property=ExitType=cgroup', '--property=KillMode=mixed', '--property=Restart=no',
                   '--property=RuntimeMaxSec=' + str(args.timeout), '--property=TimeoutStopSec=20',
                   '--property=UMask=0077', '--property=WorkingDirectory=' + str(ROOT).replace('%', '%%'),
                   '--property=StandardOutput=append:' + str(results / 'worker.log').replace('%', '%%'),

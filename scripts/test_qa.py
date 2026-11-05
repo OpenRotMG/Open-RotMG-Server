@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -61,6 +62,74 @@ class JobTests(unittest.TestCase):
         path = directory / 'collection.json'
         eventually(path.exists)
         return json.loads(path.read_text())
+
+    def test_cancel_reaps_command_without_interrupting_its_cleanup_children(self):
+        code = """import os,pathlib,signal,subprocess,sys,time
+root=pathlib.Path(os.environ['QA_RESULTS_DIR'])
+helper=\"import os,pathlib,signal,sys,time; root=pathlib.Path(os.environ['QA_RESULTS_DIR']); signal.signal(signal.SIGTERM,lambda *_:(root.joinpath('wrong-signal').touch(),sys.exit(61))); signal.signal(signal.SIGINT,lambda *_:sys.exit(0)); root.joinpath('helper-ready').touch(); time.sleep(60)\"
+child=subprocess.Popen([sys.executable,'-c',helper])
+def stop(*_):
+    child.send_signal(signal.SIGINT)
+    assert child.wait(timeout=3)==0
+    root.joinpath('graceful').touch()
+    sys.exit(23)
+signal.signal(signal.SIGTERM,stop)
+while not root.joinpath('helper-ready').exists(): time.sleep(.01)
+root.joinpath('ready').touch()
+time.sleep(60)
+"""
+        result, directory = self.launch(code, '--background')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        eventually(lambda: (directory / 'results/ready').exists())
+        cancelled = self.invoke('cancel', str(directory))
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        eventually(lambda: (directory / 'command.json').exists())
+        self.assertEqual(json.loads((directory / 'command.json').read_text())['returncode'], 23)
+        self.assertTrue((directory / 'results/graceful').exists())
+        self.assertFalse((directory / 'results/wrong-signal').exists())
+        self.assertEqual(self.receipt(directory)['status'], 'reclaimed')
+        self.assertFalse(space(directory).exists())
+
+    def test_cancel_completed_command_retires_its_remaining_cgroup(self):
+        result, directory = self.launch("import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])", '--background')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        eventually(lambda: (directory / 'command.json').exists())
+        self.assertEqual(json.loads((directory / 'command.json').read_text())['returncode'], 0)
+        cancelled = self.invoke('cancel', str(directory))
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertEqual(self.receipt(directory)['status'], 'reclaimed')
+        self.assertFalse(space(directory).exists())
+
+    def test_cancel_crashed_worker_closes_children_without_inventing_command_return(self):
+        result, directory = self.launch("import os,pathlib,time; pathlib.Path(os.environ['QA_RESULTS_DIR'],'ready').touch(); time.sleep(60)", '--background')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        eventually(lambda: (directory / 'results/ready').exists())
+        unit = qa.load(directory)['unit']
+        subprocess.run(['systemctl', '--user', 'kill', '--kill-whom=main', '--signal=SIGKILL', unit], check=True, capture_output=True)
+        eventually(lambda: qa.unit_state(unit)['MainPID'] == '0')
+        self.assertFalse((directory / 'command.json').exists())
+        cancelled = self.invoke('cancel', str(directory))
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertIn('preserving the unknown return', cancelled.stderr)
+        self.assertEqual(self.receipt(directory)['status'], 'reclaimed')
+        self.assertFalse((directory / 'command.json').exists())
+        self.assertFalse(space(directory).exists())
+
+    def test_cancel_forces_a_term_ignoring_command_without_fabricating_a_wait(self):
+        code = "import os,pathlib,signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); pathlib.Path(os.environ['QA_RESULTS_DIR'],'ready').touch(); time.sleep(60)"
+        result, directory = self.launch(code, '--background')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        eventually(lambda: (directory / 'results/ready').exists())
+        cancelled = self.invoke('cancel', str(directory))
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertEqual(self.receipt(directory)['status'], 'reclaimed')
+        # Escalation may kill the receipt writer before or after it reaps the command.
+        receipt = directory / 'command.json'
+        if receipt.exists():
+            self.assertEqual(json.loads(receipt.read_text())['returncode'], -signal.SIGKILL)
+        else:
+            self.assertIn('preserving the unknown return', cancelled.stderr)
+        self.assertFalse(space(directory).exists())
 
     def test_success_and_failure_keep_evidence_and_remove_only_scratch(self):
         for exit_code in (0, 37):
