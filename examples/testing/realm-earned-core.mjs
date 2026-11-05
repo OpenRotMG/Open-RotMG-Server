@@ -65,6 +65,14 @@ export function originalIdentity(role,spec,v){
   assert.deepEqual(v.character.items,[...spec.equipment,...spec.backpack]);
   return {role,actor:v.actor,account:v.session.account,character:v.session.character,class:spec.class,items:v.character.items,revision:v.character.inventory_revision,initial:v};
 }
+export function replacementEntrance(realm,entities,events){
+  const reserved=events.filter(e=>e.message==='Replacement Realm entrance position reserved'&&e.realm===realm);assert.equal(reserved.length,1,'Replacement requires one exact reserved entrance');
+  const portal=entities.find(e=>e.id===reserved[0].portal&&e.kind===0x712&&e.published);assert(portal,'Exact replacement entrance is not published in Nexus');return portal;
+}
+export function otherEntrance(entrance,entities,events){
+  const present=entities.find(e=>e.id===entrance.id);if(present){assert.equal(present.kind,0x712);assert(present.published,'Other entrance unexpectedly closed');assert.deepEqual(present.pos,entrance.position);return {realm:entrance.realm,portal:entrance.id,disposition:'present'};}
+  const retired=events.filter(e=>e.message==='Realm population decision'&&e.realm===entrance.realm&&e.reason==='surplus'&&e.decision==='300s empty dependency-free surplus retired'&&e.dependencies===0&&e.empty_spares>=2);assert.equal(retired.length,1,'Other entrance vanished without its exact lawful idle retirement');return {realm:entrance.realm,portal:entrance.id,disposition:'source_logged_idle_retirement',retirement:retired[0]};
+}
 export function recoveryState(character){
   const {hp,mp,stats:{max_hp,max_mp}}=character;assert([hp,mp,max_hp,max_mp].every(Number.isFinite)&&hp>0&&mp>=0&&max_hp>0&&max_mp>=110,'Recovery requires a living measured character');
   return {retreat:hp<max_hp*.6||mp<110,recovered:hp>=max_hp*.95&&mp>=max_mp*.9};

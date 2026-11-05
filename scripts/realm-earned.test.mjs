@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState} from '../examples/testing/realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance} from '../examples/testing/realm-earned-core.mjs';
 const roots=Array.from({length:49},(_,i)=>i+1),census={message:'finite Realm closure roster bound',origin:-3,heroes:49};
 const credit=(hero,remaining,now=100)=>({message:'qualifying Realm hero defeated',origin:-3,hero,remaining,now});
 const waiting=source=>({message:'quest defeat earned a pending Realm event',source}),admission=(source,entity)=>({message:'quest defeat summoned a Realm event',source,entity});
@@ -48,6 +48,14 @@ test('visible combat targets retain protected phases and prefer a real unprotect
 });
 test('original cohort identity rejects a mismatched class or controller',()=>{
   const spec={class:0x310,level:20,stats:[670,385,50,25,50,50,40,75],equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1)},v={actor:1,controller:'native',lifecycle:{alive:true,death_pending:false,quarantined:false},session:{account:2,character:3},character:{class:0x310,level:20,hp:670,mp:385,base_stats:[...spec.stats],items:[...spec.equipment,...spec.backpack],inventory_revision:4}};assert.equal(originalIdentity('fighter',spec,v).character,3);assert.throws(()=>originalIdentity('fighter',spec,{...v,controller:'game_bot'}));assert.throws(()=>originalIdentity('fighter',spec,{...v,character:{...v.character,class:0x30e}}));
+});
+test('replacement binds its exact reserved entrance even when the pool creates another spare',()=>{
+  const portals=[{id:10,kind:0x712,published:true},{id:11,kind:0x712,published:true}],reservation={message:'Replacement Realm entrance position reserved',realm:9,portal:11};assert.equal(replacementEntrance(9,portals,[reservation]).id,11);
+  assert.throws(()=>replacementEntrance(8,portals,[reservation]),/one exact/);assert.throws(()=>replacementEntrance(9,portals,[reservation,reservation]),/one exact/);assert.throws(()=>replacementEntrance(9,[{...portals[1],published:false}],[reservation]),/not published/);
+});
+test('the other entrance remains exact or has its own dependency-free surplus retirement, never unexplained absence',()=>{
+  const entrance={id:10,realm:1,position:{x:2.5,y:3.5}},portal={id:10,kind:0x712,pos:entrance.position,published:true},retired={message:'Realm population decision',realm:1,reason:'surplus',decision:'300s empty dependency-free surplus retired',dependencies:0,empty_spares:2};assert.equal(otherEntrance(entrance,[portal],[]).disposition,'present');assert.equal(otherEntrance(entrance,[],[retired]).disposition,'source_logged_idle_retirement');
+  for(const events of [[],[{...retired,realm:9}],[{...retired,dependencies:1}],[{...retired,empty_spares:1}],[retired,retired]])assert.throws(()=>otherEntrance(entrance,[],events),/lawful idle/);assert.throws(()=>otherEntrance(entrance,[{...portal,published:false}],[]),/unexpectedly closed/);assert.throws(()=>otherEntrance(entrance,[{...portal,pos:{x:3.5,y:3.5}}],[]));
 });
 test('measured depleted combat reserve escapes before ordinary regeneration is considered complete',()=>{
   const depleted={hp:442,mp:69,stats:{max_hp:790,max_mp:440}};assert.deepEqual(recoveryState(depleted),{retreat:true,recovered:false});
