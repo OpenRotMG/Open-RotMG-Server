@@ -52,7 +52,7 @@ async fn original_source_survives_pickup_but_player_redeposits_do_not_create_dis
     };
     let inventory = Slot {
         object: player,
-        slot: 4,
+        slot: 11,
         kind: -1,
     };
     let plan = w.swap(player, ground, inventory).unwrap();
@@ -93,7 +93,7 @@ async fn original_source_survives_pickup_but_player_redeposits_do_not_create_dis
     let plan = w.swap(player, ground, inventory).unwrap();
     assert!(plan.collected.is_none());
     w.finish_inventory(plan, Ok(revision + 2)).unwrap();
-    w.players.get_mut(&player).unwrap().character.items[4] = -1;
+    w.players.get_mut(&player).unwrap().character.items[11] = -1;
     for container in [
         w.loot_bag(pos, None, vec![0xa22]).unwrap(),
         w.spawn_entity(0x501, pos, vec![0xa22, -1, -1, -1, -1, -1, -1, -1])
@@ -111,7 +111,7 @@ async fn original_source_survives_pickup_but_player_redeposits_do_not_create_dis
             .unwrap();
         assert!(plan.collected.is_none());
         w.finish_inventory(plan, Ok(revision + 3)).unwrap();
-        w.players.get_mut(&player).unwrap().character.items[4] = -1;
+        w.players.get_mut(&player).unwrap().character.items[11] = -1;
     }
 }
 
@@ -167,7 +167,7 @@ async fn generated_landmark_chest_loot_has_its_chest_source() {
                         },
                         Slot {
                             object: player,
-                            slot: 4,
+                            slot: 11,
                             kind: -1,
                         },
                     )
@@ -181,7 +181,7 @@ async fn generated_landmark_chest_loot_has_its_chest_source() {
                 );
                 let revision = plan.revision + 1;
                 w.finish_inventory(plan, Ok(revision)).unwrap();
-                w.players.get_mut(&player).unwrap().character.items[4] = -1;
+                w.players.get_mut(&player).unwrap().character.items[11] = -1;
                 picked = true;
                 break;
             }
