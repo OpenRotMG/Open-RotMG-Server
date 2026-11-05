@@ -1,3 +1,4 @@
+mod account_save;
 mod audit;
 mod backup;
 mod bots;
@@ -15,6 +16,7 @@ mod navigation;
 mod performance;
 mod quest;
 mod server;
+mod state_lock;
 mod store;
 mod supervision;
 mod terrain;
@@ -23,6 +25,10 @@ mod world;
 use anyhow::{Result, ensure};
 use rand::RngCore;
 use std::sync::Arc;
+
+// Background saves may outlive a failed drain; only process exit releases desktop ownership.
+static STATE_LOCK: std::sync::OnceLock<state_lock::StateLock> = std::sync::OnceLock::new();
+
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if terrain::prepare::run(&args)? {
@@ -45,6 +51,9 @@ fn validate_client_assets(client: &std::path::Path) -> Result<()> {
     Ok(())
 }
 async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()> {
+    if account_save::run(&args).await? {
+        return Ok(());
+    }
     if backup::run(&args).await? {
         return Ok(());
     }
@@ -72,11 +81,23 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         .init();
     supervision::install_panic_hook();
     let (config, dev_control) = config::Config::load(&args)?;
+    tracing::info!(
+        platform = std::env::consts::OS,
+        linux_host_metrics = cfg!(target_os = "linux"),
+        linux_bot_thread_priority = cfg!(target_os = "linux"),
+        "runtime platform capabilities"
+    );
     let dialogue = bots::dialogue::Service::configured(config.bot_llm)?;
     let client = config.client;
     let state = config.state;
     tracing::info!(address=%config.bind, state=%state.display(), client=%client.display(), data=%config.data.display(), "local environment selected");
     std::fs::create_dir_all(&state)?;
+    if config.desktop {
+        STATE_LOCK
+            .set(state_lock::StateLock::acquire(&state)?)
+            .map_err(|_| anyhow::anyhow!("desktop state lock already initialized"))?;
+        tracing::info!(state=%state.display(), "desktop state lock acquired");
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -135,8 +156,9 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
             config.realm_count,
         )?,
     };
-    if testing.is_some() {
+    if let Some(testing) = &testing {
         directory.clock.set_paused(true);
+        testing.bind_shared_active_clock(&directory.clock)?;
     }
     let world = world::Handle::supervised(directory, supervisor);
     let control = if dev_control {
@@ -211,5 +233,5 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         persona_departure_gate: Arc::default(),
         shutdown: tokio::sync::watch::channel(false).0,
     };
-    server::serve(app, config.bind, client).await
+    server::serve(app, config.bind, client, config.desktop).await
 }

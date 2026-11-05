@@ -11,6 +11,7 @@ import {parseArgs} from 'node:util';
 import {setTimeout as delay} from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import {connect} from './record-demo.mjs';
+import {captureNativeBootstrap} from './native-chat.mjs';
 
 const exec = promisify(execFile), root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let activeCase=false;
@@ -76,6 +77,10 @@ export async function prepareFixture(module, api, signal) {
     assert(spec.worldSeed===undefined||typeof spec.world==='string'&&Number.isSafeInteger(spec.worldSeed)&&spec.worldSeed>=0,'worldSeed requires a dungeon template and a nonnegative safe integer');
     return spec;
   } finally {open=false;signal.removeEventListener('abort',abort);}
+}
+export function nativeBrowserOwner(runOwner,index) {
+  assert(typeof runOwner==='string'&&runOwner.length>0&&Number.isInteger(index)&&index>=0&&index<3,'Native browser requires its run owner and client index');
+  return `${runOwner}:client-${index}`;
 }
 export function nativeJoins({signal,api,participants,freePort,privateDisplay,openClient}) {
   let joining=false;
@@ -170,7 +175,7 @@ export async function runCase(scenario, options) {
   const out=options.runDir,state=archive?archive.state:join(out,'state');assert.equal(await realpath(dirname(out)),dirname(out),'Run parent must be canonical, not a symlink');await mkdir(out,{mode:0o700});activeCase=true;
   const previousOwner=process.env.PI_BROWSER_OWNER;
   const controller=new AbortController(), children=[], files=[], participants=[], ownedBrowsers=[], report={status:'running',scenario,prepared:true,phases:{},assertions:[],captures:[],children:[]};
-  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState;
+  const started=performance.now();let phase='setup',connection,owner,port,chromePort,browser,actor,account,primary,closing=false,guardian,registryState,bootstrapIdentity;
   const elapsed=()=>Math.round(performance.now()-started);
   let failureClient;
   let saveTurn=Promise.resolve();
@@ -238,7 +243,7 @@ export async function runCase(scenario, options) {
     const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);if(archive)assert(typeof fixtureModule.readArchive==='function'&&!Object.hasOwn(fixtureModule,'prepare')&&!Object.hasOwn(fixtureModule,'enter')&&!Object.hasOwn(fixtureModule,'fixture')&&!Object.hasOwn(fixtureModule,'run'),'Archive requires readArchive only: no fixture/prepare/enter/run');else assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');hasNativeEntry(fixtureModule);
     let spec=archive?null:fixtureModule.prepare===undefined?await prepareFixture(fixtureModule,api,controller.signal):null;
     port=await freePort(archive?archive.port:0);chromePort=await freePort();assert.notEqual(port,chromePort,'Ports collided; no launch attempted');
-    owner='native-test:'+randomUUID();process.env.PI_BROWSER_OWNER=owner;
+    owner='native-test:'+randomUUID();process.env.PI_BROWSER_OWNER=archive?owner:nativeBrowserOwner(owner,0);
     report.source={head:(await exec('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim(),dirty:Boolean((await exec('git',['status','--porcelain'],{cwd:root})).stdout.trim())};report.origin=`http://127.0.0.1:${port}`;
     await bounded('prepareBuildStart',async()=>{
       const began=performance.now();let buildStart,buildEnd,ready;
@@ -271,13 +276,15 @@ export async function runCase(scenario, options) {
       const xvfb=launch('Xvfb','Xvfb',['-displayfd','3','-screen','0','1400x1000x24','-nolisten','tcp','-auth',auth],['ignore','ignore',await log('display.log'),'pipe']);
       let display='';xvfb.child.stdio[3].on('data',b=>display+=b);await waitFor(()=>display.includes('\n'),'Private display did not start',10000);display=':'+display.trim();
       check();await nativeXauth(exec,auth,display,cookie,controller.signal);
-      const env={...process.env,DISPLAY:display,XAUTHORITY:auth,PI_BROWSER_OWNER:owner,PI_BROWSER_TAB_POLICY:'agent_only',CHROME_REAL_BINARY:options.chrome};delete env.WAYLAND_DISPLAY;
+      // Managed owners bind one port/profile, so cohort browsers need distinct owners.
+      const env={...process.env,DISPLAY:display,XAUTHORITY:auth,PI_BROWSER_OWNER:archive?owner:nativeBrowserOwner(owner,index),PI_BROWSER_TAB_POLICY:'agent_only',CHROME_REAL_BINARY:options.chrome};delete env.WAYLAND_DISPLAY;
       const box=launch('openbox','openbox',['--sm-disable'],['ignore',await log('window-manager.log'),await log('window-manager.log')],env);await box.started;
       return env;
     }
     const joins=nativeJoins({signal:controller.signal,api,participants,freePort,privateDisplay,openClient});
     const addClient=spec=>joins.add(spec);
     async function openClient(spec,worldId,chromePort,env){
+      const browserOwner=env.PI_BROWSER_OWNER;
       let connection,browser,actor,account;
       const call=(method,params={})=>{check();return connection.call(method,params);};
       const evaluate=expression=>{check();return connection.eval(expression);};
@@ -286,11 +293,11 @@ export async function runCase(scenario, options) {
       const inspectLine=line=>{const kind=browserDiagnostic(line,closing);if(kind==='fatal')fail(Error('Browser ERROR: '+line));else if(kind)(report.browserDiagnostics??=[]).push({kind,line});};
       chrome.child.stderr.on('data',bytes=>{try{writeSync(browserLog,bytes);browserLines+=bytes;let n;while((n=browserLines.indexOf('\n'))>=0){inspectLine(browserLines.slice(0,n));browserLines=browserLines.slice(n+1);}}catch(error){fail(error);}});
       chrome.child.stderr.on('end',()=>{if(browserLines)inspectLine(browserLines);});
-      let receipt='';chrome.child.stdout.on('data',b=>receipt+=b);await waitFor(()=>receipt.includes('\n'),'Managed browser did not return its receipt',30000);browser=JSON.parse(receipt.split('\n')[0]);assert(browser.target&&browser.owner===owner&&browser.pid===chrome.child.pid,'Invalid managed browser receipt: '+receipt.split('\n')[0]);
-      ownedBrowsers.push({...browser,port:chromePort});report.browser={owner,port:chromePort,target:browser.target,pid:browser.pid};
+      let receipt='';chrome.child.stdout.on('data',b=>receipt+=b);await waitFor(()=>receipt.includes('\n'),'Managed browser did not return its receipt',30000);browser=JSON.parse(receipt.split('\n')[0]);assert(browser.target&&browser.owner===browserOwner&&browser.pid===chrome.child.pid,'Invalid managed browser receipt: '+receipt.split('\n')[0]);
+      ownedBrowsers.push({...browser,port:chromePort});report.browser={owner:browser.owner,port:chromePort,target:browser.target,pid:browser.pid};
       if(archive){actor=archive.actor;account=archive.account;}
       let resolveGuest,rejectGuest;const guest=new Promise((ok,bad)=>{resolveGuest=ok;rejectGuest=bad;});guest.catch(()=>{});let requests=0,guestDone=false;
-      return await connections.open(()=>connect({port:chromePort,target:browser.target,url:'about:blank',helper:join(options.browserTools,'direct-cdp.mjs'),onEvent:event=>{
+      return await connections.open(()=>connect({port:chromePort,target:browser.target,owner:browser.owner,url:'about:blank',helper:join(options.browserTools,'direct-cdp.mjs'),onEvent:event=>{
         if(event.method==='Runtime.exceptionThrown'){fail(Error('Browser exception: '+JSON.stringify(event.params.exceptionDetails)));return;}
         if(event.method==='Runtime.consoleAPICalled'&&event.params.type==='error'){fail(Error('Browser console error: '+JSON.stringify(event.params.args)));return;}
         if(event.method!=='Fetch.requestPaused')return;
@@ -336,10 +343,12 @@ export async function runCase(scenario, options) {
       await call('Emulation.setFocusEmulationEnabled',{enabled:true});await click();await click();
       });
       report.bootstrapStep='wait-character-load';
-      await waitFor(async()=>{const actors=[...participants.map(c=>c.actor),actor],s=await api({op:'native_state',actors});assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');return s.actors.length===actors.length&&s.actors.every(a=>a.stage==='ready');},'Normal character LOAD did not complete');
+      let readyIdentity;
+      await waitFor(async()=>{const registered=[...participants.map(c=>({actor:c.actor,account:c.account})),{actor,account}],actors=registered.map(c=>c.actor),s=await api({op:'native_state',actors});assert(s.native_state_version===1&&Array.isArray(s.actors),'Native bootstrap identity v1 requires matching atomic native_state DTO');assert(!s.stopped,'Native session stopped');assert(!s.actors.some(a=>['dead','dying','lost'].includes(a.stage)),'Native participant terminal');if(s.actors.length!==actors.length||!s.actors.every(a=>a.stage==='ready'))return false;readyIdentity=captureNativeBootstrap(s,registered,bootstrapIdentity);return true;},'Normal character LOAD did not complete');
       report.bootstrapStep='publish-participant';
       participants.push({actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env.DISPLAY});
-      await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state,browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,actor:c.actor}))}),{mode:0o600});
+      bootstrapIdentity=readyIdentity;
+      await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state,native_bootstrap:bootstrapIdentity,browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,owner:c.browser.owner,actor:c.actor}))}),{mode:0o600});
       report.bootstrapStep='pause-native-client';
       await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
       report.bootstrapStep='ready';await save();check();
@@ -375,7 +384,7 @@ export async function runCase(scenario, options) {
     if(ownedBrowsers.length)try{
       managed=await import(pathToFileURL(join(options.browserTools,'tabs.mjs')).href);
       for(const b of ownedBrowsers)for(const page of (await managed.liveTargets(b.port)).targets.filter(p=>p.type==='page')){
-        const tab={...b,target:page.targetId};await managed.ensureTarget(tab);managed.assertOwner(tab,owner);tabs.push(tab);
+        const tab={...b,target:page.targetId};await managed.ensureTarget(tab);managed.assertOwner(tab,b.owner);tabs.push(tab);
       }
     }catch(error){cleanupError(error);}
     connections.close();

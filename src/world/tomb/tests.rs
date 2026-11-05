@@ -205,6 +205,43 @@ fn circle_clock_keeps_slow_and_paralysis_rules() {
 }
 
 #[test]
+fn jackal_healers_keep_target_families_and_sick_guards_separate() {
+    for (kind, targets) in [
+        (0xd19, &[0xd16, 0xd17, 0xd18][..]),
+        (0xd3b, &[0xd3a, 0xd3c][..]),
+    ] {
+        let (mut world, player) = fixture();
+        let pos = world.players[&player].pos;
+        let healer = world.spawn_entity(kind, pos, vec![]).unwrap();
+        world.entities.get_mut(&healer).unwrap().activated = Some(world.now);
+        let mut candidates = vec![(healer, false)];
+        for candidate in [
+            0xd16, 0xd17, 0xd18, 0xd19, 0xd2a, 0xd2b, 0xd3a, 0xd3b, 0xd3c,
+        ] {
+            let id = world.spawn_entity(candidate, pos, vec![]).unwrap();
+            candidates.push((id, targets.contains(&candidate)));
+        }
+        let sick = world.spawn_entity(targets[0], pos, vec![]).unwrap();
+        world.apply_condition(sick, condition::SICK, 1000).unwrap();
+        candidates.push((sick, false));
+        for &(id, _) in &candidates {
+            world.entities.get_mut(&id).unwrap().hp -= 1;
+        }
+        world.tomb_mechanics(healer, None).unwrap();
+        for (id, healed) in candidates {
+            let entity = &world.entities[&id];
+            assert_eq!(
+                entity.hp,
+                world.content.objects[&entity.kind].hp - i32::from(!healed),
+                "healer {kind:#x}, recipient {:#x}, entity {id}",
+                entity.kind
+            );
+        }
+        assert_eq!(world.players[&player].character.tombs, 0);
+    }
+}
+
+#[test]
 fn each_generated_sarcophagus_owns_eight_worshippers() {
     let (world, _) = fixture();
     for sarcophagus in world.actors().filter(|e| e.kind == d::SARCOPHAGUS) {
@@ -218,6 +255,82 @@ fn each_generated_sarcophagus_owns_eight_worshippers() {
         assert_eq!(guards.len(), 8, "sarcophagus at {:?}", sarcophagus.pos);
         assert_eq!(guards.iter().filter(|e| e.kind == 0xd2a).count(), 4);
         assert_eq!(guards.iter().filter(|e| e.kind == 0xd2b).count(), 4);
+    }
+}
+
+#[test]
+fn swarm_replacements_and_orphans_keep_their_original_master() {
+    for kind in [0xd11, 0xd13, 0xd15] {
+        let (mut world, player) = fixture();
+        let pos = world.players[&player].pos;
+        let masters = [0; 2].map(|_| world.spawn_entity(kind, pos, vec![]).unwrap());
+        for master in masters {
+            world.entities.get_mut(&master).unwrap().activated = Some(world.now);
+            world.tomb_mechanics(master, None).unwrap();
+        }
+        let owned = |world: &World, master| -> std::collections::BTreeSet<_> {
+            world.tomb_owned(master, kind - 1).into_iter().collect()
+        };
+        let original = owned(&world, masters[0]);
+        let neighbors = owned(&world, masters[1]);
+        assert!(!original.is_empty() && !neighbors.is_empty());
+        assert!(original.is_disjoint(&neighbors));
+        for &child in &original {
+            world.entities.get_mut(&child).unwrap().activated = Some(world.now);
+            world.tomb_mechanics(child, None).unwrap();
+            assert!(matches!(
+                world.tomb_movement(child, None).unwrap().0,
+                Motion::Orbit { anchor: Anchor::BoundEntity(id), .. } if id == masters[0]
+            ));
+        }
+        let victim = *original.first().unwrap();
+        world
+            .damage_enemy(player, victim, 1_000_000, true, &[], None)
+            .unwrap();
+        world.now = world.entities[&masters[0]]
+            .tomb
+            .as_ref()
+            .unwrap()
+            .next_spawn;
+        world.tomb_mechanics(masters[0], None).unwrap();
+        let replenished = owned(&world, masters[0]);
+        assert_eq!(replenished.len(), original.len());
+        assert!(!replenished.contains(&victim));
+        assert_eq!(
+            replenished.intersection(&original).count(),
+            original.len() - 1
+        );
+        assert_eq!(owned(&world, masters[1]), neighbors);
+        world
+            .damage_enemy(player, masters[0], 1_000_000, true, &[], None)
+            .unwrap();
+        assert!(!world.entities.contains_key(&masters[0]));
+        let replacement = world.spawn_entity(kind, pos, vec![]).unwrap();
+        world.entities.get_mut(&replacement).unwrap().activated = Some(world.now);
+        world.tomb_mechanics(replacement, None).unwrap();
+        assert!(!owned(&world, replacement).is_empty());
+        assert!(owned(&world, replacement).is_disjoint(&replenished));
+        assert_eq!(owned(&world, masters[0]), replenished);
+        assert_eq!(owned(&world, masters[1]), neighbors);
+        for child in replenished {
+            world
+                .entities
+                .get_mut(&child)
+                .unwrap()
+                .activated
+                .get_or_insert(world.now);
+            world.tomb_mechanics(child, Some(pos)).unwrap();
+            let state = world.entities[&child].tomb.as_ref().unwrap();
+            assert_eq!(
+                (state.producer, state.anchor),
+                (Some(masters[0]), Some(masters[0]))
+            );
+            assert!(matches!(
+                world.tomb_movement(child, Some(pos)).unwrap().0,
+                Motion::Chase { .. }
+            ));
+        }
+        assert_eq!(world.players[&player].character.tombs, 0);
     }
 }
 

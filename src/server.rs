@@ -80,6 +80,7 @@ impl App {
 }
 use tokio::sync::mpsc;
 mod account_actions;
+mod account_export;
 pub(crate) mod email;
 #[cfg(test)]
 pub(crate) use account_actions::tests::fixture as test_app;
@@ -1148,6 +1149,7 @@ struct Session {
     expected: Option<i32>,
     arrival: Option<crate::world::TransferArrival>,
     admission: Option<Vec<u8>>,
+    initial_entry: Option<crate::world::realm_population::InitialEntryHold>,
     reconnecting: bool,
     transfer: Option<PreparedTransfer>,
     runtime: Option<tokio::runtime::Handle>,
@@ -1482,6 +1484,7 @@ async fn handle_inner(
         expected,
         arrival,
         admission,
+        initial_entry,
         reconnecting,
         transfer: _,
         runtime,
@@ -1565,7 +1568,7 @@ async fn handle_inner(
                 .transpose()?
                 .flatten();
             let transfer_key = (!key.is_empty()).then(|| key.clone());
-            let (destination, character, transfer_arrival) = a
+            let (destination, character, transfer_arrival, entry_hold) = a
                 .world
                 .directory(move |d| {
                     if key.is_empty() {
@@ -1574,19 +1577,21 @@ async fn handle_inner(
                                 d.worlds.contains_key(&world),
                                 "prepared native world no longer exists"
                             );
-                            Ok((world, None, None))
+                            Ok((world, None, None, d.hold_initial_entry(world)?))
                         } else {
-                            Ok((d.initial(game)?, None, None))
+                            let world = d.initial(game)?;
+                            Ok((world, None, None, d.hold_initial_entry(world)?))
                         }
                     } else {
                         let (character, arrival) = d.consume(id, game, keytime, key)?;
-                        Ok((game, Some(character), Some(arrival)))
+                        Ok((game, Some(character), Some(arrival), None))
                     }
                 })
                 .await?;
             *expected = character;
             *arrival = transfer_arrival;
             *admission = transfer_key;
+            *initial_entry = entry_hold;
             diagnostics.world = Some(destination);
             a.world = a.world.in_world(destination);
             let body = a.world.call(|w| Ok(w.map_info())).await?;
@@ -1661,6 +1666,7 @@ async fn handle_inner(
             let ticket = admission.clone();
             let bind = lifecycle::binding(a, account)?;
             let transfer_arrival = arrival.take();
+            let entry_hold = initial_entry.take();
             let destination = diagnostics.world.context("LOAD destination missing")?;
             lifecycle::stage(Stage::Publication);
             *player = Some(
@@ -1694,6 +1700,7 @@ async fn handle_inner(
                         if let Some(key) = entry_key {
                             d.complete_dungeon_entry(&key, id)?;
                         }
+                        drop(entry_hold);
                         Ok(id)
                     })
                     .await?,
@@ -2854,7 +2861,13 @@ async fn bot_create(
             };
             let bind = lifecycle::binding(&a, acc.id)?;
             lifecycle::stage(Stage::Reservation);
-            let destination = a.world.directory(move |d| d.initial(input.world)).await?;
+            let (destination, entry_hold) = a
+                .world
+                .directory(move |d| {
+                    let destination = d.initial(input.world)?;
+                    Ok((destination, d.hold_initial_entry(destination)?))
+                })
+                .await?;
             lifecycle::stage(Stage::Store);
             let presentation = a.store.presentation(acc.id).await?;
             let legendary = a.store.is_legend(acc.id).await?;
@@ -2865,6 +2878,7 @@ async fn bot_create(
                 .call(move |w| {
                     let id = w.enter_at(ch, None, None, presentation, legendary)?;
                     bind(id)?;
+                    drop(entry_hold);
                     Ok(id)
                 })
                 .await?;
@@ -3345,6 +3359,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
             a.clone(),
             lifecycle::drain::http_entry,
         ))
+        .merge(account_export::routes(a))
         .merge(lifecycle::drain::routes())
         .route("/health", get(health))
         .route("/realmdex/stats", get(realmdex_stats))
@@ -3381,7 +3396,9 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .with_state(a.clone())
 }
 
-pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
+mod desktop;
+
+pub async fn serve(a: App, bind: SocketAddr, client: PathBuf, desktop: bool) -> Result<()> {
     crate::audit::record(
         "start",
         serde_json::json!({"revision":a.diagnostics.source_revision,"binary_sha256":a.diagnostics.binary_sha256,"prepared":a.testing.is_some()}),
@@ -3405,7 +3422,24 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         }
     });
     // Deploy rehearsals send SIGTERM as soon as /health answers.
-    let stop_requested = shutdown_signal()?;
+    #[cfg(not(windows))]
+    let signal = shutdown_signal()?;
+    #[cfg(windows)]
+    let signal = async move {
+        if desktop {
+            // GUI-owned children need no console handler; their parent pipe owns shutdown.
+            std::future::pending::<Result<()>>().await
+        } else {
+            shutdown_signal()?.await
+        }
+    };
+    let parent = desktop.then(desktop::shutdown).transpose()?;
+    let stop_requested = async move {
+        match parent {
+            Some(parent) => tokio::select! { result = signal => result, result = parent => result },
+            None => signal.await,
+        }
+    };
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
         format!("cannot listen on {bind}; another server may already use this port. Stop it and rerun ./run.sh")
     })?;
@@ -3428,22 +3462,26 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf) -> Result<()> {
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
-        let result: Result<()> = async {
-            stop_requested.await?;
-            tracing::info!("saving active characters before shutdown");
-            lifecycle::drain::prepare(&shutdown);
-            shutdown.shutdown.send_replace(true);
-            lifecycle::drain::terminate(&shutdown).await
-        }
-        .await;
+        let result = drain_shutdown(&shutdown, stop_requested).await;
         if let Err(e) = result {
-            tracing::error!(error=%e,"shutdown persistence failed");
+            tracing::error!(error=%e,"shutdown failed");
             *report.lock().expect("shutdown report poisoned") = Some(e);
         }
         stopped.send_replace(true);
     });
     supervise_serving(&a, async { serving.await }, &failure, stop).await
 }
+async fn drain_shutdown(a: &App, stop: impl Future<Output = Result<()>>) -> Result<()> {
+    let request = stop.await;
+    tracing::info!("saving active characters before shutdown");
+    lifecycle::drain::prepare(a);
+    a.shutdown.send_replace(true);
+    lifecycle::drain::terminate(a).await?;
+    request?;
+    tracing::info!("shutdown persistence complete");
+    Ok(())
+}
+
 async fn supervise_serving(
     a: &App,
     serving: impl std::future::Future<Output = std::io::Result<()>>,

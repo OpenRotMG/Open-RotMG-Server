@@ -62,7 +62,13 @@ async fn fatal_world_and_persistence_workers_stop_real_server_and_preserve_incid
         }
         let server_app = app.clone();
         let server = tokio::spawn(async move {
-            super::super::serve(server_app, "127.0.0.1:0".parse().unwrap(), "data".into()).await
+            super::super::serve(
+                server_app,
+                "127.0.0.1:0".parse().unwrap(),
+                "data".into(),
+                false,
+            )
+            .await
         });
         if component == "world" {
             assert!(

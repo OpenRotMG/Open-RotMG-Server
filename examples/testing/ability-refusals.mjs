@@ -26,7 +26,7 @@ export async function run(game){
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const api=async command=>{const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok&&s.status==='succeeded',JSON.stringify(s));return s;};
   const record=async(label,client=game)=>{const s=await client.inspect();records.push({label,...s});await writeFile(join(root(),'refusal-observations.json'),JSON.stringify(records));return s;};
-  const browser=config.native.find(n=>n.actor===game.actor),cdp=await connect({port:browser.port,target:browser.target,url:config.origin+'/',helper:config.browserTools});
+  const browser=config.native.find(n=>n.actor===game.actor),cdp=await connect({port:browser.port,target:browser.target,owner:browser.owner,url:config.origin+'/',helper:config.browserTools});
   async function pauseChat(){
     const action=game.act({keys:[],duration_ms:1600});
     const input=(async()=>{const deadline=Date.now()+5000;while((await game.observe()).paused){assert(Date.now()<deadline);await delay(20);}for(const type of ['keyDown','keyUp'])await cdp.call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await cdp.call('Input.insertText',{text:'/pause'});for(const type of ['keyDown','keyUp'])await cdp.call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13});})();

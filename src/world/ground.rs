@@ -68,19 +68,33 @@ impl World {
                 "discarded ground damage awaiting GOTO acknowledgement"
             );
         }
+        let raw_damage = damage;
+        let flags = p.conditions(self.now);
+        let hp_before = p.character.hp;
+        let previous = p.ground_hits.get(&i).copied();
+        let damage = if ignored {
+            0
+        } else {
+            crate::condition::damage(raw_damage, 0, flags, true)
+        };
+        if !ignored {
+            p.ground_hits
+                .retain(|_, previous| time.saturating_sub(*previous) < 1000);
+            p.ground_hits.insert(i, time);
+            p.character.hp = (p.character.hp - damage).max(0);
+            if p.character.hp == 0 {
+                p.death_pending = true;
+                p.killer = hazard.name;
+                p.bot_goal = None;
+                p.bot_aim = None;
+            }
+        }
+        p.audit_fact(id, &self.name, self.now, "ground", || serde_json::json!({"client_ms":time,"last_move_ms":p.last_move,
+            "position":[pos.x,pos.y],"player_position":[p.pos.x,p.pos.y],"ground":ground,"previous_ms":previous,
+            "ignored":ignored,"correcting":correcting,"protected":protected,"safe":self.safe,"paused":p.paused,
+            "conditions":flags,"raw_damage":raw_damage,"damage":damage,"hp_before":hp_before,"hp_after":p.character.hp}));
         if ignored {
             return Ok(());
-        }
-        p.ground_hits
-            .retain(|_, previous| time.saturating_sub(*previous) < 1000);
-        p.ground_hits.insert(i, time);
-        let damage = crate::condition::damage(damage, 0, p.conditions(self.now), true);
-        p.character.hp = (p.character.hp - damage).max(0);
-        if p.character.hp == 0 {
-            p.death_pending = true;
-            p.killer = hazard.name;
-            p.bot_goal = None;
-            p.bot_aim = None;
         }
         tracing::debug!(
             player = id,
