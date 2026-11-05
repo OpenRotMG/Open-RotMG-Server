@@ -544,12 +544,11 @@ fn achievement_no_receipts(dir: &std::path::Path) -> Vec<(i32, i64, Option<i64>)
     )
     .unwrap();
     let mut query = db.prepare("SELECT account,awarded_at,notified_at FROM gold_rewards WHERE reward='achievement_no' ORDER BY account").unwrap();
-    let rows = query
+    query
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
         .unwrap()
         .collect::<rusqlite::Result<_>>()
-        .unwrap();
-    rows
+        .unwrap()
 }
 
 #[tokio::test]
