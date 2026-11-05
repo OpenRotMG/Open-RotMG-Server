@@ -43,6 +43,7 @@ mod fauna_special;
 mod ghost_ship;
 mod gods;
 mod ground_dye;
+mod oryx1;
 
 mod gold;
 mod golems;
@@ -6752,8 +6753,14 @@ impl World {
             let kind = entity.kind;
             let _context = crate::supervision::npc(id, kind);
             let pos = entity.pos;
+            // A dormant Haunted Armor wakes when damaged or when a player comes within reach (bBQRbAoRP_g 2012-04-01 t=150-166).
             if entity.hp == self.content.objects[&kind].hp
-                && (kind == crate::dungeon::abyss::IDOL || kind == 0xd7e && entity.stage.is_none())
+                && (kind == crate::dungeon::abyss::IDOL
+                    || kind == 0xd7e
+                        && entity.stage.is_none()
+                        && !seen
+                            .iter()
+                            .any(|(p, ..)| pos.distance(*p) <= crate::endgame::ARMOR_WAKE_RANGE))
             {
                 continue;
             }
@@ -6816,6 +6823,7 @@ impl World {
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
                 0x925 => 30.,
+                crate::endgame::ORYX => 20.,
                 0x65a..=0x65d => 15.,
                 _ => 12.,
             };
@@ -6847,7 +6855,9 @@ impl World {
             let nearby = seen
                 .iter()
                 .any(|(p, ..)| pos.distance(*p) < simulation_radius);
-            let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind) || kind == 0x925)
+            let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind)
+                || kind == 0x925
+                || kind == crate::endgame::ORYX)
                 && entity.activated.is_some();
             if !burst
                 && !armed_abyss_missile
@@ -7012,7 +7022,7 @@ impl World {
                     }
                 }
             } else if crate::endgame::ROSTER.contains(&kind) {
-                match self.finale_movement(id, target, elapsed) {
+                match self.finale_movement(id, elapsed) {
                     Ok(movement) => movement,
                     Err(error) => {
                         tracing::error!(entity=id,%error,"endgame movement refused");

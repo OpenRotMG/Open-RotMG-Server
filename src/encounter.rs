@@ -21,6 +21,7 @@ pub enum Anchor {
     BoundEntity(i32),
     QuestMember(u16),
     QuestEntity(i32),
+    Point { x: f32, y: f32 },
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Motion {
