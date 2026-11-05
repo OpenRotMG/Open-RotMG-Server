@@ -1,11 +1,22 @@
 import assert from 'node:assert/strict';
-import {inflateSync} from 'node:zlib';
+import {join} from 'node:path';
 
-export function earnedLedger(realm,initial){
-  assert(Number.isSafeInteger(realm)&&Array.isArray(initial)&&initial.length===49&&new Set(initial).size===49&&initial.every(id=>Number.isSafeInteger(id)&&id>0),'An unreduced bound Realm requires exactly49 initial roots');
+export function structuredEvents(origin){
+  let started=false;
+  return line=>{
+    if(!line.trim())return null;
+    if(line.startsWith('{')){const row=JSON.parse(line);assert(row.fields&&typeof row.fields.message==='string','Invalid structured server event');started=true;return row.fields;}
+    // run.py precedes Rust events with build output; only these two ready lines follow them.
+    assert(!started||line===`Local server ready. Open: ${origin}/`||line==='Logs: the terminal and .local/server.log','Unexpected unstructured runtime output: '+line);
+    return null;
+  };
+}
+export function earnedLedger(realm,initial,priorEvents){
+  assert(Array.isArray(priorEvents),'Explicit owned log history required');
+  assert(Number.isSafeInteger(realm)&&Array.isArray(initial)&&initial.length>0&&new Set(initial).size===initial.length&&initial.every(id=>Number.isSafeInteger(id)&&id>0),'An unreduced bound Realm requires distinct positive initial roots');
   const known=new Set(initial),pending=new Set(initial),credited=new Set(),admitted=new Set(),waiting=new Set();let census=false,last=null;
-  return {ingest(f){
-    if(f.message==='finite Realm closure roster bound'&&f.origin===realm){assert(!census&&f.heroes===49,'Missing or duplicate normal census');census=true;}
+  const state={ingest(f){
+    if(f.message==='finite Realm closure roster bound'&&f.origin===realm){assert(!census&&f.heroes===initial.length,'Missing, duplicate or mismatched normal census');census=true;}
     if(f.message==='quest defeat summoned a Realm event'&&known.has(f.source)){
       assert(waiting.has(f.source)&&pending.has(f.source)&&Number.isSafeInteger(f.entity)&&f.entity>0&&!known.has(f.entity)&&admitted.size<10,'Unowned, duplicate or invalid earned event');
       known.add(f.entity);admitted.add(f.entity);pending.add(f.entity);waiting.delete(f.source);
@@ -16,21 +27,21 @@ export function earnedLedger(realm,initial){
       assert.equal(f.remaining,pending.size-1,'Local and coordinator ledgers differ');pending.delete(f.hero);credited.add(f.hero);last=f;
     }
   },snapshot:()=>({realm,census,initial:[...initial],admitted:[...admitted],credited:[...credited],pending:[...pending],waiting:[...waiting],last}),complete(){
-    const s=this.snapshot();assert(census&&pending.size===0&&waiting.size===0&&credited.size===49+admitted.size,'All initial and admitted roots must complete');
+    const s=this.snapshot();assert(census&&pending.size===0&&waiting.size===0&&credited.size===initial.length+admitted.size,'All initial and admitted roots must complete');
     assert(admitted.size>0,'No earned event was exercised');return s;
   }};
+  for(const event of priorEvents)state.ingest(event);return state;
 }
-export function collisionMap(raw,terrain,groundXml){
-  const bytes=inflateSync(raw,{maxOutputLength:16*1024*1024});let cursor=0;
-  const short=()=>{const n=bytes.readInt16LE(cursor);cursor+=2;return n;},integer=()=>{const n=bytes.readInt32LE(cursor);cursor+=4;return n;};
-  const string=()=>{let size=0,shift=0,b;do{assert(shift<35);b=bytes[cursor++];size|=(b&127)<<shift;shift+=7;}while(b&128);cursor+=size;assert(cursor<=bytes.length);};
-  const count=short(),dictionary=[];assert(count>0);
-  for(let i=0;i<count;i++){dictionary.push(short());string();string();cursor+=2;}
-  const width=integer(),height=integer();assert.equal(width,terrain.width);assert.equal(height,terrain.height);
-  const dangerous=new Set([...groundXml.matchAll(/<Ground\s+type="(0x[0-9a-f]+)"[\s\S]*?<\/Ground>/gi)].filter(m=>/<(?:MinDamage|MaxDamage)>[1-9]/.test(m[0])).map(m=>Number(m[1]))),blocked=new Uint8Array(width*height);
-  for(let i=0;i<blocked.length;i++){const index=short();assert(index>=0&&index<dictionary.length);blocked[i]=Number(dangerous.has(dictionary[index]));}
-  assert.equal(cursor,bytes.length);const hazards=blocked.slice();for(const [x,y]of terrain.blocked){assert(x>=0&&y>=0&&x<width&&y<height);blocked[y*width+x]=1;}
-  return {width,height,blocked,hazards,dangerous:[...dangerous]};
+export function mapInput(layout,catalogue){
+  const match=layout.match(/^classic-world-(\d+)-reconstruction$/);
+  if(match){const recipe='world'+match[1]+'.json',row=catalogue.find(r=>r.kind==='reconstruction'&&r.recipe===recipe);assert(row,'Reconstruction map must be catalogued');return {recipe,sha256:row.sha256};}
+  const row=catalogue.find(r=>r.kind==='baseline'&&r.id===layout);assert(row,'Selected layout requires an explicit catalogued baseline');return {file:join('data',row.path),sha256:row.sha256};
+}
+export function collisionMap(terrain){
+  const {width,height}=terrain;assert(Number.isSafeInteger(width)&&width>0&&Number.isSafeInteger(height)&&height>0&&width*height<=16*1024*1024,'Bounded actual map dimensions required');
+  assert(Array.isArray(terrain.blocked)&&Array.isArray(terrain.damaging_ground),'Actual runtime solids and hazards required');const blocked=new Uint8Array(width*height);
+  for(const [x,y]of [...terrain.blocked,...terrain.damaging_ground]){assert(Number.isInteger(x)&&Number.isInteger(y)&&x>=0&&y>=0&&x<width&&y<height,'Runtime collision coordinate outside map');blocked[y*width+x]=1;}
+  return {width,height,blocked};
 }
 export function route(map,start,goal){
   const {width,height,blocked}=map,total=width*height,parent=new Int32Array(total).fill(-1),queue=new Int32Array(total),origin=Math.floor(start.y)*width+Math.floor(start.x);
