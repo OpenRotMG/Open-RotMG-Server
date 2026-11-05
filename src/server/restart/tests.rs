@@ -495,6 +495,54 @@ async fn production_handler_preserves_private_authorization_and_shutdown_and_dra
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+async fn achievement_human(
+    app: &App,
+    name: &str,
+) -> (
+    Owner,
+    i32,
+    crate::store::Character,
+    tokio::sync::mpsc::Receiver<crate::wire::Packet>,
+) {
+    let account = app.store.list(name.into()).await.unwrap().id;
+    let character = app
+        .store
+        .create(account, app.content.get(WIZARD).unwrap())
+        .await
+        .unwrap();
+    let owner = app.claim_session(account).unwrap();
+    let snapshot = character.clone();
+    let (packets, inbox) = tokio::sync::mpsc::channel(256);
+    let output = Output {
+        trace: None,
+        packets,
+        lost: watch::channel(None).0,
+    };
+    let id = app
+        .world
+        .directory(move |d| {
+            let castle = d.prepared_instance(crate::endgame::CASTLE)?;
+            d.worlds
+                .get_mut(&castle)
+                .unwrap()
+                .enter(snapshot, Some(output))
+        })
+        .await
+        .unwrap();
+    owner.bind(id).unwrap();
+    (owner, id, character, inbox)
+}
+
+fn release_on_cancel(owner: Owner) -> tokio::task::JoinHandle<()> {
+    let mut cancelled = owner.cancel.clone().unwrap();
+    tokio::spawn(async move {
+        if !*cancelled.borrow() {
+            cancelled.changed().await.unwrap();
+        }
+        owner.release();
+    })
+}
+
 #[tokio::test]
 async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry() {
     let (dir, app) = achievement_fixture_with_capacity(85).await;
@@ -504,6 +552,7 @@ async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry(
         .await
         .unwrap();
     let mut owners = Vec::new();
+    let mut inboxes = Vec::new();
     let mut characters = Vec::new();
     for index in 0..86 {
         let account = app
@@ -520,18 +569,25 @@ async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry(
         if index < 85 {
             let owner = app.claim_session(account).unwrap();
             let snapshot = character.clone();
+            let (packets, inbox) = tokio::sync::mpsc::channel(256);
+            let output = Output {
+                trace: None,
+                packets,
+                lost: watch::channel(None).0,
+            };
             let id = app
                 .world
                 .directory(move |d| {
                     let world = d.worlds.get_mut(&castle).unwrap();
-                    let id = world.enter(snapshot, None)?;
+                    let id = world.enter(snapshot, Some(output))?;
                     assert!(world.players[&id].controller == crate::world::Controller::Human);
                     Ok(id)
                 })
                 .await
                 .unwrap();
             owner.bind(id).unwrap();
-            owners.push(owner);
+            owners.push((owner, id));
+            inboxes.push(inbox);
         } else {
             assert!(
                 app.claim_session(account)
@@ -588,14 +644,17 @@ async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry(
         .unwrap(),
         85
     );
-    drop(owners);
+    for (owner, id) in owners {
+        super::super::depart(&app, id).await.unwrap();
+        owner.release();
+    }
 }
 
 #[tokio::test]
 async fn achievement_generic_shutdown_drain_never_awards_no() {
     let (dir, app) = achievement_fixture().await;
-    let (owner, _, character) =
-        achievement_actor(&app, "generic-drain-no", Some(crate::endgame::CASTLE), true).await;
+    let (owner, _, character, _inbox) = achievement_human(&app, "generic-drain-no").await;
+    let released = release_on_cancel(owner);
     assert!(app.restart.lock().unwrap().current.is_none());
     super::super::drain_shutdown(&app, std::future::ready(Ok(())))
         .await
@@ -612,14 +671,13 @@ async fn achievement_generic_shutdown_drain_never_awards_no() {
         .unwrap(),
         0
     );
-    drop(owner);
+    released.await.unwrap();
 }
 
 #[tokio::test]
 async fn achievement_consumed_intent_survives_discarded_ack_and_later_drain_failure() {
     let (dir, app) = achievement_fixture().await;
-    let (owner, _, character) =
-        achievement_actor(&app, "lost-update-ack", Some(crate::endgame::CASTLE), true).await;
+    let (owner, id, character, _inbox) = achievement_human(&app, "lost-update-ack").await;
     let receipt = begin_achievement_update(&app, 'a').await;
     elapsed_for_unit_test(&app);
     let mut headers = HeaderMap::new();
@@ -643,17 +701,32 @@ async fn achievement_consumed_intent_survives_discarded_ack_and_later_drain_fail
     let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
     let paid: (i64, Option<i64>) = db.query_row("SELECT awarded_at,notified_at FROM gold_rewards WHERE account=?1 AND reward='achievement_no'", [character.account], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     db.execute_batch("CREATE TRIGGER fixture_later_drain_failure BEFORE UPDATE ON characters BEGIN SELECT RAISE(ABORT,'fixture post-consume save failure'); END;").unwrap();
-    let error = super::super::drain_shutdown(&app, std::future::ready(Ok(())))
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("shutdown drain failed"));
+    let released = release_on_cancel(owner);
+    let finalization = lifecycle::finalize(&app, id, CloseReason::Shutdown).unwrap();
+    let (shutdown, persistence) = tokio::join!(
+        super::super::drain_shutdown(&app, std::future::ready(Ok(()))),
+        finalization.wait()
+    );
+    assert!(
+        persistence
+            .unwrap_err()
+            .to_string()
+            .contains("fixture post-consume save failure")
+    );
+    assert!(
+        shutdown
+            .unwrap_err()
+            .to_string()
+            .contains("shutdown drain failed")
+    );
     let exact: Receipt = serde_json::from_value(receipt.clone()).unwrap();
-    let mut service = app.restart.lock().unwrap();
-    assert_eq!(service.current.as_ref().unwrap().status.state, "consumed");
-    assert!(service.consume(&exact, Instant::now()).is_err());
-    assert!(service.begin("b".repeat(64), Instant::now()).is_err());
-    assert!(service.finish(&exact, true, Instant::now()).is_err());
-    drop(service);
+    {
+        let mut service = app.restart.lock().unwrap();
+        assert_eq!(service.current.as_ref().unwrap().status.state, "consumed");
+        assert!(service.consume(&exact, Instant::now()).is_err());
+        assert!(service.begin("b".repeat(64), Instant::now()).is_err());
+        assert!(service.finish(&exact, true, Instant::now()).is_err());
+    }
     assert_eq!(
         call(
             &app,
@@ -678,5 +751,5 @@ async fn achievement_consumed_intent_survives_discarded_ack_and_later_drain_fail
     );
     db.execute_batch("DROP TRIGGER fixture_later_drain_failure")
         .unwrap();
-    drop(owner);
+    released.await.unwrap();
 }
