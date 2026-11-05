@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -112,6 +113,22 @@ time.sleep(60)
         self.assertIn('preserving the unknown return', cancelled.stderr)
         self.assertEqual(self.receipt(directory)['status'], 'reclaimed')
         self.assertFalse((directory / 'command.json').exists())
+        self.assertFalse(space(directory).exists())
+
+    def test_cancel_forces_a_term_ignoring_command_without_fabricating_a_wait(self):
+        code = "import os,pathlib,signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); pathlib.Path(os.environ['QA_RESULTS_DIR'],'ready').touch(); time.sleep(60)"
+        result, directory = self.launch(code, '--background')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        eventually(lambda: (directory / 'results/ready').exists())
+        cancelled = self.invoke('cancel', str(directory))
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertEqual(self.receipt(directory)['status'], 'reclaimed')
+        # Escalation may kill the receipt writer before or after it reaps the command.
+        receipt = directory / 'command.json'
+        if receipt.exists():
+            self.assertEqual(json.loads(receipt.read_text())['returncode'], -signal.SIGKILL)
+        else:
+            self.assertIn('preserving the unknown return', cancelled.stderr)
         self.assertFalse(space(directory).exists())
 
     def test_success_and_failure_keep_evidence_and_remove_only_scratch(self):

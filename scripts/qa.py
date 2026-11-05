@@ -396,12 +396,10 @@ def main(argv=None):
             state = unit_state(row['unit'])
             if state['InvocationID'] != row.get('invocation'):
                 raise RuntimeError('Cannot cancel a different or unrecorded service invocation')
-            # A reaped/crashed worker can leave children; an in-flight worker still owes its wait receipt.
-            reaped = (directory / 'command.json').exists()
-            if not reaped and state['MainPID'] == '0':
-                print('QA worker exited without a command wait receipt; closing its owned cgroup, preserving the unknown return.', file=sys.stderr)
-            operation = ['stop'] if reaped or state['MainPID'] == '0' else ['kill', '--kill-whom=main', '--signal=SIGTERM']
-            return subprocess.call(['systemctl', '--user', *operation, row['unit']])
+            code = subprocess.call(['systemctl', '--user', 'stop', row['unit']])
+            if code == 0 and not (directory / 'command.json').exists():
+                print('QA stopped without a command wait receipt; preserving the unknown return.', file=sys.stderr)
+            return code
         if args.timeout < 1:
             raise RuntimeError('--timeout must be positive')
         if ROOT.stat().st_uid != os.getuid():
@@ -425,7 +423,7 @@ def main(argv=None):
         unit = load(directory)['unit']
         inherit = [f'--setenv={key}' for key in os.environ if key not in ('INVOCATION_ID', 'NOTIFY_SOCKET', 'JOURNAL_STREAM', 'SYSTEMD_EXEC_PID') and not key.startswith(('LISTEN_', 'WATCHDOG_'))]
         launch = ['systemd-run', '--user', '--quiet', '--collect', '--service-type=exec', '--unit=' + unit,
-                  '--property=ExitType=cgroup', '--property=KillMode=control-group', '--property=Restart=no',
+                  '--property=ExitType=cgroup', '--property=KillMode=mixed', '--property=Restart=no',
                   '--property=RuntimeMaxSec=' + str(args.timeout), '--property=TimeoutStopSec=20',
                   '--property=UMask=0077', '--property=WorkingDirectory=' + str(ROOT).replace('%', '%%'),
                   '--property=StandardOutput=append:' + str(results / 'worker.log').replace('%', '%%'),
