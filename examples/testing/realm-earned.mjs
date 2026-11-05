@@ -79,10 +79,13 @@ export async function run(fighter){
   await writeFile(join(out,'earned-source.json'),JSON.stringify({scope:'Prepared nearby cooperative raid, ordinary unreduced quest/event combat; not coast/level1/history/population acceptance. Named follow chat uses the existing test-game-bot legacy invitation path (60s), not public dialogue or LLM acceptance. Auxiliary initial positions are declared before their own enrollment. No existing actor relocation, protection, direct kill, progress injection or replacement characters.',runtime:bootstrap.runtime,source:JSON.parse(await readFile(join(native,'result.json'),'utf8')).source,initialRoots:initial,map:{id:info.realm_layout,file,sha256:createHash('sha256').update(raw).digest('hex')},caps}));
   const starts=partyPositions(collision,entered.position,profiles.length).map(position=>({position}));
   const cohort=randomUUID();for(let i=0;i<profiles.length;i++){
-    const spec={guid:'earned-'+cohort+'-'+i,...auxiliary(profiles[i],i),world:realm,position:starts[i].position},created=await api({op:'spawn',spec}),v=await api({op:'observe',actor:created.actor});assert(created.connected&&created.controller==='game_bot'&&created.world===realm&&v.registered_profile===profiles[i]);originals.push(originalIdentity(profiles[i],spec,v));await writeFile(join(out,'earned-originals.json'),JSON.stringify({runtime:bootstrap.runtime,originals,fronts:starts}));
+    const spec={guid:'earned-'+cohort+'-'+i,...auxiliary(profiles[i],i),world:realm,position:starts[i].position},created=await api({op:'spawn',spec}),v=await api({op:'observe',actor:created.actor});assert(created.connected&&created.controller==='game_bot'&&created.world===realm&&v.registered_profile===profiles[i]);assert.deepEqual(v.position,spec.position,'Initial auxiliary placement differs from its declared fixture');originals.push(originalIdentity(profiles[i],spec,v));await writeFile(join(out,'earned-originals.json'),JSON.stringify({runtime:bootstrap.runtime,originals,fronts:starts}));
   }
   assert(originals.length===14&&new Set(originals.map(o=>o.account)).size===14&&new Set(originals.map(o=>o.character)).size===14);
   await save('initial-party');
+  // Paused enrollment has not published peers to the native client's known-object set.
+  await act(fighter,{keys:[],duration_ms:1000},'earned-published-party');const published=await save('published-party');
+  fighter.check('ordinary publication exposes exact original prepared peers to the client-known view',originals.slice(2).every(o=>published.objects.some(p=>p.id===o.initial.session.player&&p.account===o.account&&p.kind===o.class&&p.name===o.role&&p.hp>0)));
   for(let iteration=0;iteration<300;iteration++){
     await logs();if(ledger.snapshot().pending.length===0)break;
     await invite();const v=await fighter.observe();assert(v.lifecycle.alive&&v.session.world===realm,'Original fighter left combat before earned closure');
