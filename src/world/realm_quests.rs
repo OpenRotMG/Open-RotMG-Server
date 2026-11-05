@@ -1720,6 +1720,7 @@ fn phoenix_egg_pulses_only_after_its_shield_expires() {
         cell.object = None;
     }
     let mut world = World::new(content, Arc::new(map)).unwrap();
+    world.encounter = true;
     world.now = 5000;
     let mut character = Character::fresh(world.content.get(0x30e).unwrap()).unwrap();
     character.id = 1;
