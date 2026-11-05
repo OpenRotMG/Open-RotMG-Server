@@ -1,4 +1,6 @@
 use super::*;
+use crate::world::Output;
+use tokio::sync::watch;
 
 #[test]
 fn cancel_before_deadline_fences_the_exact_owner_and_cannot_be_replayed() {
