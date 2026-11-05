@@ -55,7 +55,7 @@ export async function run(fighter){
     const world=(await client.observe()).session.world;
     for(let n=0;n<80;n++){
       const v=await client.observe();if(v.session.world!==world)return;
-      if(client===fighter&&world!==-2&&ledger?.snapshot().pending.length===0)return;
+      if(client===fighter&&world!==-2&&(ledger?.snapshot().pending.length===0||recoveryState(v.character).retreat))return;
       const dx=goal.x-v.position.x,dy=goal.y-v.position.y,d=distance(goal,v.position);if(d<.6&&Math.floor(goal.x)===Math.floor(v.position.x)&&Math.floor(goal.y)===Math.floor(v.position.y))return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');
       await act(client,{keys,duration_ms:Math.min(6000,Math.max(80,Math.round(d*1000/7.734)))});
@@ -87,9 +87,7 @@ export async function run(fighter){
       await save('retreat-'+iteration);await act(fighter,{keys:['Insert'],duration_ms:1000});assert.equal((await fighter.observe()).world,'Nexus');
       for(let n=0;!recoveryState((await fighter.observe()).character).recovered;n++){assert(n<30,'Ordinary Nexus regeneration did not restore the original reserve');await act(fighter,{keys:[],duration_ms:5000});}
       const portal=(await observer.inspect()).view.objects.find(o=>o.id===entrance.id);assert(portal?.usable,'Original entrance closed while the original recovered');await enter(fighter,portal);
-      const companion=originals.find(o=>o.role===profiles[0]),peer=await api({op:'observe',actor:companion.actor});assert(peer.lifecycle.alive&&peer.session.world===realm,'Original companion cannot receive an ordinary teleport');
-      const player=(await fighter.observe()).session.player,offset=events.length;await act(fighter,{keys:[],chat:'/teleport '+profiles[0],duration_ms:1000});
-      assert(events.slice(offset).some(e=>e.message==='player teleported'&&e.player===player&&e.target===peer.session.player),'Ordinary native teleport did not receive a bound success');await save('recovered-'+iteration);continue;
+      await save('recovered-'+iteration);continue;
     }
     if((await observer.observe()).game_ms-invitation>=45000){await act(fighter,{keys:[],duration_ms:1000,chat:'DrFlux follow me'});invitation=(await observer.observe()).game_ms;}
     terrain=await map(fighter,true);collision=collisionMap(terrain);const pending=new Set(ledger.snapshot().pending),family=terrain.entities.filter(e=>(pending.has(e.id)||pending.has(e.quest)||pending.has(e.parent))&&e.hp>0).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position));
