@@ -37,7 +37,14 @@ fn chamber_unlock_rejects_rolls_back_and_publishes_once_to_everyone() {
             d.worlds
                 .get_mut(&world)
                 .unwrap()
-                .enter(ch, Some(Output { packets, lost }))
+                .enter(
+                    ch,
+                    Some(Output {
+                        trace: None,
+                        packets,
+                        lost,
+                    }),
+                )
                 .unwrap(),
         );
         receivers.push(inbox);

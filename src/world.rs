@@ -99,6 +99,7 @@ mod coil;
 mod jungle;
 
 mod cooperative;
+mod evidence;
 
 mod mechanics;
 use mechanics::SummonBudget;
@@ -124,6 +125,7 @@ pub(crate) mod view;
 pub use trade::{TradeAction, TradePlan};
 #[derive(Clone)]
 pub struct Output {
+    pub trace: Option<crate::audit::Trace>,
     pub packets: mpsc::Sender<Packet>,
     pub lost: watch::Sender<Option<&'static str>>,
 }
@@ -376,6 +378,8 @@ pub struct Player {
     weapon_ticks: VecDeque<(i32, i32, i32)>,
     native_lag: native_lag::Window,
     audit_motion: crate::audit::MotionWindow,
+    audit_view: Option<evidence::View>,
+    audit_revision: u64,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
@@ -2904,29 +2908,34 @@ impl Handle {
 pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
     spectator::publish(p, id, &body);
     let packet_bytes = body.len();
-    if let Some(tx) = &p.tx
-        && let Err(error) = tx.packets.try_send(Packet { id, body })
-    {
-        lose(
-            &tx.lost,
-            if tx.packets.is_closed() {
-                "output_queue_closed"
-            } else {
-                "output_queue_full"
-            },
-        );
-        let queue_state = match error {
-            mpsc::error::TrySendError::Full(_) => "full",
-            mpsc::error::TrySendError::Closed(_) => "closed",
-        };
-        tracing::warn!(
-            character = p.character.id,
-            packet = id,
-            packet_bytes,
-            queue_state,
-            queue_capacity = tx.packets.max_capacity(),
-            "outbound game packet rejected; closing connection"
-        );
+    if let Some(tx) = &p.tx {
+        let attempt_us = tx.trace.as_ref().map(crate::audit::Trace::stamp);
+        let result = tx.packets.try_send(Packet { id, body });
+        if let Some(trace) = &tx.trace {
+            trace.event("enqueue_result",Some(id),None,serde_json::json!({"attempt_us":attempt_us,"body_bytes":packet_bytes,"returned_ok":result.is_ok(),"observed_queue":tx.packets.max_capacity()-tx.packets.capacity()}));
+        }
+        if let Err(error) = result {
+            lose(
+                &tx.lost,
+                if tx.packets.is_closed() {
+                    "output_queue_closed"
+                } else {
+                    "output_queue_full"
+                },
+            );
+            let queue_state = match error {
+                mpsc::error::TrySendError::Full(_) => "full",
+                mpsc::error::TrySendError::Closed(_) => "closed",
+            };
+            tracing::warn!(
+                character = p.character.id,
+                packet = id,
+                packet_bytes,
+                queue_state,
+                queue_capacity = tx.packets.max_capacity(),
+                "outbound game packet rejected; closing connection"
+            );
+        }
     }
 }
 fn stat(out: &mut Writer, id: u8, v: i32) {
@@ -3695,6 +3704,8 @@ impl World {
                 weapon_ticks: VecDeque::from([(-1, ch.items[0], dex)]),
                 native_lag: native_lag::Window::default(),
                 audit_motion: crate::audit::MotionWindow::default(),
+                audit_view: None,
+                audit_revision: 0,
                 committed_lifetime: ch.lifetime.clone(),
                 character: ch,
                 pos,
@@ -3771,6 +3782,10 @@ impl World {
         );
         if let Some(key) = admission {
             self.admissions.remove(&key);
+        }
+        let p = &self.players[&id];
+        if let Some(trace) = p.tx.as_ref().and_then(|o| o.trace.as_ref()) {
+            trace.bind([p.character.account, p.character.id, id], &self.name);
         }
         let mut o = Writer::new();
         o.i32(id).i32(char_id);
@@ -4016,6 +4031,9 @@ impl World {
             .entry(index)
             .and_modify(|old| *old = (self.now, old.1.max(deadline)))
             .or_insert((self.now, deadline));
+        if let Some(p) = self.players.get(&id) {
+            p.audit_fact(id,&self.name,self.now,"condition_applied",||serde_json::json!({"index":index,"since":self.now,"until":p.statuses[&index].1,"conditions":p.conditions(self.now)}));
+        }
         tracing::debug!(
             entity = id,
             condition = index,
@@ -4145,6 +4163,10 @@ impl World {
             .map(|(peer, player)| (*peer, player))
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
+        self.players
+            .get_mut(&id)
+            .context("audit state player missing")?
+            .audit_state(id, &self.name, self.now, &self.content, "updates")?;
         let started = crate::performance::Measure::start();
         let pos = self.players[&id].pos;
         let center = (pos.x as i32, pos.y as i32);
@@ -5511,7 +5533,15 @@ impl World {
             tracing::info!(player = plan.player, revision, "XP boost committed");
         }
         let values = p.effective(&self.content, self.now)?;
+        let hp_before = p.character.hp;
         p.character.hp = p.character.hp.min(values[0]);
+        p.audit_hp(
+            plan.player,
+            &self.name,
+            self.now,
+            "equipment_cap",
+            hp_before,
+        );
         p.character.mp = p.character.mp.min(values[1]);
         if self.prepared_seed.is_some()
             && let Some((bag, slot)) = plan.loot_slot
@@ -5645,6 +5675,7 @@ impl World {
         ensure!(!p.correcting()?, "position correction is already pending");
         let mut out = Writer::new();
         out.i32(id).f32(p.pos.x).f32(p.pos.y);
+        p.audit_fact(id,&self.name,self.now,"correction",||serde_json::json!({"reason":reason.chars().take(512).collect::<String>(),"client_ms":time,"destination":[p.pos.x,p.pos.y],"epoch":p.audit_motion.epoch+1}));
         reconciliation::goto(p, true, out.0);
         p.native_lag.correct(reason);
         tracing::warn!(
@@ -5815,7 +5846,9 @@ impl World {
         p.character.tombs = snapshot.tombs;
         if leveled && !p.death_pending {
             let values = p.effective(&self.content, self.now)?;
+            let hp_before = p.character.hp;
             p.character.hp = values[0];
+            p.audit_hp(id, &self.name, self.now, "level_up", hp_before);
             p.character.mp = values[1];
             p.hp_fraction = 0.;
             p.mp_fraction = 0.;
@@ -7612,6 +7645,16 @@ impl World {
         self.expire_native_projectiles();
         let ids: Vec<_> = self.players.keys().copied().collect();
         for id in &ids {
+            let p = self.players.get_mut(id).unwrap();
+            if p.controller == Controller::Human {
+                for (index, (since, until)) in &p.statuses {
+                    if *until > self.now - 50 && *until <= self.now {
+                        p.audit_fact(*id,&self.name,self.now,"condition_expired",||serde_json::json!({"index":index,"since":since,"until":until,"conditions":p.conditions(self.now)}));
+                    }
+                }
+                p.audit_state(*id, &self.name, self.now, &self.content, "world_step")
+                    .expect("valid audited player state");
+            }
             self.step_bot_inputs(*id);
             let p = &self.players[id];
             if !p.active() {
@@ -7646,6 +7689,7 @@ impl World {
             } else {
                 0.
             };
+            let hp_before = p.character.hp;
             if p.character.hp < values[0]
                 && regeneration > 0.
                 && flags & crate::condition::bit(crate::condition::SICK) == 0
@@ -7660,6 +7704,13 @@ impl World {
             if flags & crate::condition::bit(crate::condition::BLEEDING) != 0 {
                 p.character.hp = (p.character.hp - 1).max(1);
             }
+            p.audit_hp(
+                *id,
+                &self.name,
+                self.now,
+                "regeneration_bleeding",
+                hp_before,
+            );
             if flags & crate::condition::bit(crate::condition::QUIET) != 0 {
                 p.character.mp = 0;
             }
@@ -8219,7 +8270,14 @@ mod prepared_native_transition_tests {
                 .worlds
                 .get_mut(&-3)
                 .unwrap()
-                .enter(ch.clone(), Some(Output { packets, lost }))
+                .enter(
+                    ch.clone(),
+                    Some(Output {
+                        trace: None,
+                        packets,
+                        lost,
+                    }),
+                )
                 .unwrap();
             while inbox.try_recv().is_ok() {}
             Self {

@@ -33,7 +33,9 @@ impl Directory {
             .context("resurrection owner missing")?;
         p.acknowledge_lifetime(restored.lifetime.clone())?;
         restored.lifetime = p.character.lifetime.clone();
+        let hp_before = p.character.hp;
         p.character = restored;
+        p.audit_hp(id, &world.name, world.now, "resurrection", hp_before);
         p.death_pending = false;
         p.death_started = false;
         p.death_lifetime = None;

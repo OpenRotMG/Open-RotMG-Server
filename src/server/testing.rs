@@ -1716,7 +1716,16 @@ mod native_state_header_tests {
         let player = app
             .world
             .in_world(-3)
-            .call(move |w| w.enter(character, Some(crate::world::Output { packets, lost })))
+            .call(move |w| {
+                w.enter(
+                    character,
+                    Some(crate::world::Output {
+                        trace: None,
+                        packets,
+                        lost,
+                    }),
+                )
+            })
             .await
             .unwrap();
         app.world

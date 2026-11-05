@@ -641,12 +641,93 @@ fn public_diagnostics(report: &Value) -> Value {
         "history": history, "browser_history": browser_history,
         "units": "Timings in milliseconds; history uses five-second buckets. RTT includes game/client/server processing. Animation-frame gaps are not game FPS. Null means unavailable. Native tick send gaps cover successful application socket writes, not client receipt; the first tick has no gap and the maximum covers the connection session. Command handler times include awaits/descheduling; world-request sums may overlap and are not exclusive handler CPU. native_lag covers up to 120 seconds in five-second buckets of the current World residency; transfer resets it. MOVE tick-ACK ingress gaps include server update cadence, network and client processing, not just network RTT. First ACK has no gap; repeated/regressed tick IDs are counted separately. Visibility hints use overlapping browser samples and never suppress gaps. World performance native_lag windows overlap: do not sum them. Other correction reasons remain in the rejection logs."})
 }
+fn audit_report(
+    report: &Value,
+    session: u64,
+    account: Option<i32>,
+    player: i32,
+    closing: bool,
+    context_status: &str,
+    context_request_ms: f64,
+) {
+    let mut values = public_diagnostics(report);
+    values
+        .as_object_mut()
+        .expect("public diagnostics object")
+        .remove("units");
+    let mut trim = |key: &str, limit: usize, tail: bool| {
+        let Some(rows) = values.pointer_mut(key).and_then(Value::as_array_mut) else {
+            return 0;
+        };
+        let omitted = rows.len().saturating_sub(limit);
+        if tail {
+            rows.drain(..omitted);
+        } else {
+            rows.truncate(limit);
+        }
+        omitted
+    };
+    let coverage = json!({"tick_buckets_omitted":trim("/history",6,false),"lag_buckets_omitted":trim("/native_lag/history",6,true),"browser_samples_omitted":trim("/browser_history",12,true)});
+    crate::audit::record(
+        "diagnostics",
+        json!({"session":session,"account":account,"player":player,"closing":closing,"context_status":context_status,"context_request_ms":context_request_ms,"coverage":coverage,"values":values}),
+    );
+}
+
+pub(super) async fn audit_session(a: &App, session: &super::Session) {
+    static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    let Some(player) = session.player else {
+        return;
+    };
+    let trace_session = session.trace.session();
+    let account = session.account.as_ref().map(|o| o.id);
+    let mut report = json!({"created_at_unix_ms":unix_ms(),"server_source_revision":a.diagnostics.source_revision,"server_binary_sha256":a.diagnostics.binary_sha256,"protocol_build":"123.5.1","connection":session.diagnostics.snapshot()});
+    let Ok(permit) = SLOTS
+        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(4)))
+        .clone()
+        .try_acquire_owned()
+    else {
+        audit_report(&report, trace_session, account, player, false, "busy", 0.);
+        return;
+    };
+    let a = a.clone();
+    // Diagnostic actor requests must not hold up this connection's packet writer.
+    tokio::spawn(async move {
+        let _permit = permit;
+        let started = Instant::now();
+        let context = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            a.world.directory(move |d| d.bug_context(player)),
+        )
+        .await;
+        let status = match context {
+            Ok(Ok(context)) => {
+                report["context"] = context;
+                "available"
+            }
+            Ok(Err(_)) => "unavailable",
+            Err(_) => "deadline",
+        };
+        audit_report(
+            &report,
+            trace_session,
+            account,
+            player,
+            false,
+            status,
+            started.elapsed().as_secs_f64() * 1000.,
+        );
+    });
+}
+
 pub(super) async fn disconnect(
     a: &App,
     player: i32,
     dropped_account: Option<i32>,
     connection: &ConnectionDiagnostics,
     transport: Value,
+    trace_session: u64,
 ) {
     // Capture before departure removes the player; never create a public bug report or gold reward.
     let mut report = json!({"created_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before epoch").as_millis(),
@@ -671,6 +752,19 @@ pub(super) async fn disconnect(
             tracing::warn!(player,transport=%transport,context_request_ms,%error,diagnostics=%public_diagnostics(&report),"game disconnect diagnostics deadline exceeded")
         }
     }
+    audit_report(
+        &report,
+        trace_session,
+        dropped_account,
+        player,
+        true,
+        if report["context"].is_null() {
+            "unavailable"
+        } else {
+            "available"
+        },
+        context_request_ms,
+    );
     if let Some(account) = dropped_account {
         let drop = json!({"at_unix_ms": unix_ms(), "transport": transport, "diagnostics": public_diagnostics(&report)});
         let diagnostics = a.diagnostics.clone();

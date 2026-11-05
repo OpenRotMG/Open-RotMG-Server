@@ -1,4 +1,6 @@
 use serde_json::{Value, json};
+mod trace;
+pub use trace::{Trace, policy as trace_policy};
 
 #[derive(Default)]
 pub struct MotionWindow {

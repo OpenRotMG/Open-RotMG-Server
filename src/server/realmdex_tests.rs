@@ -63,6 +63,7 @@ async fn realmdex_counts_only_live_humans_across_worlds_and_reports_failure() {
                 let id = w.enter(
                     character,
                     Some(crate::world::Output {
+                        trace: None,
                         packets: tx,
                         lost: tokio::sync::watch::channel(None).0,
                     }),

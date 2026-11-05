@@ -48,7 +48,11 @@ fn class_quest_notification_follows_each_first_committed_threshold_once() {
             let (packets, inbox) = mpsc::channel(64);
             let (lost, _) = watch::channel(None);
             let p = world.players.get_mut(&id).unwrap();
-            p.tx = Some(Output { packets, lost });
+            p.tx = Some(Output {
+                trace: None,
+                packets,
+                lost,
+            });
             if index < 3 {
                 p.known.insert(player);
             } else {
@@ -106,7 +110,11 @@ fn class_quest_failed_progress_does_not_notify_or_advance_record() {
     p.character.fame = 19;
     let (packets, mut inbox) = mpsc::channel(64);
     let (lost, _) = watch::channel(None);
-    p.tx = Some(Output { packets, lost });
+    p.tx = Some(Output {
+        trace: None,
+        packets,
+        lost,
+    });
     p.queue_experience(1, None, false).unwrap();
     world
         .pending_progress_where(|id, _| id == player)
