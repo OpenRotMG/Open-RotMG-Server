@@ -300,7 +300,7 @@ class ReleaseContract(unittest.TestCase):
                     source.backup(future)
                     future.execute(f'PRAGMA user_version={version}')
                 before = (Path(temporary) / 'future.db').read_bytes()
-                expected = ('schema version' if version == 25
+                expected = ('schema version' if version in (23, 24, 26)
                             else 'Gold reward metadata mismatch for known schema layout')
                 with self.subTest(version=version), self.assertRaisesRegex(ValueError, expected):
                     backup.export(Path(temporary) / 'future.db', Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'future.gz', revision, revision, revision)
