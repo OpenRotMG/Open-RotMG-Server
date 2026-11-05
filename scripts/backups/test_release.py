@@ -123,14 +123,14 @@ class ReleaseContract(unittest.TestCase):
         self.assertTrue(game['gold_rewards'])
         self.assertTrue(any(row['notified_at'] is None for row in game['gold_rewards']))
         self.assertTrue(any(row['notified_at'] is not None for row in game['gold_rewards']))
-        self.assertTrue(game['vault_purchases'])
+        self.assertTrue(game['vaults'])
         self.assertTrue(any(row['earned'] > row['balance'] for row in game['account_fame']))
         buyer = game['character_slot_purchases'][0]['account']
         wallet = next(row for row in game['accounts'] if row['id'] == buyer)
-        self.assertEqual((wallet['character_slots'], wallet['credits']), (2, 10))
+        self.assertEqual((wallet['character_slots'], wallet['credits'], wallet['vault_mask']), (2, 10, 3))
         self.assertEqual(game['character_slot_purchases'][0]['timer'], -2147483648)
         tables = ('accounts', 'gold_rewards', 'discord_gold_grants', 'character_slot_purchases',
-                  'vault_purchases', 'account_fame', 'deaths', 'guilds', 'guild_members')
+                  'vaults', 'account_fame', 'deaths', 'guilds', 'guild_members')
         financial = {table: deepcopy(game[table]) for table in tables}
         archive = directory / 'schema20.gz'
         with archive.open('xb') as output:
