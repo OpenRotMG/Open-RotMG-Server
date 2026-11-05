@@ -646,14 +646,10 @@ def exchange(live, stage):
             'Atomic source exchange failed; frozen recovery state retained')
 
 
-def restore_service(config, work):
-    """A failed cutover must not leave production stopped; restart whichever release is safest to run."""
+def restore_service(config):
+    # The candidate may already have migrated live state beyond the predecessor's schema.
     if subprocess.run(['systemctl', 'is-active', '--quiet', 'openrotmg.service']).returncode == 0:
         return 'already_running'
-    previous = work / 'previous-server-path'
-    if previous.exists():
-        exchange(LIVE, Path(previous.read_text().strip()))
-        previous.rename(work / 'restored-server-path')
     run('systemctl', 'reset-failed', 'openrotmg.service')
     run('systemctl', 'start', 'openrotmg.service')
     ready(int(config['bind'].rsplit(':', 1)[1]))
@@ -725,11 +721,11 @@ def deploy(stage, work, metadata, config):
             failure = {'stage': cutover, 'error': str(error), 'recovery': str(work), 'previous_server': str(stage)}
             (work / 'post-stop-failure.json').write_text(json.dumps(failure, indent=2) + '\n')
             try:
-                failure['restored'] = restore_service(config, work)
+                failure['restored'] = restore_service(config)
             except BaseException as restore:
                 failure['restore_error'] = str(restore)
             (work / 'post-stop-failure.json').write_text(json.dumps(failure, indent=2) + '\n')
-            raise RuntimeError(f'Post-stop {cutover} failed: {error}; restored: {failure.get("restored")}; recovery: {work}') from error
+            raise RuntimeError(f'Post-stop {cutover} failed: {error}; restored: {failure.get("restored")}; restore error: {failure.get("restore_error")}; recovery: {work}') from error
     try:
         start_backup()
     except BaseException as error:

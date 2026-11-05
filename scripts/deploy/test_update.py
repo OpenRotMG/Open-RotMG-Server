@@ -208,31 +208,54 @@ class UpdateTest(unittest.TestCase):
                     update.install_helper(source)
                 self.assertEqual(installed.read_text(), 'new = 2\n')
 
-    def test_failed_cutover_restarts_the_previous_release(self):
+    def test_failed_cutover_restarts_only_current_release_and_preserves_operator_recovery(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             live, old = root / 'server', root / 'server-stage-old'
             live.mkdir()
-            (live / 'REVISION').write_text('new\n')
-            (root / 'previous-server-path').write_text(str(old) + '\n')
-            calls = []
-            def swap(a, b):
-                calls.append(('exchange', a, b))
-                (live / 'REVISION').write_text('old\n')
-            stopped = unittest.mock.MagicMock(returncode=3)
-            with patch.object(update, 'LIVE', live), patch.object(update, 'exchange', side_effect=swap), \
-                    patch.object(update.subprocess, 'run', return_value=stopped), \
-                    patch.object(update, 'run', side_effect=lambda *a: calls.append(a)), \
-                    patch.object(update, 'ready', side_effect=lambda port: calls.append(('ready', port))), \
-                    contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(update.restore_service({'bind': '127.0.0.1:18923'}, root), 'old')
-            self.assertEqual(calls, [('exchange', live, old), ('systemctl', 'reset-failed', 'openrotmg.service'),
-                                     ('systemctl', 'start', 'openrotmg.service'), ('ready', 18923)])
-            self.assertTrue((root / 'restored-server-path').exists())
-            running = unittest.mock.MagicMock(returncode=0)
-            with patch.object(update.subprocess, 'run', return_value=running), patch.object(update, 'run') as run:
-                self.assertEqual(update.restore_service({'bind': '127.0.0.1:18923'}, root), 'already_running')
+            (live / 'REVISION').write_text('current\n')
+            previous = root / 'previous-server-path'
+            previous.write_text(str(old) + '\n')
+            original = previous.read_bytes()
+            read_text = Path.read_text
+            expected = [('systemctl', 'reset-failed', 'openrotmg.service'),
+                        ('systemctl', 'start', 'openrotmg.service'), ('ready', 18923), ('read_revision',)]
+            for failed, count in [(None, 4), ('reset-failed', 1), ('start', 2), ('ready', 3)]:
+                with self.subTest(failed=failed):
+                    calls = []
+                    def run(*args):
+                        calls.append(args)
+                        if args[1] == failed:
+                            raise RuntimeError('synthetic recovery failure')
+                    def ready(port):
+                        calls.append(('ready', port))
+                        if failed == 'ready':
+                            raise RuntimeError('synthetic recovery failure')
+                    def read(path, *args, **kwargs):
+                        self.assertEqual(path, live / 'REVISION')
+                        calls.append(('read_revision',))
+                        return read_text(path, *args, **kwargs)
+                    with patch.object(update, 'LIVE', live), patch.object(update, 'exchange') as exchange, \
+                            patch.object(update.subprocess, 'run', return_value=unittest.mock.Mock(returncode=3)), \
+                            patch.object(update, 'run', side_effect=run), patch.object(update, 'ready', side_effect=ready), \
+                            patch.object(Path, 'read_text', new=read), contextlib.redirect_stdout(io.StringIO()):
+                        if failed:
+                            with self.assertRaisesRegex(RuntimeError, 'synthetic recovery failure'):
+                                update.restore_service({'bind': '127.0.0.1:18923'})
+                        else:
+                            self.assertEqual(update.restore_service({'bind': '127.0.0.1:18923'}), 'current')
+                        exchange.assert_not_called()
+                    self.assertEqual(calls, expected[:count])
+                    self.assertEqual(previous.read_bytes(), original)
+                    self.assertFalse((root / 'restored-server-path').exists())
+            with patch.object(update.subprocess, 'run', return_value=unittest.mock.Mock(returncode=0)), \
+                    patch.object(update, 'run') as run, patch.object(update, 'ready') as ready, \
+                    patch.object(update, 'exchange') as exchange:
+                self.assertEqual(update.restore_service({'bind': '127.0.0.1:18923'}), 'already_running')
                 run.assert_not_called()
+                ready.assert_not_called()
+                exchange.assert_not_called()
+            self.assertEqual(previous.read_bytes(), original)
 
     def test_caddy_install_reloads_changes_and_restores_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:
