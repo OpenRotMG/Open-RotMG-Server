@@ -111,7 +111,8 @@ async fn original_source_survives_pickup_but_player_redeposits_do_not_create_dis
             )
             .unwrap();
         assert!(plan.collected.is_none());
-        w.finish_inventory(plan, Ok(revision + 3)).unwrap();
+        let revision = plan.revision + 1;
+        w.finish_inventory(plan, Ok(revision)).unwrap();
         w.players.get_mut(&player).unwrap().character.items[11] = -1;
     }
 }
@@ -122,7 +123,14 @@ async fn generated_landmark_chest_loot_has_its_chest_source() {
     let player = *w.players.keys().next().unwrap();
     w.players.get_mut(&player).unwrap().controller = Controller::Human;
     let pos = w.players[&player].pos;
-    for kind in [crate::dungeon::jungle::COIL, 0x925, 0x678, 0x67d, 0x928] {
+    for kind in [
+        crate::dungeon::jungle::COIL,
+        0x925,
+        0x675,
+        0x678,
+        0x67d,
+        0x668,
+    ] {
         let mut picked = false;
         for seed in 0..64 {
             for id in w.entities.keys().copied().collect::<Vec<_>>() {
