@@ -9,7 +9,7 @@ pub struct Review {
     pub reviewed_on: String,
 }
 
-pub(super) fn load(path: &Path) -> Result<Vec<Review>> {
+pub(crate) fn load(path: &Path) -> Result<Vec<Review>> {
     parse(&std::fs::read_to_string(path).context("read reviewed account decisions")?)
 }
 

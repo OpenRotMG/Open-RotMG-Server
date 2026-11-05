@@ -112,7 +112,13 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         "missing reference client {}; run ./run.sh to download the pinned client",
         client.join("client.swf").display()
     );
-    let content = Arc::new(content::Content::load(&config.data)?);
+    let mut content = content::Content::load(&config.data)?;
+    if let Some(path) = std::env::var_os("OPENROTMG_REVIEWED_ACCOUNTS") {
+        let path = std::path::Path::new(&path);
+        content.reviewed_accounts = content::reviews::load(path)?;
+        tracing::info!(path=%path.display(), decisions=content.reviewed_accounts.len(), "server reviewed account decisions loaded");
+    }
+    let content = Arc::new(content);
     let keys = Arc::new(crypto::Keys::load(&state)?);
     let swf = Arc::new(keys.client(&client.join("client.swf"))?);
     if config.test_state {

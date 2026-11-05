@@ -4,7 +4,7 @@ mod abilities;
 pub(crate) mod item_values;
 pub use abilities::Ability;
 mod consumables;
-mod reviews;
+pub(crate) mod reviews;
 pub use consumables::{Companion, ConsumableEffect};
 pub use reviews::Review;
 use serde::Serialize;
