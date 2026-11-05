@@ -92,6 +92,11 @@ export async function run(fighter){
   const starts=partyPositions(collision,entered.position,profiles.length).map(position=>({position}));
   const cohort=randomUUID();for(let i=0;i<profiles.length;i++){
     const spec={guid:'earned-'+cohort+'-'+i,...auxiliary(profiles[i],i),world:realm,position:starts[i].position},created=await api({op:'spawn',spec}),v=await api({op:'observe',actor:created.actor});assert(created.connected&&created.controller==='game_bot'&&created.world===realm&&v.registered_profile===profiles[i]);assert.deepEqual(v.position,spec.position,'Initial auxiliary placement differs from its declared fixture');originals.push(originalIdentity(profiles[i],spec,v));await writeFile(join(out,'earned-originals.json'),JSON.stringify({runtime:bootstrap.runtime,originals,fronts:starts}));
+    await act(fighter,{keys:[],duration_ms:1000});const known=(await fighter.inspect()).view.objects.find(p=>p.id===v.session.player);
+    assert(known&&known.account===v.session.account&&known.name===profiles[i]&&known.kind===spec.class&&known.hp>0,'New original peer must be client-known before its local invitation');
+    await act(fighter,{keys:[],duration_ms:1100,chat:profiles[i]+' follow me'});if(i===0)invitation=(await observer.observe()).game_ms;
+    assert(events.some(e=>e.message==='autonomous follow selected'&&e.account===v.session.account&&e.target===entered.session.player&&e.world===realm),'New original peer did not select the ordinary follow request');
+    await appendFile(join(out,'earned-enrollment-calls.jsonl'),JSON.stringify({role:profiles[i],actor:created.actor,account:v.session.account,player:v.session.player,native:entered.session.player,claim:'Original peer published and selected normal follow; not proof of sustained movement, combat or whole-clear acceptance'})+'\n');
   }
   assert(originals.length===14&&new Set(originals.map(o=>o.account)).size===14&&new Set(originals.map(o=>o.character)).size===14);
   await save('initial-party');
