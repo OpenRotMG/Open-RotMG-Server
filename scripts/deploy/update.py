@@ -700,17 +700,9 @@ def deploy(stage, work, metadata, config):
         outcome(work, 'cutover', stage)
         cutover = 'stop'
         try:
-            try:
-                stop_prepared(config, work)
-            except DrainRefused as refused:
-                # Live Nov 3: the build being replaced could not drain its own failed sessions, which blocked every fix.
-                # Saves are atomic, so stopping it loses only those sessions' unsaved work, exactly as a manual restart would.
-                run('systemctl', 'stop', 'openrotmg.service')
-                result = subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip()
-                print(json.dumps({'replacing_undrained_server': str(refused), 'shutdown_result': result}), flush=True)
-            else:
-                cutover = 'shutdown_result'
-                require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
+            stop_prepared(config, work)
+            cutover = 'shutdown_result'
+            require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
             cutover = 'freeze_recovery'
             frozen = work / 'cutover'
             frozen.mkdir(mode=0o700)
@@ -796,7 +788,6 @@ def main(desired, raw):
     require(len(raw) <= LIMIT, 'Deployment archive exceeds 64 MiB')
     ROOT.mkdir(mode=0o700, exist_ok=True)
     retain_deployments()
-    require(shutil.disk_usage(ROOT).free >= 2 * 1024**3, 'Less than 2 GiB free; inspect retained recovery data before deploying')
     work = None
     try:
         with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as archive:
