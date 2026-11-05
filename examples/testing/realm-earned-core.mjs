@@ -57,6 +57,24 @@ export function route(map,start,goal){
   const path=[];for(let id=target;id!==origin;id=parent[id])path.push(id);path.push(origin);path.reverse();
   return path.filter((p,i)=>i===0||i===path.length-1||p-path[i-1]!==path[i+1]-p).map(id=>({x:id%width+.5,y:Math.floor(id/width)+.5}));
 }
+export function inputWork(input,actor){
+  const steps=Array.isArray(input)?input:[{actor,input}];assert(steps.length>0&&steps.length<=32,'Bounded nonempty native sequence required');
+  let duration=0;for(const step of steps){assert(step.actor===actor&&Number.isSafeInteger(step.input?.duration_ms)&&step.input.duration_ms>0&&step.input.duration_ms<=10000,'Each planned input requires its original actor and bounded duration');duration+=step.input.duration_ms;}
+  assert(duration<=10000,'Native sequence total exceeds 10000ms');return {duration,inputs:steps.length};
+}
+export function nativeReceiptRoom(files,limit,reserve){
+  assert(Number.isSafeInteger(limit)&&limit>0&&Number.isSafeInteger(reserve)&&reserve>=0);const used=files.filter(n=>n.endsWith('.client.json')).length;
+  assert(used+1+reserve<=limit,'Actual native client receipt reserve exhausted');return used;
+}
+export function partyPositions(map,origin,count){
+  assert(Number.isSafeInteger(count)&&count>0&&count<=12);const start={x:Math.floor(origin.x)+.5,y:Math.floor(origin.y)+.5},queue=[start],seen=new Set([start.y*map.width+start.x]);
+  assert(start.x>=0&&start.y>=0&&start.x<map.width&&start.y<map.height&&!map.blocked[Math.floor(start.y)*map.width+Math.floor(start.x)],'Party origin must be an actual safe cell');
+  for(const p of queue)for(const [dx,dy]of [[0,-1],[-1,0],[1,0],[0,1]]){const q={x:p.x+dx,y:p.y+dy},key=q.y*map.width+q.x;if(q.x>=0&&q.y>=0&&q.x<map.width&&q.y<map.height&&Math.hypot(q.x-origin.x,q.y-origin.y)<=8&&!seen.has(key)&&!map.blocked[Math.floor(q.y)*map.width+Math.floor(q.x)]){seen.add(key);queue.push(q);}}
+  const positions=queue.filter(p=>Math.hypot(p.x-origin.x,p.y-origin.y)>=3);
+  positions.sort((a,b)=>Math.hypot(a.x-origin.x,a.y-origin.y)-Math.hypot(b.x-origin.x,b.y-origin.y)||a.y-b.y||a.x-b.x);const chosen=[];
+  for(const p of positions)if(chosen.every(q=>Math.hypot(p.x-q.x,p.y-q.y)>=2)){chosen.push(p);if(chosen.length===count)return chosen;}
+  throw Error('Insufficient safe distinct initial party positions');
+}
 export function originalIdentity(role,spec,v){
   assert(v.lifecycle.alive&&!v.lifecycle.death_pending&&!v.lifecycle.quarantined&&Number.isSafeInteger(v.character.hp)&&v.character.hp>0&&Number.isSafeInteger(v.character.mp)&&v.character.mp>=0);
   for(const id of [v.actor,v.session.account,v.session.character])assert(Number.isSafeInteger(id)&&id>0);

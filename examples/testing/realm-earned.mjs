@@ -3,14 +3,14 @@ import {readFile,writeFile,appendFile,readdir,realpath,stat} from 'node:fs/promi
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
-import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim} from './realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions} from './realm-earned-core.mjs';
 
 export const realmSeed=1344;
 export const fixture={class:0x310,level:20,seed:1344,world:-2,position:{x:78.5,y:42.5},equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
 const profiles=['DrFlux','GHZD','DrtySausge','Kryz','TKGP','HighTech','TheDezaq','Nutzz','RobbyHobby','FnSjeZZe','Cronus','Demoted'];
 const auxiliary=(profile,i)=>({class:0x307,level:20,seed:1346+i,equipment:[0xc02,0xb28,0xaf9,0xac5],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50],controller:'game_bot',profile});
 const roots=[0x91f,0x91b,0x928,0x675,0x678,0xd56,0xd59,0xd5f,0xd50,0xd54,0xd61,0xe37],heroes=[0x668,0x67d],distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),wire=[];
-const caps={wallMs:2700000,cleanupMs:120000,activeMs:2400000,combatMs:2200000,acts:600,combatActs:530,receipts:1000,combatReceiptReserve:100,tailReserveMs:190000};
+const caps={wallMs:2700000,cleanupMs:120000,activeMs:2400000,combatMs:2200000,inputs:600,combatInputs:530,nativeReceipts:240,combatNativeReserve:50,receipts:1000,combatReceiptReserve:100,tailReserveMs:190000};
 export async function beforeNavigate({browser,signal}){
   const receiver=textReceiver(),cdp=await connect({...browser,url:'about:blank',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs'),onEvent:e=>receiver.event(e)});
   signal.addEventListener('abort',()=>cdp.close(),{once:true});wire.push({browser,receiver});await cdp.call('Network.enable');
@@ -18,7 +18,7 @@ export async function beforeNavigate({browser,signal}){
 export async function run(fighter){
   const out=process.env.QA_RESULTS_DIR,native=join(out,'native'),configFile=join(native,'native.json'),config=JSON.parse(await readFile(configFile,'utf8')),registry=JSON.parse(await readFile(join(native,'children.json'),'utf8'));
   assert.equal(await realpath(config.state),join(await realpath(native),'state'));assert.equal(registry.parent.pid,process.pid);assert(registry.deadline-Date.now()<=caps.wallMs);
-  const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),headers={Authorization:'Bearer '+token,'Content-Type':'application/json'};let serial=0,acts=0,tail=false,ledger=null,consumed='',events=[],lastGame=-1,lastShared=-1;
+  const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),headers={Authorization:'Bearer '+token,'Content-Type':'application/json'};let serial=0,acts=0,inputs=0,invitation=-Infinity,tail=false,ledger=null,consumed='',events=[],lastGame=-1,lastShared=-1;
   const api=async command=>{
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:'earned-'+(++serial),command}),signal:AbortSignal.timeout(10000)}),body=await response.json();
     assert(response.ok&&body.status!=='failed',JSON.stringify(body));
@@ -35,30 +35,37 @@ export async function run(fighter){
   assert.equal(capability.mutation_limit,1024);assert(capability.controllers.includes('game_bot')&&profiles.every(p=>capability.game_bot_profiles.includes(p)));assert.equal(wire.length,2);
   const originals=[originalIdentity('fighter',fixture,first),originalIdentity('observer',{...fixture,seed:1345},observerFirst)],samples=[];
   const save=async name=>{const row={name,fighter:await fighter.inspect(),observer:await observer.inspect(),ledger:ledger?.snapshot()};samples.push(row);await writeFile(join(out,'earned-journey.json'),JSON.stringify(samples));await writeFile(join(out,'earned-text.json'),JSON.stringify(wire.map(w=>({browser:w.browser,texts:w.receiver.texts,error:w.receiver.error}))));return row.fighter.view;};
-  const budget=async duration=>{
-    const state=await api({op:'native_state',actors:[fighter.actor,observer.actor]}),shared=state.shared_active_time,clock=state.actors.find(a=>a.actor===observer.actor).observation,receipts=(await readdir(join(config.state,'testing'))).filter(n=>n.endsWith('.receipt.json')).length;
+  const budget=async({duration,inputs:planned})=>{
+    const state=await api({op:'native_state',actors:[fighter.actor,observer.actor]}),shared=state.shared_active_time,clock=state.actors.find(a=>a.actor===observer.actor).observation,files=await readdir(join(config.state,'testing')),receipts=files.filter(n=>n.endsWith('.receipt.json')).length,nativeReceipts=nativeReceiptRoom(files,caps.nativeReceipts,tail?0:caps.combatNativeReserve);
     assert(state.native_state_version===1&&state.runtime===bootstrap.runtime&&shared.version===1&&shared.runtime===bootstrap.runtime&&shared.epoch==='native_control_binding');
     assert(clock.world==='Nexus'&&clock.session.world===-2&&clock.lifecycle.alive&&Number.isSafeInteger(clock.game_ms)&&clock.game_ms>=lastGame&&Number.isSafeInteger(shared.elapsed_ms)&&shared.elapsed_ms>=lastShared,'Original budget clock changed or regressed');lastGame=clock.game_ms;lastShared=shared.elapsed_ms;
-    assert(acts<caps.acts&&(tail||acts<caps.combatActs));assert(receipts+(tail?0:caps.combatReceiptReserve)<caps.receipts,'Actual receipt reserve exhausted');
+    assert(inputs+planned<=caps.inputs&&(tail||inputs+planned<=caps.combatInputs),'Planned raw-input reserve exhausted');assert(receipts+(tail?0:caps.combatReceiptReserve)<caps.receipts,'Actual receipt reserve exhausted');
     assert(clock.game_ms+duration<=caps.activeMs&&shared.elapsed_ms+duration<=caps.activeMs&&(tail||clock.game_ms+duration<=caps.combatMs&&shared.elapsed_ms+duration<=caps.combatMs),'Actual clock reserve exhausted');
     assert(registry.deadline-Date.now()-caps.cleanupMs>=(tail?duration+10000:caps.tailReserveMs),'Original whole-wall reserve exhausted');
     for(const w of wire)assert.equal(w.receiver.error,null,'Native text decoder failed');
-    await writeFile(join(out,'earned-budget.json'),JSON.stringify({caps,acts,tail,gameMs:clock.game_ms,sharedActiveMs:shared.elapsed_ms,receipts,deadline:registry.deadline,wallNow:Date.now()}));
+    await writeFile(join(out,'earned-budget.json'),JSON.stringify({caps,acts,inputs,plannedInputs:planned,nativeReceipts,tail,gameMs:clock.game_ms,sharedActiveMs:shared.elapsed_ms,receipts,deadline:registry.deadline,wallNow:Date.now()}));
   };
   const act=async(client,input,shot)=>{
-    assert(Number.isSafeInteger(input.duration_ms)&&input.duration_ms>0&&input.duration_ms<=10000);await budget(input.duration_ms);acts++;
+    const work=inputWork(input,client.actor);await budget(work);acts++;inputs+=work.inputs;
     const before=await client.observe(),result=await client.act(input,shot?{name:shot,when:v=>v.session.world===before.session.world&&v.game_ms>=before.game_ms+600}:undefined);
     if(shot){const mtime=(await stat(join(native,shot+'.png'))).mtimeMs,step=result.steps.find(s=>s.actor===client.actor);assert(step&&mtime>=step.input_started_wall_ms&&mtime<=step.input_release_wall_ms,'Native image write was not inside the actual held-input interval');}
     await logs();return result;
   };
+  const invite=async()=>{
+    if(tail||originals.length!==14||(await observer.observe()).game_ms-invitation<45000)return;
+    const v=await fighter.observe();if(v.world!=='Realm'||recoveryState(v.character).retreat)return;
+    const view=(await fighter.inspect()).view,visible=view.objects.filter(o=>profiles.includes(o.name)&&o.hp>0),sequence=visible.map(o=>({actor:fighter.actor,input:{keys:[],duration_ms:500,chat:o.name+' follow me'}}));assert(new Set(visible.map(o=>o.name)).size===visible.length);
+    await appendFile(join(out,'earned-calls.jsonl'),JSON.stringify({gameMs:v.game_ms,actor:fighter.actor,visible:visible.map(o=>({id:o.id,name:o.name,position:o.position})),claim:'planned named local invitations only; no acceptance or following claim'})+'\n');
+    if(sequence.length)await act(fighter,sequence);invitation=(await observer.observe()).game_ms;
+  };
   const walk=async(client,goal)=>{
     const world=(await client.observe()).session.world;
     for(let n=0;n<80;n++){
-      const v=await client.observe();if(v.session.world!==world)return;
+      if(client===fighter)await invite();const v=await client.observe();if(v.session.world!==world)return;
       if(client===fighter&&world!==-2&&(ledger?.snapshot().pending.length===0||recoveryState(v.character).retreat))return;
       const dx=goal.x-v.position.x,dy=goal.y-v.position.y,d=distance(goal,v.position);if(d<.6&&Math.floor(goal.x)===Math.floor(v.position.x)&&Math.floor(goal.y)===Math.floor(v.position.y))return;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');
-      await act(client,{keys,duration_ms:Math.min(6000,Math.max(80,Math.round(d*1000/7.734)))});
+      await act(client,{keys,duration_ms:Math.min(10000,Math.max(80,Math.round(d*1000/7.734)))});
     }throw Error('Collision-legal waypoint budget exhausted');
   };
   const enter=async(client,portal)=>{await walk(client,portal.position);await act(client,{keys:[],mouse:{x:700,y:575},duration_ms:1000});assert.equal((await client.observe()).world,'Realm');};
@@ -69,34 +76,28 @@ export async function run(fighter){
   const selection=mapInput(info.realm_layout,JSON.parse(await readFile('data/realm-catalog.json','utf8')));let file;
   if(selection.recipe){const recipe=JSON.parse(await readFile(join('data/realms',selection.recipe),'utf8'));assert.equal(recipe.id,info.realm_layout);file=join('data/realms',recipe.output);}else file=selection.file;
   const raw=await readFile(file);assert.equal(createHash('sha256').update(raw).digest('hex'),selection.sha256);let collision=collisionMap(terrain);
-  await writeFile(join(out,'earned-source.json'),JSON.stringify({scope:'Prepared distributed raid, ordinary unreduced quest/event combat; not coast/level1/history/population acceptance. Auxiliary initial positions are declared before their own enrollment. No existing actor relocation, protection, direct kill, progress injection or replacement characters.',runtime:bootstrap.runtime,source:JSON.parse(await readFile(join(native,'result.json'),'utf8')).source,initialRoots:initial,map:{id:info.realm_layout,file,sha256:createHash('sha256').update(raw).digest('hex')},caps}));
-  const starts=[{position:entered.position}],chosen=new Set();
-  for(let i=1;i<profiles.length;i++){
-    const target=initial.filter(e=>!chosen.has(e.id)).sort((a,b)=>Math.min(...starts.map(p=>distance(b.pos,p.position)))-Math.min(...starts.map(p=>distance(a.pos,p.position)))||a.id-b.id)[0];assert(target);chosen.add(target.id);const positions=[];
-    for(let dy=-9;dy<=9;dy++)for(let dx=-9;dx<=9;dx++){const p={x:Math.floor(target.pos.x)+dx+.5,y:Math.floor(target.pos.y)+dy+.5},d=distance(p,target.pos);if(p.x>=0&&p.y>=0&&p.x<collision.width&&p.y<collision.height&&d>=6&&d<=9&&!collision.blocked[Math.floor(p.y)*collision.width+Math.floor(p.x)]&&starts.every(s=>distance(s.position,p)>=1))positions.push(p);}
-    positions.sort((a,b)=>distance(a,entered.position)-distance(b,entered.position)||a.y-b.y||a.x-b.x);assert(positions.length,'No legal prepared front');starts.push({position:positions[0],root:target.id});
-  }
+  await writeFile(join(out,'earned-source.json'),JSON.stringify({scope:'Prepared nearby cooperative raid, ordinary unreduced quest/event combat; not coast/level1/history/population acceptance. Named follow chat uses the existing test-game-bot legacy invitation path (60s), not public dialogue or LLM acceptance. Auxiliary initial positions are declared before their own enrollment. No existing actor relocation, protection, direct kill, progress injection or replacement characters.',runtime:bootstrap.runtime,source:JSON.parse(await readFile(join(native,'result.json'),'utf8')).source,initialRoots:initial,map:{id:info.realm_layout,file,sha256:createHash('sha256').update(raw).digest('hex')},caps}));
+  const starts=partyPositions(collision,entered.position,profiles.length).map(position=>({position}));
   const cohort=randomUUID();for(let i=0;i<profiles.length;i++){
     const spec={guid:'earned-'+cohort+'-'+i,...auxiliary(profiles[i],i),world:realm,position:starts[i].position},created=await api({op:'spawn',spec}),v=await api({op:'observe',actor:created.actor});assert(created.connected&&created.controller==='game_bot'&&created.world===realm&&v.registered_profile===profiles[i]);originals.push(originalIdentity(profiles[i],spec,v));await writeFile(join(out,'earned-originals.json'),JSON.stringify({runtime:bootstrap.runtime,originals,fronts:starts}));
   }
-  assert(originals.length===14&&new Set(originals.map(o=>o.account)).size===14&&new Set(originals.map(o=>o.character)).size===14);let invitation=-Infinity;
+  assert(originals.length===14&&new Set(originals.map(o=>o.account)).size===14&&new Set(originals.map(o=>o.character)).size===14);
   await save('initial-party');
   for(let iteration=0;iteration<300;iteration++){
     await logs();if(ledger.snapshot().pending.length===0)break;
-    const v=await fighter.observe();assert(v.lifecycle.alive&&v.session.world===realm,'Original fighter left combat before earned closure');
+    await invite();const v=await fighter.observe();assert(v.lifecycle.alive&&v.session.world===realm,'Original fighter left combat before earned closure');
     if(recoveryState(v.character).retreat){
       await save('retreat-'+iteration);await act(fighter,{keys:['Insert'],duration_ms:1000});assert.equal((await fighter.observe()).world,'Nexus');
       for(let n=0;!recoveryState((await fighter.observe()).character).recovered;n++){assert(n<30,'Ordinary Nexus regeneration did not restore the original reserve');await act(fighter,{keys:[],duration_ms:5000});}
       const portal=(await observer.inspect()).view.objects.find(o=>o.id===entrance.id);assert(portal?.usable,'Original entrance closed while the original recovered');await enter(fighter,portal);
       await save('recovered-'+iteration);continue;
     }
-    if((await observer.observe()).game_ms-invitation>=45000){await act(fighter,{keys:[],duration_ms:1000,chat:'DrFlux follow me'});invitation=(await observer.observe()).game_ms;}
     terrain=await map(fighter,true);collision=collisionMap(terrain);const pending=new Set(ledger.snapshot().pending),family=terrain.entities.filter(e=>(pending.has(e.id)||pending.has(e.quest)||pending.has(e.parent))&&e.hp>0).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position));
     if(!family.length){assert(ledger.snapshot().waiting.length>0,'Pending ledger has neither a living family nor an actual waiting event');await act(fighter,{keys:[],duration_ms:3000});continue;}
     const view=(await fighter.inspect()).view,visible=localTargets(view.objects,family,v.position),target=visible[0];
     if(!target){const points=route(collision,v.position,family[0].pos);assert(points.length>1,'Nearby pending family is absent from the native neighborhood');await walk(fighter,points[1]);}
     // An in-flight shot can finish this target during resume; a held aim is not a live-entity assertion.
-    else{const heal=v.character.hp<v.character.stats.max_hp*.8&&v.character.mp>=85,mouse=observedAim(view,target.id,-Math.PI/4);await appendFile(join(out,'earned-aims.jsonl'),JSON.stringify({actor:fighter.actor,character:view.session.character,gameMs:view.time_ms,tick:view.tick,target:target.id,targetHP:target.hp,targetPosition:target.position,playerPosition:view.position,mouse,claim:'planned held aim at last observed position, not dispatch-time liveness or a hit receipt'})+'\n');await act(fighter,{keys:heal?[' ']:[],duration_ms:1500,mouse});}
+    else{const heal=v.character.hp<v.character.stats.max_hp*.8&&v.character.mp>=85,mouse=observedAim(view,target.id,-Math.PI/4);await appendFile(join(out,'earned-aims.jsonl'),JSON.stringify({actor:fighter.actor,character:view.session.character,gameMs:view.time_ms,tick:view.tick,target:target.id,targetHP:target.hp,targetPosition:target.position,playerPosition:view.position,mouse,claim:'planned held aim at last observed position, not dispatch-time liveness or a hit receipt'})+'\n');await act(fighter,{keys:heal?[' ']:[],duration_ms:5000,mouse});}
     if(iteration%10===0)await save('combat-'+iteration);
   }
   await logs();const completed=ledger.complete();tail=true;await writeFile(join(out,'earned-ledger.json'),JSON.stringify(completed));

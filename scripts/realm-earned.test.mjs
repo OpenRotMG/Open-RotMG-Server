@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim} from '../examples/testing/realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions} from '../examples/testing/realm-earned-core.mjs';
 const roots=Array.from({length:49},(_,i)=>i+1),census={message:'finite Realm closure roster bound',origin:-3,heroes:49};
 const credit=(hero,remaining,now=100)=>({message:'qualifying Realm hero defeated',origin:-3,hero,remaining,now});
 const waiting=source=>({message:'quest defeat earned a pending Realm event',source}),admission=(source,entity)=>({message:'quest defeat summoned a Realm event',source,entity});
@@ -49,6 +49,19 @@ test('held aim binds a live observed point without claiming the enemy survives r
 });
 test('visible combat targets retain protected phases and prefer a real unprotected family member',()=>{
   const objects=[{id:1,hp:10,position:{x:1,y:1},condition_mask:1<<23},{id:2,hp:100,position:{x:2,y:1},condition_mask:0}],family=[{id:1},{id:2}];assert.equal(localTargets(objects,family,{x:0,y:0})[0].id,2);assert.equal(localTargets(objects.slice(0,1),family,{x:0,y:0})[0].id,1);assert.throws(()=>localTargets([{...objects[0],condition_mask:undefined}],family,{x:0,y:0}),/int32/);
+});
+test('native sequences account for every planned hold and the entire bounded duration',()=>{
+  const input={keys:[],duration_ms:500},batch=Array.from({length:12},()=>({actor:1,input:{...input,chat:'DrFlux follow me'}}));assert.deepEqual(inputWork(batch,1),{duration:6000,inputs:12});assert.deepEqual(inputWork(input,1),{duration:500,inputs:1});
+  for(const bad of [[],Array(33).fill(batch[0]),[{actor:2,input}],[{actor:1,input:{...input,duration_ms:NaN}}],[{actor:1,input:{...input,duration_ms:0}}],Array(21).fill(batch[0])])assert.throws(()=>inputWork(bad,1));assert.throws(()=>inputWork({...input,duration_ms:10001},1));
+});
+test('native client receipts include bootstrap and cannot be confused with backend receipts',()=>{
+  const files=[...Array.from({length:256},(_,i)=>i+'.client.json'),...Array.from({length:524},(_,i)=>i+'.receipt.json')];assert.throws(()=>nativeReceiptRoom(files,240,0),/native client receipt reserve/);
+  const pre=files.filter(n=>!n.endsWith('.client.json')).concat(Array.from({length:189},(_,i)=>i+'.client.json'));assert.equal(nativeReceiptRoom(pre,240,50),189);assert.throws(()=>nativeReceiptRoom([...pre,'next.client.json'],240,50),/native client receipt reserve/);assert.equal(nativeReceiptRoom(Array(239).fill('c.client.json'),240,0),239);assert.throws(()=>nativeReceiptRoom(Array(240).fill('c.client.json'),240,0));assert.throws(()=>nativeReceiptRoom([],240,-1));
+});
+test('prepared party starts are nearby, separated and avoid actual hazards without actor relocation',()=>{
+  const map=collisionMap({width:21,height:21,blocked:[[10,7]],damaging_ground:[[7,10]]}),origin={x:10.5,y:10.5},positions=partyPositions(map,origin,12);assert.equal(positions.length,12);
+  for(const p of positions){assert(Math.hypot(p.x-origin.x,p.y-origin.y)>=3&&Math.hypot(p.x-origin.x,p.y-origin.y)<=8);assert(!map.blocked[Math.floor(p.y)*map.width+Math.floor(p.x)]);assert(positions.every(q=>q===p||Math.hypot(p.x-q.x,p.y-q.y)>=2));}
+  assert.throws(()=>partyPositions(collisionMap({width:21,height:21,blocked:[[10,9],[9,10],[11,10],[10,11]],damaging_ground:[]}),origin,12),/Insufficient safe/);assert.throws(()=>partyPositions({width:1,height:1,blocked:new Uint8Array(1)},origin,12),/origin must be an actual safe/);
 });
 test('original cohort identity rejects a mismatched class or controller',()=>{
   const spec={class:0x310,level:20,stats:[670,385,50,25,50,50,40,75],equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1)},v={actor:1,controller:'native',lifecycle:{alive:true,death_pending:false,quarantined:false},session:{account:2,character:3},character:{class:0x310,level:20,hp:670,mp:385,base_stats:[...spec.stats],items:[...spec.equipment,...spec.backpack],inventory_revision:4}};assert.equal(originalIdentity('fighter',spec,v).character,3);assert.throws(()=>originalIdentity('fighter',spec,{...v,controller:'game_bot'}));assert.throws(()=>originalIdentity('fighter',spec,{...v,character:{...v.character,class:0x30e}}));
