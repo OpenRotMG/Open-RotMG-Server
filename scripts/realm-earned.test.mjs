@@ -37,16 +37,16 @@ test('selected baseline and reconstruction layouts require exact catalogued inpu
 });
 test('route respects collision and rejects a genuinely unreachable encounter',()=>{
   const map={width:21,height:21,blocked:new Uint8Array(441)};for(let y=0;y<21;y++)if(y!==18)map.blocked[y*21+10]=1;
-  const points=route(map,{x:2.5,y:10.5},{x:18.5,y:10.5});assert(points.some(p=>p.y===18.5));assert(points.every(p=>!map.blocked[Math.floor(p.y)*21+Math.floor(p.x)]));map.blocked[18*21+10]=1;assert.throws(()=>route(map,{x:2.5,y:10.5},{x:18.5,y:10.5}),/No collision-legal/);
+  const points=route(map,{x:2.5,y:10.5},{x:18.5,y:10.5},[]);assert(points.some(p=>p.y===18.5));assert(points.every(p=>!map.blocked[Math.floor(p.y)*21+Math.floor(p.x)]));map.blocked[18*21+10]=1;assert.throws(()=>route(map,{x:2.5,y:10.5},{x:18.5,y:10.5},[]),/No collision-legal/);
 });
 test('eight-direction routes retain long diagonal legs without cutting blocked corners',()=>{
-  const map=collisionMap({width:31,height:31,blocked:[],damaging_ground:[]}),points=route(map,{x:2.5,y:2.5},{x:26.5,y:26.5});
+  const map=collisionMap({width:31,height:31,blocked:[],damaging_ground:[]}),points=route(map,{x:2.5,y:2.5},{x:26.5,y:26.5},[]);
   assert(points.some((p,i)=>i>0&&Math.abs(p.x-points[i-1].x)>10&&Math.abs(p.x-points[i-1].x)===Math.abs(p.y-points[i-1].y)));
   for(const [x,y]of [[2,1],[1,2],[3,2],[2,3]])map.blocked[y*31+x]=1;
-  assert.throws(()=>route(map,{x:2.5,y:2.5},{x:26.5,y:26.5}),/No collision-legal/);
+  assert.throws(()=>route(map,{x:2.5,y:2.5},{x:26.5,y:26.5},[]),/No collision-legal/);
 });
 test('route trades tiny obstacle-driven corners for longer legal keyboard legs',()=>{
-  const map=collisionMap({width:31,height:31,blocked:[[4,4],[8,8],[12,12],[16,16],[20,20]],damaging_ground:[]}),points=route(map,{x:2.5,y:2.5},{x:26.5,y:26.5});assert(points.length<=6);
+  const map=collisionMap({width:31,height:31,blocked:[[4,4],[8,8],[12,12],[16,16],[20,20]],damaging_ground:[]}),points=route(map,{x:2.5,y:2.5},{x:26.5,y:26.5},[]);assert(points.length<=6);
   for(let i=1;i<points.length;i++){const from=points[i-1],to=points[i],dx=Math.sign(to.x-from.x),dy=Math.sign(to.y-from.y);assert(dx===0||dy===0||Math.abs(to.x-from.x)===Math.abs(to.y-from.y));
     for(let x=from.x,y=from.y;x!==to.x||y!==to.y;x+=dx,y+=dy){assert(!map.blocked[Math.floor(y+dy)*31+Math.floor(x+dx)]);if(dx&&dy)assert(!map.blocked[Math.floor(y)*31+Math.floor(x+dx)]&&!map.blocked[Math.floor(y+dy)*31+Math.floor(x)]);}}
 });
@@ -64,6 +64,11 @@ test('held aim binds a live observed point without claiming the enemy survives r
 });
 test('visible combat targets retain protected phases and prefer a real unprotected family member',()=>{
   const objects=[{id:1,hp:10,position:{x:1,y:1},condition_mask:1<<23},{id:2,hp:100,position:{x:2,y:1},condition_mask:0}],family=[{id:1},{id:2}];assert.equal(localTargets(objects,family,{x:0,y:0})[0].id,2);assert.equal(localTargets(objects.slice(0,1),family,{x:0,y:0})[0].id,1);assert.throws(()=>localTargets([{...objects[0],condition_mask:undefined}],family,{x:0,y:0}),/int32/);
+});
+test('an occluded Oasis target requires an ordinary route to a clear firing position',()=>{
+  const position={x:21.085083,y:21.537170},enemy={id:99,hp:140,kind:0x67c,position:{x:25.034668,y:22.004456},condition_mask:0},objects=[enemy,...[[24.5,21.5],[25.5,21.5],[24.5,22.5]].map(([x,y],i)=>({id:i+1,blocks:true,hp:0,position:{x,y}}))],family=[{id:99}];
+  assert.equal(localTargets(objects,family,position).length,0);
+  const map=collisionMap({width:31,height:31,blocked:[[24,21],[25,21],[24,22]],damaging_ground:[]}),points=route(map,position,enemy.position,objects);assert(points.length>1);assert.equal(localTargets(objects,family,points.at(-1))[0].id,99);
 });
 test('native sequences account for every planned hold and the entire bounded duration',()=>{
   const input={keys:[],duration_ms:500},batch=Array.from({length:12},()=>({actor:1,input:{...input,chat:'DrFlux follow me'}}));assert.deepEqual(inputWork(batch,1),{duration:6000,inputs:12});assert.deepEqual(inputWork(input,1),{duration:500,inputs:1});

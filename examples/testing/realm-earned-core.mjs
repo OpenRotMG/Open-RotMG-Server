@@ -48,14 +48,15 @@ export function collisionMap(terrain){
   for(const [x,y]of [...terrain.blocked,...terrain.damaging_ground]){assert(Number.isInteger(x)&&Number.isInteger(y)&&x>=0&&y>=0&&x<width&&y<height,'Runtime collision coordinate outside map');blocked[y*width+x]=1;}
   return {width,height,blocked};
 }
-export function route(map,start,goal){
+export function route(map,start,goal,objects){
+  assert(Array.isArray(objects),'Observed cover array required');
   const {width,height,blocked}=map,total=width*height,origin=Math.floor(start.y)*width+Math.floor(start.x),initial=total*8,directions=[[0,-1],[-1,0],[1,0],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]],cost=new Map([[initial,0]]),parent=new Map([[initial,null]]),heap=[];
   assert([start.x,start.y,goal.x,goal.y].every(Number.isFinite)&&start.x>=0&&start.y>=0&&start.x<width&&start.y<height,'Finite in-bounds route origin required');
   const push=v=>{heap.push(v);let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p].f<=v.f)break;heap[i]=heap[p];i=p;}heap[i]=v;};
   const pop=()=>{const v=heap[0],last=heap.pop();if(heap.length){let i=0;for(;;){let c=i*2+1;if(c>=heap.length)break;if(c+1<heap.length&&heap[c+1].f<heap[c].f)c++;if(last.f<=heap[c].f)break;heap[i]=heap[c];i=c;}heap[i]=last;}return v;};
   const estimate=id=>Math.max(0,Math.hypot(id%width+.5-goal.x,Math.floor(id/width)+.5-goal.y)-5.5);
   push({f:estimate(origin),g:0,id:origin,dir:-1,key:initial});let target;
-  while(heap.length){const p=pop();if(cost.get(p.key)!==p.g)continue;if(estimate(p.id)===0){target=p.key;break;}const x=p.id%width,y=Math.floor(p.id/width);
+  while(heap.length){const p=pop();if(cost.get(p.key)!==p.g)continue;if(estimate(p.id)===0&&shotClear(objects,{x:p.id%width+.5,y:Math.floor(p.id/width)+.5},goal)){target=p.key;break;}const x=p.id%width,y=Math.floor(p.id/width);
     for(let d=0;d<directions.length;d++){const [dx,dy]=directions[d],nx=x+dx,ny=y+dy,n=ny*width+nx,key=n*8+d;
       if(nx<0||ny<0||nx>=width||ny>=height||blocked[n]||dx&&dy&&(blocked[y*width+nx]||blocked[ny*width+x]))continue;
       // A small detour costs less native input than repeatedly stopping at tiny grid corners.
@@ -124,8 +125,14 @@ export function walkingKeys(dx,dy){
 export function observedAim(view,entity,angle){
   const target=view.objects.find(e=>e.id===entity&&e.hp>0);assert(target,'Aim requires a living enemy in the observed neighborhood');const dx=target.position.x-view.position.x,dy=target.position.y-view.position.y,x=50*(dx*Math.cos(angle)+dy*Math.sin(angle)),y=50*(-dx*Math.sin(angle)+dy*Math.cos(angle)),scale=Math.max(1,Math.hypot(x,y)/270);assert([x,y,angle].every(Number.isFinite),'Aim geometry must be finite');return {x:300+x/scale,y:325+y/scale};
 }
+export function shotClear(objects,from,to){
+  assert(Array.isArray(objects)&&[from.x,from.y,to.x,to.y].every(Number.isFinite),'Observed cover and finite shot geometry required');
+  // Movement-blocking water must not suppress a clear shot; only observed cover does.
+  const cover=new Set(objects.filter(o=>o.blocks).map(o=>Math.floor(o.position.x)+','+Math.floor(o.position.y))),steps=Math.max(1,Math.ceil(Math.hypot(to.x-from.x,to.y-from.y)*8));
+  for(let i=0;i<=steps;i++){const f=i/steps;if(cover.has(Math.floor(from.x+(to.x-from.x)*f)+','+Math.floor(from.y+(to.y-from.y)*f)))return false;}return true;
+}
 export function localTargets(objects,family,position){
-  const candidates=objects.filter(e=>family.some(f=>f.id===e.id)&&e.hp>0&&Math.hypot(e.position.x-position.x,e.position.y-position.y)<=7),mask=(1<<23)|(1<<24)|(1<<21);
+  const candidates=objects.filter(e=>family.some(f=>f.id===e.id)&&e.hp>0&&Math.hypot(e.position.x-position.x,e.position.y-position.y)<=7&&shotClear(objects,position,e.position)),mask=(1<<23)|(1<<24)|(1<<21);
   for(const e of candidates)assert(Number.isInteger(e.condition_mask)&&e.condition_mask>=-2147483648&&e.condition_mask<=2147483647,'Combat target requires its observed int32 condition mask');
   const open=candidates.some(e=>(e.condition_mask&mask)===0);return candidates.sort((a,b)=>Number(open&&(a.condition_mask&mask)!==0)-Number(open&&(b.condition_mask&mask)!==0)||a.hp-b.hp);
 }
