@@ -84,7 +84,7 @@ export async function run(fighter){
   assert(originals.length===14&&new Set(originals.map(o=>o.account)).size===14&&new Set(originals.map(o=>o.character)).size===14);
   await save('initial-party');
   // Paused enrollment has not published peers to the native client's known-object set.
-  await act(fighter,{keys:[],duration_ms:1000},'earned-published-party');const published=await save('published-party');
+  await act(fighter,{keys:[],duration_ms:1000});const published=await save('published-party');
   fighter.check('ordinary publication exposes exact original prepared peers to the client-known view',originals.slice(2).every(o=>published.objects.some(p=>p.id===o.initial.session.player&&p.account===o.account&&p.kind===o.class&&p.name===o.role&&p.hp>0)));
   for(let iteration=0;iteration<300;iteration++){
     await logs();if(ledger.snapshot().pending.length===0)break;
