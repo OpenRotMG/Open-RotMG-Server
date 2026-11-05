@@ -49,14 +49,20 @@ export function collisionMap(terrain){
   return {width,height,blocked};
 }
 export function route(map,start,goal){
-  const {width,height,blocked}=map,total=width*height,parent=new Int32Array(total).fill(-1),queue=new Int32Array(total),origin=Math.floor(start.y)*width+Math.floor(start.x);
-  assert(origin>=0&&origin<total);parent[origin]=origin;queue[0]=origin;let head=0,tail=1,target;
-  while(head<tail){const id=queue[head++],x=id%width,y=Math.floor(id/width);if(Math.hypot(x+.5-goal.x,y+.5-goal.y)<=5.5){target=id;break;}
-    for(const [dx,dy]of [[0,-1],[-1,0],[1,0],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]){
-      const nx=x+dx,ny=y+dy,n=ny*width+nx;
-      if(nx>=0&&ny>=0&&nx<width&&ny<height&&parent[n]===-1&&!blocked[n]&&(!dx||!dy||!blocked[y*width+nx]&&!blocked[ny*width+x])){parent[n]=id;queue[tail++]=n;}}}
-  assert.notEqual(target,undefined,'No collision-legal undamaging route to the current encounter');
-  const path=[];for(let id=target;id!==origin;id=parent[id])path.push(id);path.push(origin);path.reverse();
+  const {width,height,blocked}=map,total=width*height,origin=Math.floor(start.y)*width+Math.floor(start.x),initial=total*8,directions=[[0,-1],[-1,0],[1,0],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]],cost=new Map([[initial,0]]),parent=new Map([[initial,null]]),heap=[];
+  assert([start.x,start.y,goal.x,goal.y].every(Number.isFinite)&&start.x>=0&&start.y>=0&&start.x<width&&start.y<height,'Finite in-bounds route origin required');
+  const push=v=>{heap.push(v);let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p].f<=v.f)break;heap[i]=heap[p];i=p;}heap[i]=v;};
+  const pop=()=>{const v=heap[0],last=heap.pop();if(heap.length){let i=0;for(;;){let c=i*2+1;if(c>=heap.length)break;if(c+1<heap.length&&heap[c+1].f<heap[c].f)c++;if(last.f<=heap[c].f)break;heap[i]=heap[c];i=c;}heap[i]=last;}return v;};
+  const estimate=id=>Math.max(0,Math.hypot(id%width+.5-goal.x,Math.floor(id/width)+.5-goal.y)-5.5);
+  push({f:estimate(origin),g:0,id:origin,dir:-1,key:initial});let target;
+  while(heap.length){const p=pop();if(cost.get(p.key)!==p.g)continue;if(estimate(p.id)===0){target=p.key;break;}const x=p.id%width,y=Math.floor(p.id/width);
+    for(let d=0;d<directions.length;d++){const [dx,dy]=directions[d],nx=x+dx,ny=y+dy,n=ny*width+nx,key=n*8+d;
+      if(nx<0||ny<0||nx>=width||ny>=height||blocked[n]||dx&&dy&&(blocked[y*width+nx]||blocked[ny*width+x]))continue;
+      // A small detour costs less native input than repeatedly stopping at tiny grid corners.
+      const g=p.g+Math.hypot(dx,dy)+(p.dir!==-1&&p.dir!==d?8:0);if(!cost.has(key)||g<cost.get(key)){cost.set(key,g);parent.set(key,p.key);push({f:g+estimate(n),g,id:n,dir:d,key});}}
+  }
+  assert.notEqual(target,undefined,'No collision-legal undamaging route to the current encounter');const path=[];
+  for(let key=target;key!==null;key=parent.get(key))path.push(key===initial?origin:Math.floor(key/8));path.reverse();
   return path.filter((p,i)=>i===0||i===path.length-1||p-path[i-1]!==path[i+1]-p).map(id=>({x:id%width+.5,y:Math.floor(id/width)+.5}));
 }
 export function inputWork(input,actor){

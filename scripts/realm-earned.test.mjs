@@ -45,6 +45,11 @@ test('eight-direction routes retain long diagonal legs without cutting blocked c
   for(const [x,y]of [[2,1],[1,2],[3,2],[2,3]])map.blocked[y*31+x]=1;
   assert.throws(()=>route(map,{x:2.5,y:2.5},{x:26.5,y:26.5}),/No collision-legal/);
 });
+test('route trades tiny obstacle-driven corners for longer legal keyboard legs',()=>{
+  const map=collisionMap({width:31,height:31,blocked:[[4,4],[8,8],[12,12],[16,16],[20,20]],damaging_ground:[]}),points=route(map,{x:2.5,y:2.5},{x:26.5,y:26.5});assert(points.length<=6);
+  for(let i=1;i<points.length;i++){const from=points[i-1],to=points[i],dx=Math.sign(to.x-from.x),dy=Math.sign(to.y-from.y);assert(dx===0||dy===0||Math.abs(to.x-from.x)===Math.abs(to.y-from.y));
+    for(let x=from.x,y=from.y;x!==to.x||y!==to.y;x+=dx,y+=dy){assert(!map.blocked[Math.floor(y+dy)*31+Math.floor(x+dx)]);if(dx&&dy)assert(!map.blocked[Math.floor(y)*31+Math.floor(x+dx)]&&!map.blocked[Math.floor(y+dy)*31+Math.floor(x)]);}}
+});
 test('native heading ignores tiny off-axis drift rather than turning a long diagonal leg',()=>{
   assert.deepEqual(walkingKeys(100.3,100.5),['s']);assert.deepEqual(walkingKeys(-100.5,100.3),['a']);
   assert.deepEqual(walkingKeys(100,.2),['d','s']);assert.deepEqual(walkingKeys(-.2,-100),['d','w']);assert.throws(()=>walkingKeys(NaN,0),/Finite native/);

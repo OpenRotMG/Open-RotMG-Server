@@ -75,6 +75,7 @@ export async function run(fighter){
     for(let n=0;n<80;n++){
       if(client===fighter)await invite();const v=await client.observe();if(v.session.world!==world)return;
       if(client===fighter&&world!==-2&&(ledger?.snapshot().pending.length===0||recoveryState(v.character).retreat))return;
+      if(v.character.conditions&(1<<10)){await act(client,{keys:[],duration_ms:2000});continue;}
       const dx=goal.x-v.position.x,dy=goal.y-v.position.y,d=distance(goal,v.position);if(d<.6&&Math.floor(goal.x)===Math.floor(v.position.x)&&Math.floor(goal.y)===Math.floor(v.position.y))return;
       const keys=walkingKeys(dx,dy);
       await act(client,{keys,duration_ms:Math.min(10000,Math.max(80,Math.round(d*1000/7.734)))});
