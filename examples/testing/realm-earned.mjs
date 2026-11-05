@@ -75,7 +75,7 @@ export async function run(fighter){
     for(let n=0;n<80;n++){
       if(client===fighter)await invite();const v=await client.observe();if(v.session.world!==world)return;
       if(client===fighter&&world!==-2&&(ledger?.snapshot().pending.length===0||recoveryState(v.character).retreat))return;
-      if(v.character.conditions&(1<<10)){await act(client,{keys:[],duration_ms:2000});continue;}
+      if(v.character.conditions&(1<<10)){await appendFile(join(out,'earned-mobility.jsonl'),JSON.stringify({actor:client.actor,gameMs:v.game_ms,position:v.position,conditions:v.character.conditions,claim:'Observed native Confused; planned ordinary 2000ms idle, not a movement claim'})+'\n');await act(client,{keys:[],duration_ms:2000});continue;}
       const dx=goal.x-v.position.x,dy=goal.y-v.position.y,d=distance(goal,v.position);if(d<.6&&Math.floor(goal.x)===Math.floor(v.position.x)&&Math.floor(goal.y)===Math.floor(v.position.y))return;
       const keys=walkingKeys(dx,dy);
       await act(client,{keys,duration_ms:Math.min(10000,Math.max(80,Math.round(d*1000/7.734)))});
@@ -115,7 +115,7 @@ export async function run(fighter){
     terrain=await map(fighter,true);collision=collisionMap(terrain);const pending=new Set(ledger.snapshot().pending),family=terrain.entities.filter(e=>(pending.has(e.id)||pending.has(e.quest)||pending.has(e.parent))&&e.hp>0).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position));
     if(!family.length){assert(ledger.snapshot().waiting.length>0,'Pending ledger has neither a living family nor an actual waiting event');await act(fighter,{keys:[],duration_ms:3000});continue;}
     const view=(await fighter.inspect()).view,visible=localTargets(view.objects,family,v.position),target=visible[0];
-    if(!target){const points=route(collision,v.position,family[0].pos);assert(points.length>1,'Nearby pending family is absent from the native neighborhood');await walk(fighter,points[1]);}
+    if(!target){const points=route(collision,v.position,family[0].pos);assert(points.length>1,'Nearby pending family is absent from the native neighborhood');await appendFile(join(out,'earned-route-plans.jsonl'),JSON.stringify({iteration,gameMs:v.game_ms,from:v.position,target:family[0],points,claim:'Planned collision/hazard-safe route only; actual movement remains in native client receipts'})+'\n');await walk(fighter,points[1]);}
     // An in-flight shot can finish this target during resume; a held aim is not a live-entity assertion.
     else{const heal=v.character.hp<v.character.stats.max_hp*.8&&v.character.mp>=85,mouse=observedAim(view,target.id,-Math.PI/4);await appendFile(join(out,'earned-aims.jsonl'),JSON.stringify({actor:fighter.actor,character:view.session.character,gameMs:view.time_ms,tick:view.tick,target:target.id,targetHP:target.hp,targetPosition:target.position,playerPosition:view.position,mouse,claim:'planned held aim at last observed position, not dispatch-time liveness or a hit receipt'})+'\n');await act(fighter,{keys:heal?[' ']:[],duration_ms:5000,mouse});}
     if(iteration%10===0)await save('combat-'+iteration);
