@@ -270,24 +270,22 @@ def run_job(directory):
            'QA_RESULTS_DIR': str(results), 'QA_JOB_DIR': str(directory)}
     process, interrupted, forwarded = None, False, False
 
-    def interrupt(signum, _frame):
+    def interrupt(_signum, _frame):
         nonlocal interrupted, forwarded
         interrupted = True
-        if process is not None and not forwarded:
+        if process is not None and process.returncode is None and not forwarded:
             forwarded = True
             process.send_signal(signal.SIGTERM)
 
-    # Request command cleanup before group shutdown can kill its guardian or receipt writer.
-    previous = signal.signal(signal.SIGUSR1, interrupt)
-    try:
-        with (results / 'stdout.log').open('ab', buffering=0) as out, (results / 'stderr.log').open('ab', buffering=0) as err:
-            process = subprocess.Popen(row['command'], cwd=row['source'], env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
-            if interrupted:
-                interrupt(signal.SIGUSR1, None)
-            code = process.wait()
-        save(directory / 'command.json', {'returncode': code, 'finished': time.time()})
-    finally:
-        signal.signal(signal.SIGUSR1, previous)
+    # Shared services retain their signal policy; late requests must stay harmless until this one-shot worker exits.
+    if row['service'] is None:
+        signal.signal(signal.SIGUSR1, interrupt)
+    with (results / 'stdout.log').open('ab', buffering=0) as out, (results / 'stderr.log').open('ab', buffering=0) as err:
+        process = subprocess.Popen(row['command'], cwd=row['source'], env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
+        if interrupted:
+            interrupt(signal.SIGUSR1, None)
+        code = process.wait()
+    save(directory / 'command.json', {'returncode': code, 'finished': time.time()})
     if code == 0 and row.get('service'):
         address = os.environ['NOTIFY_SOCKET']
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notify:
