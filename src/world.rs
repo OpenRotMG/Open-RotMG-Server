@@ -8082,6 +8082,8 @@ fn inside_box(a: Pos, b: Pos) -> bool {
 }
 
 #[cfg(test)]
+mod chat_label_tests;
+#[cfg(test)]
 mod legends_glow_tests;
 #[cfg(test)]
 mod shop_tests;

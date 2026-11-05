@@ -30,6 +30,7 @@ pub(super) async fn hiscores(State(a): State<App>) -> Response {
             .await?;
         let mut scores = a.store.hiscores(living).await?;
         scores["collectible_items"] = serde_json::json!(crate::loot::collectibles(&a.content));
+        scores["reviewed_accounts"] = serde_json::json!(a.content.reviewed_accounts);
         Ok(scores)
     }
     .await;
