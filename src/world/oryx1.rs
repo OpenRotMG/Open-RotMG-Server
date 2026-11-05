@@ -338,9 +338,8 @@ mod tests {
     #[test]
     fn oryx_wakes_on_damage_tosses_each_phase_and_rages() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let map = Arc::new(
-            Map::load(std::path::Path::new("data/oryx-chamber.wmap"), &content).unwrap(),
-        );
+        let map =
+            Arc::new(Map::load(std::path::Path::new("data/oryx-chamber.wmap"), &content).unwrap());
         let fixture = || {
             let mut world = World::new(content.clone(), map.clone()).unwrap();
             world.name = "Oryx's Chamber".into();
