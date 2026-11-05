@@ -14,7 +14,8 @@ impl World {
         let target = target.into();
         let e = &self.entities[&id];
         if e.kind == EGG {
-            if target.is_some_and(|target| e.pos.distance(target) < 0.5) {
+            // A sac burst 0.15-0.2 s after a player passed 1.9-2.05 tiles away without shooting it; the 2011 wiki says 1.5.
+            if target.is_some_and(|target| e.pos.distance(target) < 2.) {
                 self.finish_timed_defeat(id)?;
             }
             return Ok(());
@@ -26,19 +27,16 @@ impl World {
             self.entities.get_mut(&id).unwrap().activated = Some(self.now);
             return Ok(());
         }
-        if e.stage.is_none() || e.stage == Some(0) && elapsed >= 1500 {
+        if e.stage.is_none() || e.stage == Some(0) && elapsed >= crate::dungeon::spider::SPOKE_MS {
             let tossing = e.stage.is_none();
             let home = e.pos;
-            let positions: Vec<_> = (0..9)
-                .map(|i| {
-                    let (radius, degrees) = if i < 6 {
-                        (10., i as f32 * 60.)
-                    } else {
-                        (6., (i - 6) as f32 * 120.)
-                    };
+            let positions: Vec<_> = (crate::dungeon::spider::tuning::SPOKES.iter())
+                .flat_map(|&(n, radius)| (0..n).map(move |i| (radius, i as f32 * 360. / n as f32)))
+                .zip(0x937..)
+                .map(|((radius, degrees), kind)| {
                     let angle = degrees.to_radians();
                     (
-                        0x937 + i,
+                        kind,
                         Pos {
                             x: home.x + radius * angle.cos(),
                             y: home.y + radius * angle.sin(),
@@ -68,7 +66,7 @@ impl World {
                 }
                 let e = self.entities.get_mut(&id).unwrap();
                 e.stage = Some(0);
-                e.next_shot = self.now + 2000;
+                e.next_shot = self.now + crate::dungeon::spider::ATTACK_MS;
                 tracing::info!(entity = id, spokes = 9, "Arachna web tosses telegraphed");
             } else {
                 for (kind, pos) in positions {
@@ -76,13 +74,18 @@ impl World {
                     let e = self.entities.get_mut(&child).unwrap();
                     e.parent.set(Some(id), child, &mut self.timed_ids);
                     e.activated = Some(self.now);
+                    e.expires.set(
+                        Some(self.now + crate::dungeon::spider::WEB_LIFETIME_MS),
+                        child,
+                        &mut self.timed_ids,
+                    );
                 }
                 self.entities.get_mut(&id).unwrap().stage = Some(1);
                 tracing::info!(entity = id, spokes = 9, "Arachna web formation established");
             }
         }
         let e = self.entities.get_mut(&id).unwrap();
-        if elapsed < 2000 {
+        if elapsed < crate::dungeon::spider::ATTACK_MS {
             e.condition |= condition::bit(condition::INVULNERABLE);
         } else {
             e.condition &= !condition::bit(condition::INVULNERABLE);
@@ -130,12 +133,14 @@ impl World {
                 <= 512,
             "Spider hatchling budget exhausted"
         );
+        // One walked-past sac left 4-5 hatchlings in a cluster under a tile wide that fired within ≈0.1 s (8Uv7XGMabZI 2012-05-27).
         let positions: Vec<_> = (0..count)
-            .map(|i| {
-                let angle = i as f32 * std::f32::consts::TAU / count as f32;
+            .map(|_| {
+                let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
+                let r = self.rng.gen_range(0f32..0.5);
                 Pos {
-                    x: egg.pos.x + 0.2 * angle.cos(),
-                    y: egg.pos.y + 0.2 * angle.sin(),
+                    x: egg.pos.x + r * angle.cos(),
+                    y: egg.pos.y + r * angle.sin(),
                 }
             })
             .collect();
