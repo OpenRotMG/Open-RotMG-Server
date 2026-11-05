@@ -1284,3 +1284,91 @@ async fn schema25_unknown_legacy17_gold_constraint_refuses_before_rebuild() {
     );
     assert_eq!(snapshot(&path), before);
 }
+
+#[tokio::test]
+async fn schema25_paid_slot_indexes_reject_without_erasing_history_in_store_or_physical_export() {
+    for damage in [
+        None,
+        Some(
+            "DROP INDEX living_characters_by_account; CREATE UNIQUE INDEX living_characters_by_account ON characters(account) WHERE alive=1",
+        ),
+        Some(
+            "CREATE UNIQUE INDEX hidden_one_living_character ON characters(account) WHERE alive=1",
+        ),
+    ] {
+        let (dir, content, store, _) = fixture(false).await;
+        let path = dir.join("game.db");
+        let account = store
+            .register(
+                "slot-index-owner".into(),
+                "slot-index@example.invalid".into(),
+                "slot-index-password".into(),
+            )
+            .await
+            .unwrap();
+        store
+            .create(account, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        store
+            .call(move |db| {
+                db.execute("UPDATE accounts SET credits=700 WHERE id=?1", [account])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store.purchase_character_slot(account, 17).await.unwrap();
+        assert_eq!(store.presentation(account).await.unwrap().credits, 100);
+        assert_eq!(store.lifecycle_pending_jobs(), 0);
+        drop(store);
+        let db = Connection::open(&path).unwrap();
+        assert_eq!(
+            super::super::character_slots::read(&db, account).unwrap(),
+            2
+        );
+        assert_eq!(db.query_row("SELECT count(*) FROM character_slot_purchases WHERE account=?1 AND timer=17 AND slots=2", [account], |r| r.get::<_, i32>(0)).unwrap(), 1);
+        if let Some(sql) = damage {
+            db.execute_batch(sql).unwrap();
+            let before = snapshot(&path);
+            let error = Store::open(&path, &content).err().unwrap();
+            assert!(error.to_string().contains("character index"), "{error:#}");
+            let output = dir.join("must-not-export.gz");
+            let python = std::process::Command::new("python3").args(["-B", "-c", r#"
+import pathlib,sys
+sys.path.insert(0,'scripts/backups')
+import backup
+path,output=map(pathlib.Path,sys.argv[1:])
+try:
+    backup.export(path,path.parent/'unused-discord',output,path.parent/'unused-revision',path.parent/'unused-revision',path.parent/'unused-revision')
+except ValueError as error:
+    assert 'character index' in str(error),str(error)
+else:
+    raise AssertionError('noncanonical paid-slot index exported')
+assert not output.exists()
+"#]).arg(&path).arg(&output).output().unwrap();
+            assert!(
+                python.status.success(),
+                "{}",
+                String::from_utf8_lossy(&python.stderr)
+            );
+            assert_eq!(snapshot(&path), before);
+            assert!(!output.exists());
+        } else {
+            let reopened = Store::open(&path, &content).unwrap();
+            reopened
+                .create(account, content.get(WIZARD).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM characters WHERE account=?1 AND alive=1",
+                    [account],
+                    |r| r.get::<_, i32>(0)
+                )
+                .unwrap(),
+                2
+            );
+            assert_eq!(reopened.presentation(account).await.unwrap().credits, 100);
+        }
+    }
+}

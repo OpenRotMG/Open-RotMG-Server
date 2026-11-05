@@ -177,7 +177,18 @@ COLLECTION_SOURCE_SQL = "ALTER TABLE collections ADD COLUMN source TEXT CHECK(so
 COLLECTION_WITH_SOURCE_SQL = "CREATE TABLE collections(account INTEGER NOT NULL REFERENCES accounts(id),item INTEGER NOT NULL CHECK(item BETWEEN 0 AND 65535),found_at INTEGER NOT NULL, source TEXT CHECK(source IS NULL OR (typeof(source)='text' AND length(trim(source)) BETWEEN 1 AND 128)),PRIMARY KEY(account,item))"
 
 
+LIVING_INDEX_SQL = "CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1"
+LEGACY_LIVING_INDEX_SQL = "CREATE UNIQUE INDEX one_living_character ON characters(account) WHERE alive=1"
+
+
 def check_source_objects(db, version):
+    slots = 'character_slots' in {r[1] for r in db.execute("PRAGMA table_info('accounts')")}
+    living = db.execute("SELECT sql FROM sqlite_schema WHERE type='index' AND name=?", ('living_characters_by_account' if slots else 'one_living_character',)).fetchone()
+    if (slots or living is not None) and living != (LIVING_INDEX_SQL if slots else LEGACY_LIVING_INDEX_SQL,):
+        raise ValueError('Canonical living character index missing or altered; preserve slot history for review')
+    extra = db.execute("SELECT name FROM pragma_index_list('characters') WHERE [unique]=1 AND (? OR name<>'one_living_character') LIMIT 1", (slots,)).fetchone()
+    if extra:
+        raise ValueError('Unsupported unique character index ' + extra[0] + '; preserve slot history for review')
     canonical = {name: sql for name, (minimum, sql) in CANONICAL_TRIGGERS.items() if version >= minimum}
     for kind, name, sql in db.execute("SELECT type,name,sql FROM sqlite_schema WHERE type IN ('view','trigger') OR (type='index' AND tbl_name='gold_rewards') ORDER BY name"):
         supported = (kind == 'index' and name == 'sqlite_autoindex_gold_rewards_1' and sql is None) or (kind == 'trigger' and name in canonical and canonical.pop(name) == sql)

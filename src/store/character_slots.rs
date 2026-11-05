@@ -72,6 +72,10 @@ pub(super) fn read(db: &Connection, account: i32) -> Result<i32> {
     Ok(slots)
 }
 
+pub(super) const LIVING_INDEX: &str =
+    "CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1";
+pub(super) const LEGACY_LIVING_INDEX: &str =
+    "CREATE UNIQUE INDEX one_living_character ON characters(account) WHERE alive=1";
 pub(super) const PURCHASE_SCHEMA: &str = "CREATE TABLE character_slot_purchases(account INTEGER NOT NULL REFERENCES accounts(id),timer INTEGER NOT NULL CHECK(typeof(timer)='integer' AND timer BETWEEN -2147483648 AND 2147483647),slots INTEGER NOT NULL CHECK(typeof(slots)='integer' AND slots BETWEEN 2 AND 14),PRIMARY KEY(account,timer),UNIQUE(account,slots));";
 pub(super) fn check_schema(db: &Connection, version: i32) -> Result<bool> {
     let column: bool = db.query_row(
@@ -84,6 +88,33 @@ pub(super) fn check_schema(db: &Connection, version: i32) -> Result<bool> {
         column == receipts && (version < 12 || column),
         "character slot capacity or purchase history missing; restore reviewed state"
     );
+    let living: Option<String> = db
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='index' AND name=?1",
+            [if column {
+                "living_characters_by_account"
+            } else {
+                "one_living_character"
+            }],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if column || living.is_some() {
+        ensure!(
+            living.as_deref()
+                == Some(if column {
+                    LIVING_INDEX
+                } else {
+                    LEGACY_LIVING_INDEX
+                }),
+            "canonical living character index missing or altered; preserve slot history for review"
+        );
+    }
+    let extra: Option<String> = db.query_row("SELECT name FROM pragma_index_list('characters') WHERE [unique]=1 AND (?1 OR name<>'one_living_character') LIMIT 1", [column], |r| r.get(0)).optional()?;
+    ensure!(
+        extra.is_none(),
+        "unsupported unique character index {extra:?}; preserve slot history for review"
+    );
     if column {
         let sql: String = db.query_row(
             "SELECT sql FROM sqlite_schema WHERE name='character_slot_purchases'",
@@ -95,7 +126,6 @@ pub(super) fn check_schema(db: &Connection, version: i32) -> Result<bool> {
             "character slot purchase metadata mismatch; preserve input for review"
         );
         for name in [
-            "living_characters_by_account",
             "character_slot_insert",
             "character_slot_update",
             "character_slot_capacity",
