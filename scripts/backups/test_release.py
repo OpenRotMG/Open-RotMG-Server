@@ -44,6 +44,33 @@ def legacy_copy(bundle):
     return old
 
 
+def historical_profile(bundle, version, achievement):
+    historical = deepcopy(bundle)
+    historical['schema'] = version
+    portable = version in (22, 23) and not achievement or version == 24
+    sources = version == 23 and not achievement
+    if not sources:
+        for row in historical['game']['collections']:
+            del row['source']
+    if not portable:
+        for table in backup.PORTABLE_TABLES:
+            del historical['game'][table]
+    if not achievement:
+        for table in backup.ACHIEVEMENT_TABLES:
+            del historical['game'][table]
+    allowed = backup.gold_reward_types(version, achievement)
+    historical['game']['gold_rewards'] = [r for r in historical['game']['gold_rewards'] if r['reward'] in allowed]
+    for table, field in [('characters', 'stats'), ('deaths', 'snapshot')]:
+        for row in historical['game'][table]:
+            character = json.loads(row[field])
+            flags = [a for a in character.get('achievements', []) if 'achievement_' + a in allowed]
+            character.pop('achievements', None)
+            if flags:
+                character['achievements'] = flags
+            row[field] = json.dumps(character)
+    return historical, portable, sources
+
+
 class ReleaseContract(unittest.TestCase):
     def check_fame_migration(self, migrated, original):
         self.assertRegex(migrated.pop('save_namespace')[0]['namespace'], '^[0-9a-f]{64}$')
@@ -79,60 +106,59 @@ class ReleaseContract(unittest.TestCase):
 
     def test_schema20_financial_format_restores_exports_and_migrates_without_minting(self):
         root = Path(__file__).resolve().parents[2]
-        binary = os.environ['OPENROTMG_BACKUP_BINARY']
-        with tempfile.TemporaryDirectory(prefix='schema20-financial-') as temporary:
-            directory = Path(temporary)
-            written = directory / 'written'
-            subprocess.run([binary, '--backup-fixture', str(written), str(root / 'data')], check=True)
-            discord = directory / 'levels.sqlite'
-            with closing(sqlite3.connect(discord)) as db, db:
-                db.execute('CREATE TABLE levels(guild_id TEXT,user_id TEXT,username TEXT,xp INTEGER,last_xp_at INTEGER,last_message_id TEXT,PRIMARY KEY(guild_id,user_id))')
-            revision = directory / 'REVISION'
-            revision.write_text('a' * 40 + '\n')
-            historical = backup.export(written / 'game.db', discord, directory / 'written.gz', revision, revision, revision)
-            # This is the existing serialized v20 contract, not a recovered historical raw database.
-            historical['schema'] = 20
-            for table in [*backup.PORTABLE_TABLES, *backup.ACHIEVEMENT_TABLES]:
-                del historical['game'][table]
-            for row in historical['game']['collections']:
-                del row['source']
-            allowed = backup.gold_reward_types(20, False)
-            historical['game']['gold_rewards'] = [row for row in historical['game']['gold_rewards'] if row['reward'] in allowed]
-            for table, field in [('characters', 'stats'), ('deaths', 'snapshot')]:
-                for row in historical['game'][table]:
-                    value = json.loads(row[field])
-                    value.pop('achievements', None)
-                    row[field] = json.dumps(value)
-            for table in ['gold_rewards', 'character_slot_purchases', 'account_fame', 'guilds', 'guild_members']:
-                self.assertTrue(historical['game'][table], table)
-            self.assertTrue(any(row['credits'] > 0 for row in historical['game']['accounts']))
-            archive = directory / 'schema20.gz'
-            archive.write_bytes(gzip.compress(json.dumps(historical).encode()))
-            restored = directory / 'restored'
-            backup.restore(archive, restored)
-            exported = backup.export(restored / 'game.db', restored / 'levels.sqlite', directory / 'reexport20.gz', revision, revision, revision)
-            self.assertEqual(exported['schema'], 20)
-            self.assertEqual(exported['game'], historical['game'])
-            with closing(sqlite3.connect(restored / 'game.db')) as db:
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 20)
-            subprocess.run([binary, '--backup-load', str(restored / 'game.db'), str(root / 'data')], check=True)
-            migrated = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
-            self.assertRegex(migrated.pop('save_namespace')[0]['namespace'], '^[0-9a-f]{64}$')
-            for table in (backup.PORTABLE_TABLES.keys() - {'save_namespace'}) | backup.ACHIEVEMENT_TABLES.keys():
-                self.assertEqual(migrated.pop(table), [])
-            for row in migrated['collections']:
-                self.assertIsNone(row.pop('source'))
-            self.assertEqual(migrated, historical['game'])
-            if 'QA_RESULTS_DIR' in os.environ:
-                evidence = {'scope': 'synthetic serialized schema20 format-contract, not historical raw20 provenance',
-                            'restored_and_reexported_schema': exported['schema'], 'whole_game_conserved_before_and_after_load': True,
-                            'wallets': [{key: row[key] for key in ['id', 'credits', 'character_slots']} for row in historical['game']['accounts']],
-                            'gold_rewards': historical['game']['gold_rewards'],
-                            'character_slot_purchases': historical['game']['character_slot_purchases'],
-                            'account_fame': historical['game']['account_fame'],
-                            'discord_gold_grants_nonempty': bool(historical['game']['discord_gold_grants']),
-                            'fixture_directory': str(directory), 'actual_binary': binary}
-                (Path(os.environ['QA_RESULTS_DIR']) / 'schema20-financial-conservation.json').write_text(json.dumps(evidence, indent=2) + '\n')
+        binary = Path(os.environ['OPENROTMG_BACKUP_BINARY']).resolve(strict=True)
+        directory = Path(os.environ['QA_RESULTS_DIR']) / 'schema20-financial'
+        directory.mkdir(mode=0o700)
+        written = directory / 'written'
+        subprocess.run([str(binary), '--backup-fixture', str(written), str(root / 'data')], check=True)
+        discord = directory / 'levels.sqlite'
+        with closing(sqlite3.connect(discord)) as db, db:
+            db.execute('CREATE TABLE levels(guild_id TEXT,user_id TEXT,username TEXT,xp INTEGER,last_xp_at INTEGER,last_message_id TEXT,PRIMARY KEY(guild_id,user_id))')
+        revision = directory / 'REVISION'
+        revision.write_text('a' * 40 + '\n')
+        bundle = backup.export(written / 'game.db', discord, directory / 'written.gz', revision, revision, revision)
+        historical, portable, sources = historical_profile(bundle, 20, False)
+        self.assertFalse(portable or sources)
+        game = historical['game']
+        self.assertTrue(game['gold_rewards'])
+        self.assertTrue(any(row['notified_at'] is None for row in game['gold_rewards']))
+        self.assertTrue(any(row['notified_at'] is not None for row in game['gold_rewards']))
+        self.assertTrue(game['vault_purchases'])
+        self.assertTrue(any(row['earned'] > row['balance'] for row in game['account_fame']))
+        buyer = game['character_slot_purchases'][0]['account']
+        wallet = next(row for row in game['accounts'] if row['id'] == buyer)
+        self.assertEqual((wallet['character_slots'], wallet['credits']), (2, 10))
+        self.assertEqual(game['character_slot_purchases'][0]['timer'], -2147483648)
+        tables = ('accounts', 'gold_rewards', 'discord_gold_grants', 'character_slot_purchases',
+                  'vault_purchases', 'account_fame', 'deaths', 'guilds', 'guild_members')
+        financial = {table: deepcopy(game[table]) for table in tables}
+        archive = directory / 'schema20.gz'
+        with archive.open('xb') as output:
+            output.write(gzip.compress(json.dumps(historical).encode()))
+        restored = directory / 'restored'
+        backup.restore(archive, restored)
+        exported = backup.export(restored / 'game.db', restored / 'levels.sqlite', directory / 'reexport20.gz', revision, revision, revision)
+        self.assertEqual(exported['schema'], 20)
+        self.assertEqual(exported['game'], game)
+        with closing(sqlite3.connect(restored / 'game.db')) as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 20)
+        subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(root / 'data')], check=True)
+        migrated = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
+        observed = {table: deepcopy(migrated[table]) for table in tables}
+        self.assertEqual(observed, financial)
+        self.assertRegex(migrated.pop('save_namespace')[0]['namespace'], '^[0-9a-f]{64}$')
+        for table in (backup.PORTABLE_TABLES.keys() - {'save_namespace'}) | backup.ACHIEVEMENT_TABLES.keys():
+            self.assertEqual(migrated.pop(table), [])
+        for row in migrated['collections']:
+            self.assertIsNone(row.pop('source'))
+        self.assertEqual(migrated, game)
+        evidence = {'scope': 'maintained serialized schema20 format-contract, not historical raw20 provenance',
+                    'fixture_revision_is_not_build_provenance': True,
+                    'restored_and_reexported_schema': exported['schema'], 'whole_game_conserved_before_and_after_load': True,
+                    'before': financial, 'after_load': observed, 'fixture_directory': str(directory), 'actual_binary': str(binary)}
+        with (Path(os.environ['QA_RESULTS_DIR']) / 'schema20-financial-conservation.json').open('x') as output:
+            json.dump(evidence, output, indent=2)
+            output.write('\n')
 
     def test_actual_writer_backup_restore_and_reload(self):
         root = Path(__file__).resolve().parents[2]
@@ -177,29 +203,7 @@ class ReleaseContract(unittest.TestCase):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
             self.assertEqual(bundle['schema'], 25)
             for version, achievement in [(20, False), (21, False), (22, True), (22, False), (23, True), (23, False), (24, True)]:
-                historical = deepcopy(bundle)
-                historical['schema'] = version
-                portable = version in (22, 23) and not achievement or version == 24
-                sources = version == 23 and not achievement
-                if not sources:
-                    for row in historical['game']['collections']:
-                        del row['source']
-                if not portable:
-                    for table in backup.PORTABLE_TABLES:
-                        del historical['game'][table]
-                if not achievement:
-                    for table in backup.ACHIEVEMENT_TABLES:
-                        del historical['game'][table]
-                allowed = backup.gold_reward_types(version, achievement)
-                historical['game']['gold_rewards'] = [r for r in historical['game']['gold_rewards'] if r['reward'] in allowed]
-                for table, field in [('characters', 'stats'), ('deaths', 'snapshot')]:
-                    for row in historical['game'][table]:
-                        character = json.loads(row[field])
-                        flags = [a for a in character.get('achievements', []) if 'achievement_' + a in allowed]
-                        character.pop('achievements', None)
-                        if flags:
-                            character['achievements'] = flags
-                        row[field] = json.dumps(character)
+                historical, portable, sources = historical_profile(bundle, version, achievement)
                 label = f'{version}-' + ('achievement' if achievement else 'base-portable')
                 archive = Path(temporary) / (label + '.gz')
                 archive.write_bytes(gzip.compress(json.dumps(historical).encode()))

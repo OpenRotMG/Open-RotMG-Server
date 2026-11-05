@@ -148,7 +148,9 @@ async fn achievement_fixture() -> (std::path::PathBuf, App) {
     achievement_fixture_with_capacity(16).await
 }
 async fn achievement_fixture_with_capacity(capacity: usize) -> (std::path::PathBuf, App) {
+    assert!((1..=85).contains(&capacity));
     let (dir, mut app) = crate::server::test_app();
+    assert!(app.owners.lock().unwrap().is_empty());
     app.max_players = capacity;
     app.world = Handle::spawn(
         crate::world::Directory::prepared(
@@ -535,22 +537,33 @@ async fn achievement_human(
     (owner, id, character, inbox)
 }
 
-fn release_on_cancel(owner: Owner) -> tokio::task::JoinHandle<()> {
-    let mut cancelled = owner.cancel.clone().unwrap();
-    tokio::spawn(async move {
-        if !*cancelled.borrow() {
-            cancelled.changed().await.unwrap();
-        }
-        owner.release();
-    })
+fn achievement_no_receipts(dir: &std::path::Path) -> Vec<(i32, i64, Option<i64>)> {
+    let db = rusqlite::Connection::open_with_flags(
+        dir.join("game.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    let mut query = db.prepare("SELECT account,awarded_at,notified_at FROM gold_rewards WHERE reward='achievement_no' ORDER BY account").unwrap();
+    let rows = query
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    rows
 }
 
 #[tokio::test]
 async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry() {
     let (dir, app) = achievement_fixture_with_capacity(85).await;
-    let castle = app
+    let worlds = app
         .world
-        .directory(|d| d.prepared_instance(crate::endgame::CASTLE))
+        .directory(|d| {
+            Ok([
+                d.prepared_instance(crate::endgame::CASTLE)?,
+                d.prepared_instance(crate::endgame::CHAMBER)?,
+                d.prepared_instance(crate::endgame::CELLAR)?,
+            ])
+        })
         .await
         .unwrap();
     let mut owners = Vec::new();
@@ -571,6 +584,7 @@ async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry(
         if index < 85 {
             let owner = app.claim_session(account).unwrap();
             let snapshot = character.clone();
+            let castle = worlds[index % worlds.len()];
             let (packets, inbox) = tokio::sync::mpsc::channel(256);
             let output = Output {
                 trace: None,
@@ -619,17 +633,20 @@ async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry(
     for character in &characters {
         assert_eq!(achievement_balance(&app, character.account).await, 100);
     }
+    assert!(achievement_no_receipts(&dir).is_empty());
     let receipt = begin_achievement_update(&app, 'a').await;
     elapsed_for_unit_test(&app);
     let consume = serde_json::json!({"operation":"consume","receipt":receipt});
-    assert_eq!(
-        call(&app, consume.clone(), "127.0.0.1:1", true).await.1["state"],
-        "consumed"
-    );
+    let committed = call(&app, consume.clone(), "127.0.0.1:1", true).await;
+    assert_eq!(committed.0, StatusCode::OK);
+    assert_eq!(committed.1["state"], "consumed");
+    let paid = achievement_no_receipts(&dir);
+    assert_eq!(paid.len(), 85);
     assert_eq!(
         call(&app, consume, "127.0.0.1:1", true).await.0,
         StatusCode::CONFLICT
     );
+    assert_eq!(achievement_no_receipts(&dir), paid);
     for (index, character) in characters.iter().enumerate() {
         assert_eq!(
             achievement_balance(&app, character.account).await,
@@ -650,89 +667,109 @@ async fn achievement_update_accepts_85_humans_and_refuses_the_86th_before_entry(
         super::super::depart(&app, id).await.unwrap();
         owner.release();
     }
+    drop(inboxes);
+    drop(db);
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]
 async fn achievement_generic_shutdown_drain_never_awards_no() {
     let (dir, app) = achievement_fixture().await;
-    let (owner, _, character, _inbox) = achievement_human(&app, "generic-drain-no").await;
-    let released = release_on_cancel(owner);
-    assert!(app.restart.lock().unwrap().current.is_none());
-    super::super::drain_shutdown(&app, std::future::ready(Ok(())))
+    let (owner, _, character, inbox) = achievement_human(&app, "generic-drain-no").await;
+    assert_eq!(
+        app.world
+            .directory(|d| Ok(d.update_achievement_actors().len()))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(achievement_balance(&app, character.account).await, 100);
+    let receipt = begin_achievement_update(&app, 'a').await;
+    elapsed_for_unit_test(&app);
+    lifecycle::drain::prepare(&app);
+    owner
+        .close(&app, CloseReason::Shutdown)
+        .unwrap()
+        .unwrap()
+        .wait()
         .await
         .unwrap();
+    tokio::time::timeout(Duration::from_secs(20), lifecycle::drain::terminate(&app))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(achievement_balance(&app, character.account).await, 100);
-    assert!(app.restart.lock().unwrap().current.is_none());
-    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
-    assert_eq!(
-        db.query_row(
-            "SELECT count(*) FROM gold_rewards WHERE reward='achievement_no'",
-            [],
-            |r| r.get::<_, i32>(0)
-        )
-        .unwrap(),
-        0
-    );
-    released.await.unwrap();
+    assert!(achievement_no_receipts(&dir).is_empty());
+    let status = app
+        .restart
+        .lock()
+        .unwrap()
+        .current
+        .as_ref()
+        .unwrap()
+        .status
+        .clone();
+    assert_eq!(status.state, "pending");
+    assert_eq!(serde_json::to_value(status.receipt).unwrap(), receipt);
+    drop(inbox);
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[tokio::test]
-async fn achievement_consumed_intent_survives_discarded_ack_and_later_drain_failure() {
+async fn achievement_committed_intent_survives_notice_failure_and_discarded_response_without_reaward()
+ {
     let (dir, app) = achievement_fixture().await;
-    let (owner, id, character, _inbox) = achievement_human(&app, "lost-update-ack").await;
+    let (owner, id, character, inbox) = achievement_human(&app, "lost-update-ack").await;
+    assert_eq!(
+        app.world
+            .directory(|d| Ok(d.update_achievement_actors().len()))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(achievement_balance(&app, character.account).await, 100);
+    drop(inbox);
     let receipt = begin_achievement_update(&app, 'a').await;
     elapsed_for_unit_test(&app);
+    let consume = serde_json::json!({"operation":"consume","receipt":receipt.clone()});
     let mut headers = HeaderMap::new();
     headers.insert(
         "authorization",
         format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
     );
-    let response = request(
-        State(app.clone()),
-        ConnectInfo("127.0.0.1:1".parse().unwrap()),
-        headers,
-        Json(Request::Consume {
-            receipt: serde_json::from_value(receipt.clone()).unwrap(),
-        }),
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::OK);
-    // Discard the actual handler response without acknowledging it to a client.
-    drop(response);
+    // Store commitment must not depend on a response reader or notification receiver.
+    drop(
+        request(
+            State(app.clone()),
+            ConnectInfo("127.0.0.1:1".parse().unwrap()),
+            headers,
+            Json(serde_json::from_value(consume.clone()).unwrap()),
+        )
+        .await,
+    );
     assert_eq!(achievement_balance(&app, character.account).await, 200);
-    let db = rusqlite::Connection::open(dir.join("game.db")).unwrap();
-    let paid: (i64, Option<i64>) = db.query_row("SELECT awarded_at,notified_at FROM gold_rewards WHERE account=?1 AND reward='achievement_no'", [character.account], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
-    db.execute_batch("CREATE TRIGGER fixture_later_drain_failure BEFORE UPDATE ON characters BEGIN SELECT RAISE(ABORT,'fixture post-consume save failure'); END;").unwrap();
-    let released = release_on_cancel(owner);
-    let finalization = lifecycle::finalize(&app, id, CloseReason::Shutdown).unwrap();
-    let (shutdown, persistence) = tokio::join!(
-        super::super::drain_shutdown(&app, std::future::ready(Ok(()))),
-        finalization.wait()
+    assert_eq!(
+        app.world
+            .for_player(id)
+            .call(move |w| { Ok(*w.players[&id].tx.as_ref().unwrap().lost.borrow()) })
+            .await
+            .unwrap(),
+        Some("gold_notice_queue")
     );
-    assert!(
-        persistence
-            .unwrap_err()
-            .to_string()
-            .contains("fixture post-consume save failure")
+    let paid = achievement_no_receipts(&dir);
+    assert_eq!(paid.len(), 1);
+    assert_eq!(paid[0].0, character.account);
+    assert!(paid[0].1 > 0 && paid[0].2.is_none());
+    assert_eq!(
+        call(&app, consume, "127.0.0.1:1", true).await.0,
+        StatusCode::CONFLICT
     );
-    assert!(
-        shutdown
-            .unwrap_err()
-            .to_string()
-            .contains("shutdown drain failed")
-    );
-    let exact: Receipt = serde_json::from_value(receipt.clone()).unwrap();
-    {
-        let mut service = app.restart.lock().unwrap();
-        assert_eq!(service.current.as_ref().unwrap().status.state, "consumed");
-        assert!(service.consume(&exact, Instant::now()).is_err());
-        assert!(service.begin("b".repeat(64), Instant::now()).is_err());
-        assert!(service.finish(&exact, true, Instant::now()).is_err());
-    }
     assert_eq!(
         call(
             &app,
-            serde_json::json!({"operation":"consume","receipt":receipt}),
+            serde_json::json!({"operation":"begin","owner":"b".repeat(64)}),
             "127.0.0.1:1",
             true
         )
@@ -740,18 +777,21 @@ async fn achievement_consumed_intent_survives_discarded_ack_and_later_drain_fail
         .0,
         StatusCode::CONFLICT
     );
+    let status = app
+        .restart
+        .lock()
+        .unwrap()
+        .current
+        .as_ref()
+        .unwrap()
+        .status
+        .clone();
+    assert_eq!(status.state, "consumed");
+    assert_eq!(serde_json::to_value(status.receipt).unwrap(), receipt);
     assert_eq!(achievement_balance(&app, character.account).await, 200);
-    assert_eq!(db.query_row("SELECT awarded_at,notified_at FROM gold_rewards WHERE account=?1 AND reward='achievement_no'", [character.account], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,Option<i64>>(1)?))).unwrap(), paid);
-    assert_eq!(
-        db.query_row(
-            "SELECT count(*) FROM gold_rewards WHERE reward='achievement_no'",
-            [],
-            |r| r.get::<_, i32>(0)
-        )
-        .unwrap(),
-        1
-    );
-    db.execute_batch("DROP TRIGGER fixture_later_drain_failure")
-        .unwrap();
-    released.await.unwrap();
+    assert_eq!(achievement_no_receipts(&dir), paid);
+    super::super::depart(&app, id).await.unwrap();
+    owner.release();
+    drop(app);
+    std::fs::remove_dir_all(dir).unwrap();
 }
