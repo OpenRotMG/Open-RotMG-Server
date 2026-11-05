@@ -14,6 +14,11 @@ davy-templates.json (templates without a note): cells from
 maps/jm's/Nilly/davyjones.jm at the same commit, a client capture of one live
 Davy Jones's Locker; enemies dropped, doors and keys made slots.
 
+spider-templates.json: the arena, cut from maps/jm's/Nilly/spiderden.jm at the
+same commit (the same cells as VotR-Server/bin/resources/worlds/spiderden.wmap at
+the Valor-Server commit below), a client capture of one live Spider Den; web
+spokes, the boss-drop portal and enemies dropped.
+
 Upstream publishes GNU AGPL v3 (see ../LICENSE) and README attributions:
 ossimc82/Fabian Fischer; C453; Trapped; Donran; creepylava; Krazyshank; Barm;
 Nilly; sebastianfra12 for some more behaviors; Kieron for making 1 behavior;

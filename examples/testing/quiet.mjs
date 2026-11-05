@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
-export const fixture={class:0x30e,level:20,seed:935,world:'oryx-castle',position:{x:24.5,y:139.5},equipment:[0xb08,0xb24,-1,-1],backpack:[0xa23,0xc1a,0xc21,-1,-1,-1,-1,-1],stats:[670,385,75,25,50,75,40,60]};
+// Beside the causeway's lone Living Floor, on one of its ring lines and beyond every other floor's bomb reach.
+const tower=w=>{const f=w.encounter_markers.filter(m=>m.kind===0xd87).map(m=>m.position),lone=f.find(p=>f.every(q=>q===p||Math.hypot(p.x-q.x,p.y-q.y)>10));assert(lone,'No lone Living Floor');return{x:lone.x-1,y:lone.y+2};};
+export const fixture={class:0x30e,level:20,seed:935,world:'oryx-castle',position:tower,equipment:[0xb08,0xb24,-1,-1],backpack:[0xa23,0xc1a,0xc21,-1,-1,-1,-1,-1],stats:[670,385,75,25,50,75,40,60]};
 export async function run(game){
   const root=process.env.QA_RESULTS_DIR,config=JSON.parse(await readFile(join(root,'native/native.json'),'utf8')),samples=[];
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -41,6 +43,8 @@ export async function run(game){
   }
   const killed=await save('source-defeated');
   game.check('Quiet permits ordinary weapon fire to defeat its actual source',!killed.diagnostic.entities.some(e=>e.id===floor.id)&&killed.diagnostic.character.kills>refused.diagnostic.character.kills&&!!(killed.view.character.conditions&2));
+  // Bombs already thrown still land and burst for up to 2.45 s.
+  await game.act({keys:[],duration_ms:2500});
   await game.act({keys:['3'],duration_ms:200},{name:'quiet-cured',when:v=>!(v.character.conditions&2)});
   const cured=await save('cured');
   game.check('ordinary Holy Water consumes once and clears natural Quiet',!(cured.view.character.conditions&2)&&cured.view.character.items[6]===-1&&cured.view.character.inventory_revision===killed.view.character.inventory_revision+1);
