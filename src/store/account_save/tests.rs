@@ -895,7 +895,7 @@ async fn account_save_schema21_snapshot_precedes_migration_and_preserves_old_cre
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        24
+        25
     );
     assert_eq!(
         Connection::open(&backup)
@@ -1001,7 +1001,7 @@ async fn account_save_snapshot_required_schema_rejected_before_restore_without_r
     let source_before = dump(&Connection::open(&baseline).unwrap());
     let target_db = Connection::open(state.join("game.db")).unwrap();
     let before = dump(&target_db);
-    for version in [21, 22, 24] {
+    for version in [21, 22, 23, 24, 25] {
         let mut damages = vec![
             "DROP TRIGGER character_slot_insert",
             "DROP TRIGGER character_slot_update",
@@ -1013,10 +1013,10 @@ async fn account_save_snapshot_required_schema_rejected_before_restore_without_r
             "DROP TABLE account_lists",
             "DROP TABLE update_feed",
             "DROP TABLE email_password_resets",
-            "INSERT INTO collections VALUES(1,2594,0)",
-            "INSERT INTO collections VALUES(1,2594,-1)",
-            "INSERT INTO collections VALUES(1,2594,1.5)",
-            "INSERT INTO collections VALUES(1,2594,'invalid-time')",
+            "INSERT INTO collections(account,item,found_at) VALUES(1,2594,0)",
+            "INSERT INTO collections(account,item,found_at) VALUES(1,2594,-1)",
+            "INSERT INTO collections(account,item,found_at) VALUES(1,2594,1.5)",
+            "INSERT INTO collections(account,item,found_at) VALUES(1,2594,'invalid-time')",
         ];
         if version == 21 {
             damages.push("CREATE TABLE account_origins(ignored TEXT)");
@@ -1039,8 +1039,12 @@ async fn account_save_snapshot_required_schema_rejected_before_restore_without_r
                 if version == 21 {
                     db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace;").unwrap();
                 }
-                db.pragma_update(None, "user_version", version).unwrap();
             }
+            if version != 23 && version != 25 {
+                db.execute_batch("ALTER TABLE collections DROP COLUMN source")
+                    .unwrap();
+            }
+            db.pragma_update(None, "user_version", version).unwrap();
             db.execute_batch(damage).unwrap();
             let unchanged = dump(&db);
             drop(db);
@@ -1351,6 +1355,12 @@ async fn account_save_collection_timestamp_rejected_without_destination_mutation
     }
     let mut valid = save;
     valid.collections = vec![(0xa22, 1)];
+    valid.collection_sources = vec![(0xa22, "Medusa".into())];
+    for source in ["", "  ", "Medusa\n", "Medusa\u{0085}", "Medusa\u{009f}"] {
+        let mut bad = valid.clone();
+        bad.collection_sources[0].1 = source.into();
+        assert!(AccountSave::decode(&serde_json::to_vec(&bad).unwrap()).is_err());
+    }
     let imported = local
         .import_account_save(valid, "local-password".into(), false)
         .await
@@ -1362,6 +1372,14 @@ async fn account_save_collection_timestamp_rejected_without_destination_mutation
             .unwrap()
             .collections,
         vec![(0xa22, 1)]
+    );
+    assert_eq!(
+        local
+            .export_account_save(imported.account)
+            .await
+            .unwrap()
+            .collection_sources,
+        vec![(0xa22, "Medusa".into())]
     );
     drop(local);
     assert_eq!(
@@ -1588,7 +1606,7 @@ async fn account_save_cli_preview_metadata_expected_and_snapshot_counts_preserve
     let verified = cli_ok(&["verify-snapshot", backup.to_str().unwrap(), "data"], b"");
     assert_eq!(
         verified,
-        serde_json::json!({"verified":true,"schema":24,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
+        serde_json::json!({"verified":true,"schema":25,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
     );
     assert_eq!(local.load(peer, other.id).await.unwrap().items, other.items);
     assert_eq!(
@@ -1724,7 +1742,7 @@ async fn account_save_cli_stale_missing_malformed_and_input_changed_fail_before_
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        24
+        25
     );
     let verified = cli_ok(&["verify-snapshot", backup, "data"], b"");
     assert_eq!(

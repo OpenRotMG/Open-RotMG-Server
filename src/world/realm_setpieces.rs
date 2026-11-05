@@ -781,7 +781,15 @@ impl World {
         for chunk in items.chunks(8) {
             let mut slots = chunk.to_vec();
             slots.resize(8, -1);
-            self.spawn_entity(0x501, pos, slots)?;
+            let id = self.spawn_entity(0x501, pos, slots)?;
+            let chest = self.entities.get_mut(&id).unwrap();
+            chest.drop_slots = chunk
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| **item >= 0)
+                .map(|(slot, _)| slot)
+                .collect();
+            chest.drop_source = Some(format!("{} chest", self.content.get(kind)?.name));
         }
         tracing::info!(kind, count = items.len(), "landmark chest rewards created");
         Ok(())

@@ -21,23 +21,41 @@ pub(super) const TABLES: [(&str, &str); 3] = [
     ),
 ];
 
+pub(super) const COLLECTIONS: &str = "CREATE TABLE collections(account INTEGER NOT NULL REFERENCES accounts(id),item INTEGER NOT NULL CHECK(item BETWEEN 0 AND 65535),found_at INTEGER NOT NULL,PRIMARY KEY(account,item))";
+pub(super) const COLLECTION_SOURCE: &str = "ALTER TABLE collections ADD COLUMN source TEXT CHECK(source IS NULL OR (typeof(source)='text' AND length(trim(source)) BETWEEN 1 AND 128))";
+pub(super) const COLLECTIONS_WITH_SOURCE: &str = "CREATE TABLE collections(account INTEGER NOT NULL REFERENCES accounts(id),item INTEGER NOT NULL CHECK(item BETWEEN 0 AND 65535),found_at INTEGER NOT NULL, source TEXT CHECK(source IS NULL OR (typeof(source)='text' AND length(trim(source)) BETWEEN 1 AND 128)),PRIMARY KEY(account,item))";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum KnownStoreLayout {
     Legacy,
     Achievement22,
     Portable22,
     Achievement23,
+    Portable23,
     Combined24,
+    Combined25,
 }
 impl KnownStoreLayout {
     pub(super) fn achievements(self) -> bool {
         matches!(
             self,
-            Self::Achievement22 | Self::Achievement23 | Self::Combined24
+            Self::Achievement22 | Self::Achievement23 | Self::Combined24 | Self::Combined25
         )
     }
     pub(super) fn portable(self) -> bool {
-        matches!(self, Self::Portable22 | Self::Combined24)
+        matches!(
+            self,
+            Self::Portable22 | Self::Portable23 | Self::Combined24 | Self::Combined25
+        )
+    }
+    pub(super) fn collection_sources(self) -> bool {
+        matches!(self, Self::Portable23 | Self::Combined25)
+    }
+    pub(super) fn expand_gold(self) -> bool {
+        matches!(
+            self,
+            Self::Legacy | Self::Achievement22 | Self::Portable22 | Self::Portable23
+        )
     }
     fn check_objects(self, db: &Connection, version: i32) -> Result<()> {
         let mut canonical = super::character_slots::TRIGGERS
@@ -138,11 +156,40 @@ impl KnownStoreLayout {
             (22, true, false) => Self::Achievement22,
             (22, false, true) => Self::Portable22,
             (23, true, false) => Self::Achievement23,
+            (23, false, true) => Self::Portable23,
             (24, true, true) => Self::Combined24,
+            (25, true, true) => Self::Combined25,
             _ => anyhow::bail!(
                 "unsupported schema-{version} feature layout; preserve input for review"
             ),
         };
+        let collections: Option<String> = db
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='collections'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if version >= 4 || collections.is_some() {
+            let expected = if layout.collection_sources() {
+                COLLECTIONS_WITH_SOURCE
+            } else {
+                COLLECTIONS
+            };
+            ensure!(
+                collections.as_deref() == Some(expected),
+                "schema-{version} collection metadata mismatch; preserve source history for review"
+            );
+        }
+        if layout.collection_sources() {
+            let mut q = db.prepare("SELECT source FROM collections WHERE source IS NOT NULL")?;
+            for source in q.query_map([], |r| r.get::<_, String>(0))? {
+                ensure!(
+                    super::valid_collection_source(&source?),
+                    "invalid stored collection source; preserve input for review"
+                );
+            }
+        }
         if version >= 10 {
             let sql: String = db.query_row(
                 "SELECT sql FROM sqlite_schema WHERE name='gold_rewards'",
@@ -151,7 +198,7 @@ impl KnownStoreLayout {
             )?;
             let expected = match layout {
                 Self::Achievement22 => GOLD,
-                Self::Achievement23 | Self::Combined24 => GOLD23,
+                Self::Achievement23 | Self::Combined24 | Self::Combined25 => GOLD23,
                 _ if version < 11 => super::gold::SCHEMA10,
                 _ if version < 18 => super::gold::SCHEMA11,
                 _ => super::gold::SCHEMA18,

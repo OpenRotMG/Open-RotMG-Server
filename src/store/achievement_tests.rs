@@ -15,10 +15,10 @@ pub(super) fn schema21_fixture(db: &Connection) {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        24
+        25
     );
-    schema22_compat::check(db, 24).unwrap();
-    gold::check_schema(db, 24).unwrap();
+    schema22_compat::check(db, 25).unwrap();
+    gold::check_schema(db, 25).unwrap();
     for (name, _) in schema22_compat::TABLES {
         assert_eq!(
             db.query_row(&format!("SELECT count(*) FROM {name}"), [], |r| r
@@ -49,6 +49,8 @@ pub(super) fn schema21_fixture(db: &Connection) {
             0
         );
     }
+    db.execute_batch("ALTER TABLE collections DROP COLUMN source")
+        .unwrap();
     db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace;").unwrap();
     db.execute_batch("DROP TABLE achievement_partners; DROP TABLE achievement_dungeons; DROP TABLE achievement_realm_credits; ALTER TABLE gold_rewards RENAME TO schema22_gold;").unwrap();
     db.execute_batch(gold::SCHEMA18).unwrap();
@@ -436,7 +438,7 @@ async fn achievement_schema22_preserves_old_rows_dates_wallets_and_rejects_missi
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        24
+        25
     );
     drop(db);
     let store = Store::open(&path, &content).unwrap();

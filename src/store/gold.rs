@@ -25,8 +25,8 @@ pub(super) fn check_schema(db: &Connection, version: i32) -> Result<()> {
     super::schema22_compat::check(db, version)
 }
 
-pub(super) fn migrate(db: &Connection, version: i32, exists: bool) -> Result<()> {
-    if exists && version < 23 {
+pub(super) fn migrate(db: &Connection, expand: bool, exists: bool) -> Result<()> {
+    if exists && expand {
         db.execute_batch("ALTER TABLE gold_rewards RENAME TO old_gold_rewards;")?;
         db.execute_batch(SCHEMA)?;
         db.execute_batch(

@@ -275,9 +275,9 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        24
+        25
     );
-    check_schema(&db, 24).unwrap();
+    check_schema(&db, 25).unwrap();
     let gold = reopened.gold(account).await.unwrap();
     assert_eq!(gold.balance, 123531);
     assert!(
@@ -295,7 +295,7 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
             .err()
             .unwrap()
             .to_string()
-            .contains("schema-24 gold reward metadata mismatch")
+            .contains("schema-25 gold reward metadata mismatch")
     );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }

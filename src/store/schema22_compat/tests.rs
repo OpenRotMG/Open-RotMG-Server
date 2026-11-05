@@ -90,15 +90,27 @@ fn assert_upgrade_only(
     label: &str,
 ) {
     let db = Connection::open(path).unwrap();
-    KnownStoreLayout::read(&db, 24).unwrap();
+    KnownStoreLayout::read(&db, 25).unwrap();
+    let sources = before
+        .iter()
+        .any(|line| line == &format!("collections:{COLLECTIONS_WITH_SOURCE}"));
     let mut expected: Vec<_> = before
         .iter()
         .filter(|line| {
-            !line.starts_with("version:") && !line.starts_with("gold_rewards:CREATE TABLE")
+            !line.starts_with("version:")
+                && !line.starts_with("gold_rewards:CREATE TABLE")
+                && !line.starts_with("collections:CREATE TABLE")
         })
-        .cloned()
+        .map(|line| {
+            if !sources && line.starts_with("collections:[") {
+                format!("{}, Null]", line.strip_suffix(']').unwrap())
+            } else {
+                line.clone()
+            }
+        })
         .collect();
-    expected.push("version:24".into());
+    expected.push(format!("collections:{COLLECTIONS_WITH_SOURCE}"));
+    expected.push("version:25".into());
     expected.push(format!("gold_rewards:{}", GOLD23.trim_end_matches(';')));
     if !achievements {
         for (name, sql) in TABLES {
@@ -151,7 +163,7 @@ fn assert_upgrade_only(
             .iter()
             .filter(|line| !actual.contains(line))
             .collect();
-        std::fs::write(Path::new(&out).join(format!("schema24-exact-upgrade-{label}.json")),serde_json::to_vec(&serde_json::json!({"fresh_owned_synthetic_only":true,"before":before,"after":actual,"allowed_exact_state":expected,"added":added,"removed":removed})).unwrap()).unwrap();
+        std::fs::write(Path::new(&out).join(format!("schema25-exact-upgrade-{label}.json")),serde_json::to_vec(&serde_json::json!({"fresh_owned_synthetic_only":true,"before":before,"after":actual,"allowed_exact_state":expected,"added":added,"removed":removed})).unwrap()).unwrap();
     }
     assert!(
         actual == expected,
@@ -169,7 +181,7 @@ fn ledger(path: &Path) -> Vec<(i32, String, i64, Option<i64>)> {
 }
 
 #[tokio::test]
-async fn schema24_promotion_fresh_store_has24_without_awards() {
+async fn schema25_promotion_fresh_store_has25_without_awards() {
     let (dir, content, store, ch) = fixture(false).await;
     let path = dir.join("game.db");
     let before = snapshot(&path);
@@ -184,8 +196,8 @@ async fn schema24_promotion_fresh_store_has24_without_awards() {
     let reopened = Store::open(&path, &content).unwrap();
     assert_eq!(snapshot(&path), before);
     let db = Connection::open(&path).unwrap();
-    gold::check_schema(&db, 24).unwrap();
-    check(&db, 24).unwrap();
+    gold::check_schema(&db, 25).unwrap();
+    check(&db, 25).unwrap();
     for (name, _) in TABLES {
         assert!(
             db.query_row(
@@ -207,7 +219,7 @@ async fn schema24_promotion_fresh_store_has24_without_awards() {
 }
 
 #[tokio::test]
-async fn schema24_known24_reopen_retains_every_logical_row_and_pending_gold() {
+async fn schema25_known25_reopen_retains_every_logical_row_and_pending_gold() {
     let (dir, content, store, ch) = fixture(true).await;
     let path = dir.join("game.db");
     let before = snapshot(&path);
@@ -364,7 +376,7 @@ async fn schema22_compat_real_writers_preserve_flags_ledger_wallet_dates_and_rep
 async fn schema22_compat_missing_malformed_unknown_and_mixed_fail_without_logical_writes() {
     let mut mutations = vec![
         "DROP TABLE gold_rewards".to_owned(),
-        "PRAGMA user_version=25".into(),
+        "PRAGMA user_version=26".into(),
         "PRAGMA user_version=999".into(),
         "PRAGMA user_version=21".into(),
     ];
@@ -447,7 +459,7 @@ fn schema22_compat_actual_serde_and_gold_message_keep_closed_known_metadata() {
 }
 
 #[tokio::test]
-async fn schema24_recovery_successful_resurrection_invalidates_only_pending_dead_attempt() {
+async fn schema25_recovery_successful_resurrection_invalidates_only_pending_dead_attempt() {
     let (dir, content, store, mut ch) = fixture(true).await;
     ch.achievements.insert(Achievement::NexusAfterDeath);
     let path = dir.join("game.db");
@@ -536,7 +548,7 @@ async fn schema24_recovery_successful_resurrection_invalidates_only_pending_dead
 }
 
 #[tokio::test]
-async fn schema24_recovery_pending_nexus_cleanup_survives_fresh_store_reopen() {
+async fn schema25_recovery_pending_nexus_cleanup_survives_fresh_store_reopen() {
     let (dir, content, store, mut ch) = fixture(true).await;
     ch.achievements.insert(Achievement::NexusAfterDeath);
     let path = dir.join("game.db");
@@ -601,7 +613,7 @@ async fn schema24_recovery_pending_nexus_cleanup_survives_fresh_store_reopen() {
 }
 
 #[tokio::test]
-async fn schema24_promotion_ambiguous_nexus_rejects_both_locations_before_write() {
+async fn schema25_promotion_ambiguous_nexus_rejects_both_locations_before_write() {
     for version in [21, 23] {
         for archived in [false, true] {
             let (dir, content, store, mut ch) = fixture(false).await;
@@ -651,7 +663,7 @@ async fn schema24_promotion_ambiguous_nexus_rejects_both_locations_before_write(
 }
 
 #[tokio::test]
-async fn schema24_promotion_paid_nexus_history_retained_and_receipt_not_validation_bypass() {
+async fn schema25_promotion_paid_nexus_history_retained_and_receipt_not_validation_bypass() {
     for mutation in [
         None,
         Some(
@@ -706,7 +718,7 @@ async fn schema24_promotion_paid_nexus_history_retained_and_receipt_not_validati
 }
 
 #[tokio::test]
-async fn schema24_promotion_unpaid_observation_cannot_enter_reusable_progress_or_potion() {
+async fn schema25_promotion_unpaid_observation_cannot_enter_reusable_progress_or_potion() {
     let (dir, content, store, mut ch) = fixture(false).await;
     let path = dir.join("game.db");
     ch.achievements.insert(Achievement::NexusAfterDeath);
@@ -759,7 +771,7 @@ async fn schema24_promotion_unpaid_observation_cannot_enter_reusable_progress_or
 }
 
 #[tokio::test]
-async fn schema24_promotion_nexus_receipt_dates_validate_stored_types_without_pending_flags() {
+async fn schema25_promotion_nexus_receipt_dates_validate_stored_types_without_pending_flags() {
     for (field, value, stored_type, valid) in [
         ("awarded_at", "'not-a-date'", "text", false),
         ("notified_at", "'not-a-date'", "text", false),
@@ -828,7 +840,7 @@ async fn schema24_promotion_nexus_receipt_dates_validate_stored_types_without_pe
 }
 
 #[tokio::test]
-async fn schema24_main_integration_preserves_realm_close_state_and_public_backup_contract() {
+async fn schema25_main_integration_preserves_realm_close_state_and_public_backup_contract() {
     let dir =
         std::env::temp_dir().join(format!("achievement-main-tokens-{}", rand::random::<u64>()));
     std::fs::create_dir(&dir).unwrap();
@@ -893,7 +905,7 @@ async fn schema24_main_integration_preserves_realm_close_state_and_public_backup
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        24
+        25
     );
     assert_eq!(store.presentation(account).await.unwrap().credits, 200);
     store
@@ -965,14 +977,14 @@ async fn schema24_main_integration_preserves_realm_close_state_and_public_backup
 }
 
 #[tokio::test]
-async fn schema24_known22_paid_history_tokens_migrate_transactionally_without_awards() {
+async fn schema25_known22_paid_history_tokens_migrate_transactionally_without_awards() {
     let (dir, content, store, ch) = fixture(true).await;
     assert_eq!(store.lifecycle_pending_jobs(), 0);
     drop(store);
     let path = dir.join("game.db");
     let db = Connection::open(&path).unwrap();
     db.execute("INSERT INTO discord_realm_close_tokens VALUES('1558662335076376580',?1,'1558662335076376578','1558662335076376579',NULL)",[ch.account]).unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; ALTER TABLE gold_rewards RENAME TO owned23_gold;")
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; ALTER TABLE collections DROP COLUMN source; ALTER TABLE gold_rewards RENAME TO owned23_gold;")
         .unwrap();
     db.execute_batch(GOLD).unwrap();
     db.execute_batch("INSERT INTO gold_rewards SELECT * FROM owned23_gold; DROP TABLE owned23_gold; PRAGMA user_version=22;").unwrap();
@@ -1042,6 +1054,7 @@ async fn known_layout_fixture(
             db.execute("INSERT INTO gold_rewards VALUES(?1,'discord_link',111,222)",[account])?;
             db.execute("INSERT INTO gold_rewards VALUES(?1,'first_bug_report',333,NULL)",[account])?;
         }
+        db.execute("INSERT INTO collections(account,item,found_at,source) VALUES(?1,2594,123,NULL),(?1,2595,124,' Medusa ')",[account])?;
         db.execute("INSERT INTO discord_realm_close_tokens VALUES('source-unused',?1,'private-discord','private-actor',NULL)",[account])?;
         db.execute("INSERT INTO discord_realm_close_tokens VALUES('source-used',?1,'private-discord','private-actor','private-used')",[account])?;
         if portable {
@@ -1067,7 +1080,11 @@ async fn known_layout_fixture(
     }
     db.execute_batch("ALTER TABLE gold_rewards RENAME TO synthetic_current_gold;")
         .unwrap();
-    db.execute_batch(if version >= 23 {
+    if !(version == 23 && !achievement || version == 25) {
+        db.execute_batch("ALTER TABLE collections DROP COLUMN source")
+            .unwrap();
+    }
+    db.execute_batch(if version >= 23 && achievement {
         GOLD23
     } else if achievement {
         GOLD
@@ -1085,13 +1102,15 @@ async fn known_layout_fixture(
 }
 
 #[tokio::test]
-async fn schema24_known_layouts_preserve_history_and_private_snapshot_before_atomic_upgrade() {
+async fn schema25_known_layouts_preserve_history_and_private_snapshot_before_atomic_upgrade() {
     for (version, achievement, portable) in [
         (21, false, false),
         (22, true, false),
         (22, false, true),
         (23, true, false),
+        (23, false, true),
         (24, true, true),
+        (25, true, true),
     ] {
         let (dir, content) = known_layout_fixture(version, achievement, portable).await;
         let path = dir.join("game.db");
@@ -1104,7 +1123,7 @@ async fn schema24_known_layouts_preserve_history_and_private_snapshot_before_ato
         let current = Store::open(&path, &content).unwrap();
         assert_eq!(ledger(&path), rewards);
         let db = Connection::open(&path).unwrap();
-        KnownStoreLayout::read(&db, 24).unwrap();
+        KnownStoreLayout::read(&db, 25).unwrap();
         assert_upgrade_only(
             &path,
             before,
@@ -1123,9 +1142,13 @@ async fn schema24_known_layouts_preserve_history_and_private_snapshot_before_ato
 }
 
 #[tokio::test]
-async fn schema24_unknown_partial_mixed_and_missing_namespace_never_repair_input() {
+async fn schema25_unknown_partial_mixed_and_missing_namespace_never_repair_input() {
     for sql in [
-        "PRAGMA user_version=25",
+        "PRAGMA user_version=26",
+        "PRAGMA user_version=24",
+        "PRAGMA user_version=23",
+        "ALTER TABLE collections RENAME COLUMN source TO wrong_source",
+        "INSERT INTO collections(account,item,found_at,source) VALUES(1,2594,123,'Medusa'||char(133))",
         "PRAGMA user_version=22",
         "DELETE FROM save_namespace",
         "INSERT INTO portable_history VALUES(1,0,0,0); INSERT INTO account_origins VALUES(1,'INVALID',17)",
@@ -1147,13 +1170,15 @@ async fn schema24_unknown_partial_mixed_and_missing_namespace_never_repair_input
 }
 
 #[tokio::test]
-async fn schema24_noncanonical_gold_dependencies_reject_before_writes_for_every_known_layout() {
+async fn schema25_noncanonical_gold_dependencies_reject_before_writes_for_every_known_layout() {
     for (version, achievement, portable) in [
         (21, false, false),
         (22, true, false),
         (22, false, true),
         (23, true, false),
+        (23, false, true),
         (24, true, true),
+        (25, true, true),
     ] {
         for (name, sql) in [
             (
@@ -1210,13 +1235,15 @@ async fn schema24_noncanonical_gold_dependencies_reject_before_writes_for_every_
 }
 
 #[tokio::test]
-async fn schema24_base_token_slot_and_late_helper_failures_preserve_all_logical_state() {
+async fn schema25_base_token_slot_and_late_helper_failures_preserve_all_logical_state() {
     for (version, achievement, portable) in [
         (21, false, false),
         (22, true, false),
         (22, false, true),
         (23, true, false),
+        (23, false, true),
         (24, true, true),
+        (25, true, true),
     ] {
         for sql in [
             "DROP TABLE discord_realm_close_tokens",
@@ -1241,7 +1268,7 @@ async fn schema24_base_token_slot_and_late_helper_failures_preserve_all_logical_
     }
 }
 #[tokio::test]
-async fn schema24_unknown_legacy17_gold_constraint_refuses_before_rebuild() {
+async fn schema25_unknown_legacy17_gold_constraint_refuses_before_rebuild() {
     let (dir, content) = known_layout_fixture(21, false, false).await;
     let path = dir.join("game.db");
     let db = Connection::open(&path).unwrap();

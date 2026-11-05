@@ -185,8 +185,8 @@ impl Store {
         self.call(move |db| {
             let tx=db.transaction()?;
             let name:String=tx.query_row("SELECT name FROM accounts JOIN competitors ON competitors.account=accounts.id WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM shore_bots WHERE shore_bots.account=accounts.id)",[account],|r|r.get(0)).context("player has no competitive profile")?;
-            let mut q=tx.prepare("SELECT item,found_at FROM collections WHERE account=?1 ORDER BY item")?;
-            let items=q.query_map([account],|r|Ok(serde_json::json!({"item":r.get::<_,i32>(0)?,"found_at":r.get::<_,i64>(1)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut q=tx.prepare("SELECT item,found_at,source FROM collections WHERE account=?1 ORDER BY item")?;
+            let items=q.query_map([account],|r|Ok(serde_json::json!({"item":r.get::<_,i32>(0)?,"found_at":r.get::<_,i64>(1)?,"source":r.get::<_,Option<String>>(2)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
             drop(q);
             let players:i64=tx.query_row("SELECT count(*) FROM competitors c WHERE NOT EXISTS(SELECT 1 FROM shore_bots b WHERE b.account=c.account)",[],|r|r.get(0))?;
             let mut q=tx.prepare("SELECT x.item,count(*) FROM collections x JOIN competitors c ON c.account=x.account WHERE NOT EXISTS(SELECT 1 FROM shore_bots b WHERE b.account=x.account) GROUP BY x.item ORDER BY x.item")?;
@@ -200,6 +200,107 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn collection_source_is_atomic_first_only_and_migrates_without_guessing() {
+        let content = Content::load(Path::new("data")).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("collection-source-{}.db", rand::random::<u64>()));
+        let store = Store::open(&path, &content).unwrap();
+        let account = store
+            .register(
+                "source-owner".into(),
+                "source@example.invalid".into(),
+                "source-password".into(),
+            )
+            .await
+            .unwrap();
+        store.compete(account).await.unwrap();
+        let mut ch = store
+            .create(account, content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute(
+            "INSERT INTO collections(account,item,found_at) VALUES(?1,2594,123)",
+            [account],
+        )
+        .unwrap();
+        drop(store);
+        db.execute_batch("ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=24")
+            .unwrap();
+        let store = Store::open(&path, &content).unwrap();
+        let old = store.collection(account).await.unwrap()["items"][0].clone();
+        assert_eq!(
+            old,
+            serde_json::json!({"item":2594,"found_at":123,"source":null})
+        );
+        let pickup = |item, source: &str| {
+            Some(CollectedItem {
+                item,
+                source: source.into(),
+            })
+        };
+        let write = |ch: &Character| InventoryWrite {
+            account: ch.account,
+            id: ch.id,
+            revision: ch.revision,
+            items: ch.items.clone(),
+        };
+        ch.items[4] = 2595;
+        ch.revision = store
+            .exchange_collected(vec![write(&ch)], vec![], pickup(2595, "Medusa"))
+            .await
+            .unwrap()[0];
+        let first = store.collection(account).await.unwrap()["items"][1].clone();
+        assert_eq!(first["source"], "Medusa");
+        assert!(
+            store
+                .exchange_collected(vec![write(&ch)], vec![], pickup(2596, ""))
+                .await
+                .is_err()
+        );
+        let stale = InventoryWrite {
+            revision: ch.revision - 1,
+            ..write(&ch)
+        };
+        assert!(
+            store
+                .exchange_collected(vec![stale], vec![], pickup(2596, "Oasis Giant chest"))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            store.collection(account).await.unwrap()["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        ch.revision = store
+            .exchange_collected(vec![write(&ch)], vec![], pickup(2595, "Oasis Giant chest"))
+            .await
+            .unwrap()[0];
+        ch.revision = store
+            .exchange_collected(vec![write(&ch)], vec![], pickup(2594, "Medusa"))
+            .await
+            .unwrap()[0];
+        ch.items[5] = 2596;
+        store
+            .exchange_collected(vec![write(&ch)], vec![], pickup(2596, "Oasis Giant chest"))
+            .await
+            .unwrap();
+        drop(store);
+        let reopened = Store::open(&path, &content).unwrap();
+        let items = reopened.collection(account).await.unwrap()["items"].clone();
+        assert_eq!(items[0], old);
+        assert_eq!(items[1], first);
+        assert_eq!(items[2]["source"], "Oasis Giant chest");
+        assert_eq!(reopened.load(account, ch.id).await.unwrap().items[5], 2596);
+        drop(reopened);
+        drop(db);
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[tokio::test]
     async fn account_presentation_reads_characters_by_index() {

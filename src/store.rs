@@ -522,6 +522,16 @@ pub struct Vault {
     pub items: Vec<i32>,
     pub revision: i32,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectedItem {
+    pub item: u16,
+    pub source: String,
+}
+fn valid_collection_source(source: &str) -> bool {
+    !source.trim().is_empty()
+        && source.chars().count() <= 128
+        && !source.chars().any(char::is_control)
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InventoryWrite {
     pub id: i32,
@@ -787,6 +797,7 @@ impl Store {
                     | 22
                     | 23
                     | 24
+                    | 25
             ),
             "unsupported game database schema {version}"
         );
@@ -863,7 +874,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         migration.execute_batch("CREATE TABLE IF NOT EXISTS trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE);
  CREATE TABLE IF NOT EXISTS bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)));")?;
         guilds::migrate(&migration, version)?;
-        gold::migrate(&migration, version, rewards_exist)?;
+        gold::migrate(&migration, layout.expand_gold(), rewards_exist)?;
         achievements::migrate(&migration, !layout.achievements())?;
         if version < 19 {
             migration.execute_batch(&discord_gold::SCHEMA.replacen(
@@ -882,6 +893,9 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             migration.execute_batch(discord_gold::REALM_CLOSE_SCHEMA)?;
         }
         email::migrate(&migration, version)?;
+        if !layout.collection_sources() {
+            migration.execute_batch(schema22_compat::COLLECTION_SOURCE)?;
+        }
         if !credits_exist {
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
         }
@@ -976,8 +990,8 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
         account_save::migrate(&migration, !layout.portable())?;
-        schema22_compat::check(&migration, 24)?;
-        migration.pragma_update(None, "user_version", 24)?;
+        schema22_compat::check(&migration, 25)?;
+        migration.pragma_update(None, "user_version", 25)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -1539,7 +1553,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         &self,
         writes: Vec<InventoryWrite>,
         vaults: Vec<Vault>,
-        collected: Option<u16>,
+        collected: Option<CollectedItem>,
     ) -> Result<Vec<i32>> {
         self.exchange_transaction(writes, vaults, collected, None)
             .await
@@ -1684,13 +1698,19 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         &self,
         writes: Vec<InventoryWrite>,
         vaults: Vec<Vault>,
-        collected: Option<u16>,
+        collected: Option<CollectedItem>,
         receipt: Option<(String, Option<crate::bots::pursuits::market::Delivery>)>,
     ) -> Result<Vec<i32>> {
         ensure!(
             collected.is_none() || writes.len() == 1,
             "collection requires one pickup owner"
         );
+        if let Some(pickup) = &collected {
+            ensure!(
+                valid_collection_source(&pickup.source),
+                "invalid collection source"
+            );
+        }
         let collector = writes.first().context("missing inventory owner")?.account;
         ensure!(
             (1..=2).contains(&writes.len()),
@@ -1741,8 +1761,8 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 ensure!(n == 1, "inventory conflict: character {}, account {}, expected revision {}", write.id, write.account, write.revision);
                 revisions.push(write.revision + 1);
             }
-            let rewarded = if let Some(item) = collected {
-                tx.execute("INSERT OR IGNORE INTO collections(account,item,found_at) VALUES(?1,?2,unixepoch())", params![collector,item])? > 0
+            let rewarded = if let Some(pickup) = collected {
+                tx.execute("INSERT INTO collections(account,item,found_at,source) VALUES(?1,?2,unixepoch(),?3) ON CONFLICT(account,item) DO NOTHING", params![collector,pickup.item,pickup.source])? > 0
                     && gold::collection(&tx, collector)?
             } else { false };
             for vault in vaults { vaults::save(&tx, &vault)?; }

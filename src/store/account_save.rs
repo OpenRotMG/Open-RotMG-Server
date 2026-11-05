@@ -160,6 +160,8 @@ pub struct AccountSave {
     pub claims: Vec<(u16, i32)>,
     pub vaults: Vec<Chest>,
     pub collections: Vec<(u16, i64)>,
+    #[serde(default)]
+    pub collection_sources: Vec<(u16, String)>,
     pub rewards: Vec<Reward>,
     pub pictures: Vec<Picture>,
     pub guild_fame: i64,
@@ -317,6 +319,15 @@ impl AccountSave {
                 );
             }
         }
+        let mut sources = BTreeSet::new();
+        ensure!(
+            self.collection_sources
+                .iter()
+                .all(|(item, source)| sources.insert(*item)
+                    && self.collections.iter().any(|(id, _)| id == item)
+                    && super::valid_collection_source(source)),
+            "invalid collection source"
+        );
         let mut ids = BTreeSet::new();
         for row in &self.characters {
             let ch = &row.character;
@@ -544,6 +555,21 @@ pub(crate) fn export(db: &Connection, account: i32, base: [i32; 8]) -> Result<Ac
             account,
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?,
+        collection_sources: if super::schema22_compat::KnownStoreLayout::read(
+            db,
+            db.query_row("PRAGMA user_version", [], |r| r.get(0))?,
+        )?
+        .collection_sources()
+        {
+            rows(
+                db,
+                "SELECT item,source FROM collections WHERE account=?1 AND source IS NOT NULL ORDER BY item",
+                account,
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?
+        } else {
+            Vec::new()
+        },
         rewards: rows(
             db,
             "SELECT reward,awarded_at,notified_at FROM gold_rewards WHERE account=?1 ORDER BY reward",
@@ -636,7 +662,7 @@ pub(crate) fn check_expected(
 pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResult> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=24),
+        matches!(version, 21..=25),
         "unsupported local preview schema {version}"
     );
     let layout = super::schema22_compat::KnownStoreLayout::read(db, version)?;
@@ -900,8 +926,14 @@ pub(super) fn import(
     }
     for (item, time) in &save.collections {
         tx.execute(
-            "INSERT INTO collections VALUES(?1,?2,?3)",
+            "INSERT INTO collections(account,item,found_at) VALUES(?1,?2,?3)",
             params![account, item, time],
+        )?;
+    }
+    for (item, source) in &save.collection_sources {
+        tx.execute(
+            "UPDATE collections SET source=?3 WHERE account=?1 AND item=?2",
+            params![account, item, source],
         )?;
     }
     for reward in &save.rewards {
@@ -1012,7 +1044,7 @@ impl Store {
 pub(crate) fn verify_database(db: &Connection, content: &Content) -> Result<()> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=24),
+        matches!(version, 21..=25),
         "unsupported local snapshot schema {version}"
     );
     gold::check_schema(db, version)?;

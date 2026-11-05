@@ -489,7 +489,7 @@ impl World {
                 .map(i32::from)
                 .collect();
             rewards.push(potion);
-            self.loot_bags(boss.pos, Some(account), &rewards)?;
+            self.loot_bags(boss.pos, Some(account), &rewards, boss.kind)?;
         }
         Ok(())
     }

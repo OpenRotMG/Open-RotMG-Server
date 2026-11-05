@@ -52,7 +52,7 @@ def check(path):
         before = db.execute('SELECT * FROM discord_realm_close_tokens ORDER BY request_id').fetchall()
         assert len(before) == 2 and sum(row[-1] is None for row in before) == 1
         assert db.execute('SELECT count(*) FROM characters').fetchone()[0] == 0
-        assert db.execute('SELECT sql FROM sqlite_schema WHERE name="gold_rewards"').fetchone()[0] == backup.gold_reward_sql(23)
+        assert db.execute('SELECT sql FROM sqlite_schema WHERE name="gold_rewards"').fetchone()[0] == backup.gold_reward_sql(25, True)
     public = backup.snapshot(path, backup.RELOADED_GAME)
     assert 'discord_realm_close_tokens' not in public and 'credentials' not in public
     assert len(public['achievement_partners']) == len(public['achievement_dungeons']) == len(public['achievement_realm_credits']) == 1
@@ -80,7 +80,7 @@ def check(path):
     with patch.object(backup, 'characters', empty_characters), patch.object(backup, 'validate_community', empty_community), patch.object(backup, 'validate_pictures', empty_pictures):
         archive = parent / 'backup-test-public.gz'
         bundle = backup.export(path, discord, archive, revision, revision, revision)
-        assert bundle['schema'] == 24 and bundle['game'] == public
+        assert bundle['schema'] == 25 and bundle['game'] == public
         assert b'discord_realm_close_tokens' not in gzip.decompress(archive.read_bytes())
         restored = parent / 'backup-test-restored'
         backup.restore(archive, restored)
@@ -100,8 +100,8 @@ def check(path):
                 raise AssertionError('Malformed achievement progress accepted: ' + table)
     with closing(sqlite3.connect(path)) as db:
         assert db.execute('SELECT * FROM discord_realm_close_tokens ORDER BY request_id').fetchall() == before
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 24
-    print('PASS actual schema24 export/restore/reexport preserves achievement history; source tokens unchanged and private tokens intentionally omitted; empty external codecs unit-isolated, no CLI')
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 25
+    print('PASS actual schema25 export/restore/reexport preserves achievement history; source tokens unchanged and private tokens intentionally omitted; empty external codecs unit-isolated, no CLI')
 
 
 if __name__ == '__main__':

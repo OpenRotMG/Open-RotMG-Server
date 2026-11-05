@@ -68,7 +68,8 @@ PORTABLE_TABLES = {
     'portable_history': ('account', 'guild_fame', 'realm_unused', 'realm_spent'),
 }
 PORTABLE_GAME = {**DISCORD_GOLD_GAME, **PORTABLE_TABLES}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: PORTABLE_GAME, 23: ACHIEVEMENT_GAME, 24: {**PORTABLE_GAME, **ACHIEVEMENT_TABLES}}
+COLLECTION_GAME = {**PORTABLE_GAME, 'collections': ('account', 'item', 'found_at', 'source')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: PORTABLE_GAME, 23: ACHIEVEMENT_GAME, 24: {**PORTABLE_GAME, **ACHIEVEMENT_TABLES}, 25: {**COLLECTION_GAME, **ACHIEVEMENT_TABLES}}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -95,8 +96,12 @@ RESTORED_BASE_TOKEN_GAME = {**RESTORED_BASE_GAME, **RESET_TABLES, **REALM_CLOSE_
 RESTORED_PORTABLE_GAME = {**PORTABLE_GAME, **EMAIL_TABLES, **RESET_TABLES, **REALM_CLOSE_TABLES}
 RESTORED_ACHIEVEMENT_GAME = {**ACHIEVEMENT_GAME, **EMAIL_TABLES, **RESET_TABLES, **REALM_CLOSE_TABLES}
 RELOADED_PORTABLE_GAME = {**PRE_PORTABLE_GAME, **PORTABLE_TABLES}
-RELOADED_GAME = {**RELOADED_PORTABLE_GAME, **ACHIEVEMENT_TABLES}
-RESTORED_GAME = {**GAME_SCHEMAS[24], **EMAIL_TABLES, **RESET_TABLES, **REALM_CLOSE_TABLES}
+RELOADED_COMBINED24_GAME = {**RELOADED_PORTABLE_GAME, **ACHIEVEMENT_TABLES}
+RESTORED_COMBINED24_GAME = {**GAME_SCHEMAS[24], **EMAIL_TABLES, **RESET_TABLES, **REALM_CLOSE_TABLES}
+RELOADED_COLLECTION_GAME = {**RELOADED_PORTABLE_GAME, 'collections': COLLECTION_GAME['collections']}
+RESTORED_COLLECTION_GAME = {**RESTORED_PORTABLE_GAME, 'collections': COLLECTION_GAME['collections']}
+RELOADED_GAME = {**RELOADED_COMBINED24_GAME, 'collections': COLLECTION_GAME['collections']}
+RESTORED_GAME = {**GAME_SCHEMAS[25], **EMAIL_TABLES, **RESET_TABLES, **REALM_CLOSE_TABLES}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -165,6 +170,11 @@ CANONICAL_TRIGGERS = {
     'character_slot_capacity': (12, "CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END"),
     'guild_capacity': (9, "CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END"),
 }
+
+
+COLLECTION_SQL = "CREATE TABLE collections(account INTEGER NOT NULL REFERENCES accounts(id),item INTEGER NOT NULL CHECK(item BETWEEN 0 AND 65535),found_at INTEGER NOT NULL,PRIMARY KEY(account,item))"
+COLLECTION_SOURCE_SQL = "ALTER TABLE collections ADD COLUMN source TEXT CHECK(source IS NULL OR (typeof(source)='text' AND length(trim(source)) BETWEEN 1 AND 128))"
+COLLECTION_WITH_SOURCE_SQL = "CREATE TABLE collections(account INTEGER NOT NULL REFERENCES accounts(id),item INTEGER NOT NULL CHECK(item BETWEEN 0 AND 65535),found_at INTEGER NOT NULL, source TEXT CHECK(source IS NULL OR (typeof(source)='text' AND length(trim(source)) BETWEEN 1 AND 128)),PRIMARY KEY(account,item))"
 
 
 def check_source_objects(db, version):
@@ -251,6 +261,10 @@ def snapshot(path, schema, *, include_schema=False):
                     if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (name,)).fetchone() != (definition.strip(),):
                         raise ValueError('Unsupported portable save metadata: ' + name)
         version = db.execute('PRAGMA user_version').fetchone()[0]
+        if 'collections' in schema:
+            expected = COLLECTION_WITH_SOURCE_SQL if 'source' in schema['collections'] else COLLECTION_SQL
+            if db.execute("SELECT sql FROM sqlite_schema WHERE name='collections'").fetchone() != (expected,):
+                raise ValueError('Collection source metadata mismatch; preserve input for review')
         if 'gold_rewards' in schema:
             if db.execute("SELECT sql FROM sqlite_schema WHERE name='gold_rewards'").fetchone() != (gold_reward_sql(version, 'achievement_partners' in schema),):
                 raise ValueError('Gold reward metadata mismatch for known schema layout')
@@ -497,6 +511,8 @@ def validate_community(game):
 
 
 def game_schema(bundle):
+    if bundle['schema'] == 23 and set(bundle['game']) == set(COLLECTION_GAME):
+        return COLLECTION_GAME
     if bundle['schema'] == 22 and set(bundle['game']) == set(ACHIEVEMENT_GAME):
         return ACHIEVEMENT_GAME
     return GAME_SCHEMAS[bundle['schema']]
@@ -590,6 +606,11 @@ def validate(bundle):
                 raise ValueError('Invalid collection record')
             if table == 'discord_links' and (not isinstance(row['discord_id'], str) or not re.fullmatch(r'[0-9]{17,20}', row['discord_id'])):
                 raise ValueError('Invalid linked Discord identity')
+        if table == 'collections' and bundle['schema'] >= 4 and 'source' in game_schema(bundle)['collections']:
+            for row in rows:
+                source = row['source']
+                if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 128 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in source)):
+                    raise ValueError('Invalid collection source')
         identities = [(row['account'], row['item']) if table == 'collections' else row['account'] for row in rows]
         if len(set(identities)) != len(rows) or (table == 'discord_links' and len({r['discord_id'] for r in rows}) != len(rows)):
             raise ValueError('Duplicate hiscores identity: ' + table)
@@ -664,7 +685,7 @@ def validate_achievements(game):
 
 
 def gold_reward_types(version, achievements=False):
-    return ('discord_link', 'collection_top_half') + (('first_bug_report',) if version >= 11 else ()) + (('class_star_blue', 'class_star_red', 'class_star_orange', 'class_star_yellow', 'class_star_white') if version >= 18 else ()) + (tuple('achievement_' + name for name in (ACHIEVEMENT_REWARDS if version >= 23 else ACHIEVEMENT_REWARDS22)) if version >= 23 or (version == 22 and achievements) else ())
+    return ('discord_link', 'collection_top_half') + (('first_bug_report',) if version >= 11 else ()) + (('class_star_blue', 'class_star_red', 'class_star_orange', 'class_star_yellow', 'class_star_white') if version >= 18 else ()) + (tuple('achievement_' + name for name in (ACHIEVEMENT_REWARDS if version >= 23 else ACHIEVEMENT_REWARDS22)) if achievements else ())
 
 
 def gold_reward_sql(version, achievements=False):
@@ -673,7 +694,7 @@ def gold_reward_sql(version, achievements=False):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, PRE_PORTABLE_GAME, RELOADED_PORTABLE_GAME, ACHIEVEMENT_GAME, RELOADED_GAME, RELOADED_ACHIEVEMENT_GAME, RESTORED_BASE_GAME, RESTORED_BASE_TOKEN_GAME, RESTORED_PORTABLE_GAME, RESTORED_ACHIEVEMENT_GAME, RESTORED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, PRE_PORTABLE_GAME, RELOADED_PORTABLE_GAME, ACHIEVEMENT_GAME, RELOADED_GAME, RELOADED_ACHIEVEMENT_GAME, RESTORED_BASE_GAME, RESTORED_BASE_TOKEN_GAME, RESTORED_PORTABLE_GAME, RESTORED_ACHIEVEMENT_GAME, RESTORED_GAME, COLLECTION_GAME, RELOADED_COMBINED24_GAME, RESTORED_COMBINED24_GAME, RELOADED_COLLECTION_GAME, RESTORED_COLLECTION_GAME], include_schema=True)
     if (matched == RESTORED_BASE_GAME and stored_version != 20) or (matched == RESTORED_BASE_TOKEN_GAME and stored_version != 21) or (matched == RESTORED_PORTABLE_GAME and stored_version != 22):
         raise ValueError('Unsupported restored database schema layout/version')
     if 'credentials' in matched and (('email_verifications' in matched) != (stored_version >= 20)):
@@ -683,6 +704,8 @@ def export(game, discord, output, server_revision, bot_revision, validator_revis
     versions = [v for v, schema in GAME_SCHEMAS.items() if schema == {k: c for k, c in matched.items() if k in game_data}]
     if stored_version == 22 and 'achievement_partners' in game_data:
         versions.append(22)
+    if stored_version == 23 and {k: c for k, c in matched.items() if k in game_data} == COLLECTION_GAME:
+        versions.append(23)
     if (stored_version > max(GAME_SCHEMAS) or
             ((max(versions) >= 12 or stored_version >= 12) and stored_version not in versions)):
         raise ValueError('Unsupported database schema version')
@@ -771,12 +794,14 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         definitions['game'] += '\n' + DISCORD_GOLD_SQL + ';'
     if 'save_namespace' in bundle['game']:
         definitions['game'] += '\n' + PORTABLE_SQL
-    if bundle['schema'] in (23, 24) or 'achievement_partners' in bundle['game']:
+    if 'achievement_partners' in bundle['game']:
         definitions['game'] += '\n' + ';\n'.join(ACHIEVEMENT_SQL.values()) + ';'
     if bundle['schema'] >= 20:
         definitions['game'] += '\n' + ';'.join(EMAIL_SQL.values()) + ';'
     if bundle['schema'] >= 21:
         definitions['game'] += '\n' + RESET_SQL + ';\n' + REALM_CLOSE_SQL + ';'
+    if bundle['schema'] >= 4 and 'source' in game_schema(bundle)['collections']:
+        definitions['game'] += '\n' + COLLECTION_SOURCE_SQL + ';'
     for minimum, sql in CANONICAL_TRIGGERS.values():
         if bundle['schema'] >= minimum:
             definitions['game'] += '\n' + sql + ';'

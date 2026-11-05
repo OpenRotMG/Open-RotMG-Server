@@ -846,7 +846,7 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                     items: plan.items.clone(),
                 }],
                 plan.vaults.clone(),
-                plan.collected,
+                plan.collected.clone(),
             )
             .await
             .and_then(|mut revisions| {

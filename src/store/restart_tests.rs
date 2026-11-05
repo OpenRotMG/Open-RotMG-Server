@@ -51,7 +51,14 @@ async fn mutate(store: &Store, content: &Content, operation: &str) -> Result<()>
         "pickup" => {
             left.items[5] = 0xa97;
             store
-                .exchange_collected(vec![write(&left)], vec![], Some(0xa97))
+                .exchange_collected(
+                    vec![write(&left)],
+                    vec![],
+                    Some(CollectedItem {
+                        item: 0xa97,
+                        source: "Medusa".into(),
+                    }),
+                )
                 .await?;
         }
         "drop" => {
@@ -82,7 +89,7 @@ fn snapshot(path: &Path) -> Vec<String> {
         "SELECT json_group_array(json_array(character,snapshot,receipt)) FROM (SELECT * FROM deaths ORDER BY character)",
         "SELECT json_group_array(json_array(account,balance,earned)) FROM (SELECT * FROM account_fame ORDER BY account)",
         "SELECT json_group_array(json_array(id,owners,writes,revisions)) FROM trade_transactions",
-        "SELECT json_group_array(json_array(account,item)) FROM collections",
+        "SELECT json_group_array(json_array(account,item,source)) FROM collections",
         "SELECT json_group_array(json_array(account,class,character)) FROM legacy_claims",
         "SELECT json_group_array(json_array(name,account)) FROM shore_bots",
         "SELECT json_group_array(json_array(account,reward)) FROM gold_rewards",
