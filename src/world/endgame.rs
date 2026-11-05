@@ -1285,7 +1285,14 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     let (packets, mut inbox) = mpsc::channel(64);
     let (lost, _) = watch::channel(None);
     let player = world
-        .enter(character.clone(), Some(Output { packets, lost }))
+        .enter(
+            character.clone(),
+            Some(Output {
+                trace: None,
+                packets,
+                lost,
+            }),
+        )
         .unwrap();
     while inbox.try_recv().is_ok() {}
     directory.worlds.insert(-3, world);
@@ -1651,7 +1658,14 @@ async fn realm_close_token_starts_the_ordinary_closure_once() {
     let (packets, mut inbox) = mpsc::channel(64);
     let (lost, _) = watch::channel(None);
     let player = world
-        .enter(character.clone(), Some(Output { packets, lost }))
+        .enter(
+            character.clone(),
+            Some(Output {
+                trace: None,
+                packets,
+                lost,
+            }),
+        )
         .unwrap();
     while inbox.try_recv().is_ok() {}
     directory.worlds.insert(-3, world);

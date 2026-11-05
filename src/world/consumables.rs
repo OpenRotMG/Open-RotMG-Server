@@ -12,6 +12,18 @@ pub(super) struct Boost {
     amount: i32,
     until: Option<u64>,
 }
+impl Boost {
+    pub(super) fn audit(&self) -> serde_json::Value {
+        serde_json::json!([
+            self.source.0,
+            self.source.1,
+            self.activation,
+            self.index,
+            self.amount,
+            self.until
+        ])
+    }
+}
 impl Player {
     pub(super) fn effective(&self, content: &Content, now: u64) -> Result<[i32; 8]> {
         let mut values = self.character.effective(content)?;
@@ -115,13 +127,33 @@ impl World {
     }
 
     pub(super) fn expire_consumable_boosts(&mut self) {
-        for p in self.players.values_mut() {
+        for (id, p) in &mut self.players {
+            let expired = if p.controller == Controller::Human {
+                p.boosts
+                    .iter()
+                    .filter(|b| b.until.is_some_and(|until| until <= self.now))
+                    .map(Boost::audit)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             p.boosts
                 .retain(|boost| boost.until.is_none_or(|until| until > self.now));
+            if !expired.is_empty() {
+                p.audit_fact(
+                    *id,
+                    &self.name,
+                    self.now,
+                    "boost_expired",
+                    || serde_json::json!({"boosts":expired}),
+                );
+            }
             let values = p
                 .effective(&self.content, self.now)
                 .expect("validated temporary stats");
+            let before = p.character.hp;
             p.character.hp = p.character.hp.min(values[0]);
+            p.audit_hp(*id, &self.name, self.now, "stat_cap", before);
             p.character.mp = p.character.mp.min(values[1]);
         }
     }
@@ -272,8 +304,9 @@ impl World {
                 duration, range, ..
             } = effect
             {
-                for p in self.players.values_mut() {
+                for (id, p) in &mut self.players {
                     if p.active() && p.character.hp > 0 {
+                        let mut applied = Vec::new();
                         for boost in p.boosts.iter_mut().filter(|b| {
                             b.source == source && b.activation == activation && b.until.is_none()
                         }) {
@@ -281,6 +314,18 @@ impl World {
                                 self.now
                                     .checked_add(*duration)
                                     .context("boost deadline overflow")?,
+                            );
+                            if p.controller == Controller::Human {
+                                applied.push(boost.audit());
+                            }
+                        }
+                        if !applied.is_empty() {
+                            p.audit_fact(
+                                *id,
+                                &self.name,
+                                self.now,
+                                "boost_applied",
+                                || serde_json::json!({"boosts":applied}),
                             );
                         }
                     }
@@ -308,6 +353,7 @@ impl World {
                         p.character.hp =
                             (p.character.hp + amount).min(p.effective(&self.content, self.now)?[0]);
                         let restored = p.character.hp - before;
+                        p.audit_hp(player, &self.name, self.now, "consumable", before);
                         self.consumable_restored(player, restored, 0xff00ff00);
                     }
                 }

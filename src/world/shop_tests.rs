@@ -271,7 +271,11 @@ async fn merchant_reservations_freeze_quotes_and_settle_once_atomically() {
     world.entities.get_mut(&seller).unwrap().extra_stats = saved_rank;
     let (packets, mut inbox) = mpsc::channel(64);
     let (lost, _) = watch::channel(None);
-    world.players.get_mut(&player).unwrap().tx = Some(Output { packets, lost });
+    world.players.get_mut(&player).unwrap().tx = Some(Output {
+        trace: None,
+        packets,
+        lost,
+    });
     world.step();
     world.step();
     while inbox.try_recv().is_ok() {}

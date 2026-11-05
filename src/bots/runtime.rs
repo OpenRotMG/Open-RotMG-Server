@@ -512,7 +512,11 @@ async fn enter_admitted(
             }
             let id = w.enter_admitted(
                 character,
-                Some(Output { packets, lost }),
+                Some(Output {
+                    trace: None,
+                    packets,
+                    lost,
+                }),
                 position,
                 presentation,
                 legendary,

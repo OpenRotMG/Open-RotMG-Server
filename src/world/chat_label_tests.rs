@@ -60,6 +60,7 @@ async fn reviewed_chat_labels_follow_account_ids_without_changing_commands_or_na
                 .enter_at(
                     ch,
                     Some(Output {
+                        trace: None,
                         packets,
                         lost: lost.clone(),
                     }),

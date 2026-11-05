@@ -383,6 +383,7 @@ impl World {
                 }
                 Ability::Teleport { .. } => {
                     let p = self.players.get_mut(&id).unwrap();
+                    p.audit_fact(id,&self.name,self.now,"teleport",||serde_json::json!({"source":"ability","target":id,"from":[p.pos.x,p.pos.y],"destination":[pos.x,pos.y],"epoch":p.audit_motion.epoch+1}));
                     p.pos = pos;
                     p.movement_credit = 0.78;
                     p.last_motion = None;

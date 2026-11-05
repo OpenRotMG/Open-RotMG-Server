@@ -27,6 +27,7 @@ async fn fixture() -> (
         }
         let (packets, mut inbox) = mpsc::channel(64);
         let output = Some(Output {
+            trace: None,
             packets,
             lost: lost.clone(),
         });

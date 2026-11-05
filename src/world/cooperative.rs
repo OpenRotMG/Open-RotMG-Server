@@ -61,6 +61,7 @@ impl Directory {
             .context("teleport predates world epoch")?
             .as_millis() as u64;
         let p = world.players.get_mut(&id).unwrap();
+        p.audit_fact(id,&world.name,world.now,"teleport",||serde_json::json!({"source":"player","target":target,"from":[p.pos.x,p.pos.y],"destination":[position.x,position.y],"epoch":p.audit_motion.epoch+1}));
         p.pos = position;
         p.movement_credit = 0.78;
         // Server-driven motors budget against simulation time, not native packet arrival time.
@@ -207,7 +208,9 @@ impl World {
                 if amount == 0 {
                     continue;
                 }
+                let before = p.character.hp;
                 p.character.hp += amount;
+                p.audit_hp(*id, &self.name, self.now, "fountain", before);
                 healed.push((*id, amount, p.pos, fountain));
             }
         }
@@ -258,6 +261,7 @@ impl World {
             let cap = q.effective(&self.content, self.now)?[0];
             let before = q.character.hp;
             q.character.hp = (q.character.hp + amount).min(cap);
+            q.audit_hp(*id, &self.name, self.now, "consumable_nova", before);
             healed.push((*id, q.character.hp - before));
         }
         for (target, amount) in healed {
@@ -314,7 +318,10 @@ impl World {
                 })
         });
         for (target, amount) in &healing {
-            self.players.get_mut(target).unwrap().character.hp += amount;
+            let q = self.players.get_mut(target).unwrap();
+            let before = q.character.hp;
+            q.character.hp += amount;
+            q.audit_hp(*target, &self.name, self.now, "ability_heal", before);
             if *amount > 0 {
                 let mut out = Writer::new();
                 out.i32(*target).utf(&format!("+{amount}")).u32(0xff00ff00);

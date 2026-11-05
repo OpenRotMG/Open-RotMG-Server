@@ -99,6 +99,16 @@ impl Player {
             }
             return;
         }
+        if self
+            .weapon_ticks
+            .back()
+            .is_none_or(|(_, weapon, previous_dex)| {
+                *weapon != self.character.items[0] || *previous_dex != dex
+            })
+            && let Some(trace) = self.tx.as_ref().and_then(|o| o.trace.as_ref())
+        {
+            trace.event("weapon_advertised",None,None,serde_json::json!({"tick":self.tick,"weapon":self.character.items[0],"dex":dex,"state_revision":self.audit_revision}));
+        }
         self.weapon_ticks
             .push_back((self.tick, self.character.items[0], dex));
     }
@@ -276,7 +286,23 @@ impl World {
         );
         p.native_lag.acknowledge(tick, received);
         // NEW_TICK queues MOVE before applying inventory; earlier SHOOTs still use the old weapon.
+        let newest = p
+            .weapon_ticks
+            .back()
+            .map(|(_, weapon, dex)| (*weapon, *dex));
+        let retired = if p.controller == Controller::Human {
+            p.weapon_ticks
+                .iter()
+                .filter(|(sent, weapon, dex)| *sent < tick && Some((*weapon, *dex)) != newest)
+                .copied()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         p.weapon_ticks.retain(|(sent, _, _)| *sent >= tick);
+        if !retired.is_empty() {
+            p.audit_fact(id,&self.name,self.now,"weapon_ack",||serde_json::json!({"tick":tick,"retired":retired,"remaining":p.weapon_ticks.len(),"state_revision":p.audit_revision}));
+        }
         Ok(())
     }
     pub(super) fn validate_native_coordinates(&self, id: i32, pos: Pos, time: i32) -> Result<()> {
@@ -343,6 +369,7 @@ impl World {
             p.last_move = time;
         }
         p.goto_acks.pop_front();
+        p.audit_fact(id,&self.name,self.now,"goto_ack",||serde_json::json!({"client_ms":time,"own":own,"age_ms":sent.elapsed().as_millis(),"epoch":p.audit_motion.epoch,"remaining":p.goto_acks.len()}));
         tracing::debug!(player = id, client_time = time, own, "GOTO acknowledged");
         Ok(())
     }
