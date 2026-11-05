@@ -338,29 +338,35 @@ mod tests {
     #[test]
     fn oryx_wakes_on_damage_tosses_each_phase_and_rages() {
         let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-        let map = Map::load(std::path::Path::new("data/oryx-chamber.wmap"), &content).unwrap();
-        let mut world = World::new(content.clone(), Arc::new(map)).unwrap();
-        world.name = "Oryx's Chamber".into();
-        world.encounter = true;
-        world.prepare_endgame().unwrap();
-        let mut character = Character::fresh(content.get(0x307).unwrap()).unwrap();
-        character.account = 1;
-        character.id = 1;
-        let player = world.enter(character, None).unwrap();
-        world
-            .apply_condition(player, condition::INVINCIBLE, 3_600_000)
-            .unwrap();
-        let oryx = world
-            .entities
-            .values()
-            .find(|e| e.kind == finale::ORYX)
-            .unwrap()
-            .id;
-        let home = world.entities[&oryx].home;
-        world.players.get_mut(&player).unwrap().pos = Pos {
-            x: home.x,
-            y: home.y + 6.,
+        let map = Arc::new(
+            Map::load(std::path::Path::new("data/oryx-chamber.wmap"), &content).unwrap(),
+        );
+        let fixture = || {
+            let mut world = World::new(content.clone(), map.clone()).unwrap();
+            world.name = "Oryx's Chamber".into();
+            world.encounter = true;
+            world.prepare_endgame().unwrap();
+            let mut character = Character::fresh(content.get(0x307).unwrap()).unwrap();
+            character.account = 1;
+            character.id = 1;
+            let player = world.enter(character, None).unwrap();
+            world
+                .apply_condition(player, condition::INVINCIBLE, 3_600_000)
+                .unwrap();
+            let oryx = world
+                .entities
+                .values()
+                .find(|e| e.kind == finale::ORYX)
+                .unwrap()
+                .id;
+            let home = world.entities[&oryx].home;
+            world.players.get_mut(&player).unwrap().pos = Pos {
+                x: home.x,
+                y: home.y + 6.,
+            };
+            (world, oryx)
         };
+        let (mut world, oryx) = fixture();
         // Alone until he has lost ≈3 %, then the wake burst of Minions, gone after the end line.
         run(&mut world, 2000);
         assert_eq!(world.finale.oryx[&oryx].phase(), Phase::Alone);
@@ -374,18 +380,27 @@ mod tests {
         );
         run(&mut world, 17_000);
         assert_eq!(world.oryx_count(oryx, 0x1749..=0x1749), 0);
-        // Each phase's tossed summons are on the floor once they land.
+        // Random phase draws cannot guarantee summon coverage in a finite run.
         let (mut checked, mut low) = (BTreeSet::new(), BTreeSet::new());
-        for step in 0..9_000 {
-            if step == 4_500 {
-                world.entities.get_mut(&oryx).unwrap().hp = 30_000;
-            }
+        for (phase, hp, landing_ms) in [
+            (Phase::Silence, 82_000, 2_000),
+            (Phase::Artifacts, 82_000, 7_000),
+            (Phase::Planets, 82_000, 3_000),
+            (Phase::Minions, 82_000, 500),
+            (Phase::Dance, 30_000, 2_000),
+            (Phase::Cosmic, 30_000, 8_200),
+            (Phase::Grid, 30_000, 3_700),
+        ] {
+            let (mut world, oryx) = fixture();
+            world.entities.get_mut(&oryx).unwrap().hp = hp;
+            let (brain, duration) = oryx1::Brain::for_phase_fixture(phase);
+            world.finale.oryx.insert(oryx, brain);
             world.step();
-            let brain = &world.finale.oryx[&oryx];
-            let (phase, age) = (brain.phase(), brain.age(world.now));
-            if step > 4_500 && age < 50 {
-                low.insert(phase);
-            }
+            assert_eq!(world.finale.oryx[&oryx].phase(), phase);
+            assert_eq!(world.finale.oryx[&oryx].age(world.now), 0);
+            run(&mut world, landing_ms);
+            let age = world.finale.oryx[&oryx].age(world.now);
+            assert_eq!(age, landing_ms);
             let count = |kinds| world.oryx_count(oryx, kinds);
             let landed = match phase {
                 Phase::Silence | Phase::Dance if (2_000..2_050).contains(&age) => {
@@ -403,12 +418,28 @@ mod tests {
                     count(0x1749..=0x1749) == oryx1::PHASE_MINIONS
                         && count(0x1741..=0x1741) >= oryx1::PHASE_ASSASSINS
                 }
-                _ => continue,
+                _ => panic!("{phase:?} landing checkpoint missing at {age} ms"),
             };
             assert!(landed, "{phase:?} summons missing at {age} ms");
             checked.insert(phase);
+            world.entities.get_mut(&oryx).unwrap().hp = 30_000;
+            run(&mut world, duration - landing_ms);
+            let next = world.finale.oryx[&oryx].phase();
+            assert_ne!(next, phase, "a phase followed itself");
+            low.insert(next);
         }
-        assert!(checked.len() >= 5, "only {checked:?} ran");
+        assert_eq!(
+            checked,
+            BTreeSet::from([
+                Phase::Silence,
+                Phase::Artifacts,
+                Phase::Planets,
+                Phase::Minions,
+                Phase::Dance,
+                Phase::Cosmic,
+                Phase::Grid,
+            ])
+        );
         assert!(!low.contains(&Phase::Silence) && !low.contains(&Phase::Artifacts));
         // At 5000 HP: heal 7 × 2500 while invulnerable, grow, then Armored with Assassins and Minions.
         world.entities.get_mut(&oryx).unwrap().hp = 4_000;
