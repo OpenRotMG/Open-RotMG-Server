@@ -275,25 +275,41 @@ def run_job(directory):
         interrupted = True
         if process is not None and not forwarded:
             forwarded = True
-            process.send_signal(signum)
+            process.send_signal(signal.SIGTERM)
 
-    # Reap the command and let its guardian finish instead of killing the receipt writer too.
-    previous = signal.signal(signal.SIGTERM, interrupt)
+    # Request command cleanup before group shutdown can kill its guardian or receipt writer.
+    previous = signal.signal(signal.SIGUSR1, interrupt)
     try:
         with (results / 'stdout.log').open('ab', buffering=0) as out, (results / 'stderr.log').open('ab', buffering=0) as err:
             process = subprocess.Popen(row['command'], cwd=row['source'], env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err)
             if interrupted:
-                interrupt(signal.SIGTERM, None)
+                interrupt(signal.SIGUSR1, None)
             code = process.wait()
         save(directory / 'command.json', {'returncode': code, 'finished': time.time()})
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        signal.signal(signal.SIGUSR1, previous)
     if code == 0 and row.get('service'):
         address = os.environ['NOTIFY_SOCKET']
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notify:
             notify.connect('\0' + address[1:] if address.startswith('@') else address)
             notify.sendall(b'READY=1')
     return code if code >= 0 else 128 - code
+
+
+def stop_job(directory):
+    row = load(directory)
+    state = unit_state(row['unit'])
+    if row['service'] is not None or cgroup() != row.get('cgroup') or os.environ.get('INVOCATION_ID') != row.get('invocation') or state['InvocationID'] != row.get('invocation'):
+        raise RuntimeError('Graceful stop must run inside its recorded owned job invocation')
+    receipt = directory / 'command.json'
+    if not receipt.exists() and state['MainPID'] != '0':
+        subprocess.run(['systemctl', '--user', 'kill', '--kill-whom=main', '--signal=SIGUSR1', row['unit']], check=True)
+        # Leave headroom before systemd's 20-second ExecStop deadline.
+        deadline = time.monotonic() + 18
+        while not receipt.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not receipt.exists():
+            print('Graceful command stop produced no wait receipt; proceeding to bounded group shutdown.', file=sys.stderr)
 
 
 def wait_job(directory):
@@ -368,7 +384,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, epilog='Results: $XDG_STATE_HOME/openrotmg/qa-jobs/ID/results (default ~/.local/state). Requires a user systemd manager and cgroup v2. Short disk-backed scratch: $OPENROTMG_QA_SCRATCH_ROOT (default $XDG_CACHE_HOME/oq). Long jobs: --background; inspect/cancel using the printed job directory. A preserve-scratch file in that job directory is an explicit hold. Host holds: $OPENROTMG_QA_PRESERVATION_FILE (default $XDG_CONFIG_HOME/openrotmg/qa-preservation.json), JSON version:1 with protectedPaths/protectedWords arrays; malformed policy preserves scratch. Host shared cache units can be listed in $XDG_CONFIG_HOME/openrotmg/qa-services.json; they start before jobs, not inside their cgroups. No cleanup/release command is needed.')
     parser.add_argument('--background', action='store_true')
     parser.add_argument('--timeout', type=int, default=3600, help='Whole-job deadline in seconds, including surviving children (default 3600)')
-    parser.add_argument('kind', choices=['cargo', 'native', 'exec', 'status', 'cancel', '__run', '__collect', '__service', '__service-collect'])
+    parser.add_argument('kind', choices=['cargo', 'native', 'exec', 'status', 'cancel', '__run', '__stop', '__collect', '__service', '__service-collect'])
     parser.add_argument('arguments', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     os.umask(0o077)
@@ -380,11 +396,14 @@ def main(argv=None):
         if args.kind == '__service-collect':
             collect(jobs_root() / os.environ['INVOCATION_ID'], stopping=True)
             return 0
-        if args.kind in ('__run', '__collect', 'status', 'cancel'):
+        if args.kind in ('__run', '__stop', '__collect', 'status', 'cancel'):
             directory = Path(args.arguments[0])
             row = load(directory)
             if args.kind == '__run':
                 return run_job(directory)
+            if args.kind == '__stop':
+                stop_job(directory)
+                return 0
             if args.kind == '__collect':
                 collect(directory, stopping=True)
                 return 0
@@ -423,11 +442,12 @@ def main(argv=None):
         unit = load(directory)['unit']
         inherit = [f'--setenv={key}' for key in os.environ if key not in ('INVOCATION_ID', 'NOTIFY_SOCKET', 'JOURNAL_STREAM', 'SYSTEMD_EXEC_PID') and not key.startswith(('LISTEN_', 'WATCHDOG_'))]
         launch = ['systemd-run', '--user', '--quiet', '--collect', '--service-type=exec', '--unit=' + unit,
-                  '--property=ExitType=cgroup', '--property=KillMode=mixed', '--property=Restart=no',
+                  '--property=ExitType=cgroup', '--property=KillMode=control-group', '--property=Restart=no',
                   '--property=RuntimeMaxSec=' + str(args.timeout), '--property=TimeoutStopSec=20',
                   '--property=UMask=0077', '--property=WorkingDirectory=' + str(ROOT).replace('%', '%%'),
                   '--property=StandardOutput=append:' + str(results / 'worker.log').replace('%', '%%'),
                   '--property=StandardError=append:' + str(results / 'worker.log').replace('%', '%%'),
+                  '--property=ExecStop=' + ' '.join('"' + str(p).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%').replace('$', '$$') + '"' for p in [sys.executable, snapshot, '__stop', directory]),
                   '--property=ExecStopPost=' + ' '.join('"' + str(p).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%').replace('$', '$$') + '"' for p in [sys.executable, snapshot, '__collect', directory]),
                   *inherit, sys.executable, str(snapshot), '__run', str(directory)]
         subprocess.run(launch, check=True)
