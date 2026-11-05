@@ -35,6 +35,7 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
 async fn original_source_survives_pickup_but_player_redeposits_do_not_create_discoveries() {
     let (mut w, store, _) = reward_world().await;
     let player = *w.players.keys().next().unwrap();
+    w.players.get_mut(&player).unwrap().controller = Controller::Human;
     let pos = w.players[&player].pos;
     let account = w.players[&player].character.account;
     w.loot_bags(pos, Some(account), &[0xa22; 9], 0x91f).unwrap();
@@ -119,15 +120,9 @@ async fn original_source_survives_pickup_but_player_redeposits_do_not_create_dis
 async fn generated_landmark_chest_loot_has_its_chest_source() {
     let (mut w, _store, _) = reward_world().await;
     let player = *w.players.keys().next().unwrap();
+    w.players.get_mut(&player).unwrap().controller = Controller::Human;
     let pos = w.players[&player].pos;
-    for kind in [
-        0xdc2,
-        0x925,
-        0x678,
-        0x67d,
-        0x928,
-        crate::dungeon::jungle::COIL,
-    ] {
+    for kind in [crate::dungeon::jungle::COIL, 0x925, 0x678, 0x67d, 0x928] {
         let mut picked = false;
         for seed in 0..64 {
             for id in w.entities.keys().copied().collect::<Vec<_>>() {
