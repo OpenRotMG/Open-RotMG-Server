@@ -52,7 +52,9 @@ export function route(map,start,goal){
   const {width,height,blocked}=map,total=width*height,parent=new Int32Array(total).fill(-1),queue=new Int32Array(total),origin=Math.floor(start.y)*width+Math.floor(start.x);
   assert(origin>=0&&origin<total);parent[origin]=origin;queue[0]=origin;let head=0,tail=1,target;
   while(head<tail){const id=queue[head++],x=id%width,y=Math.floor(id/width);if(Math.hypot(x+.5-goal.x,y+.5-goal.y)<=5.5){target=id;break;}
-    for(const n of [id-width,id-1,id+1,id+width])if(n>=0&&n<total&&Math.abs(n%width-x)<=1&&parent[n]===-1&&!blocked[n]){parent[n]=id;queue[tail++]=n;}}
+    for(const [dx,dy]of [[0,-1],[-1,0],[1,0],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]){
+      const nx=x+dx,ny=y+dy,n=ny*width+nx;
+      if(nx>=0&&ny>=0&&nx<width&&ny<height&&parent[n]===-1&&!blocked[n]&&(!dx||!dy||!blocked[y*width+nx]&&!blocked[ny*width+x])){parent[n]=id;queue[tail++]=n;}}}
   assert.notEqual(target,undefined,'No collision-legal undamaging route to the current encounter');
   const path=[];for(let id=target;id!==origin;id=parent[id])path.push(id);path.push(origin);path.reverse();
   return path.filter((p,i)=>i===0||i===path.length-1||p-path[i-1]!==path[i+1]-p).map(id=>({x:id%width+.5,y:Math.floor(id/width)+.5}));
@@ -107,6 +109,11 @@ export function recoveryState(character){
 }
 export function assertCastleArrival(view,original){
   assert.equal(view.map.name,"Oryx's Castle");assert.equal(view.session.character,original.session.character);assert.equal(view.session.account,original.session.account);assert(view.lifecycle.alive);
+}
+export function walkingKeys(dx,dy){
+  assert([dx,dy].every(Number.isFinite),'Finite native walking delta required');
+  const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,threshold=Math.max(.12,Math.max(Math.abs(x),Math.abs(y))*(Math.SQRT2-1)),keys=[];
+  if(Math.abs(x)>threshold)keys.push(x>0?'d':'a');if(Math.abs(y)>threshold)keys.push(y>0?'s':'w');return keys;
 }
 export function observedAim(view,entity,angle){
   const target=view.objects.find(e=>e.id===entity&&e.hp>0);assert(target,'Aim requires a living enemy in the observed neighborhood');const dx=target.position.x-view.position.x,dy=target.position.y-view.position.y,x=50*(dx*Math.cos(angle)+dy*Math.sin(angle)),y=50*(-dx*Math.sin(angle)+dy*Math.cos(angle)),scale=Math.max(1,Math.hypot(x,y)/270);assert([x,y,angle].every(Number.isFinite),'Aim geometry must be finite');return {x:300+x/scale,y:325+y/scale};

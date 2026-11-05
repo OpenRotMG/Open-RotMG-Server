@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions,rejoinMarker} from '../examples/testing/realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions,rejoinMarker,walkingKeys} from '../examples/testing/realm-earned-core.mjs';
 const roots=Array.from({length:49},(_,i)=>i+1),census={message:'finite Realm closure roster bound',origin:-3,heroes:49};
 const credit=(hero,remaining,now=100)=>({message:'qualifying Realm hero defeated',origin:-3,hero,remaining,now});
 const waiting=source=>({message:'quest defeat earned a pending Realm event',source}),admission=(source,entity)=>({message:'quest defeat summoned a Realm event',source,entity});
@@ -38,6 +38,16 @@ test('selected baseline and reconstruction layouts require exact catalogued inpu
 test('route respects collision and rejects a genuinely unreachable encounter',()=>{
   const map={width:21,height:21,blocked:new Uint8Array(441)};for(let y=0;y<21;y++)if(y!==18)map.blocked[y*21+10]=1;
   const points=route(map,{x:2.5,y:10.5},{x:18.5,y:10.5});assert(points.some(p=>p.y===18.5));assert(points.every(p=>!map.blocked[Math.floor(p.y)*21+Math.floor(p.x)]));map.blocked[18*21+10]=1;assert.throws(()=>route(map,{x:2.5,y:10.5},{x:18.5,y:10.5}),/No collision-legal/);
+});
+test('eight-direction routes retain long diagonal legs without cutting blocked corners',()=>{
+  const map=collisionMap({width:31,height:31,blocked:[],damaging_ground:[]}),points=route(map,{x:2.5,y:2.5},{x:26.5,y:26.5});
+  assert(points.some((p,i)=>i>0&&Math.abs(p.x-points[i-1].x)>10&&Math.abs(p.x-points[i-1].x)===Math.abs(p.y-points[i-1].y)));
+  for(const [x,y]of [[2,1],[1,2],[3,2],[2,3]])map.blocked[y*31+x]=1;
+  assert.throws(()=>route(map,{x:2.5,y:2.5},{x:26.5,y:26.5}),/No collision-legal/);
+});
+test('native heading ignores tiny off-axis drift rather than turning a long diagonal leg',()=>{
+  assert.deepEqual(walkingKeys(100.3,100.5),['s']);assert.deepEqual(walkingKeys(-100.5,100.3),['a']);
+  assert.deepEqual(walkingKeys(100,.2),['d','s']);assert.deepEqual(walkingKeys(-.2,-100),['d','w']);assert.throws(()=>walkingKeys(NaN,0),/Finite native/);
 });
 test('actual runtime hazards and solids prohibit navigation and invalid projections fail',()=>{
   const live={width:3,height:3,blocked:[[1,1]],damaging_ground:[[2,0]]},m=collisionMap(live);assert.equal(m.blocked[2],1);assert.equal(m.blocked[4],1);assert.equal(m.blocked[0],0);assert.throws(()=>collisionMap({...live,damaging_ground:undefined}),/Actual runtime/);assert.throws(()=>collisionMap({...live,blocked:[[-1,0]]}),/outside map/);assert.throws(()=>collisionMap({...live,width:0}),/dimensions/);

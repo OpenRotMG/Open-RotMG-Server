@@ -3,7 +3,7 @@ import {readFile,writeFile,appendFile,readdir,realpath,stat} from 'node:fs/promi
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
-import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions,rejoinMarker} from './realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions,rejoinMarker,walkingKeys} from './realm-earned-core.mjs';
 
 export const realmSeed=1344;
 export const fixture={class:0x310,level:20,seed:1344,world:-2,position:{x:78.5,y:42.5},equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
@@ -76,7 +76,7 @@ export async function run(fighter){
       if(client===fighter)await invite();const v=await client.observe();if(v.session.world!==world)return;
       if(client===fighter&&world!==-2&&(ledger?.snapshot().pending.length===0||recoveryState(v.character).retreat))return;
       const dx=goal.x-v.position.x,dy=goal.y-v.position.y,d=distance(goal,v.position);if(d<.6&&Math.floor(goal.x)===Math.floor(v.position.x)&&Math.floor(goal.y)===Math.floor(v.position.y))return;
-      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];if(Math.abs(x)>.12)keys.push(x>0?'d':'a');if(Math.abs(y)>.12)keys.push(y>0?'s':'w');
+      const keys=walkingKeys(dx,dy);
       await act(client,{keys,duration_ms:Math.min(10000,Math.max(80,Math.round(d*1000/7.734)))});
     }throw Error('Collision-legal waypoint budget exhausted');
   };
@@ -95,13 +95,12 @@ export async function run(fighter){
     await act(fighter,{keys:[],duration_ms:1000});const known=(await fighter.inspect()).view.objects.find(p=>p.id===v.session.player);
     assert(known&&known.account===v.session.account&&known.name===profiles[i]&&known.kind===spec.class&&known.hp>0,'New original peer must be client-known before its local invitation');
     await act(fighter,{keys:[],duration_ms:1100,chat:profiles[i]+' follow me'});if(i===0)invitation=(await observer.observe()).game_ms;
-    assert(events.some(e=>e.message==='autonomous follow selected'&&e.account===v.session.account&&e.target===entered.session.player&&e.world===realm),'New original peer did not select the ordinary follow request');
+    assert(events.some(e=>e.message==='autonomous follow selected'&&e.account===v.session.account&&e.target===entered.session.player&&e.world===realm),'New original peer did not select a normal follow action');
     await appendFile(join(out,'earned-enrollment-calls.jsonl'),JSON.stringify({role:profiles[i],actor:created.actor,account:v.session.account,player:v.session.player,native:entered.session.player,claim:'Original peer published and selected normal follow; not proof of sustained movement, combat or whole-clear acceptance'})+'\n');
   }
   assert(originals.length===14&&new Set(originals.map(o=>o.account)).size===14&&new Set(originals.map(o=>o.character)).size===14);
   await save('initial-party');
-  // Paused enrollment has not published peers to the native client's known-object set.
-  await act(fighter,{keys:[],duration_ms:1000});const published=await save('published-party');
+  const published=await save('published-party');
   fighter.check('ordinary publication exposes exact original prepared peers to the client-known view',originals.slice(2).every(o=>published.objects.some(p=>p.id===o.initial.session.player&&p.account===o.account&&p.kind===o.class&&p.name===o.role&&p.hp>0)));
   for(let iteration=0;iteration<300;iteration++){
     await logs();if(ledger.snapshot().pending.length===0)break;
