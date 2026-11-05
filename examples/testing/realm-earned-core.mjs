@@ -65,6 +65,10 @@ export function originalIdentity(role,spec,v){
   assert.deepEqual(v.character.items,[...spec.equipment,...spec.backpack]);
   return {role,actor:v.actor,account:v.session.account,character:v.session.character,class:spec.class,items:v.character.items,revision:v.character.inventory_revision,initial:v};
 }
+export function recoveryState(character){
+  const {hp,mp,stats:{max_hp,max_mp}}=character;assert([hp,mp,max_hp,max_mp].every(Number.isFinite)&&hp>0&&mp>=0&&max_hp>0&&max_mp>=110,'Recovery requires a living measured character');
+  return {retreat:hp<max_hp*.6||mp<110,recovered:hp>=max_hp*.95&&mp>=max_mp*.9};
+}
 export function assertCastleArrival(view,original){
   assert.equal(view.map.name,"Oryx's Castle");assert.equal(view.session.character,original.session.character);assert.equal(view.session.account,original.session.account);assert(view.lifecycle.alive);
 }

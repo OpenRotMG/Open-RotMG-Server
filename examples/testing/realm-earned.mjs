@@ -3,7 +3,7 @@ import {readFile,writeFile,readdir,realpath,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
-import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap} from './realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState} from './realm-earned-core.mjs';
 
 export const realmSeed=1344;
 export const fixture={class:0x310,level:20,seed:1344,world:-2,position:{x:78.5,y:42.5},equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
@@ -83,6 +83,14 @@ export async function run(fighter){
   for(let iteration=0;iteration<300;iteration++){
     await logs();if(ledger.snapshot().pending.length===0)break;
     const v=await fighter.observe();assert(v.lifecycle.alive&&v.session.world===realm,'Original fighter left combat before earned closure');
+    if(recoveryState(v.character).retreat){
+      await save('retreat-'+iteration);await act(fighter,{keys:['Insert'],duration_ms:1000});assert.equal((await fighter.observe()).world,'Nexus');
+      for(let n=0;!recoveryState((await fighter.observe()).character).recovered;n++){assert(n<30,'Ordinary Nexus regeneration did not restore the original reserve');await act(fighter,{keys:[],duration_ms:5000});}
+      const portal=(await observer.inspect()).view.objects.find(o=>o.id===entrance.id);assert(portal?.usable,'Original entrance closed while the original recovered');await enter(fighter,portal);
+      const companion=originals.find(o=>o.role===profiles[0]),peer=await api({op:'observe',actor:companion.actor});assert(peer.lifecycle.alive&&peer.session.world===realm,'Original companion cannot receive an ordinary teleport');
+      const player=(await fighter.observe()).session.player,offset=events.length;await act(fighter,{keys:[],chat:'/teleport '+profiles[0],duration_ms:1000});
+      assert(events.slice(offset).some(e=>e.message==='player teleported'&&e.player===player&&e.target===peer.session.player),'Ordinary native teleport did not receive a bound success');await save('recovered-'+iteration);continue;
+    }
     if((await observer.observe()).game_ms-invitation>=45000){await act(fighter,{keys:[],duration_ms:1000,chat:'DrFlux follow me'});invitation=(await observer.observe()).game_ms;}
     terrain=await map(fighter,true);collision=collisionMap(terrain);const pending=new Set(ledger.snapshot().pending),family=terrain.entities.filter(e=>(pending.has(e.id)||pending.has(e.quest)||pending.has(e.parent))&&e.hp>0).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position));
     if(!family.length){assert(ledger.snapshot().waiting.length>0,'Pending ledger has neither a living family nor an actual waiting event');await act(fighter,{keys:[],duration_ms:3000});continue;}

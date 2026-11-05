@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap} from '../examples/testing/realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState} from '../examples/testing/realm-earned-core.mjs';
 const roots=Array.from({length:49},(_,i)=>i+1),census={message:'finite Realm closure roster bound',origin:-3,heroes:49};
 const credit=(hero,remaining,now=100)=>({message:'qualifying Realm hero defeated',origin:-3,hero,remaining,now});
 const waiting=source=>({message:'quest defeat earned a pending Realm event',source}),admission=(source,entity)=>({message:'quest defeat summoned a Realm event',source,entity});
@@ -48,6 +48,11 @@ test('visible combat targets retain protected phases and prefer a real unprotect
 });
 test('original cohort identity rejects a mismatched class or controller',()=>{
   const spec={class:0x310,level:20,stats:[670,385,50,25,50,50,40,75],equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1)},v={actor:1,controller:'native',lifecycle:{alive:true,death_pending:false,quarantined:false},session:{account:2,character:3},character:{class:0x310,level:20,hp:670,mp:385,base_stats:[...spec.stats],items:[...spec.equipment,...spec.backpack],inventory_revision:4}};assert.equal(originalIdentity('fighter',spec,v).character,3);assert.throws(()=>originalIdentity('fighter',spec,{...v,controller:'game_bot'}));assert.throws(()=>originalIdentity('fighter',spec,{...v,character:{...v.character,class:0x30e}}));
+});
+test('measured depleted combat reserve escapes before ordinary regeneration is considered complete',()=>{
+  const depleted={hp:442,mp:69,stats:{max_hp:790,max_mp:440}};assert.deepEqual(recoveryState(depleted),{retreat:true,recovered:false});
+  assert.equal(recoveryState({...depleted,hp:790,mp:110}).retreat,false);assert.equal(recoveryState({...depleted,hp:790,mp:395}).recovered,false);assert.equal(recoveryState({...depleted,hp:790,mp:396}).recovered,true);
+  assert.equal(recoveryState({...depleted,hp:450,mp:440}).retreat,true);assert.throws(()=>recoveryState({...depleted,hp:0}),/living measured/);assert.throws(()=>recoveryState({...depleted,mp:NaN}),/living measured/);
 });
 test('Castle arrival uses the actual nested inspect view and original living identity',()=>{
   const original={world:'Realm',session:{account:2,character:3}},view={map:{name:"Oryx's Castle"},session:{account:2,character:3},lifecycle:{alive:true}};
