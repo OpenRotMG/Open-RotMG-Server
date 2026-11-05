@@ -111,6 +111,7 @@ impl World {
                 Ok(member.pos)
             }
             encounter::Anchor::Home => Ok(e.home),
+            encounter::Anchor::Point { x, y } => Ok(Pos { x, y }),
             encounter::Anchor::CampLeader => {
                 let camp = self
                     .camps

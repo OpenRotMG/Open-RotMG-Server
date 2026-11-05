@@ -4,7 +4,11 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
 const mode=process.env.CASTLE_MODE??'armor';
-const positions={armor:{x:114.5,y:39.5},ordinary:{x:94.5,y:110.5},tower:{x:24.5,y:139.5}};
+const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),marks=(w,kind)=>w.encounter_markers.filter(m=>m.kind===kind).map(m=>m.position);
+// Beside the causeway's lone Living Floor, on one of its ring lines and beyond every other floor's bomb reach.
+const tower=w=>{const f=w.encounter_markers.filter(m=>m.kind===0xd87).map(m=>m.position),lone=f.find(p=>f.every(q=>q===p||Math.hypot(p.x-q.x,p.y-q.y)>10));assert(lone,'No lone Living Floor');return{x:lone.x-1,y:lone.y+2};};
+// Beside a hall armor slot, or beside the authored armor nearest the Guardians' ring.
+const positions={armor:w=>{const core=marks(w,0xd7a)[0],slot=marks(w,0xd7d)[0];return{x:slot.x+Math.sign(core.x-slot.x),y:slot.y};},ordinary:w=>{const core=marks(w,0xd7a)[0],armor=marks(w,0xd7e).sort((a,b)=>distance(a,core)-distance(b,core))[0];return{x:armor.x+1,y:armor.y};},tower};
 assert(Object.hasOwn(positions,mode),'CASTLE_MODE must be armor, ordinary or tower');
 export const fixture={class:0x307,level:20,seed:866,world:'oryx-castle',position:positions[mode],equipment:[0xc02,0xb28,-1,0xac5],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 export async function run(game){
@@ -12,7 +16,7 @@ export async function run(game){
   const headers={Authorization:'Bearer '+(await readFile(join(config.state,'control.token'),'utf8')).trim(),'Content-Type':'application/json'};
   const api=async command=>{const r=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command}),signal:AbortSignal.timeout(10000)});const s=await r.json();assert(r.ok&&s.status==='succeeded',JSON.stringify(s));return s;};
   const map=async()=>{const v=await game.observe(),r=await fetch(config.origin+'/dev/map?player='+v.session.player,{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);return r.json();};
-  const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),samples=[];
+  const samples=[];
   async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(join(root,'castle-journey.json'),JSON.stringify(samples));return state;}
   const initial=await save('initial');
   if(mode==='tower'){

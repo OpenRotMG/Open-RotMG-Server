@@ -1,0 +1,132 @@
+{
+ "source": "Spider Den arena; provenance in data/README.md. Cut tile-exact from one live-instance client capture: web spokes and the boss-drop Realm Portal dropped, Arachna 'A' on the portal's cell (the arena centre). The capture's corridor cut through the south-west outline; that sector is restored from the outline's mirror symmetry. '?' is a loose wall (SpiderDirt when absent): each of the two stands in two of three surviving layouts.",
+ "legend": {
+  "#": [
+   "",
+   "Spider Dirt Wall"
+  ],
+  ",": [
+   "Spider Dirt Hole",
+   ""
+  ],
+  ".": [
+   "SpiderDirt",
+   ""
+  ],
+  ":": [
+   "Dirt",
+   ""
+  ],
+  ";": [
+   "Dirt Hole",
+   ""
+  ],
+  "?": [
+   "SpiderDirt",
+   "loose wall"
+  ],
+  "A": [
+   "Dirt Hole",
+   "Arachna the Spider Queen"
+  ],
+  "J": [
+   "Dirt",
+   "Spider Junk"
+  ],
+  "O": [
+   "SpiderDirt",
+   "Spider Egg Prop"
+  ],
+  "Q": [
+   "Spider Dirt Hole",
+   "Spider Ground Rocks"
+  ],
+  "R": [
+   "SpiderDirt",
+   "Spider Ground Rocks"
+  ],
+  "S": [
+   "Dirt Hole",
+   "Spider Silk"
+  ],
+  "W": [
+   "Spider Dirt Hole",
+   "Spider Web"
+  ],
+  "e": [
+   "Dirt Hole",
+   "Spider Egg Prop"
+  ],
+  "j": [
+   "SpiderDirt",
+   "Spider Junk"
+  ],
+  "o": [
+   "Dirt",
+   "Spider Egg Prop"
+  ],
+  "q": [
+   "Dirt Hole",
+   "Spider Ground Rocks"
+  ],
+  "r": [
+   "Dirt",
+   "Spider Ground Rocks"
+  ],
+  "s": [
+   "Dirt",
+   "Spider Silk"
+  ],
+  "v": [
+   "Dirt Hole",
+   "Spider Web"
+  ],
+  "w": [
+   "SpiderDirt",
+   "Spider Web"
+  ]
+ },
+ "templates": {
+  "arena": {
+   "rows": [
+    "                ..j...w",
+    "            w..,.:::::....w",
+    "          ...::::rrr::::::...",
+    "        w..:r::rrr:::::rr,::.,.",
+    "       ..::r::o:::::::::,r:r:,..",
+    "      ...,;:::::::::o:::Qr::....w",
+    "     w.,;#v:r:::::::::::::r;v#;...",
+    "    ..::W#.r:;;:::::::::::::;##w:.w",
+    "    .:::.;.:;;::::::::::::::..O;Q:.",
+    "   w.:r,::::::::::::::::::::::::::..",
+    "   .::Qo:::::,:o,:::;;:::o::::::rJ:.",
+    "  w.:r:::::::::::::;,;::::::::::rr:.w",
+    "  .::;r,,,::::::::::::::::,::,:,:r::.",
+    "  .r::r:::::o:::::::s:::;:o::::::o::j",
+    "  .::::::,;;:::::S;,;::,:::s:::::r::.",
+    " ..:r:::::::::::;,SS;S;:::::::::::::,w",
+    " .::r::::::::,:;S:;SS;;S::;::::::;r:,.",
+    " .,r:r::o::;::s;;S;;SS;;::;;:::::::::w",
+    " w:R;.::::::::;;S:SAS;S;s:,::::::;:::.",
+    " w:R?w::,::::::;S;;S;sS;:::::::::::r:.",
+    " .:.;;:::,:::::;;SS;SS;;::::::o:::;r:j",
+    " ,.::,::::;;:::;S;;S;S;S::::::::::::.w",
+    "  .r::,:::e;::::::;;S::::::;;::,::rr,",
+    "  .::::,::::::,::::::::::::::::::r:,.",
+    "  w::r::::::::::::s::::::::::::::qr:.",
+    "  ,.:r:::::::;;;::::::::;o:::::::::..",
+    "   .:rr:o::::;;o:::::::::::::::;ro:.",
+    "   ..:::::::::::::::::::::::;.,;:,.w",
+    "    ..R..........,.O.......O.##v.R.",
+    "    w....#w..................v#w.,j",
+    "     ...w#......O....;;.....;R....",
+    "      ....RR.;;........O.....R..w",
+    "       j....R.;;.........R......",
+    "        .........?v....RR...,,w",
+    "          w,...RR....RRR.,...",
+    "            w...,.R........",
+    "                w.....w"
+   ]
+  }
+ }
+}

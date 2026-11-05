@@ -205,6 +205,43 @@ fn circle_clock_keeps_slow_and_paralysis_rules() {
 }
 
 #[test]
+fn jackal_healers_keep_target_families_and_sick_guards_separate() {
+    for (kind, targets) in [
+        (0xd19, &[0xd16, 0xd17, 0xd18][..]),
+        (0xd3b, &[0xd3a, 0xd3c][..]),
+    ] {
+        let (mut world, player) = fixture();
+        let pos = world.players[&player].pos;
+        let healer = world.spawn_entity(kind, pos, vec![]).unwrap();
+        world.entities.get_mut(&healer).unwrap().activated = Some(world.now);
+        let mut candidates = vec![(healer, false)];
+        for candidate in [
+            0xd16, 0xd17, 0xd18, 0xd19, 0xd2a, 0xd2b, 0xd3a, 0xd3b, 0xd3c,
+        ] {
+            let id = world.spawn_entity(candidate, pos, vec![]).unwrap();
+            candidates.push((id, targets.contains(&candidate)));
+        }
+        let sick = world.spawn_entity(targets[0], pos, vec![]).unwrap();
+        world.apply_condition(sick, condition::SICK, 1000).unwrap();
+        candidates.push((sick, false));
+        for &(id, _) in &candidates {
+            world.entities.get_mut(&id).unwrap().hp -= 1;
+        }
+        world.tomb_mechanics(healer, None).unwrap();
+        for (id, healed) in candidates {
+            let entity = &world.entities[&id];
+            assert_eq!(
+                entity.hp,
+                world.content.objects[&entity.kind].hp - i32::from(!healed),
+                "healer {kind:#x}, recipient {:#x}, entity {id}",
+                entity.kind
+            );
+        }
+        assert_eq!(world.players[&player].character.tombs, 0);
+    }
+}
+
+#[test]
 fn each_generated_sarcophagus_owns_eight_worshippers() {
     let (world, _) = fixture();
     for sarcophagus in world.actors().filter(|e| e.kind == d::SARCOPHAGUS) {

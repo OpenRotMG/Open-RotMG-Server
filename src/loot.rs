@@ -1257,7 +1257,8 @@ pub fn private(kind: u16) -> bool {
         | crate::dungeon::jungle::BOSS | crate::dungeon::beach::BOSS
         | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
-        | 0x668 | 0x67d | 0xd78 | 0xd79 | 0xd7f | crate::endgame::ORYX | crate::endgame::ORYX2)
+        // 2012 brown bags were public: the Commander's HP/MP potions are not owner-only (Wild Shadow bag page, 2012-06-11).
+        | 0x668 | 0x67d | 0xd78 | 0xd79 | crate::endgame::ORYX | crate::endgame::ORYX2)
 }
 pub(crate) fn damage_threshold(content: &Content, kind: u16) -> i32 {
     if kind == crate::dungeon::trench::HERMIT {
@@ -1283,6 +1284,9 @@ pub(crate) fn damage_threshold(content: &Content, kind: u16) -> i32 {
         800
     } else if matches!(kind, 0x927 | crate::dungeon::davy::BOSS) {
         100
+    } else if crate::endgame::GUARDIANS.contains(&kind) {
+        // "3,500 damage" for guardian loot on the Wild Shadow wiki (captured 2012-03); a 2013 guide says about 5,000.
+        3500
     } else {
         (content.objects[&kind].hp / 10).max(1)
     }
