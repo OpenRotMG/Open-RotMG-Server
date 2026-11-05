@@ -25,6 +25,7 @@ type PortalDisplay = (String, Vec<(u8, i32)>, bool);
 pub(super) struct Snapshot {
     pub players: BTreeMap<i32, Resident>,
     pub admissions_empty: bool,
+    pub realm_return: Option<i32>,
     pub entities: usize,
     pub actors: usize,
     pub bullets: usize,
@@ -58,6 +59,10 @@ impl Snapshot {
                 })
                 .collect(),
             admissions_empty: world.admissions.is_empty(),
+            realm_return: match world.return_route {
+                Some(super::DungeonReturn::Realm(id)) => Some(id),
+                _ => None,
+            },
             entities: world.entities.len(),
             actors: world.actor_ids.len(),
             bullets: world.bullets.len(),

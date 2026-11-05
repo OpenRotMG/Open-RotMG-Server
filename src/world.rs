@@ -72,6 +72,7 @@ mod population_density;
 mod realm_events;
 mod realm_voice;
 
+pub(crate) mod realm_population;
 mod realm_portal;
 mod realm_quests;
 
@@ -370,6 +371,7 @@ pub struct Player {
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32, i32)>,
     native_lag: native_lag::Window,
+    audit_motion: crate::audit::MotionWindow,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
     predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
@@ -420,6 +422,21 @@ pub struct Player {
     ability_shot: Option<(u16, i32, bool, i32)>,
 }
 impl Player {
+    fn audit_fact(
+        &self,
+        id: i32,
+        world: &str,
+        now: u64,
+        event: &str,
+        values: impl FnOnce() -> serde_json::Value,
+    ) {
+        if self.controller == Controller::Human {
+            crate::audit::combat(
+                serde_json::json!({"event":event,"world":world,"world_ms":now,
+                "identity":[self.character.account,self.character.id,id],"values":values()} ),
+            );
+        }
+    }
     fn acknowledge_lifetime(&mut self, committed: crate::store::FameLifetime) -> Result<()> {
         committed.follows(&self.committed_lifetime)?;
         self.character.lifetime.follows(&self.committed_lifetime)?;
@@ -981,6 +998,8 @@ pub struct Directory {
     templates: BTreeMap<String, Arc<Map>>,
     realms: Vec<Arc<crate::terrain::realms::Source>>,
     realm_rng: rand::rngs::StdRng,
+    portal_rng: rand::rngs::StdRng,
+    portal_positions: Vec<Pos>,
     content: Arc<Content>,
     ids: Arc<AtomicI32>,
     grants: BTreeMap<Vec<u8>, Grant>,
@@ -988,6 +1007,7 @@ pub struct Directory {
     chat_budgets: BTreeMap<i32, chat::ChatBudget>,
     guild_invites: BTreeMap<i32, guilds::Invitation>,
     endgame: endgame::RealmDirectory,
+    realm_population: realm_population::Population,
     teleports: BTreeMap<i32, Instant>,
     idle: BTreeMap<i32, u64>,
     next_world: i32,
@@ -1147,7 +1167,10 @@ impl Directory {
         realms: Vec<crate::terrain::realms::Source>,
         realm_count: usize,
     ) -> Result<Self> {
-        ensure!((2..=3).contains(&realm_count), "realm_count must be 2 or 3");
+        ensure!(
+            (1..=realm_population::MAX_CURRENT).contains(&realm_count),
+            "initial realm_count must be between 1 and 8"
+        );
         ensure!(!realms.is_empty(), "Realm layout pool is empty");
         crate::endgame::validate(&content)?;
         let mut templates = BTreeMap::new();
@@ -1176,6 +1199,8 @@ impl Directory {
             templates,
             realms: realms.into_iter().map(Arc::new).collect(),
             realm_rng: rand::rngs::StdRng::seed_from_u64(seed),
+            portal_rng: rand::rngs::StdRng::seed_from_u64(seed ^ u64::from_le_bytes(*b"entrance")),
+            portal_positions: Vec::new(),
             content,
             ids: Arc::new(AtomicI32::new(1000)),
             grants: BTreeMap::new(),
@@ -1183,6 +1208,7 @@ impl Directory {
             chat_budgets: BTreeMap::new(),
             guild_invites: BTreeMap::new(),
             endgame: endgame::RealmDirectory::default(),
+            realm_population: realm_population::Population::default(),
             teleports: BTreeMap::new(),
             idle: BTreeMap::new(),
             next_world: 1,
@@ -1203,6 +1229,7 @@ impl Directory {
             let world = d.make(template, name, safe, None)?;
             d.worlds.insert(id, world);
         }
+        d.portal_positions = d.worlds[&-2].realm_portal_positions()?;
         for slot in 0..realm_count {
             let origin = if slot == 0 {
                 -3
@@ -1216,10 +1243,19 @@ impl Directory {
             d.bind_realm_heroes(origin, d.worlds[&origin].hero_identities())?;
             let name =
                 (seed as usize % realm_portal::NAMES.len() + slot) % realm_portal::NAMES.len();
-            let portal = d.install_realm_portal(origin, None)?;
+            let portal = d.install_realm_portal(slot)?;
+            let position = d.worlds[&-2].entities[&portal].pos;
+            tracing::info!(
+                realm = origin,
+                portal,
+                x = position.x,
+                y = position.y,
+                "Realm entrance bound"
+            );
             let record = d.endgame.realms.get_mut(&origin).unwrap();
             record.name = name;
             record.portal = Some(portal);
+            record.portal_slot = slot;
         }
         d.sync_realm_portal();
         Ok(d)
@@ -1676,6 +1712,11 @@ impl Directory {
         )?;
         // Entrances expire before their dungeons; preserve RECONNECT's exact world identity: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/incoming/Reconnect.as
         world.return_route = return_route;
+        if let Some(DungeonReturn::Realm(origin)) = return_route
+            && let Some(record) = self.endgame.realms.get_mut(&origin)
+        {
+            record.empty_since = None;
+        }
         let id = self.next_world;
         self.next_world = id
             .checked_add(1)
@@ -1917,6 +1958,11 @@ impl Directory {
                 expires: self.tick + 2400,
             },
         );
+        for id in origin.into_iter().chain(std::iter::once(destination)) {
+            if let Some(record) = self.endgame.realms.get_mut(&id) {
+                record.empty_since = None;
+            }
+        }
         tracing::info!(
             account,
             character,
@@ -2408,6 +2454,7 @@ impl Directory {
     // Another world's completion or a timer must not publish this world's queued effects early.
     fn coordinate(&mut self, ready: &[i32]) {
         self.endgame_step(ready);
+        self.realm_population_step(self.clock.now());
         self.sync_realm_portal();
         self.worlds.release_world(&-2);
         let requesting: Vec<_> = self
@@ -3645,6 +3692,7 @@ impl World {
                 dungeon_entries: VecDeque::new(),
                 weapon_ticks: VecDeque::from([(-1, ch.items[0], dex)]),
                 native_lag: native_lag::Window::default(),
+                audit_motion: crate::audit::MotionWindow::default(),
                 committed_lifetime: ch.lifetime.clone(),
                 character: ch,
                 pos,
@@ -3759,7 +3807,12 @@ impl World {
             "inventory or death operation pending"
         );
         self.clear_companions(id);
-        let p = self.players.remove(&id).unwrap();
+        let mut p = self.players.remove(&id).unwrap();
+        if p.controller == Controller::Human {
+            crate::audit::flush_combat(true);
+            p.audit_motion
+                .flush(p.character.account, p.character.id, id, &self.name, true);
+        }
         self.bullets.retain(|b| b.owner != id);
         tracing::info!(player = id, character = p.character.id, "player left");
         if p.controller == Controller::Human {
@@ -4331,6 +4384,27 @@ impl World {
         ensure!(received >= p.last_move_at, "native ingress clock regressed");
         // Rechecking client collision or speed here turns delayed packet delivery into snap-backs.
         let speed = p.speed(&self.content, self.now)? * 1000.;
+        if p.controller == Controller::Human {
+            let ground = self
+                .map
+                .cell(pos.x, pos.y)
+                .expect("validated native position")
+                .ground;
+            let from_ground = self
+                .map
+                .cell(p.pos.x, p.pos.y)
+                .expect("existing player position")
+                .ground;
+            let push = self.content.pushes[&ground];
+            let from_push = self.content.pushes[&from_ground];
+            let conditions = p.conditions(self.now);
+            let epoch = p.audit_motion.epoch;
+            p.audit_motion.observe(|| serde_json::json!({"client_ms":time,"received_ms":received,"world_ms":self.now,
+                "from":[p.pos.x,p.pos.y],"position":[pos.x,pos.y],"speed":speed,"conditions":conditions,"ground":ground,
+                "ground_speed":self.content.grounds[&ground],"ground_push":[push.0*1000.,push.1*1000.],
+                "from_ground":from_ground,"from_ground_speed":self.content.grounds[&from_ground],"from_ground_push":[from_push.0*1000.,from_push.1*1000.],
+                "epoch":epoch,"hp":p.character.hp}));
+        }
         p.record_motion(pos, time, self.now, speed);
         if p.pos.distance(pos) > 0.001 {
             p.last_motion = Some(((pos.y - p.pos.y).atan2(pos.x - p.pos.x), self.now));
@@ -7486,6 +7560,20 @@ impl World {
         self.now += 50;
         self.admissions.retain(|_, a| a.expires > self.now);
         self.tick += 1;
+        crate::audit::flush_combat(false);
+        if self.tick.is_multiple_of(100) {
+            for (id, p) in &mut self.players {
+                if p.controller == Controller::Human {
+                    p.audit_motion.flush(
+                        p.character.account,
+                        p.character.id,
+                        *id,
+                        &self.name,
+                        false,
+                    );
+                }
+            }
+        }
         self.merchant_step();
         self.lab_step();
         self.expire_consumable_boosts();

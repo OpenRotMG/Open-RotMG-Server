@@ -22,9 +22,13 @@ struct RealmPreparation {
 pub(super) struct RealmRecord {
     pub cycle: RealmCycle,
     pub portal: Option<i32>,
+    pub portal_slot: usize,
     pub name: usize,
+    pub created_at: Instant,
+    pub empty_since: Option<Instant>,
+    pub initial_entries: Arc<std::sync::atomic::AtomicUsize>,
     pub enabled: bool,
-    replacement: Option<i32>,
+    pub(super) replacement: Option<i32>,
     pub castle: Option<i32>,
     pub pending_transfers: BTreeSet<i32>,
     publish_at: Option<u64>,
@@ -32,11 +36,15 @@ pub(super) struct RealmRecord {
     next_taunt: u64,
 }
 impl RealmRecord {
-    fn new(cycle: RealmCycle, now: u64) -> Self {
+    pub(super) fn new(cycle: RealmCycle, now: u64, created_at: Instant) -> Self {
         Self {
             cycle,
             portal: None,
+            portal_slot: 0,
             name: 0,
+            created_at,
+            empty_since: None,
+            initial_entries: Arc::default(),
             enabled: true,
             replacement: None,
             castle: None,
@@ -55,6 +63,22 @@ pub(super) struct ForcedRoute {
     frozen: bool,
 }
 impl RealmDirectory {
+    pub(super) fn population_references(&self, id: i32) -> usize {
+        self.realms
+            .values()
+            .filter(|r| r.replacement == Some(id) || r.castle == Some(id))
+            .count()
+            + self
+                .forced
+                .values()
+                .filter(|r| r.origin == id || r.destination == id)
+                .count()
+            + usize::from(
+                self.preparing
+                    .as_ref()
+                    .is_some_and(|p| p.origin == id || p.realm == id || p.castle == id),
+            )
+    }
     pub(super) fn references_world(&self, id: i32) -> bool {
         self.realms.contains_key(&id)
             || self
@@ -468,9 +492,10 @@ impl Directory {
             heroes = cycle.remaining.len(),
             "finite Realm closure roster bound"
         );
-        self.endgame
-            .realms
-            .insert(origin, RealmRecord::new(cycle, self.tick * 50));
+        self.endgame.realms.insert(
+            origin,
+            RealmRecord::new(cycle, self.tick * 50, self.clock.now()),
+        );
         Ok(())
     }
     pub(super) fn endgame_step(&mut self, ready: &[i32]) {
@@ -604,6 +629,7 @@ impl Directory {
                 record.replacement.is_some()
                     && record.publish_at.is_none()
                     && record.pending_transfers.is_empty()
+                    && record.initial_entries.load(Ordering::Acquire) == 0
                     && self
                         .worlds
                         .summary(id)
@@ -710,12 +736,7 @@ impl Directory {
         }
         let (castle, realm, next_cycle) = result?;
         let (castle_id, realm_id) = (preparation.castle, preparation.realm);
-        let name = (1..=super::realm_portal::NAMES.len())
-            .map(|offset| {
-                (self.endgame.realms[&origin].name + offset) % super::realm_portal::NAMES.len()
-            })
-            .find(|name| self.endgame.realms.values().all(|r| r.name != *name))
-            .context("no unused Realm name")?;
+        let name = self.unused_realm_name(Some(origin))?;
         let players: Vec<_> = self.worlds[&origin]
             .players
             .iter()
@@ -743,14 +764,23 @@ impl Directory {
             entrance.kind == 0x712,
             "closing Realm entrance kind changed"
         );
-        let portal = self.install_realm_portal(realm_id, Some(old_portal))?;
+        let portal = self.install_realm_portal(0)?;
+        let position = self.worlds[&-2].entities[&portal].pos;
+        tracing::info!(
+            realm = realm_id,
+            portal,
+            x = position.x,
+            y = position.y,
+            "Replacement Realm entrance position reserved"
+        );
         let mut realm = realm;
         realm.admission_open = false;
         self.worlds.insert(castle_id, castle);
         self.worlds.insert(realm_id, realm);
         self.idle.insert(castle_id, self.tick);
-        let mut record = RealmRecord::new(next_cycle, self.tick * 50);
+        let mut record = RealmRecord::new(next_cycle, self.tick * 50, self.clock.now());
         record.portal = Some(portal);
+        record.portal_slot = self.endgame.realms[&origin].portal_slot;
         record.name = name;
         record.enabled = false;
         self.endgame.realms.insert(realm_id, record);
@@ -1326,15 +1356,19 @@ async fn realm_death_credit_survives_portal_reward_failure() {
         .castle
         .expect("normal replacement construction completed");
     let replacement = record.replacement.unwrap();
-    let entrance =
-        &directory.worlds[&-2].entities[&directory.endgame.realms[&replacement].portal.unwrap()];
-    assert!(entrance.pos.distance(other_pos) >= 4.);
-    assert_eq!(
-        directory.worlds[&-2].entities[&other_portal]
+    let replacement_portal = directory.endgame.realms[&replacement].portal.unwrap();
+    let old_portal = directory.endgame.realms[&-3].portal.unwrap();
+    let other_position = directory.worlds[&-2].entities[&other_portal].pos;
+    assert_eq!(other_position.distance(other_pos), 0.);
+    let replacement_position = directory.worlds[&-2].entities[&replacement_portal].pos;
+    assert!(!directory.worlds[&-2].entities[&replacement_portal].published);
+    assert!(
+        directory.worlds[&-2].entities[&old_portal]
             .pos
-            .distance(other_pos),
-        0.
+            .distance(replacement_position)
+            >= 4.
     );
+    assert!(other_position.distance(replacement_position) >= 4.);
     assert!(!directory.worlds[&replacement].admission_open);
     assert!(directory.forced_transfer(player).unwrap().is_none());
     let (owner, progress) = directory
@@ -1425,6 +1459,22 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     directory.tick = 2600;
     directory.endgame_step(&[castle]);
     assert!(directory.worlds[&replacement].admission_open);
+    assert!(directory.worlds[&-2].entities.contains_key(&old_portal));
+    directory.retire_transfer_grants();
+    directory.endgame_step(&[castle]);
+    assert!(!directory.worlds[&-2].entities.contains_key(&old_portal));
+    assert_eq!(
+        directory.worlds[&-2].entities[&replacement_portal]
+            .pos
+            .distance(replacement_position),
+        0.
+    );
+    assert_eq!(
+        directory.worlds[&-2].entities[&other_portal]
+            .pos
+            .distance(other_position),
+        0.
+    );
 }
 
 #[cfg(test)]
@@ -1455,6 +1505,102 @@ fn prepare_realm_closure_preserves_other_cycle_and_refuses_reservations() {
     assert!(d.endgame.realms[&-3].cycle.admits() && d.worlds[&-3].admission_open);
     assert_eq!(d.endgame.realms[&1].cycle.remaining, other);
     assert!(d.endgame.realms[&1].cycle.admits() && d.worlds[&1].admission_open);
+}
+
+#[cfg(test)]
+#[test]
+fn eight_realm_closures_keep_held_predecessors_across_two_replacement_generations() {
+    let data = std::path::Path::new("data");
+    let content = Arc::new(Content::load(data).unwrap());
+    let mut d = Directory::prepared(data, content, 16, 1344, 8).unwrap();
+    let mut holds = Vec::new();
+    for generation in 0..2 {
+        let current: Vec<_> = d
+            .endgame
+            .realms
+            .iter()
+            .filter(|(_, r)| r.replacement.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(current.len(), 8);
+        for origin in &current {
+            holds.push(d.hold_initial_entry(*origin).unwrap().unwrap());
+            let cycle = &mut d.endgame.realms.get_mut(origin).unwrap().cycle;
+            for root in cycle.remaining.clone() {
+                assert!(cycle.defeated(root, 0));
+            }
+            assert!(cycle.advance(crate::endgame::CLOSE_DELAY_MS));
+            assert!(cycle.advance(crate::endgame::CLOSE_DELAY_MS + crate::endgame::EARTHQUAKE_MS));
+            d.worlds.get_mut(origin).unwrap().admission_open = false;
+        }
+        d.sync_realm_portal();
+        for origin in current {
+            let old_name = d.endgame.realms[&origin].name;
+            let old_portal = d.endgame.realms[&origin].portal.unwrap();
+            d.replace_realm(origin).unwrap();
+            let next = d.endgame.realms[&origin].replacement.unwrap();
+            assert_ne!(d.endgame.realms[&next].name, old_name);
+            assert!(!d.endgame.realms[&next].enabled);
+            assert!(!d.worlds[&next].admission_open);
+            assert_eq!(d.endgame.realms[&origin].portal, Some(old_portal));
+            assert_eq!(d.worlds[&-2].entities[&old_portal].kind, 0x712);
+            assert_eq!(
+                d.endgame.realms[&origin]
+                    .initial_entries
+                    .load(Ordering::Acquire),
+                1
+            );
+        }
+        let names: BTreeSet<_> = d
+            .endgame
+            .realms
+            .values()
+            .filter(|r| r.replacement.is_none())
+            .map(|r| r.name)
+            .collect();
+        assert_eq!(names.len(), 8);
+        let reserved: Vec<_> = d.worlds[&-2]
+            .entities
+            .values()
+            .filter(|e| e.kind == 0x712 && d.realm_entrance_reserves_position(e.id).unwrap())
+            .map(|e| e.pos)
+            .collect();
+        assert_eq!(reserved.len(), 8);
+        for (i, pos) in reserved.iter().enumerate() {
+            assert!(
+                reserved
+                    .iter()
+                    .skip(i + 1)
+                    .all(|other| pos.distance(*other) >= 4.)
+            );
+        }
+        d.tick += crate::endgame::REPLACEMENT_DELAY_MS / 50;
+        d.endgame_step(&[]);
+        d.sync_realm_portal();
+        assert_eq!(d.endgame.realms.len(), 8 * (generation + 2));
+        assert_eq!(
+            d.endgame
+                .realms
+                .values()
+                .filter(|r| r.replacement.is_none())
+                .count(),
+            8
+        );
+        assert_eq!(
+            d.worlds[&-2]
+                .entities
+                .values()
+                .filter(|e| e.kind == 0x712 && e.published)
+                .count(),
+            8
+        );
+    }
+    assert_eq!(holds.len(), 16);
+    assert_eq!(
+        d.endgame.realms.len(),
+        24,
+        "initial-entry holds retain physical predecessors without claiming a global bound"
+    );
 }
 
 #[cfg(test)]

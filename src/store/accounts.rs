@@ -333,7 +333,7 @@ impl Store {
             .hashes
             .clone()
             .try_acquire_owned()
-            .context("account service busy; retry shortly")?;
+            .map_err(|_| AuthenticationBusy)?;
         let valid = tokio::task::spawn_blocking(move || -> Result<bool> {
             let _permit = permit;
             let hash = PasswordHash::new(&verifier)

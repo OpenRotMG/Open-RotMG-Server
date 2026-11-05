@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
+#[cfg(target_os = "linux")]
 use serde_json::{Value, json};
+#[cfg(target_os = "linux")]
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -100,6 +102,7 @@ impl Write for Writer {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Default)]
 struct HostCounters {
     pressure: Option<BTreeMap<&'static str, u64>>,
@@ -107,6 +110,7 @@ struct HostCounters {
     threads: BTreeMap<String, (u64, u64)>,
 }
 
+#[cfg(target_os = "linux")]
 fn read_host(own: i32) -> Result<HostCounters> {
     let mut host = HostCounters::default();
     // Kernels without PSI report null pressure, not zero.
@@ -158,6 +162,7 @@ fn read_host(own: i32) -> Result<HostCounters> {
     Ok(host)
 }
 
+#[cfg(target_os = "linux")]
 fn snapshot(
     state: &Path,
     own: i32,
@@ -215,6 +220,15 @@ fn snapshot(
     )
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn observe_host(_state: PathBuf) -> Result<()> {
+    tracing::warn!(target: "lag", platform = std::env::consts::OS,
+        host_metrics = "unavailable", reason = "host observer requires Linux /proc and statvfs",
+        "host metrics unavailable");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 pub fn observe_host(state: PathBuf) -> Result<()> {
     let own = std::process::id() as i32;
     let mut before = read_host(own)?;
