@@ -3,7 +3,7 @@ import {readFile,writeFile,readdir,realpath,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
-import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput} from './realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap} from './realm-earned-core.mjs';
 
 export const realmSeed=1344;
 export const fixture={class:0x310,level:20,seed:1344,world:-2,position:{x:78.5,y:42.5},equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
@@ -30,9 +30,7 @@ export async function run(fighter){
     const text=await readFile(join(native,'server.log'),'utf8'),complete=text.slice(0,text.lastIndexOf('\n')+1);assert(complete.startsWith(consumed),'Owned log prefix changed');
     for(const line of complete.slice(consumed.length).split('\n')){const fields=parseEvent(line);if(fields!==null){events.push(fields);ledger?.ingest(fields);}}consumed=complete;if(ledger)await writeFile(join(out,'earned-ledger-latest.json'),JSON.stringify(ledger.snapshot()));return events;
   };
-  const map=async(client=fighter)=>{
-    const v=await client.observe(),r=await fetch(config.origin+'/dev/map?player='+v.session.player+'&entity_summary=true',{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);const data=await r.json();assert.equal(data.projection,'entity_summary');return data;
-  };
+  const map=async(client,summary)=>readMap(config.origin,headers,(await client.observe()).session.player,summary);
   const observer=await fighter.join({...fixture,seed:1345}),first=await fighter.observe(),observerFirst=await observer.observe(),capability=await api({op:'capabilities'}),bootstrap=JSON.parse(await readFile(configFile,'utf8')).native_bootstrap;
   assert.equal(capability.mutation_limit,1024);assert(capability.controllers.includes('game_bot')&&profiles.every(p=>capability.game_bot_profiles.includes(p)));assert.equal(wire.length,2);
   const originals=[originalIdentity('fighter',fixture,first),originalIdentity('observer',{...fixture,seed:1345},observerFirst)],samples=[];
@@ -65,7 +63,7 @@ export async function run(fighter){
   };
   const enter=async(client,portal)=>{await walk(client,portal.position);await act(client,{keys:[],mouse:{x:700,y:575},duration_ms:1000});assert.equal((await client.observe()).world,'Realm');};
   const nexus=(await observer.inspect()).view.objects.filter(o=>o.kind===0x712);assert.equal(nexus.length,2);const entrance=nexus[0],other=nexus[1];await walk(observer,other.position);await enter(fighter,entrance);
-  const entered=await fighter.observe(),realm=entered.session.world,info=await api({op:'world_info',world:realm});let terrain=await map();
+  const entered=await fighter.observe(),realm=entered.session.world,info=await api({op:'world_info',world:realm});let terrain=await map(fighter,true);
   const initial=terrain.entities.filter(e=>heroes.includes(e.kind)||roots.includes(e.kind)&&e.quest===e.id);ledger=earnedLedger(realm,initial.map(e=>e.id),events);await logs();assert(ledger.snapshot().census&&ledger.snapshot().credited.length===0,'Unreduced initial roster must precede combat');
   const selection=mapInput(info.realm_layout,JSON.parse(await readFile('data/realm-catalog.json','utf8')));let file;
   if(selection.recipe){const recipe=JSON.parse(await readFile(join('data/realms',selection.recipe),'utf8'));assert.equal(recipe.id,info.realm_layout);file=join('data/realms',recipe.output);}else file=selection.file;
@@ -86,7 +84,7 @@ export async function run(fighter){
     await logs();if(ledger.snapshot().pending.length===0)break;
     const v=await fighter.observe();assert(v.lifecycle.alive&&v.session.world===realm,'Original fighter left combat before earned closure');
     if((await observer.observe()).game_ms-invitation>=45000){await act(fighter,{keys:[],duration_ms:1000,chat:'DrFlux follow me'});invitation=(await observer.observe()).game_ms;}
-    terrain=await map();collision=collisionMap(terrain);const pending=new Set(ledger.snapshot().pending),family=terrain.entities.filter(e=>(pending.has(e.id)||pending.has(e.quest)||pending.has(e.parent))&&e.hp>0).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position));
+    terrain=await map(fighter,true);collision=collisionMap(terrain);const pending=new Set(ledger.snapshot().pending),family=terrain.entities.filter(e=>(pending.has(e.id)||pending.has(e.quest)||pending.has(e.parent))&&e.hp>0).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position));
     if(!family.length){assert(ledger.snapshot().waiting.length>0,'Pending ledger has neither a living family nor an actual waiting event');await act(fighter,{keys:[],duration_ms:3000});continue;}
     const view=(await fighter.inspect()).view,visible=localTargets(view.objects,family,v.position),target=visible[0];
     if(!target){const points=route(collision,v.position,family[0].pos);assert(points.length>1,'Nearby pending family is absent from the native neighborhood');await walk(fighter,points[1]);}
@@ -104,7 +102,7 @@ export async function run(fighter){
   for(let n=0;n<8&&!events.some(e=>e.origin===realm&&e.message==='safe collective departure completed; replacement published');n++)await act(fighter,{keys:[],duration_ms:500});
   const publication=events.find(e=>e.origin===realm&&e.message==='safe collective departure completed; replacement published'),departure=events.find(e=>e.origin===realm&&e.message==='all collective recipients durably departed; replacement delay started');assert(publication&&departure&&publication.directory_tick>=departure.publish_tick,'Exact Directory-gated publication log missing');
   const handoff=events.find(e=>e.origin===realm&&e.message==='Realm closed; collective Castle route and fresh Realm installed');assert(handoff&&Number.isSafeInteger(handoff.replacement)&&castle.session.world===handoff.castle);
-  const nexusMap=await map(observer),fresh=nexusMap.entities.filter(e=>e.kind===0x712&&e.id!==other.id&&e.id!==entrance.id);assert.equal(fresh.length,1,'Exact fresh portal must be unambiguous');await walk(observer,fresh[0].pos);
+  const nexusMap=await map(observer,false),fresh=nexusMap.entities.filter(e=>e.kind===0x712&&e.id!==other.id&&e.id!==entrance.id);assert.equal(fresh.length,1,'Exact fresh portal must be unambiguous');await walk(observer,fresh[0].pos);
   const portals=(await observer.inspect()).view.objects.filter(o=>o.kind===0x712),successor=portals.find(o=>o.id===fresh[0].id);assert(successor&&successor.usable&&successor.id!==entrance.id&&nexusMap.entities.some(o=>o.id===other.id));
   await act(observer,{keys:[],duration_ms:3000},'earned-published-successor');await act(fighter,{keys:['Insert'],duration_ms:1500});assert.equal((await fighter.observe()).world,'Nexus');await enter(fighter,successor);assert.equal((await fighter.observe()).session.world,handoff.replacement);await act(fighter,{keys:['Insert'],duration_ms:1500});
   const final=await save('final');for(const [before,after]of [[first,final],[observerFirst,await observer.observe()]]){assert(after.lifecycle.alive);assert.equal(after.session.character,before.session.character);assert.equal(after.session.account,before.session.account);assert.deepEqual(after.character.items,before.character.items);assert.equal(after.character.inventory_revision,before.character.inventory_revision);}

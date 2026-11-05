@@ -32,6 +32,11 @@ export function earnedLedger(realm,initial,priorEvents){
   }};
   for(const event of priorEvents)state.ingest(event);return state;
 }
+export async function readMap(origin,headers,player,entitySummary,request=fetch){
+  assert.equal(typeof entitySummary,'boolean');
+  const r=await request(origin+'/dev/map?player='+player+'&entity_summary='+entitySummary,{headers,signal:AbortSignal.timeout(10000)});assert(r.ok);const data=await r.json();
+  if(entitySummary)assert.equal(data.projection,'entity_summary');else assert(!Object.hasOwn(data,'projection'));return data;
+}
 export function mapInput(layout,catalogue){
   const match=layout.match(/^classic-world-(\d+)-reconstruction$/);
   if(match){const recipe='world'+match[1]+'.json',row=catalogue.find(r=>r.kind==='reconstruction'&&r.recipe===recipe);assert(row,'Reconstruction map must be catalogued');return {recipe,sha256:row.sha256};}

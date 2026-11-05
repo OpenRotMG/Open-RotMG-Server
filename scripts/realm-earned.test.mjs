@@ -1,11 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput} from '../examples/testing/realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap} from '../examples/testing/realm-earned-core.mjs';
 const roots=Array.from({length:49},(_,i)=>i+1),census={message:'finite Realm closure roster bound',origin:-3,heroes:49};
 const credit=(hero,remaining,now=100)=>({message:'qualifying Realm hero defeated',origin:-3,hero,remaining,now});
 const waiting=source=>({message:'quest defeat earned a pending Realm event',source}),admission=(source,entity)=>({message:'quest defeat summoned a Realm event',source,entity});
 test('structured events accept launcher preamble and known ready lines but reject unknown runtime output',()=>{
   const parse=structuredEvents('http://127.0.0.1:12345');assert.equal(parse('Local source: abc dirty=False'),null);assert.equal(parse('    Finished `release` profile [optimized]'),null);assert.deepEqual(parse(JSON.stringify({fields:census})),census);assert.equal(parse('Local server ready. Open: http://127.0.0.1:12345/'),null);assert.equal(parse('Logs: the terminal and .local/server.log'),null);assert.equal(parse(''),null);assert.throws(()=>parse('thread panicked at runtime'),/Unexpected unstructured/);assert.throws(()=>parse('{bad'));assert.throws(()=>parse('{}'),/Invalid structured/);
+});
+test('Nexus discovery explicitly reads legacy zero-HP portals while combat uses the summary',async()=>{
+  const entities=[{id:10,kind:0x712,hp:0},{id:11,kind:0x712,hp:0},{id:12,kind:0x604,hp:100}],seen=[],headers={Authorization:'Bearer own-fixture'};
+  const request=async(url,options)=>{const query=new URL(url).searchParams;assert.equal(query.get('player'),'7');assert.equal(options.headers,headers);const summary=query.get('entity_summary')==='true';seen.push(summary);return {ok:true,json:async()=>summary?{projection:'entity_summary',entities:entities.filter(e=>e.hp>0)}:{entities}};};
+  const nexus=await readMap('http://127.0.0.1:12345',headers,7,false,request);assert.deepEqual(nexus.entities.filter(e=>e.kind===0x712).map(e=>e.id),[10,11]);
+  const combat=await readMap('http://127.0.0.1:12345',headers,7,true,request);assert.deepEqual(combat.entities.map(e=>e.id),[12]);assert.deepEqual(seen,[false,true]);
 });
 test('late ledger binding consumes the owned census history exactly once',()=>{
   const l=earnedLedger(-3,roots,[census,credit(1,48)]);assert(l.snapshot().census);assert.deepEqual(l.snapshot().credited,[1]);assert.throws(()=>l.ingest(census),/duplicate/);assert.throws(()=>earnedLedger(-3,roots,undefined),/Explicit owned/);
