@@ -44,7 +44,9 @@ export async function run(game){
   await game.act({keys:[' '],duration_ms:200,mouse:{x:300+50*(dx*Math.cos(a)+dy*Math.sin(a)),y:325+50*(-dx*Math.sin(a)+dy*Math.cos(a))}});
   const denied=await record('blocked-refusal');
   game.check('native blocked teleport refuses before mana cooldown or decoy creation',denied.view.character.mp>=before.view.character.mp&&JSON.stringify(denied.view.position)===JSON.stringify(before.view.position)&&denied.view.character.ability_ready_ms<=denied.view.time_ms&&denied.diagnostic.entities.every(e=>e.kind!==0x715));
-  const quiet=await game.join({class:0x30e,level:20,seed:879,world:'oryx-castle',position:{x:24.5,y:139.5},equipment:[-1,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,0]});
+  // Beside the causeway's lone Living Floor, on one of its ring lines and beyond every other floor's bomb reach.
+  const tower=w=>{const f=w.encounter_markers.filter(m=>m.kind===0xd87).map(m=>m.position),lone=f.find(p=>f.every(q=>q===p||Math.hypot(p.x-q.x,p.y-q.y)>10));assert(lone,'No lone Living Floor');return{x:lone.x-1,y:lone.y+2};};
+  const quiet=await game.join({class:0x30e,level:20,seed:879,world:'oryx-castle',position:tower,equipment:[-1,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,0]});
   await api({op:'cheat',actor:quiet.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
   await quiet.act({keys:[],duration_ms:1000});const hit=await record('natural-quiet',quiet);
   game.check('natural Living Floor projectile applies Quiet and drains MP',!!(hit.view.character.conditions&2)&&hit.view.character.mp===0);

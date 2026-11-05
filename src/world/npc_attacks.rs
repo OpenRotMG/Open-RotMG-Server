@@ -236,18 +236,74 @@ impl World {
                     .context("rage clock missing")?
                     .checked_sub(10000)
                     .context("rage began before protected preparation completed")?,
-                _ => bail!("invalid Oryx2 phase"),
             };
             return Ok(Some(attacks::oryx2_schedule(phase, age)));
         }
         if e.kind == 0xd7e {
-            let stage = e.stage.context("activated Suit of Armor phase missing")?;
+            let stage = e.stage.unwrap_or(0);
             let age = if stage == 2 {
-                self.now - (e.reaction_until - 1500)
+                self.now
+                    - e.reaction_until
+                        .checked_sub(crate::endgame::ARMOR_REGEN_MS)
+                        .context("Suit of Armor regen clock missing")?
             } else {
                 elapsed
             };
             return Ok(Some(attacks::armor_schedule(stage, age)));
+        }
+        if crate::endgame::GUARDIANS.contains(&e.kind) {
+            return Ok(Some(match self.finale.guardian_clock(id) {
+                Some(clock) if e.stage == Some(1) => attacks::guardian_schedule(
+                    clock.block,
+                    clock.serial,
+                    e.kind == crate::endgame::GUARDIANS[0],
+                    self.now - clock.start,
+                ),
+                // Statues, stone and the grey throw fire nothing.
+                _ => Schedule {
+                    state: 0,
+                    age: 0,
+                    attacks: vec![],
+                },
+            }));
+        }
+        if e.kind == 0xd80 {
+            return Ok(Some(attacks::insect_schedule(e.stage == Some(1), elapsed)));
+        }
+        if e.kind == 0xd82 {
+            let brute = self
+                .finale
+                .brute(id)
+                .context("activated Oryx Brute state missing")?;
+            return Ok(Some(attacks::brute_schedule(
+                brute.charge,
+                brute.serial,
+                self.now - brute.since,
+            )));
+        }
+        if e.kind == ORYX {
+            let brain = self
+                .finale
+                .oryx
+                .get(&id)
+                .context("activated Oryx brain missing")?;
+            return Ok(Some(attacks::oryx1_schedule(
+                brain.phase(),
+                brain.serial(),
+                brain.age(self.now),
+                e.hp,
+                brain.lead_in(self.now),
+            )));
+        }
+        if matches!(e.kind, 0x174a..=0x174e) {
+            // Artifact flames fly outward from Oryx, not at players (ZdjeB9t-n5w 2012-06-28 t=6.65-10.5): aim along the orbit's own angle.
+            let mut schedule = attacks::oryx1_summon_schedule(e.kind, elapsed);
+            for attack in &mut schedule.attacks {
+                if matches!(attack.aim, Aim::Target) {
+                    attack.aim = Aim::Fixed(e.phase);
+                }
+            }
+            return Ok(Some(schedule));
         }
         let mut schedule = match attacks::schedule(e.kind, e.hp, elapsed) {
             Some(schedule) => Some(schedule),
@@ -277,18 +333,6 @@ impl World {
                 .context("Gray Blob schedule missing")?
                 .attacks[0]
                 .enabled = e.stage == Some(1);
-        }
-        if e.kind == ORYX && e.hp <= self.content.objects[&e.kind].hp / 5 {
-            schedule
-                .as_mut()
-                .context("Oryx rage attack schedule missing")?
-                .age = self
-                .finale
-                .bosses
-                .get(&id)
-                .context("activated Oryx brain missing")?
-                .rage_elapsed(elapsed)
-                .context("Oryx rage entry clock missing")?;
         }
         if e.kind == 0xd06 && e.reaction_until > self.now {
             schedule

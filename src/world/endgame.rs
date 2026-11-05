@@ -774,6 +774,12 @@ impl Directory {
         );
         let mut realm = realm;
         realm.admission_open = false;
+        let mut castle = castle;
+        // One island per 20 arrivals, up to 4, from a later comparator: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/worlds/logic/Castle.cs#L24-L44
+        // 2012 thresholds are UNKNOWN: "4 or 3 groups" busy, "2 groups" quiet (https://anticosmic.blogspot.com/2012/07/oryx-castle-drops.html); footage wpi7Ff-mOD4 t=0-48 shows 3 players on one island.
+        Arc::make_mut(&mut castle.map)
+            .spawns
+            .truncate(1 + players.len() / 20);
         self.worlds.insert(castle_id, castle);
         self.worlds.insert(realm_id, realm);
         self.idle.insert(castle_id, self.tick);
@@ -963,6 +969,13 @@ impl World {
             for e in self.entities.matching_mut(|e| e.kind == 0xd7d) {
                 e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
                 e.published = false;
+            }
+            // Guardians start as grey statues (selected AltTexture 1).
+            for e in self
+                .entities
+                .matching_mut(|e| crate::endgame::GUARDIANS.contains(&e.kind))
+            {
+                e.extra_stats = vec![(61, 1)];
             }
             ensure!(
                 crate::endgame::GUARDIANS.iter().all(|kind| self

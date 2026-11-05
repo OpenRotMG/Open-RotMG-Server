@@ -1,10 +1,14 @@
-import {writeFile} from 'node:fs/promises';
+import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
-export const fixture={class:0x30e,level:20,seed:1051,world:'spider-den',position:{x:12.5,y:71.5},equipment:[0xb08,-1,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
+export const fixture={class:0x30e,level:20,seed:1051,world:'spider-den',position:'spawn',equipment:[0xb08,-1,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
 export async function run(game){
   const start=await game.inspect();
-  const peer=await game.join({...fixture,world:start.view.session.world,position:{x:16.5,y:71.5}});
+  const report=JSON.parse(await readFile(join(process.env.QA_RESULTS_DIR,'native/result.json'),'utf8')),token=(await readFile(join(process.env.QA_RESULTS_DIR,'native/state/control.token'),'utf8')).trim();
+  const m=await (await fetch(report.origin+'/dev/map?player='+start.view.session.player,{headers:{Authorization:'Bearer '+token}})).json(),w=m.width,blocked=new Set(m.blocked.map(([x,y])=>y*w+x));
+  const from=Math.floor(start.view.position.y)*w+Math.floor(start.view.position.x),seen=new Set([from]),queue=[from];let spot=null;
+  for(let i=0;i<queue.length&&!spot;i++){const c={x:queue[i]%w+.5,y:Math.floor(queue[i]/w)+.5};if(Math.hypot(c.x-start.view.position.x,c.y-start.view.position.y)>=4)spot=c;for(const n of [queue[i]-1,queue[i]+1,queue[i]-w,queue[i]+w])if(!seen.has(n)&&!blocked.has(n)){seen.add(n);queue.push(n);}}
+  const peer=await game.join({...fixture,world:start.view.session.world,position:spot});
   const target=await peer.inspect();
   game.check('two living players begin apart in Spider Den',start.view.map.name==='Spider Den'&&target.view.session.world===start.view.session.world&&target.view.lifecycle.alive&&Math.hypot(start.view.position.x-target.view.position.x,start.view.position.y-target.view.position.y)>3);
   await game.act({keys:[],duration_ms:800});

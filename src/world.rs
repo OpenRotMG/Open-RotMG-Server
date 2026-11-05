@@ -43,6 +43,7 @@ mod fauna_special;
 mod ghost_ship;
 mod gods;
 mod ground_dye;
+mod oryx1;
 
 mod gold;
 mod golems;
@@ -6372,6 +6373,9 @@ impl World {
                         "Manor completion requires one authored arena marker"
                     );
                     sites[0]
+                } else if defeated.kind == crate::dungeon::spider::BOSS {
+                    // The Realm Portal appears at the arena centre (Build 122.3, 2012-03-31; 2 videos), not where she wandered to.
+                    defeated.home
                 } else {
                     defeated.pos
                 };
@@ -6752,8 +6756,14 @@ impl World {
             let kind = entity.kind;
             let _context = crate::supervision::npc(id, kind);
             let pos = entity.pos;
+            // A dormant Haunted Armor wakes when damaged or when a player comes within reach (bBQRbAoRP_g 2012-04-01 t=150-166).
             if entity.hp == self.content.objects[&kind].hp
-                && (kind == crate::dungeon::abyss::IDOL || kind == 0xd7e && entity.stage.is_none())
+                && (kind == crate::dungeon::abyss::IDOL
+                    || kind == 0xd7e
+                        && entity.stage.is_none()
+                        && !seen
+                            .iter()
+                            .any(|(p, ..)| pos.distance(*p) <= crate::endgame::ARMOR_WAKE_RANGE))
             {
                 continue;
             }
@@ -6811,10 +6821,12 @@ impl World {
                 0x61a => 12.,
                 0x6d8 => 12.,
                 0x91a => 7.,
-                crate::dungeon::spider::BOSS | crate::dungeon::lab::BOSS => 12.,
+                crate::dungeon::spider::BOSS => crate::dungeon::spider::WAKE,
+                crate::dungeon::lab::BOSS => 12.,
                 0xd90 | 0xd7e => 8.,
                 0xd82 | 0xd83 => 10.,
                 0x925 => 30.,
+                crate::endgame::ORYX => 20.,
                 0x65a..=0x65d => 15.,
                 _ => 12.,
             };
@@ -6846,7 +6858,9 @@ impl World {
             let nearby = seen
                 .iter()
                 .any(|(p, ..)| pos.distance(*p) < simulation_radius);
-            let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind) || kind == 0x925)
+            let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind)
+                || kind == 0x925
+                || kind == crate::endgame::ORYX)
                 && entity.activated.is_some();
             if !burst
                 && !armed_abyss_missile
@@ -7011,7 +7025,7 @@ impl World {
                     }
                 }
             } else if crate::endgame::ROSTER.contains(&kind) {
-                match self.finale_movement(id, target, elapsed) {
+                match self.finale_movement(id, elapsed) {
                     Ok(movement) => movement,
                     Err(error) => {
                         tracing::error!(entity=id,%error,"endgame movement refused");
