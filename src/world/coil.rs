@@ -18,8 +18,7 @@ impl World {
     }
 
     pub(super) fn spawn_coil_site(&mut self, pos: Pos) -> Result<()> {
-        let items = crate::loot::landmark_chest(&self.content, COIL, &mut self.rng)?;
-        self.spawn_entity(0x501, pos, items)?;
+        self.spawn_landmark_chests(COIL, pos)?;
         let id = self.spawn_entity(COIL, pos, vec![])?;
         self.entities
             .get_mut(&id)

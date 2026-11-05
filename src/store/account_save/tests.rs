@@ -852,7 +852,7 @@ async fn account_save_schema21_snapshot_precedes_migration_and_preserves_old_cre
         .unwrap();
     drop(store);
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE discord_realm_close_tokens; PRAGMA user_version=21;").unwrap();
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE discord_realm_close_tokens; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=21;").unwrap();
     let before = dump(&db);
     let backup = root.join("before-migration.db");
     crate::account_save::snapshot(&path, &backup, &content).unwrap();
@@ -869,7 +869,7 @@ async fn account_save_schema21_snapshot_precedes_migration_and_preserves_old_cre
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        22
+        23
     );
     assert_eq!(
         Connection::open(&backup)
@@ -987,10 +987,10 @@ async fn account_save_snapshot_required_schema_rejected_before_restore_without_r
             "DROP TABLE account_lists",
             "DROP TABLE update_feed",
             "DROP TABLE email_password_resets",
-            "INSERT INTO collections VALUES(1,2594,0)",
-            "INSERT INTO collections VALUES(1,2594,-1)",
-            "INSERT INTO collections VALUES(1,2594,1.5)",
-            "INSERT INTO collections VALUES(1,2594,'invalid-time')",
+            "INSERT INTO collections(account,item,found_at) VALUES(1,2594,0)",
+            "INSERT INTO collections(account,item,found_at) VALUES(1,2594,-1)",
+            "INSERT INTO collections(account,item,found_at) VALUES(1,2594,1.5)",
+            "INSERT INTO collections(account,item,found_at) VALUES(1,2594,'invalid-time')",
         ];
         if version == 21 {
             damages.push("CREATE TABLE account_origins(ignored TEXT)");
@@ -1000,7 +1000,7 @@ async fn account_save_snapshot_required_schema_rejected_before_restore_without_r
             crate::account_save::snapshot(&baseline, &bad, &content).unwrap();
             let db = Connection::open(&bad).unwrap();
             if version == 21 {
-                db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; PRAGMA user_version=21;").unwrap();
+                db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=21;").unwrap();
             }
             db.execute_batch(damage).unwrap();
             let unchanged = dump(&db);
@@ -1069,7 +1069,7 @@ async fn account_save_migrated_legacy_paid_death_exports_without_lifetime_but_mo
         .unwrap();
     drop(source);
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; UPDATE characters SET stats=json_remove(stats,'$.lifetime'); UPDATE deaths SET snapshot=json_remove(snapshot,'$.lifetime'); UPDATE account_fame SET balance=19,earned=19; PRAGMA user_version=16;").unwrap();
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; UPDATE characters SET stats=json_remove(stats,'$.lifetime'); UPDATE deaths SET snapshot=json_remove(snapshot,'$.lifetime'); UPDATE account_fame SET balance=19,earned=19; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=16;").unwrap();
     let source = Store::open(&path, &content).unwrap();
     let before = dump(&db);
     let raw: String = db
@@ -1221,7 +1221,7 @@ async fn account_save_schema21_preview_readonly_login_and_collision_checks() {
         .unwrap();
     drop(local);
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; PRAGMA user_version=21;").unwrap();
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=21;").unwrap();
     let file = root.join("save.json");
     std::fs::write(&file, serde_json::to_vec(&save).unwrap()).unwrap();
     let before = dump(&db);
@@ -1287,6 +1287,12 @@ async fn account_save_collection_timestamp_rejected_without_destination_mutation
     }
     let mut valid = save;
     valid.collections = vec![(0xa22, 1)];
+    valid.collection_sources = vec![(0xa22, "Medusa".into())];
+    for source in ["", "  ", "Medusa\n"] {
+        let mut bad = valid.clone();
+        bad.collection_sources[0].1 = source.into();
+        assert!(AccountSave::decode(&serde_json::to_vec(&bad).unwrap()).is_err());
+    }
     let imported = local
         .import_account_save(valid, "local-password".into(), false)
         .await
@@ -1298,6 +1304,14 @@ async fn account_save_collection_timestamp_rejected_without_destination_mutation
             .unwrap()
             .collections,
         vec![(0xa22, 1)]
+    );
+    assert_eq!(
+        local
+            .export_account_save(imported.account)
+            .await
+            .unwrap()
+            .collection_sources,
+        vec![(0xa22, "Medusa".into())]
     );
     drop(local);
     assert_eq!(
@@ -1426,7 +1440,7 @@ fn write_input(root: &Path, save: &AccountSave) -> PathBuf {
     file
 }
 fn schema21(db: &Connection) {
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; PRAGMA user_version=21;").unwrap();
+    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=21;").unwrap();
 }
 
 #[tokio::test]
@@ -1523,7 +1537,7 @@ async fn account_save_cli_preview_metadata_expected_and_snapshot_counts_preserve
     let verified = cli_ok(&["verify-snapshot", backup.to_str().unwrap(), "data"], b"");
     assert_eq!(
         verified,
-        serde_json::json!({"verified":true,"schema":22,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
+        serde_json::json!({"verified":true,"schema":23,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
     );
     assert_eq!(local.load(peer, other.id).await.unwrap().items, other.items);
     assert_eq!(
@@ -1659,7 +1673,7 @@ async fn account_save_cli_stale_missing_malformed_and_input_changed_fail_before_
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        22
+        23
     );
     let verified = cli_ok(&["verify-snapshot", backup, "data"], b"");
     assert_eq!(
