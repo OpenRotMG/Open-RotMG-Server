@@ -63,7 +63,8 @@ PORTABLE_TABLES = {
     'portable_history': ('account', 'guild_fame', 'realm_unused', 'realm_spent'),
 }
 PORTABLE_GAME = {**DISCORD_GOLD_GAME, **PORTABLE_TABLES}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: PORTABLE_GAME}
+COLLECTION_GAME = {**PORTABLE_GAME, 'collections': ('account', 'item', 'found_at', 'source')}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: PORTABLE_GAME, 23: COLLECTION_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -84,7 +85,8 @@ RELOADED_DISCORD_GOLD_GAME = {**RELOADED_DEATH_FAME_GAME, 'discord_gold_grants':
 RELOADED_EMAIL_GAME = {**RELOADED_DISCORD_GOLD_GAME, **EMAIL_TABLES}
 RESET_GAME = {**RELOADED_EMAIL_GAME, **RESET_TABLES}
 PRE_PORTABLE_GAME = {**RESET_GAME, **REALM_CLOSE_TABLES}
-RELOADED_GAME = {**PRE_PORTABLE_GAME, **PORTABLE_TABLES}
+RELOADED_PORTABLE_GAME = {**PRE_PORTABLE_GAME, **PORTABLE_TABLES}
+RELOADED_GAME = {**RELOADED_PORTABLE_GAME, 'collections': COLLECTION_GAME['collections']}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -536,6 +538,11 @@ def validate(bundle):
                 raise ValueError('Invalid collection record')
             if table == 'discord_links' and (not isinstance(row['discord_id'], str) or not re.fullmatch(r'[0-9]{17,20}', row['discord_id'])):
                 raise ValueError('Invalid linked Discord identity')
+        if table == 'collections' and bundle['schema'] >= 23:
+            for row in rows:
+                source = row['source']
+                if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 128 or any(ord(c) < 32 or ord(c) == 127 for c in source)):
+                    raise ValueError('Invalid collection source')
         identities = [(row['account'], row['item']) if table == 'collections' else row['account'] for row in rows]
         if len(set(identities)) != len(rows) or (table == 'discord_links' and len({r['discord_id'] for r in rows}) != len(rows)):
             raise ValueError('Duplicate hiscores identity: ' + table)
@@ -595,7 +602,7 @@ def gold_reward_sql(version):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, PRE_PORTABLE_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, PRE_PORTABLE_GAME, RELOADED_PORTABLE_GAME, RELOADED_GAME], include_schema=True)
     if 'credentials' in matched and (('email_verifications' in matched) != (stored_version >= 20)):
         raise ValueError('Unsupported email verification schema version')
     if 'credentials' in matched and (('email_password_resets' in matched) != (stored_version >= 21)):
@@ -691,6 +698,8 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         definitions['game'] += '\n' + DISCORD_GOLD_SQL + ';'
     if bundle['schema'] >= 22:
         definitions['game'] += '\n' + PORTABLE_SQL
+    if bundle['schema'] >= 23:
+        definitions['game'] += "\nALTER TABLE collections ADD COLUMN source TEXT CHECK(source IS NULL OR (typeof(source)='text' AND length(trim(source)) BETWEEN 1 AND 128));"
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

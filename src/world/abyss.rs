@@ -87,7 +87,7 @@ impl World {
                 ?items,
                 "Abyss legitimate defeat roll group"
             );
-            self.loot_bags(defeated.pos, owner, &items).with_context(|| format!("Abyss loot packaging enemy={} kind={:#x} account={owner:?} items={items:?}", defeated.id, defeated.kind))?;
+            self.loot_bags(defeated.pos, owner, &items, defeated.kind).with_context(|| format!("Abyss loot packaging enemy={} kind={:#x} account={owner:?} items={items:?}", defeated.id, defeated.kind))?;
         }
         Ok(())
     }

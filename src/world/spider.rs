@@ -101,7 +101,7 @@ impl World {
             .into_iter()
             .map(i32::from)
             .collect();
-        self.loot_bags(boss.pos, None, &shared)?;
+        self.loot_bags(boss.pos, None, &shared, boss.kind)?;
         // The comparator's 0.32 threshold compares integer damage, not a percentage of Arachna's HP.
         let owners: BTreeSet<_> = self
             .players
@@ -119,7 +119,7 @@ impl World {
                 .context("Arachna participation reward missing")?,
         );
         for account in owners {
-            self.loot_bags(boss.pos, Some(account), &[item])?;
+            self.loot_bags(boss.pos, Some(account), &[item], boss.kind)?;
         }
         Ok(())
     }
