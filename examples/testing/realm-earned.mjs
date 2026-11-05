@@ -3,7 +3,7 @@ import {readFile,writeFile,appendFile,readdir,realpath,stat} from 'node:fs/promi
 import {join} from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
-import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions} from './realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,originalIdentity,localTargets,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions,rejoinMarker} from './realm-earned-core.mjs';
 
 export const realmSeed=1344;
 export const fixture={class:0x310,level:20,seed:1344,world:-2,position:{x:78.5,y:42.5},equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
@@ -54,9 +54,21 @@ export async function run(fighter){
   const invite=async()=>{
     if(tail||originals.length!==14||(await observer.observe()).game_ms-invitation<45000)return;
     const v=await fighter.observe();if(v.world!=='Realm'||recoveryState(v.character).retreat)return;
-    const view=(await fighter.inspect()).view,visible=view.objects.filter(o=>profiles.includes(o.name)&&o.hp>0),sequence=visible.map(o=>({actor:fighter.actor,input:{keys:[],duration_ms:500,chat:o.name+' follow me'}}));assert(new Set(visible.map(o=>o.name)).size===visible.length);
+    const view=(await fighter.inspect()).view,visible=view.objects.filter(o=>profiles.includes(o.name)&&o.hp>0),sequence=visible.map(o=>({actor:fighter.actor,input:{keys:[],duration_ms:1100,chat:o.name+' follow me'}}));assert(new Set(visible.map(o=>o.name)).size===visible.length);
     await appendFile(join(out,'earned-calls.jsonl'),JSON.stringify({gameMs:v.game_ms,actor:fighter.actor,visible:visible.map(o=>({id:o.id,name:o.name,position:o.position})),claim:'planned named local invitations only; no acceptance or following claim'})+'\n');
-    if(sequence.length)await act(fighter,sequence);invitation=(await observer.observe()).game_ms;
+    for(let i=0;i<sequence.length;i+=9)await act(fighter,sequence.slice(i,i+9));invitation=(await observer.observe()).game_ms;
+  };
+  const rejoin=async goal=>{
+    await act(fighter,Array.from({length:6},()=>({actor:fighter.actor,input:{keys:['-'],duration_ms:200}})));
+    const before=await fighter.observe(),target=rejoinMarker((await fighter.inspect()).view,originals,goal),peer=await api({op:'observe',actor:target.actor});
+    const originalPeer=v=>v.lifecycle.alive&&!v.lifecycle.death_pending&&!v.lifecycle.quarantined&&v.controller==='game_bot'&&v.session.account===target.account&&v.session.character===target.character&&v.session.world===realm&&v.character.class===target.class;
+    assert(originalPeer(peer)&&peer.session.player===target.id,'Original GUI rejoin target changed before input');
+    await appendFile(join(out,'earned-rejoins.jsonl'),JSON.stringify({stage:'planned',target,before:before.session,position:before.position})+'\n');
+    await act(fighter,[{actor:fighter.actor,input:{keys:[],mouse:target.point,duration_ms:200}},{actor:fighter.actor,input:{keys:[],duration_ms:400}},{actor:fighter.actor,input:{keys:[],mouse:target.menu,duration_ms:200}}]);
+    const after=await fighter.observe(),current=await api({op:'observe',actor:target.actor});
+    assert(originalPeer(current)&&after.lifecycle.alive&&after.session.account===first.session.account&&after.session.character===first.session.character&&after.session.world===realm,'GUI rejoin changed an original identity or world');
+    fighter.check('ordinary minimap GUI rejoin reaches an original living cohort ally after Nexus recovery',after.game_ms>=before.game_ms&&after.game_ms-before.game_ms<10000&&distance(before.position,after.position)>100&&distance(after.position,current.position)<=8);
+    await appendFile(join(out,'earned-rejoins.jsonl'),JSON.stringify({stage:'observed',target:target.account,before:before.position,after:after.position,peer:current.position,gameMs:after.game_ms,claim:'Actual long-range same-Realm rejoin within normal moving-ally bounds, not a dispatch-only claim'})+'\n');
   };
   const walk=async(client,goal)=>{
     const world=(await client.observe()).session.world;
@@ -93,7 +105,7 @@ export async function run(fighter){
       await save('retreat-'+iteration);await act(fighter,{keys:['Insert'],duration_ms:1000});assert.equal((await fighter.observe()).world,'Nexus');
       for(let n=0;!recoveryState((await fighter.observe()).character).recovered;n++){assert(n<30,'Ordinary Nexus regeneration did not restore the original reserve');await act(fighter,{keys:[],duration_ms:5000});}
       const portal=(await observer.inspect()).view.objects.find(o=>o.id===entrance.id);assert(portal?.usable,'Original entrance closed while the original recovered');await enter(fighter,portal);
-      await save('recovered-'+iteration);continue;
+      await rejoin(v.position);await save('recovered-'+iteration);continue;
     }
     terrain=await map(fighter,true);collision=collisionMap(terrain);const pending=new Set(ledger.snapshot().pending),family=terrain.entities.filter(e=>(pending.has(e.id)||pending.has(e.quest)||pending.has(e.parent))&&e.hp>0).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position));
     if(!family.length){assert(ledger.snapshot().waiting.length>0,'Pending ledger has neither a living family nor an actual waiting event');await act(fighter,{keys:[],duration_ms:3000});continue;}

@@ -75,6 +75,16 @@ export function partyPositions(map,origin,count){
   for(const p of positions)if(chosen.every(q=>Math.hypot(p.x-q.x,p.y-q.y)>=2)){chosen.push(p);if(chosen.length===count)return chosen;}
   throw Error('Insufficient safe distinct initial party positions');
 }
+export function rejoinMarker(view,originals,goal){
+  assert(view.map.name==='Realm'&&view.map.allow_teleport&&view.map.width===2048&&view.map.height===2048,'Rejoin requires the calibrated teleport-enabled Realm');
+  assert([goal.x,goal.y].every(Number.isFinite),'Rejoin goal must be finite');
+  const peers=view.player_markers.map(p=>{const o=originals.slice(2).find(o=>o.account===p.account);assert(o&&o.role===p.name&&Number.isSafeInteger(p.id)&&p.id>0&&[p.position.x,p.position.y].every(n=>Number.isFinite(n)&&n>=0&&n<2048),'Marker must identify an original cohort member');
+    // The selected client's fully zoomed Realm minimap has a 192-pixel interior.
+    return {...p,actor:o.actor,character:o.character,class:o.class,point:{x:604+Math.floor(p.position.x*192/2048),y:4+Math.floor(p.position.y*192/2048)}};});
+  const candidates=peers.filter(p=>Math.hypot(p.position.x-view.position.x,p.position.y-view.position.y)>100&&peers.every(q=>q===p||Math.hypot(p.point.x-q.point.x,p.point.y-q.point.y)>6));
+  assert(candidates.length,'No isolated distant original cohort marker for GUI rejoin');candidates.sort((a,b)=>Math.hypot(a.position.x-goal.x,a.position.y-goal.y)-Math.hypot(b.position.x-goal.x,b.position.y-goal.y)||a.account-b.account);
+  const chosen=candidates[0];return {...chosen,menu:{x:chosen.point.x-94,y:chosen.point.y+28}};
+}
 export function originalIdentity(role,spec,v){
   assert(v.lifecycle.alive&&!v.lifecycle.death_pending&&!v.lifecycle.quarantined&&Number.isSafeInteger(v.character.hp)&&v.character.hp>0&&Number.isSafeInteger(v.character.mp)&&v.character.mp>=0);
   for(const id of [v.actor,v.session.account,v.session.character])assert(Number.isSafeInteger(id)&&id>0);

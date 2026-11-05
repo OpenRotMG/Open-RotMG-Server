@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions} from '../examples/testing/realm-earned-core.mjs';
+import {earnedLedger,collisionMap,route,localTargets,originalIdentity,textReceiver,assertCastleArrival,structuredEvents,mapInput,readMap,recoveryState,replacementEntrance,otherEntrance,observedAim,inputWork,nativeReceiptRoom,partyPositions,rejoinMarker} from '../examples/testing/realm-earned-core.mjs';
 const roots=Array.from({length:49},(_,i)=>i+1),census={message:'finite Realm closure roster bound',origin:-3,heroes:49};
 const credit=(hero,remaining,now=100)=>({message:'qualifying Realm hero defeated',origin:-3,hero,remaining,now});
 const waiting=source=>({message:'quest defeat earned a pending Realm event',source}),admission=(source,entity)=>({message:'quest defeat summoned a Realm event',source,entity});
@@ -52,6 +52,7 @@ test('visible combat targets retain protected phases and prefer a real unprotect
 });
 test('native sequences account for every planned hold and the entire bounded duration',()=>{
   const input={keys:[],duration_ms:500},batch=Array.from({length:12},()=>({actor:1,input:{...input,chat:'DrFlux follow me'}}));assert.deepEqual(inputWork(batch,1),{duration:6000,inputs:12});assert.deepEqual(inputWork(input,1),{duration:500,inputs:1});
+  const paced=batch.map(s=>({...s,input:{...s.input,duration_ms:1100}}));assert.deepEqual(inputWork(paced.slice(0,9),1),{duration:9900,inputs:9});assert.throws(()=>inputWork(paced.slice(0,10),1),/total exceeds/);
   for(const bad of [[],Array(33).fill(batch[0]),[{actor:2,input}],[{actor:1,input:{...input,duration_ms:NaN}}],[{actor:1,input:{...input,duration_ms:0}}],Array(21).fill(batch[0])])assert.throws(()=>inputWork(bad,1));assert.throws(()=>inputWork({...input,duration_ms:10001},1));
 });
 test('native client receipts include bootstrap and cannot be confused with backend receipts',()=>{
@@ -62,6 +63,17 @@ test('prepared party starts are nearby, separated and avoid actual hazards witho
   const map=collisionMap({width:21,height:21,blocked:[[10,7]],damaging_ground:[[7,10]]}),origin={x:10.5,y:10.5},positions=partyPositions(map,origin,12);assert.equal(positions.length,12);
   for(const p of positions){assert(Math.hypot(p.x-origin.x,p.y-origin.y)>=3&&Math.hypot(p.x-origin.x,p.y-origin.y)<=8);assert(!map.blocked[Math.floor(p.y)*map.width+Math.floor(p.x)]);assert(positions.every(q=>q===p||Math.hypot(p.x-q.x,p.y-q.y)>=2));}
   assert.throws(()=>partyPositions(collisionMap({width:21,height:21,blocked:[[10,9],[9,10],[11,10],[10,11]],damaging_ground:[]}),origin,12),/Insufficient safe/);assert.throws(()=>partyPositions({width:1,height:1,blocked:new Uint8Array(1)},origin,12),/origin must be an actual safe/);
+});
+test('GUI rejoin maps a fresh original marker to the observed minimap and Teleport header',()=>{
+  const originals=[{role:'fighter'},{role:'observer'},{actor:3,account:3,character:3,class:0x307,role:'DrFlux',initial:{session:{player:7}}},{actor:4,account:4,character:4,class:0x307,role:'GHZD'}],view={map:{name:'Realm',allow_teleport:true,width:2048,height:2048},position:{x:1024.5,y:117.5},player_markers:[{account:3,id:99,name:'DrFlux',position:{x:542.5,y:1858.5}}]};
+  const chosen=rejoinMarker(view,originals,{x:542.5,y:1858.5});assert.equal(chosen.id,99);assert.equal(chosen.character,3);assert.deepEqual(chosen.point,{x:654,y:178});assert.deepEqual(chosen.menu,{x:560,y:206});
+  const other={account:4,id:100,name:'GHZD',position:{x:900.5,y:900.5}};assert.equal(rejoinMarker({...view,player_markers:[...view.player_markers,other]},originals,other.position).account,4);
+});
+test('GUI rejoin refuses foreign, ambiguous, nearby and uncalibrated targets',()=>{
+  const originals=[{role:'fighter'},{role:'observer'},{actor:3,account:3,character:3,class:0x307,role:'DrFlux'},{actor:4,account:4,character:4,class:0x307,role:'GHZD'}],marker={account:3,id:99,name:'DrFlux',position:{x:542.5,y:1858.5}},view={map:{name:'Realm',allow_teleport:true,width:2048,height:2048},position:{x:1024.5,y:117.5},player_markers:[marker]},goal=marker.position;
+  for(const p of [{...marker,account:9},{...marker,name:'replacement'},{...marker,id:0},{...marker,position:{x:NaN,y:2}}])assert.throws(()=>rejoinMarker({...view,player_markers:[p]},originals,goal),/original cohort/);
+  assert.throws(()=>rejoinMarker({...view,player_markers:[marker,{account:4,id:100,name:'GHZD',position:{x:543.5,y:1859.5}}]},originals,goal),/No isolated/);assert.throws(()=>rejoinMarker({...view,position:goal},originals,goal),/No isolated/);assert.throws(()=>rejoinMarker({...view,player_markers:[]},originals,goal),/No isolated/);
+  for(const map of [{...view.map,allow_teleport:false},{...view.map,width:1024},{...view.map,name:'Nexus'}])assert.throws(()=>rejoinMarker({...view,map},originals,goal),/calibrated/);assert.throws(()=>rejoinMarker(view,originals,{x:NaN,y:1}),/finite/);
 });
 test('original cohort identity rejects a mismatched class or controller',()=>{
   const spec={class:0x310,level:20,stats:[670,385,50,25,50,50,40,75],equipment:[0xaf6,0xb25,0xb05,0xac5],backpack:Array(8).fill(-1)},v={actor:1,controller:'native',lifecycle:{alive:true,death_pending:false,quarantined:false},session:{account:2,character:3},character:{class:0x310,level:20,hp:670,mp:385,base_stats:[...spec.stats],items:[...spec.equipment,...spec.backpack],inventory_revision:4}};assert.equal(originalIdentity('fighter',spec,v).character,3);assert.throws(()=>originalIdentity('fighter',spec,{...v,controller:'game_bot'}));assert.throws(()=>originalIdentity('fighter',spec,{...v,character:{...v.character,class:0x30e}}));
