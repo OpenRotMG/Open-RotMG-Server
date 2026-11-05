@@ -115,7 +115,7 @@ class ReleaseContract(unittest.TestCase):
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
             self.assertEqual(bundle['schema'], 24)
-            for version, achievement in [(21, False), (22, True), (22, False), (23, True)]:
+            for version, achievement in [(20, False), (21, False), (22, True), (22, False), (23, True)]:
                 historical = deepcopy(bundle)
                 historical['schema'] = version
                 portable = version == 22 and not achievement
@@ -144,7 +144,8 @@ class ReleaseContract(unittest.TestCase):
                 exported = backup.export(restored / 'game.db', restored / 'levels.sqlite', Path(temporary) / (label + '-export.gz'), revision, revision, revision)
                 self.assertEqual(exported['game'], historical['game'])
                 self.assertEqual(exported['schema'], version)
-                subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--local-save', 'verify-snapshot', str(restored / 'game.db'), str(root / 'data')], check=True)
+                if version >= 21:
+                    subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--local-save', 'verify-snapshot', str(restored / 'game.db'), str(root / 'data')], check=True)
                 subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(restored / 'game.db'), str(root / 'data')], check=True)
                 migrated = backup.snapshot(restored / 'game.db', backup.RELOADED_GAME)
                 for table in backup.PORTABLE_TABLES:

@@ -121,7 +121,10 @@ async fn discord_gold_preserves_wallet_spending_and_receipts_across_relink_and_r
             .contains("schema-19 Discord gold receipts")
     );
     db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts;").unwrap();
+    // This owned legacy18 construction predates the intentionally dropped replay ledger.
+    db.execute_batch(SCHEMA).unwrap();
     crate::store::achievement_tests::schema21_fixture(&db);
+    db.execute_batch("DROP TABLE discord_gold_grants").unwrap();
     db.pragma_update(None, "user_version", 18).unwrap();
     let s = Store::open(&path, &content).unwrap();
     assert_eq!(s.gold(account).await.unwrap().balance, 250);

@@ -680,6 +680,27 @@ pub(super) fn check_required_state(db: &Connection, version: i32) -> Result<()> 
             ensure!(exists, "{reason}");
         }
     }
+    if version >= 21 {
+        for table in [
+            "competitors",
+            "collections",
+            "discord_links",
+            "discord_recovery",
+            "shore_bots",
+            "vaults",
+            "pictures",
+            "picture_sequence",
+        ] {
+            ensure!(
+                db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
+                    [table],
+                    |r| r.get::<_, bool>(0)
+                )?,
+                "modern public base table {table} missing; preserve database and private backup for review"
+            );
+        }
+    }
     character_slots::check_schema(db, version)?;
     if version >= 5 {
         for (name, sql) in [

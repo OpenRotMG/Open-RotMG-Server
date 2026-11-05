@@ -1222,7 +1222,8 @@ async fn schema24_base_token_slot_and_late_helper_failures_preserve_all_logical_
             "DROP TABLE discord_realm_close_tokens",
             "ALTER TABLE discord_realm_close_tokens RENAME TO bad_tokens; CREATE TABLE discord_realm_close_tokens AS SELECT * FROM bad_tokens; DROP TABLE bad_tokens",
             "DROP INDEX characters_by_account; DROP TABLE character_slot_purchases",
-            "DROP TABLE credentials; DROP TABLE pictures",
+            "DROP TABLE credentials; DROP TABLE verified_emails",
+            "DROP TABLE competitors",
         ] {
             let (dir, content) = known_layout_fixture(version, achievement, portable).await;
             let path = dir.join("game.db");

@@ -155,6 +155,8 @@ def check(binary, data, directory, revision):
     reexported = directory / 'representable-paid-reexport.json'
     subprocess.run([str(binary), '--local-save', 'export', str(fresh), str(data), str(imported['account']), str(reexported)], check=True)
     original, carried = json.loads(paid_save.read_bytes()), json.loads(reexported.read_bytes())
+    if any(value.encode() in file.read_bytes() for value in canaries for file in [paid_save,reexported]):
+        raise RuntimeError('Portable account output contains a private capability')
     if carried['gold'] != original['gold'] or carried['rewards'] != original['rewards'] or carried['origin'] != original['origin']:
         raise RuntimeError('Fresh portable import changed representable paid wallet/date/notified history')
     if (original['realm_unused'],original['realm_spent'])!=(4,3) or (carried['realm_unused'],carried['realm_spent'])!=(4,3):
