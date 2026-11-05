@@ -2,6 +2,7 @@
 from contextlib import closing
 from copy import deepcopy
 import gzip
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -40,7 +41,7 @@ def assert_source_sql_refusals(path, discord, revision, parent):
         with closing(sqlite3.connect(database)) as db:
             after = list(db.iterdump())
         assert after == before and not output.exists(), name
-        evidence.append({'case': name, 'before': before, 'after': after, 'error': message, 'noPublishedArtifact': True})
+        evidence.append({'case': name, 'beforeSha256': hashlib.sha256('\n'.join(before).encode()).hexdigest(), 'afterSha256': hashlib.sha256('\n'.join(after).encode()).hexdigest(), 'error': message, 'noPublishedArtifact': True})
     if 'QA_RESULTS_DIR' in os.environ:
         (Path(os.environ['QA_RESULTS_DIR']) / 'python-gold-object-refusals.json').write_text(json.dumps(evidence, indent=2) + '\n')
 
@@ -85,7 +86,7 @@ def check(path):
         backup.restore(archive, restored)
         assert backup.snapshot(restored / 'game.db', backup.RESTORED_GAME) == public
         with closing(sqlite3.connect(restored / 'game.db')) as db:
-            assert db.execute("SELECT count(*) FROM sqlite_schema WHERE name='discord_realm_close_tokens'").fetchone()[0] == 0
+            assert db.execute("SELECT count(*) FROM discord_realm_close_tokens").fetchone()[0] == 0
         reexported = backup.export(restored / 'game.db', restored / 'levels.sqlite', parent / 'backup-test-reexport.gz', revision, revision, revision)
         assert reexported['game'] == public
         for table, field, value in [('achievement_partners', 'peer', 999999), ('achievement_dungeons', 'dungeon', 'not-a-dungeon'), ('achievement_realm_credits', 'root', 0)]:

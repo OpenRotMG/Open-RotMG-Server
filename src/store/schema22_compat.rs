@@ -143,7 +143,7 @@ impl KnownStoreLayout {
                 "unsupported schema-{version} feature layout; preserve input for review"
             ),
         };
-        if version >= 18 {
+        if version >= 10 {
             let sql: String = db.query_row(
                 "SELECT sql FROM sqlite_schema WHERE name='gold_rewards'",
                 [],
@@ -152,6 +152,8 @@ impl KnownStoreLayout {
             let expected = match layout {
                 Self::Achievement22 => GOLD,
                 Self::Achievement23 | Self::Combined24 => GOLD23,
+                _ if version < 11 => super::gold::SCHEMA10,
+                _ if version < 18 => super::gold::SCHEMA11,
                 _ => super::gold::SCHEMA18,
             };
             ensure!(
@@ -159,6 +161,17 @@ impl KnownStoreLayout {
                 "schema-{version} gold reward metadata mismatch; restore the reviewed ledger"
             );
         }
+        if version < 10 {
+            ensure!(
+                !db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='gold_rewards')",
+                    [],
+                    |r| r.get::<_, bool>(0)
+                )?,
+                "unsupported pre-schema10 Gold metadata; preserve input for review"
+            );
+        }
+        super::discord_gold::check_schema(db, version)?;
         layout.check_objects(db, version)?;
         if portable {
             super::account_save::check_schema(db)?;

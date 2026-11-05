@@ -91,11 +91,12 @@ RESET_GAME = {**RELOADED_EMAIL_GAME, **RESET_TABLES}
 PRE_PORTABLE_GAME = {**RESET_GAME, **REALM_CLOSE_TABLES}
 RELOADED_ACHIEVEMENT_GAME = {**PRE_PORTABLE_GAME, **ACHIEVEMENT_TABLES}
 RESTORED_BASE_GAME = {**DISCORD_GOLD_GAME, **EMAIL_TABLES, **RESET_TABLES}
-RESTORED_PORTABLE_GAME = {**PORTABLE_GAME, **EMAIL_TABLES, **RESET_TABLES}
-RESTORED_ACHIEVEMENT_GAME = {**ACHIEVEMENT_GAME, **EMAIL_TABLES, **RESET_TABLES}
+RESTORED_BASE_TOKEN_GAME = {**RESTORED_BASE_GAME, **REALM_CLOSE_TABLES}
+RESTORED_PORTABLE_GAME = {**PORTABLE_GAME, **EMAIL_TABLES, **RESET_TABLES, **REALM_CLOSE_TABLES}
+RESTORED_ACHIEVEMENT_GAME = {**ACHIEVEMENT_GAME, **EMAIL_TABLES, **RESET_TABLES, **REALM_CLOSE_TABLES}
 RELOADED_PORTABLE_GAME = {**PRE_PORTABLE_GAME, **PORTABLE_TABLES}
 RELOADED_GAME = {**RELOADED_PORTABLE_GAME, **ACHIEVEMENT_TABLES}
-RESTORED_GAME = {**GAME_SCHEMAS[24], **EMAIL_TABLES, **RESET_TABLES}
+RESTORED_GAME = {**GAME_SCHEMAS[24], **EMAIL_TABLES, **RESET_TABLES, **REALM_CLOSE_TABLES}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -156,6 +157,8 @@ def validate_pictures(game):
         raise ValueError('Release picture validator returned an invalid receipt')
 
 
+SLOT_PURCHASE_SQL = "CREATE TABLE character_slot_purchases(account INTEGER NOT NULL REFERENCES accounts(id),timer INTEGER NOT NULL CHECK(typeof(timer)='integer' AND timer BETWEEN -2147483648 AND 2147483647),slots INTEGER NOT NULL CHECK(typeof(slots)='integer' AND slots BETWEEN 2 AND 14),PRIMARY KEY(account,timer),UNIQUE(account,slots))"
+
 CANONICAL_TRIGGERS = {
     'character_slot_insert': (12, "CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END"),
     'character_slot_update': (12, "CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END"),
@@ -192,6 +195,8 @@ def snapshot(path, schema, *, include_schema=False):
         if not matched or any(candidate != matched[0] for candidate in matched):
             raise ValueError('Unsupported database tables or columns/metadata; update and test the export schema before backing up')
         schema = matched[0]
+        if 'character_slot_purchases' in schema and db.execute("SELECT sql FROM sqlite_schema WHERE name='character_slot_purchases'").fetchone() != (SLOT_PURCHASE_SQL,):
+            raise ValueError('Character slot purchase metadata mismatch; preserve input for review')
         if 'vaults' in schema:
             references = db.execute('SELECT "table","from","to",seq,on_update,on_delete FROM pragma_foreign_key_list(\'vaults\') ORDER BY id,seq').fetchall()
             if references != [('accounts', 'account', 'id', 0, 'NO ACTION', 'NO ACTION')]:
@@ -246,10 +251,15 @@ def snapshot(path, schema, *, include_schema=False):
                     if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (name,)).fetchone() != (definition.strip(),):
                         raise ValueError('Unsupported portable save metadata: ' + name)
         version = db.execute('PRAGMA user_version').fetchone()[0]
-        if version >= 18 and 'gold_rewards' in schema:
+        if 'gold_rewards' in schema:
             if db.execute("SELECT sql FROM sqlite_schema WHERE name='gold_rewards'").fetchone() != (gold_reward_sql(version, 'achievement_partners' in schema),):
                 raise ValueError('Gold reward metadata mismatch for known schema layout')
         if 'characters' in schema:
+            tokens=db.execute("SELECT sql FROM sqlite_schema WHERE name='discord_realm_close_tokens'").fetchone()
+            if tokens is not None and tokens != (REALM_CLOSE_SQL,):
+                raise ValueError('Realm Close token/replay metadata mismatch; preserve database and private backup')
+            if tokens is None and version>=21:
+                raise ValueError('Missing Realm Close token/replay history; schema21 was reused, preserve database and private backup for explicit compatibility review')
             check_source_objects(db, version)
         result = {}
         for table, columns in schema.items():
@@ -663,8 +673,8 @@ def gold_reward_sql(version, achievements=False):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, PRE_PORTABLE_GAME, RELOADED_PORTABLE_GAME, ACHIEVEMENT_GAME, RELOADED_GAME, RELOADED_ACHIEVEMENT_GAME, RESTORED_BASE_GAME, RESTORED_PORTABLE_GAME, RESTORED_ACHIEVEMENT_GAME, RESTORED_GAME], include_schema=True)
-    if (matched == RESTORED_BASE_GAME and stored_version not in (20, 21)) or (matched == RESTORED_PORTABLE_GAME and stored_version != 22):
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, PRE_PORTABLE_GAME, RELOADED_PORTABLE_GAME, ACHIEVEMENT_GAME, RELOADED_GAME, RELOADED_ACHIEVEMENT_GAME, RESTORED_BASE_GAME, RESTORED_BASE_TOKEN_GAME, RESTORED_PORTABLE_GAME, RESTORED_ACHIEVEMENT_GAME, RESTORED_GAME], include_schema=True)
+    if (matched == RESTORED_BASE_GAME and stored_version != 20) or (matched == RESTORED_BASE_TOKEN_GAME and stored_version != 21) or (matched == RESTORED_PORTABLE_GAME and stored_version != 22):
         raise ValueError('Unsupported restored database schema layout/version')
     if 'credentials' in matched and (('email_verifications' in matched) != (stored_version >= 20)):
         raise ValueError('Unsupported email verification schema version')
@@ -703,7 +713,9 @@ def restore(archive, directory):
         'game': """CREATE TABLE accounts(id INTEGER PRIMARY KEY,guid TEXT UNIQUE,name TEXT NOT NULL);
 CREATE TABLE characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,alive INTEGER NOT NULL DEFAULT 1);
 CREATE UNIQUE INDEX one_living_character ON characters(account) WHERE alive=1;
-CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()));""",
+CREATE INDEX characters_by_account ON characters(account);
+CREATE TABLE deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()));
+CREATE INDEX deaths_by_time ON deaths(died_at);""",
         'discord': """CREATE TABLE levels(guild_id TEXT NOT NULL,user_id TEXT NOT NULL,username TEXT NOT NULL,xp INTEGER NOT NULL CHECK(xp>=0 AND xp<=9007199254740991),last_xp_at INTEGER NOT NULL,last_message_id TEXT NOT NULL,PRIMARY KEY(guild_id,user_id)) STRICT;""",
     }
     if 2 <= bundle['schema'] < 13:
@@ -737,10 +749,12 @@ CREATE INDEX guild_roster ON guild_members(guild);
     if bundle['schema'] >= 12:
         definitions['game'] += '''
 ALTER TABLE accounts ADD COLUMN character_slots INTEGER NOT NULL DEFAULT 1 CHECK(typeof(character_slots)='integer' AND character_slots BETWEEN 1 AND 14);
-CREATE TABLE character_slot_purchases(account INTEGER NOT NULL REFERENCES accounts(id),timer INTEGER NOT NULL CHECK(typeof(timer)='integer' AND timer BETWEEN -2147483648 AND 2147483647),slots INTEGER NOT NULL CHECK(typeof(slots)='integer' AND slots BETWEEN 2 AND 14),PRIMARY KEY(account,timer),UNIQUE(account,slots));
+
 DROP INDEX one_living_character;
 CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1;
 '''
+    if bundle['schema'] >= 12:
+        definitions['game'] += '\n' + SLOT_PURCHASE_SQL + ';'
     if bundle['schema'] >= 13:
         definitions['game'] += """
 ALTER TABLE accounts ADD COLUMN vault_mask INTEGER NOT NULL DEFAULT 1 CHECK(typeof(vault_mask)='integer' AND vault_mask BETWEEN 1 AND 1048575 AND (vault_mask & 1)=1);
@@ -759,6 +773,10 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         definitions['game'] += '\n' + PORTABLE_SQL
     if bundle['schema'] in (23, 24) or 'achievement_partners' in bundle['game']:
         definitions['game'] += '\n' + ';\n'.join(ACHIEVEMENT_SQL.values()) + ';'
+    if bundle['schema'] >= 20:
+        definitions['game'] += '\n' + ';'.join(EMAIL_SQL.values()) + ';'
+    if bundle['schema'] >= 21:
+        definitions['game'] += '\n' + RESET_SQL + ';\n' + REALM_CLOSE_SQL + ';'
     for minimum, sql in CANONICAL_TRIGGERS.values():
         if bundle['schema'] >= minimum:
             definitions['game'] += '\n' + sql + ';'
@@ -782,13 +800,12 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
                 db.backup(target)
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         schema = game_schema(bundle) if name == 'game' else DISCORD
+        if name == 'game' and bundle['schema'] >= 20:
+            schema = {**schema, **EMAIL_TABLES}
+        if name == 'game' and bundle['schema'] >= 21:
+            schema = {**schema, **RESET_TABLES, **REALM_CLOSE_TABLES}
         if snapshot(directory / filename, schema) != bundle[name]:
             raise ValueError('Restored fields differ from uploaded archive: ' + name)
-    if bundle['schema'] >= 20:
-        with closing(sqlite3.connect(directory / 'game.db')) as db:
-            db.executescript(';'.join(EMAIL_SQL.values()) + ';')
-            if bundle['schema'] >= 21:
-                db.execute(RESET_SQL)
     return bundle
 
 

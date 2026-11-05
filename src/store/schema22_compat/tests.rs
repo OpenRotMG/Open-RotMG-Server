@@ -1208,3 +1208,51 @@ async fn schema24_noncanonical_gold_dependencies_reject_before_writes_for_every_
         }
     }
 }
+
+#[tokio::test]
+async fn schema24_base_token_slot_and_late_helper_failures_preserve_all_logical_state() {
+    for (version, achievement, portable) in [
+        (21, false, false),
+        (22, true, false),
+        (22, false, true),
+        (23, true, false),
+        (24, true, true),
+    ] {
+        for sql in [
+            "DROP TABLE discord_realm_close_tokens",
+            "ALTER TABLE discord_realm_close_tokens RENAME TO bad_tokens; CREATE TABLE discord_realm_close_tokens AS SELECT * FROM bad_tokens; DROP TABLE bad_tokens",
+            "DROP INDEX characters_by_account; DROP TABLE character_slot_purchases",
+            "DROP TABLE credentials; DROP TABLE pictures",
+        ] {
+            let (dir, content) = known_layout_fixture(version, achievement, portable).await;
+            let path = dir.join("game.db");
+            Connection::open(&path).unwrap().execute_batch(sql).unwrap();
+            let before = snapshot(&path);
+            let error = Store::open(&path, &content)
+                .err()
+                .expect("unknown base state must not be rebuilt");
+            assert_eq!(
+                snapshot(&path),
+                before,
+                "{version}/{achievement}/{portable}: {error:#}"
+            );
+        }
+    }
+}
+#[tokio::test]
+async fn schema24_unknown_legacy17_gold_constraint_refuses_before_rebuild() {
+    let (dir, content) = known_layout_fixture(21, false, false).await;
+    let path = dir.join("game.db");
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE discord_realm_close_tokens; DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; ALTER TABLE gold_rewards RENAME TO old_fixture_gold").unwrap();
+    let sql = gold::SCHEMA11.replace("awarded_at>0", "awarded_at>=0");
+    db.execute_batch(&sql).unwrap();
+    db.execute_batch("INSERT INTO gold_rewards SELECT * FROM old_fixture_gold; DROP TABLE old_fixture_gold; PRAGMA user_version=17").unwrap();
+    let before = snapshot(&path);
+    let error = Store::open(&path, &content).err().unwrap();
+    assert!(
+        error.to_string().contains("gold reward metadata mismatch"),
+        "{error:#}"
+    );
+    assert_eq!(snapshot(&path), before);
+}

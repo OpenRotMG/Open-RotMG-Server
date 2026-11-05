@@ -680,6 +680,29 @@ pub(super) fn check_required_state(db: &Connection, version: i32) -> Result<()> 
             ensure!(exists, "{reason}");
         }
     }
+    character_slots::check_schema(db, version)?;
+    if version >= 5 {
+        for (name, sql) in [
+            (
+                "characters_by_account",
+                "CREATE INDEX characters_by_account ON characters(account)",
+            ),
+            (
+                "deaths_by_time",
+                "CREATE INDEX deaths_by_time ON deaths(died_at)",
+            ),
+        ] {
+            let actual: Option<String> = db
+                .query_row("SELECT sql FROM sqlite_schema WHERE name=?1", [name], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            ensure!(
+                actual.as_deref() == Some(sql),
+                "canonical base index {name} missing or altered; preserve input for review"
+            );
+        }
+    }
     if version >= 8 {
         let credits: bool = db.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='credits')",
@@ -783,8 +806,11 @@ impl Store {
             guilds::migrate(&c, version)?;
             death_awards::validate_state(&c, legacy_base)?;
         }
-        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
-CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY,guid TEXT NOT NULL UNIQUE,name TEXT NOT NULL);
+        c.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
+        )?;
+        let migration = c.transaction()?;
+        migration.execute_batch("CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY,guid TEXT NOT NULL UNIQUE,name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS shore_bots(name TEXT PRIMARY KEY,account INTEGER NOT NULL UNIQUE REFERENCES accounts(id));
 CREATE TABLE IF NOT EXISTS characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,alive INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()));
@@ -802,8 +828,8 @@ CREATE TABLE IF NOT EXISTS account_lists(account INTEGER NOT NULL REFERENCES acc
 CREATE TABLE IF NOT EXISTS update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);
 CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
-        let journal: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
-        let synchronous: i32 = c.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
+        let journal: String = migration.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
+        let synchronous: i32 = migration.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
         ensure!(
             journal == "wal" || path == Path::new(":memory:"),
             "WAL unavailable: {journal}"
@@ -813,7 +839,6 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             "FULL durability unavailable: synchronous={synchronous}"
         );
         tracing::info!(%journal, synchronous, "account store durability configured");
-        let migration = c.transaction()?;
         migration.execute_batch("CREATE TABLE IF NOT EXISTS trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE);
  CREATE TABLE IF NOT EXISTS bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)));")?;
         guilds::migrate(&migration, version)?;
@@ -827,7 +852,14 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             ))?;
         }
         discord_gold::check_schema(&migration, 19)?;
-        migration.execute_batch(discord_gold::REALM_CLOSE_SCHEMA)?;
+        let tokens: bool = migration.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='discord_realm_close_tokens')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !tokens {
+            migration.execute_batch(discord_gold::REALM_CLOSE_SCHEMA)?;
+        }
         email::migrate(&migration, version)?;
         if !credits_exist {
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;

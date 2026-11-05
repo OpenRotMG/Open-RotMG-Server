@@ -1,6 +1,8 @@
 from contextlib import closing
 from copy import deepcopy
 import gzip
+import hashlib
+import secrets
 import json
 import os
 from pathlib import Path
@@ -22,6 +24,18 @@ def check(binary, data, directory, revision):
         db.execute('INSERT INTO email_verifications VALUES(?,?,?,1,2)', (account, email, 'EMAIL_BACKUP_PRIVATE_CANARY'))
         db.execute('INSERT INTO email_password_resets VALUES(?,?,?,1,2)', (account, email, 'RESET_BACKUP_PRIVATE_CANARY'))
         db.execute('INSERT INTO email_send_attempts VALUES(?,?,1)', (account, 'EMAIL_BACKUP_PRIVATE_CANARY'))
+        seed = 10**18 + secrets.randbelow(8 * 10**18 - 5)
+        canaries = [str(seed + i) for i in range(5)]
+        db.executemany('INSERT INTO discord_realm_close_tokens VALUES(?,?,?,?,?)', [(canaries[0],1,canaries[1],canaries[2],None),(canaries[3],1,canaries[1],canaries[2],canaries[4])])
+        token_rows = db.execute('SELECT * FROM discord_realm_close_tokens ORDER BY request_id').fetchall()
+        if len(token_rows)!=2 or sum(row[-1] is None for row in token_rows)!=1:
+            raise RuntimeError('Synthetic capability fixture is not one unused/one spent row')
+        private_hash=hashlib.sha256(json.dumps(token_rows).encode()).hexdigest()
+    private_snapshot=directory/'full-private-snapshot.db'
+    subprocess.run([str(binary),'--local-save','snapshot',str(written),str(data),str(private_snapshot)],check=True)
+    with closing(sqlite3.connect(private_snapshot)) as db:
+        if hashlib.sha256(json.dumps(db.execute('SELECT * FROM discord_realm_close_tokens ORDER BY request_id').fetchall()).encode()).hexdigest()!=private_hash:
+            raise RuntimeError('Full private snapshot changed capability rows')
     discord = directory / 'levels.sqlite'
     with closing(sqlite3.connect(discord)) as db, db:
         db.execute('CREATE TABLE levels(guild_id TEXT,user_id TEXT,username TEXT,xp INTEGER,last_xp_at INTEGER,last_message_id TEXT,PRIMARY KEY(guild_id,user_id))')
@@ -41,11 +55,23 @@ def check(binary, data, directory, revision):
         raise RuntimeError('Release fixture must retain all thirteen achievement receipts')
     if any(marker in gzip.decompress(archive.read_bytes()) for marker in [b'BACKUP_FIXTURE_SECRET', b'EMAIL_BACKUP_PRIVATE_CANARY', b'RESET_BACKUP_PRIVATE_CANARY']):
         raise RuntimeError('Release backup exported a login identity')
+    if 'discord_realm_close_tokens' in bundle['game'] or any(value.encode() in gzip.decompress(archive.read_bytes()) for value in canaries):
+        raise RuntimeError('Public archive contains a private capability')
+    with closing(sqlite3.connect(written/'game.db')) as db:
+        if hashlib.sha256(json.dumps(db.execute('SELECT * FROM discord_realm_close_tokens ORDER BY request_id').fetchall()).encode()).hexdigest()!=private_hash:
+            raise RuntimeError('Public export changed source capability rows')
     restored = directory / 'restored'
     backup.restore(archive, restored)
     subprocess.run([str(binary), '--backup-load', str(restored / 'game.db'), str(data)], check=True)
     if backup.snapshot(restored / 'game.db', backup.RELOADED_GAME) != bundle['game']:
         raise RuntimeError('Release loading changed restored gameplay records')
+    with closing(sqlite3.connect(restored/'game.db')) as db:
+        if db.execute("SELECT sql FROM sqlite_schema WHERE name='discord_realm_close_tokens'").fetchone()!=(backup.REALM_CLOSE_SQL,) or db.execute('SELECT count(*) FROM discord_realm_close_tokens').fetchone()[0]!=0:
+            raise RuntimeError('Fresh public restore/reload has usable or noncanonical capability state')
+    reexport=directory/'restored-reexport.json.gz'
+    if backup.export(restored/'game.db',restored/'levels.sqlite',reexport,version,version,version)['game']!=bundle['game'] or any(value.encode() in gzip.decompress(reexport.read_bytes()) for value in canaries):
+        raise RuntimeError('Public reload/reexport changed history or leaked a capability')
+    print(json.dumps({'event':'nonempty_private_public_contract_passed','private_token_rows':2,'restored_token_rows':0,'source_token_sha256':private_hash,'public_contains_private_token':False}))
     print(json.dumps({'event': 'release_portable_metadata_roundtrip_passed',
                       'rows': {table: len(bundle['game'][table]) for table in backup.PORTABLE_TABLES}}))
     result = subprocess.run([str(binary), '--backup-exercise-vault', str(restored / 'game.db'), str(data)], text=True, capture_output=True)
@@ -119,7 +145,7 @@ def check(binary, data, directory, revision):
             db.execute('DELETE FROM ' + table)
         db.execute("UPDATE characters SET stats=json_remove(stats,'$.achievements') WHERE account=1")
         db.execute("UPDATE deaths SET snapshot=json_remove(snapshot,'$.achievements') WHERE character IN (SELECT id FROM characters WHERE account=1)")
-        for table in ['discord_recovery', 'discord_links', 'discord_codes', 'discord_gold_grants', 'discord_realm_close_tokens']:
+        for table in ['discord_recovery', 'discord_links', 'discord_codes', 'discord_gold_grants']:
             db.execute('DELETE FROM ' + table + ' WHERE account=1')
     paid_save = directory / 'representable-paid-account.json'
     subprocess.run([str(binary), '--local-save', 'export', str(trade_state), str(data), '1', str(paid_save)], check=True)
@@ -131,8 +157,14 @@ def check(binary, data, directory, revision):
     original, carried = json.loads(paid_save.read_bytes()), json.loads(reexported.read_bytes())
     if carried['gold'] != original['gold'] or carried['rewards'] != original['rewards'] or carried['origin'] != original['origin']:
         raise RuntimeError('Fresh portable import changed representable paid wallet/date/notified history')
+    if (original['realm_unused'],original['realm_spent'])!=(4,3) or (carried['realm_unused'],carried['realm_spent'])!=(4,3):
+        raise RuntimeError('Portable inert counts lost source capability history')
+    with closing(sqlite3.connect(fresh/'game.db')) as db:
+        if db.execute('SELECT count(*) FROM discord_realm_close_tokens').fetchone()[0]!=0:
+            raise RuntimeError('Portable import created usable capability tokens')
     with closing(sqlite3.connect(trade_database)) as db, db:
         db.execute("DELETE FROM gold_rewards WHERE account=1 AND reward GLOB 'achievement_*'")
+        db.execute('DELETE FROM discord_realm_close_tokens WHERE account=1')
     portable = directory / 'retained-trade-account.json'
     subprocess.run([str(binary), '--local-save', 'export', str(trade_state), str(data), '1', str(portable)], check=True)
     with closing(sqlite3.connect(trade_database)) as db:

@@ -878,8 +878,7 @@ async fn account_save_schema21_snapshot_precedes_migration_and_preserves_old_cre
     drop(store);
     let db = Connection::open(&path).unwrap();
     crate::store::achievement_tests::schema21_fixture(&db);
-    db.execute_batch("DROP TABLE discord_realm_close_tokens; PRAGMA user_version=21;")
-        .unwrap();
+    db.execute_batch("PRAGMA user_version=21;").unwrap();
     let before = dump(&db);
     let backup = root.join("before-migration.db");
     crate::account_save::snapshot(&path, &backup, &content).unwrap();
@@ -1110,6 +1109,13 @@ async fn account_save_migrated_legacy_paid_death_exports_without_lifetime_but_mo
     drop(source);
     let db = Connection::open(&path).unwrap();
     crate::store::achievement_tests::schema21_fixture(&db);
+    db.execute_batch("ALTER TABLE gold_rewards RENAME TO fresh_fixture_gold")
+        .unwrap();
+    db.execute_batch(gold::SCHEMA11).unwrap();
+    db.execute_batch(
+        "INSERT INTO gold_rewards SELECT * FROM fresh_fixture_gold; DROP TABLE fresh_fixture_gold",
+    )
+    .unwrap();
     db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; UPDATE characters SET stats=json_remove(stats,'$.lifetime'); UPDATE deaths SET snapshot=json_remove(snapshot,'$.lifetime'); UPDATE account_fame SET balance=19,earned=19; PRAGMA user_version=16;").unwrap();
     let source = Store::open(&path, &content).unwrap();
     let before = dump(&db);

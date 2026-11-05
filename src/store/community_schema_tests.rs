@@ -62,6 +62,13 @@ async fn community_schema17_migrates_canonical16_and_committed_reopen_preserves_
     let (path, account) = fresh_schema_account(&content).await;
     let db = Connection::open(&path).unwrap();
     crate::store::achievement_tests::schema21_fixture(&db);
+    db.execute_batch("ALTER TABLE gold_rewards RENAME TO fresh_fixture_gold")
+        .unwrap();
+    db.execute_batch(gold::SCHEMA11).unwrap();
+    db.execute_batch(
+        "INSERT INTO gold_rewards SELECT * FROM fresh_fixture_gold; DROP TABLE fresh_fixture_gold",
+    )
+    .unwrap();
     db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; PRAGMA user_version=16;").unwrap();
     let before = canonical_schema_rows(&db);
     let feature_rows = |db: &Connection| -> Vec<String> {
