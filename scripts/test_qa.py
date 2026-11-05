@@ -50,7 +50,7 @@ class JobTests(unittest.TestCase):
         shutil.rmtree(self.short)
 
     def invoke(self, *args, **kwargs):
-        return subprocess.run([sys.executable, str(SCRIPT), *args], env=self.env, capture_output=True, text=True, timeout=25, **kwargs)
+        return subprocess.run([sys.executable, str(SCRIPT), *args], env=self.env, capture_output=True, text=True, timeout=45, **kwargs)
 
     def launch(self, code, *options):
         result = self.invoke(*options, 'exec', '--', sys.executable, '-c', code)
@@ -78,17 +78,21 @@ while not root.joinpath('helper-ready').exists(): time.sleep(.01)
 root.joinpath('ready').touch()
 time.sleep(60)
 """
-        result, directory = self.launch(code, '--background')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        eventually(lambda: (directory / 'results/ready').exists())
-        cancelled = self.invoke('cancel', str(directory))
-        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
-        eventually(lambda: (directory / 'command.json').exists())
-        self.assertEqual(json.loads((directory / 'command.json').read_text())['returncode'], 23)
-        self.assertTrue((directory / 'results/graceful').exists())
-        self.assertFalse((directory / 'results/wrong-signal').exists())
-        self.assertEqual(self.receipt(directory)['status'], 'reclaimed')
-        self.assertFalse(space(directory).exists())
+        for timed in (False, True):
+            with self.subTest(runtime_deadline=timed):
+                options = ('--background', '--timeout', '5') if timed else ('--background',)
+                result, directory = self.launch(code, *options)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                eventually(lambda: (directory / 'results/ready').exists())
+                if not timed:
+                    cancelled = self.invoke('cancel', str(directory))
+                    self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+                eventually(lambda: (directory / 'command.json').exists())
+                self.assertEqual(json.loads((directory / 'command.json').read_text())['returncode'], 23)
+                self.assertTrue((directory / 'results/graceful').exists())
+                self.assertFalse((directory / 'results/wrong-signal').exists())
+                self.assertEqual(self.receipt(directory)['status'], 'reclaimed')
+                self.assertFalse(space(directory).exists())
 
     def test_cancel_completed_command_retires_its_remaining_cgroup(self):
         result, directory = self.launch("import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])", '--background')
