@@ -2732,6 +2732,7 @@ async fn connection_io<S, I>(
             tracing::error!(player=?session.player,error=%error,"disconnect finalization failed");
         }
     }
+    trace.flush(true);
 }
 pub(crate) async fn automatic_transfer(
     a: &App,

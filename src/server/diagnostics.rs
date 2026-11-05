@@ -670,7 +670,7 @@ fn audit_report(
     let coverage = json!({"tick_buckets_omitted":trim("/history",6,false),"lag_buckets_omitted":trim("/native_lag/history",6,true),"browser_samples_omitted":trim("/browser_history",12,true)});
     crate::audit::record(
         "diagnostics",
-        json!({"session":session,"account":account,"player":player,"closing":closing,"context_status":context_status,"context_request_ms":context_request_ms,"coverage":coverage,"values":values}),
+        json!({"session":session,"account":account,"player":player,"closing":closing,"context_status":context_status,"context_request_ms":context_request_ms,"coverage":coverage,"transport":report["transport"],"values":values}),
     );
 }
 
@@ -732,7 +732,7 @@ pub(super) async fn disconnect(
     // Capture before departure removes the player; never create a public bug report or gold reward.
     let mut report = json!({"created_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before epoch").as_millis(),
         "server_source_revision":a.diagnostics.source_revision,"server_binary_sha256":a.diagnostics.binary_sha256,
-        "protocol_build":"123.5.1","connection":connection.snapshot()});
+        "protocol_build":"123.5.1","connection":connection.snapshot(),"transport":transport});
     let started = Instant::now();
     let context = tokio::time::timeout(
         std::time::Duration::from_secs(2),
