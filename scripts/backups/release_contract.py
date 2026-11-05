@@ -158,8 +158,10 @@ def check(binary, data, directory, revision):
     original, carried = json.loads(paid_save.read_bytes()), json.loads(reexported.read_bytes())
     if any(value.encode() in file.read_bytes() for value in canaries for file in [paid_save,reexported]):
         raise RuntimeError('Portable account output contains a private capability')
-    if carried['gold'] != original['gold'] or carried['rewards'] != original['rewards'] or carried['origin'] != original['origin']:
-        raise RuntimeError('Fresh portable import changed representable paid wallet/date/notified history')
+    if [2594, 123] not in original['collections'] or [2594, 'Medusa'] not in original['collection_sources']:
+        raise RuntimeError('Representable paid fixture requires nonempty Medusa and first-found collection history')
+    if any(carried[field] != original[field] for field in ['gold', 'rewards', 'origin', 'collections', 'collection_sources']):
+        raise RuntimeError('Fresh portable import changed representable paid wallet/date/notified/collection/source history')
     if (original['realm_unused'],original['realm_spent'])!=(4,3) or (carried['realm_unused'],carried['realm_spent'])!=(4,3):
         raise RuntimeError('Portable inert counts lost source capability history')
     with closing(sqlite3.connect(fresh/'game.db')) as db:
