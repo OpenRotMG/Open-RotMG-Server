@@ -105,9 +105,12 @@ class ReleaseContract(unittest.TestCase):
             row['stats'] = old['stats']
 
     def test_schema20_financial_format_restores_exports_and_migrates_without_minting(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            self.check_schema20_financial(Path(temporary) / 'schema20-financial')
+
+    def check_schema20_financial(self, directory):
         root = Path(__file__).resolve().parents[2]
         binary = Path(os.environ['OPENROTMG_BACKUP_BINARY']).resolve(strict=True)
-        directory = Path(os.environ['QA_RESULTS_DIR']) / 'schema20-financial'
         directory.mkdir(mode=0o700)
         written = directory / 'written'
         subprocess.run([str(binary), '--backup-fixture', str(written), str(root / 'data')], check=True)
@@ -152,13 +155,10 @@ class ReleaseContract(unittest.TestCase):
         for row in migrated['collections']:
             self.assertIsNone(row.pop('source'))
         self.assertEqual(migrated, game)
-        evidence = {'scope': 'maintained serialized schema20 format-contract, not historical raw20 provenance',
+        return {'scope': 'maintained serialized schema20 format-contract, not historical raw20 provenance',
                     'fixture_revision_is_not_build_provenance': True,
                     'restored_and_reexported_schema': exported['schema'], 'whole_game_conserved_before_and_after_load': True,
                     'before': financial, 'after_load': observed, 'fixture_directory': str(directory), 'actual_binary': str(binary)}
-        with (Path(os.environ['QA_RESULTS_DIR']) / 'schema20-financial-conservation.json').open('x') as output:
-            json.dump(evidence, output, indent=2)
-            output.write('\n')
 
     def test_actual_writer_backup_restore_and_reload(self):
         root = Path(__file__).resolve().parents[2]
