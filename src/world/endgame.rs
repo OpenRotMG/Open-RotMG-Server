@@ -544,6 +544,7 @@ impl Directory {
                     world.last_realm_enemy_notice(&cycle.remaining);
                     tracing::info!(
                         origin,
+                        now,
                         hero = id,
                         remaining = cycle.remaining.len(),
                         "qualifying Realm hero defeated"

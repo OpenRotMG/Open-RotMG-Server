@@ -85,9 +85,12 @@ fn serialized_development_map_preserves_schema_and_private_visibility() {
     let other = world
         .loot_bag(Pos { x: 4.5, y: 2.5 }, Some(202), vec![0xa1f])
         .unwrap();
+    let enemy = world
+        .insert_entity(0x604, Pos { x: 6.5, y: 6.5 }, vec![])
+        .unwrap();
     for (observer, account) in [(None, -1), (Some(player), 101)] {
         let actual: serde_json::Value =
-            serde_json::from_slice(&world.inspect_map(observer).unwrap()).unwrap();
+            serde_json::from_slice(&world.inspect_map(observer, false).unwrap()).unwrap();
         let entities: Vec<_> = world
             .entities
             .values()
@@ -106,10 +109,24 @@ fn serialized_development_map_preserves_schema_and_private_visibility() {
         assert!(ids.contains(&public));
         assert_eq!(ids.contains(&own), observer.is_some());
         assert!(!ids.contains(&other));
+        let summary: serde_json::Value =
+            serde_json::from_slice(&world.inspect_map(observer, true).unwrap()).unwrap();
+        assert_eq!(summary["projection"], "entity_summary");
+        assert_eq!(summary["blocked"], actual["blocked"]);
+        assert_eq!(summary["damaging_ground"], serde_json::json!([]));
+        let expected: Vec<_> = actual["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entity| entity["hp"].as_i64().unwrap() > 0)
+            .cloned()
+            .collect();
+        assert_eq!(summary["entities"], serde_json::json!(expected));
+        assert!(expected.iter().any(|entity| entity["id"] == enemy));
     }
     world.entities.get_mut(&public).unwrap().pos.x = 2.3;
     let actual: serde_json::Value =
-        serde_json::from_slice(&world.inspect_map(None).unwrap()).unwrap();
+        serde_json::from_slice(&world.inspect_map(None, false).unwrap()).unwrap();
     let serialized = actual["entities"]
         .as_array()
         .unwrap()
@@ -120,5 +137,11 @@ fn serialized_development_map_preserves_schema_and_private_visibility() {
         serialized["pos"]["x"].as_f64().unwrap() as f32,
         world.entities[&public].pos.x
     );
-    assert!(world.inspect_map(Some(i32::MAX)).is_err());
+    let hazard = *world.content.hazards.keys().next().unwrap();
+    Arc::make_mut(&mut world.map).cells[0].ground = hazard;
+    let summary: serde_json::Value =
+        serde_json::from_slice(&world.inspect_map(Some(player), true).unwrap()).unwrap();
+    assert_eq!(summary["damaging_ground"], serde_json::json!([[0, 0]]));
+    assert!(world.inspect_map(Some(i32::MAX), false).is_err());
+    assert!(world.inspect_map(Some(i32::MAX), true).is_err());
 }
