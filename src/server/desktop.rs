@@ -128,6 +128,7 @@ mod tests {
             app.world
                 .for_player(player)
                 .call(move |world| {
+                    world.name = "Oryx's Castle".into();
                     world
                         .players
                         .get_mut(&player)
@@ -139,6 +140,13 @@ mod tests {
                 })
                 .await
                 .unwrap();
+            assert_eq!(
+                app.world
+                    .directory(|d| Ok(d.update_achievement_actors().len()))
+                    .await
+                    .unwrap(),
+                1
+            );
             let result = super::super::drain_shutdown(&app, parse(message)).await;
             assert_eq!(result.is_ok(), message != b"invalid\n");
             assert!(app.owners.lock().unwrap().is_empty());
@@ -146,6 +154,18 @@ mod tests {
             let saved = reopened.load(account, character.id).await.unwrap();
             assert_eq!(saved.lifetime.shots, character.lifetime.shots + 7);
             assert!(saved.alive);
+            assert_eq!(
+                rusqlite::Connection::open(dir.join("game.db"))
+                    .unwrap()
+                    .query_row(
+                        "SELECT count(*) FROM gold_rewards WHERE reward='achievement_no'",
+                        [],
+                        |r| r.get::<_, i32>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+
             drop(socket);
             server.abort();
         }

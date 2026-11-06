@@ -769,6 +769,13 @@ impl World {
             } else if p.oxygen > 0 {
                 p.oxygen = (p.oxygen - 2).max(0);
             } else {
+                if let Err(error) = p.achievement_damage(self.clock.now(), 10, p.character.hp) {
+                    p.quarantine(
+                        *id,
+                        format!("suffocation achievement observation failed: {error:#}"),
+                    );
+                    continue;
+                }
                 let hp_before = p.character.hp;
                 p.character.hp = (p.character.hp - 10).max(0);
                 p.audit_hp(*id, &self.name, self.now, "suffocation", hp_before);

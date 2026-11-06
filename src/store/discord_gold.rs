@@ -16,10 +16,28 @@ pub(super) fn check_schema(db: &Connection, version: i32) -> Result<()> {
             "schema-19 Discord gold receipts missing or mismatched; restore reviewed state instead of allowing duplicate grants"
         );
     }
+    let tokens: Option<String> = db
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE name='discord_realm_close_tokens'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(sql) = tokens {
+        ensure!(
+            sql == REALM_CLOSE_SCHEMA.trim_end_matches(';'),
+            "Realm Close token/replay metadata mismatch; preserve database and private backup for review"
+        );
+    } else {
+        ensure!(
+            version < 21,
+            "Realm Close token/replay ledger missing: schema21 was reused, so pre-token input cannot be distinguished from lost history; preserve database and private backup for explicit compatibility review"
+        );
+    }
     Ok(())
 }
 
-pub(super) const REALM_CLOSE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS discord_realm_close_tokens(request_id TEXT PRIMARY KEY NOT NULL,account INTEGER NOT NULL REFERENCES accounts(id),discord_id TEXT NOT NULL,actor_id TEXT NOT NULL,used_request TEXT UNIQUE);";
+pub(super) const REALM_CLOSE_SCHEMA: &str = "CREATE TABLE discord_realm_close_tokens(request_id TEXT PRIMARY KEY NOT NULL,account INTEGER NOT NULL REFERENCES accounts(id),discord_id TEXT NOT NULL,actor_id TEXT NOT NULL,used_request TEXT UNIQUE);";
 
 fn linked(db: &Connection, discord: &str) -> Result<i32> {
     db.query_row(

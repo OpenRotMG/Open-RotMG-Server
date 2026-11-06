@@ -1,4 +1,5 @@
 mod account_save;
+mod achievements;
 mod audit;
 mod backup;
 mod bots;
@@ -230,6 +231,7 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         owners: Arc::default(),
         admission_started: Arc::default(),
         admission: Arc::default(),
+        restart: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),

@@ -74,6 +74,7 @@ fn fixture_with_control(native: bool) -> (PathBuf, App) {
         owners: Arc::default(),
         admission_started: Arc::default(),
         admission: Arc::default(),
+        restart: Arc::default(),
         authentication: Arc::default(),
         guild_actions: Arc::default(),
         gold_updates: Arc::default(),

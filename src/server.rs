@@ -85,11 +85,16 @@ pub(crate) mod email;
 #[cfg(test)]
 pub(crate) use account_actions::tests::fixture as test_app;
 
+mod achievements;
 pub(crate) mod browser_link;
 pub(crate) mod diagnostics;
 mod gold;
+use achievements::intentional_update_stop;
+#[cfg(test)]
+mod achievement_tests;
 mod guilds;
 mod hiscores;
+pub(crate) mod restart;
 pub(crate) mod testing;
 mod updates;
 use account_actions::{
@@ -144,6 +149,7 @@ pub struct App {
     pub(crate) persona_departure_gate: Arc<Mutex<Option<PersonaDepartureGate>>>,
     pub shutdown: tokio::sync::watch::Sender<bool>,
     pub(crate) admission: Arc<lifecycle::drain::Admission>,
+    pub(crate) restart: Arc<Mutex<restart::Service>>,
 }
 fn error(e: anyhow::Error) -> Response {
     tracing::error!(error=%format_args!("{e:#}"),"request failed");
@@ -746,7 +752,8 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
     lifecycle::stage(Stage::Reservation);
     let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
     lifecycle::stage(Stage::Store);
-    let collector = plan.collected.as_ref().map(|_| plan.account);
+    let reward_account =
+        (plan.collected.is_some() || plan.stat_growth.is_some()).then_some(plan.account);
     let result = if let Some(pet) = plan.companion.as_ref().filter(|pet| pet.permanent) {
         a.store
             .select_companion(
@@ -852,7 +859,7 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
     a.world
         .directory(move |d| d.finish_inventory(plan, result))
         .await?;
-    if let Some(account) = collector {
+    if let Some(account) = reward_account {
         gold::sync(a, account).await?;
     }
     lifecycle::stage(Stage::Settled);
@@ -1021,17 +1028,18 @@ async fn persist_progress_inner(a: &App, id: i32, snapshot: crate::store::Charac
         .await
         .context("progress persistence failed");
     lifecycle::stage(Stage::Publication);
-    let crossed_rank = a
+    let sync_gold = a
         .world
         .for_player(id)
         .call(move |w| {
             let rank = w.class_quest_rank(id)?;
             w.committed(id, result)?;
             w.finish_progress(id, snapshot)?;
-            Ok(w.class_quest_rank(id)? > rank)
+            Ok(w.class_quest_rank(id)? > rank
+                || w.players[&id].controller != crate::world::Controller::Autonomous)
         })
         .await?;
-    if crossed_rank {
+    if sync_gold {
         gold::sync(a, account).await?;
     }
     Ok(())
@@ -1085,6 +1093,7 @@ pub(crate) async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
     let result = std::panic::AssertUnwindSafe(async {
         lifecycle::stage(Stage::Store);
         let id = plan.plans[0].player;
+        let accounts: Vec<_> = plan.plans.iter().map(|p| p.account).collect();
         let writes = plan
             .plans
             .iter()
@@ -1103,7 +1112,11 @@ pub(crate) async fn persist_trade(a: &App, plan: TradePlan) -> Result<()> {
         a.world
             .for_player(id)
             .call(move |w| w.finish_trade(plan, result))
-            .await
+            .await?;
+        for account in accounts {
+            gold::sync(a, account).await?;
+        }
+        Ok(())
     })
     .catch_unwind()
     .await;
@@ -1498,6 +1511,43 @@ async fn handle_inner(
             "discarded in-flight input after durable departure"
         );
         return Ok(());
+    }
+    if packet.id == 42
+        && let Some(id) = *player
+    {
+        NativeReader(Reader::new(&packet.body)).done()?;
+        let dead = a
+            .world
+            .call(move |w| {
+                let p = w
+                    .players
+                    .get_mut(&id)
+                    .context("escape achievement actor missing")?;
+                if p.native_transferring() || p.controller == crate::world::Controller::Autonomous {
+                    return Ok(None);
+                }
+                if p.death_pending || !p.character.alive {
+                    p.character
+                        .achievements
+                        .insert(crate::achievements::Achievement::NexusAfterDeath);
+                    Ok(Some((
+                        p.character.account,
+                        p.character.id,
+                        !p.character.alive,
+                    )))
+                } else {
+                    Ok(None)
+                }
+            })
+            .await?;
+        if let Some((account, character, committed)) = dead {
+            if committed {
+                lifecycle::stage(Stage::Store);
+                a.store.achievement_dead_escape(account, character).await?;
+                lifecycle::stage(Stage::Publication);
+            }
+            return Ok(());
+        }
     }
     // Resurrection is alive again, but its old scene must stay inert until the owned RECONNECT.
     if let Some(id) = *player
@@ -2203,6 +2253,7 @@ async fn reconnect(
     let transfer = a
         .world
         .directory(move |d| {
+            let escape = matches!(&request, Reconnect::Portal(None));
             let portal = match &request {
                 Reconnect::Portal(portal) => *portal,
                 Reconnect::Tutorial => None,
@@ -2265,6 +2316,9 @@ async fn reconnect(
                     return Err(primary);
                 }
             };
+            if escape && destination == -2 {
+                d.bind_achievement_escape(id, &key)?;
+            }
             Ok(Some((destination, keytime, key, name, reservation)))
         })
         .await?;
@@ -3152,6 +3206,18 @@ fn close_scripts(a: &App) -> Result<Vec<lifecycle::Finalized>> {
 }
 
 pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
+    let credits = a
+        .world
+        .directory(|d| Ok(d.pending_achievement_credits()))
+        .await?;
+    for credit in credits {
+        a.store.achievement_closure(credit.clone()).await?;
+        let account = credit.account;
+        a.world
+            .directory(move |d| d.finish_achievement_credit(&credit))
+            .await?;
+        gold::sync(a, account).await?;
+    }
     // Commit progress across worlds before death settlement so causal recipients stay durable.
     for world in a.world.worlds() {
         let app = a.clone();
@@ -3370,8 +3436,10 @@ fn routes(a: &App, client: PathBuf) -> Router {
         )
         .route("/api/hiscores", get(hiscores))
         .route("/api/collection/{account}", get(collection))
+        .route("/api/achievements/{account}", get(hiscores::achievements))
         .route("/api/graveyard", get(graveyard))
         .route("/internal/discord/announce", post(discord_announce))
+        .route("/internal/lifecycle/restart", post(restart::request))
         .route("/internal/discord/link", post(discord_link))
         .route("/internal/discord/link/start", post(browser_link::issue))
         .route("/internal/discord/link/status", post(browser_link::status))

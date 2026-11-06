@@ -442,6 +442,37 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 ["2".repeat(64)],
             )?;
             tx.execute_batch("INSERT INTO portable_assists VALUES(1,7); INSERT INTO portable_consumed_levels VALUES(1,2); INSERT INTO portable_history VALUES(1,0,3,2);")?;
+            ensure!(
+                tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM achievement_dungeons)",
+                    [],
+                    |r| r.get::<_, bool>(0)
+                )?,
+                "backup fixture dungeon progress missing"
+            );
+            tx.execute(
+                "INSERT INTO achievement_realm_credits VALUES(2,?1,1)",
+                ["a".repeat(32)],
+            )?;
+            for definition in crate::achievements::CATALOG {
+                let exists: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM gold_rewards WHERE account=2 AND reward=?1)",
+                    [definition.id.reward()],
+                    |r| r.get(0),
+                )?;
+                if !exists {
+                    tx.execute(
+                        "INSERT INTO gold_rewards VALUES(2,?1,unixepoch(),NULL)",
+                        [definition.id.reward()],
+                    )?;
+                    tx.execute(
+                        "UPDATE accounts SET credits=credits+?1 WHERE id=2",
+                        [definition.gold],
+                    )?;
+                }
+            }
+            tx.execute("UPDATE characters SET stats=json_set(stats,'$.achievements',json('[\"ah_7uck\"]')) WHERE account=2 AND alive=0",[])?;
+            tx.execute("UPDATE deaths SET snapshot=json_set(snapshot,'$.achievements',json('[\"ah_7uck\"]')) WHERE character IN (SELECT id FROM characters WHERE account=2)",[])?;
             tx.commit()?;
             println!("{}", serde_json::json!({"fixture_characters": 4}));
         }
@@ -881,5 +912,27 @@ mod tests {
                 assert!(!known_fields(&opaque, &saved));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod schema22_compat_tests {
+    use super::*;
+
+    #[test]
+    fn schema22_compat_backup_validation_preserves_closed_achievement_flags() {
+        let content = content::Content::load(Path::new("data")).unwrap();
+        let mut ch = store::Character::fresh(content.get(content::WIZARD).unwrap()).unwrap();
+        ch.achievements
+            .insert(crate::achievements::Achievement::HitByTruck);
+        let original = serde_json::to_value(&ch).unwrap();
+        validate(vec![original.clone()], false).unwrap();
+        assert!(known_fields(&original, &serde_json::to_value(ch).unwrap()));
+        let mut unknown = original.clone();
+        unknown["achievements"] = serde_json::json!(["future_unknown_flag"]);
+        assert!(validate(vec![unknown], false).is_err());
+        let mut unrecognized = original;
+        unrecognized["future_metadata"] = serde_json::json!(true);
+        assert!(validate(vec![unrecognized], false).is_err());
     }
 }

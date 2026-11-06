@@ -87,7 +87,7 @@ impl Store {
                     ensure!(balance >= 0, "negative account fame");
                     // Account stars sum class bests, not spendable fame: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/appengine/SavedCharactersList.as#L127-L139
                     let (presentation, _) = read_presentation(&tx, id, base, &classes)?;
-                    records.insert(id,serde_json::json!({"account":id,"name":name,"discord_id":discord,"base_fame":0,"total_fame":balance,"collection":0,"quests":0,"stars":presentation.stars()}));
+                    records.insert(id,serde_json::json!({"account":id,"name":name,"discord_id":discord,"base_fame":0,"total_fame":balance,"collection":0,"achievements":0,"quests":0,"stars":presentation.stars()}));
                 }
             }
             let mut characters = std::collections::BTreeMap::new();
@@ -128,6 +128,13 @@ impl Store {
                     let (id,count)=row?;if let Some(row)=records.get_mut(&id) {row["collection"]=count.into();}
                 }
             }
+            {
+                let mut q = tx.prepare("SELECT account,count(*) FROM gold_rewards WHERE reward GLOB 'achievement_*' GROUP BY account")?;
+                for row in q.query_map([], |r| Ok((r.get::<_,i32>(0)?, r.get::<_,i64>(1)?)))? {
+                    let (account, count) = row?;
+                    if let Some(row) = records.get_mut(&account) { row["achievements"] = count.into(); }
+                }
+            }
             // Guilds are public in the game (the name over each member's head, the guild hall), so
             // each player's guild and every guild's standing are shared; the guild board stays
             // private. Only guilds with a competing player in them are listed, like players.
@@ -152,7 +159,7 @@ impl Store {
                 }
             }
             tx.commit()?;
-            Ok(serde_json::json!({"updated_at":now()?,"players":records.into_values().collect::<Vec<_>>(),"characters":living,"guilds":guilds}))
+            Ok(serde_json::json!({"updated_at":now()?,"players":records.into_values().collect::<Vec<_>>(),"characters":living,"guilds":guilds,"achievement_catalog":crate::achievements::CATALOG}))
         }).await
     }
     /// Player deaths from `since` (inclusive), oldest first, at most 500; bots and non-competitors never appear.
@@ -220,7 +227,7 @@ mod tests {
         )
         .unwrap();
         drop(store);
-        db.execute_batch("ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=22")
+        db.execute_batch("ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=24")
             .unwrap();
         let store = Store::open(&path, &content).unwrap();
         let old = store.collection(account).await.unwrap()["items"][0].clone();

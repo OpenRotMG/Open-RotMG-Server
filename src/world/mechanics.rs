@@ -559,6 +559,7 @@ impl World {
             let defense = self.defense(id)?;
             let damage = condition::damage(amount, defense, flags, false);
             let p = self.players.get_mut(&id).unwrap();
+            p.achievement_damage(self.clock.now(), damage, p.character.hp)?;
             let hp_before = p.character.hp;
             p.character.hp = (p.character.hp - damage).max(0);
             if p.character.hp == 0 {

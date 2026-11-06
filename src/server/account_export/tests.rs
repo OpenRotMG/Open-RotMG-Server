@@ -670,3 +670,63 @@ async fn account_export_http_deadline_retains_snapshot_guards_until_supervised_c
     saved(export(&url).await).await;
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn account_export_achievement_progress_refusal_is_actionable_private_and_publishes_no_download()
+ {
+    for table in [
+        "achievement_partners",
+        "achievement_dungeons",
+        "achievement_realm_credits",
+    ] {
+        let (dir, a, account, _) = fixture().await;
+        let peer = a
+            .store
+            .list("incoming-export-peer".into())
+            .await
+            .unwrap()
+            .id;
+        assert_eq!(a.store.lifecycle_pending_jobs(), 0);
+        let db = Connection::open(dir.join("game.db")).unwrap();
+        db.execute(
+            "INSERT INTO achievement_partners VALUES(?1,?2)",
+            rusqlite::params![peer, account],
+        )
+        .unwrap();
+        match table {
+            "achievement_partners" => {
+                db.execute(
+                    "INSERT INTO achievement_partners VALUES(?1,?2)",
+                    rusqlite::params![account, peer],
+                )
+                .unwrap();
+            }
+            "achievement_dungeons" => {
+                db.execute(
+                    "INSERT INTO achievement_dungeons VALUES(?1,'pirate-cave')",
+                    [account],
+                )
+                .unwrap();
+            }
+            "achievement_realm_credits" => {
+                db.execute(
+                    "INSERT INTO achievement_realm_credits VALUES(?1,?2,1)",
+                    rusqlite::params![account, "a".repeat(32)],
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let before = dump(&db);
+        let (url, server) = serve(&a).await;
+        let message = failure(export(&url).await, StatusCode::CONFLICT).await;
+        assert!(message.contains("format1 cannot represent owned achievement progress"));
+        assert!(
+            !message.contains(&peer.to_string()),
+            "no peer identity in refusal"
+        );
+        assert_eq!(dump(&db), before);
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+    }
+}

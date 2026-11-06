@@ -1,6 +1,9 @@
 use super::*;
 
-pub(crate) const SCHEMA: &str = "CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half','first_bug_report','class_star_blue','class_star_red','class_star_orange','class_star_yellow','class_star_white')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));";
+pub(crate) const SCHEMA10: &str = "CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));";
+pub(crate) const SCHEMA11: &str = "CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half','first_bug_report')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));";
+pub(crate) const SCHEMA18: &str = "CREATE TABLE gold_rewards(account INTEGER NOT NULL REFERENCES accounts(id),reward TEXT NOT NULL CHECK(reward IN ('discord_link','collection_top_half','first_bug_report','class_star_blue','class_star_red','class_star_orange','class_star_yellow','class_star_white')),awarded_at INTEGER NOT NULL CHECK(awarded_at>0),notified_at INTEGER CHECK(notified_at>0),PRIMARY KEY(account,reward));";
+pub(crate) const SCHEMA: &str = super::schema22_compat::GOLD23;
 pub(crate) const DISCORD: &str = "discord_link";
 const COLLECTION: &str = "collection_top_half";
 pub(crate) const AMOUNT: i32 = 100;
@@ -19,22 +22,11 @@ const CLASS_QUESTS: [(&str, i32, &str); 5] = [
 ];
 
 pub(super) fn check_schema(db: &Connection, version: i32) -> Result<()> {
-    if version >= 18 {
-        let sql: String = db.query_row(
-            "SELECT sql FROM sqlite_schema WHERE name='gold_rewards'",
-            [],
-            |r| r.get(0),
-        )?;
-        ensure!(
-            sql == SCHEMA.trim_end_matches(';'),
-            "schema-18 gold reward metadata mismatch; restore the reviewed ledger"
-        );
-    }
-    Ok(())
+    super::schema22_compat::check(db, version)
 }
 
-pub(super) fn migrate(db: &Connection, version: i32, exists: bool) -> Result<()> {
-    if exists && version < 18 {
+pub(super) fn migrate(db: &Connection, expand: bool, exists: bool) -> Result<()> {
+    if exists && expand {
         db.execute_batch("ALTER TABLE gold_rewards RENAME TO old_gold_rewards;")?;
         db.execute_batch(SCHEMA)?;
         db.execute_batch(
@@ -46,7 +38,7 @@ pub(super) fn migrate(db: &Connection, version: i32, exists: bool) -> Result<()>
     Ok(())
 }
 
-fn details(reward: &str) -> Result<(i32, &'static str)> {
+pub(super) fn details(reward: &str) -> Result<(i32, &'static str)> {
     Ok(match reward {
         DISCORD => (AMOUNT, "linking your Discord account"),
         COLLECTION => (
@@ -54,11 +46,20 @@ fn details(reward: &str) -> Result<(i32, &'static str)> {
             "reaching the top 50% of the Collection Log hiscores",
         ),
         BUG => (50, "submitting your first bug report"),
-        _ => CLASS_QUESTS
-            .iter()
-            .find(|r| r.0 == reward)
-            .map(|r| (r.1, r.2))
-            .with_context(|| format!("unknown gold reward {reward}"))?,
+        _ => {
+            if let Some(d) = crate::achievements::CATALOG
+                .iter()
+                .find(|d| d.id.reward() == reward)
+            {
+                (d.gold, d.name)
+            } else {
+                CLASS_QUESTS
+                    .iter()
+                    .find(|r| r.0 == reward)
+                    .map(|r| (r.1, r.2))
+                    .with_context(|| format!("unknown gold reward {reward}"))?
+            }
+        }
     })
 }
 

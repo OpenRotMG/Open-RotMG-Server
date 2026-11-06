@@ -33,8 +33,8 @@ fn verify(db: &Connection, content: &Content) -> Result<()> {
     );
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=23),
-        "snapshot requires supported local database schema 21, 22 or 23 (found {version})"
+        matches!(version, 21..=25),
+        "snapshot requires supported local database schema 21/known22/known23/24/25 (found {version})"
     );
     crate::store::account_save::verify_database(db, content)?;
     Ok(())
@@ -218,7 +218,12 @@ pub(crate) async fn run(args: &[String]) -> Result<bool> {
     };
     match execute(args, &mut phase).await {
         Ok(()) => Ok(true),
-        Err(_) => {
+        Err(error) => {
+            if let Some(refusal) =
+                error.downcast_ref::<crate::store::account_save::Format1Refusal>()
+            {
+                phase.stage(refusal.message());
+            }
             // Raw errors can embed SQL, input fields or capabilities; expose only the known failed stage.
             if phase.acknowledgement_started {
                 anyhow::bail!(

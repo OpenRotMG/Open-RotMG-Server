@@ -78,6 +78,7 @@ impl World {
             crate::condition::damage(raw_damage, 0, flags, true)
         };
         if !ignored {
+            p.achievement_damage(self.clock.now(), damage, hp_before)?;
             p.ground_hits
                 .retain(|_, previous| time.saturating_sub(*previous) < 1000);
             p.ground_hits.insert(i, time);

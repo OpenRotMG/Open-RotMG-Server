@@ -8,6 +8,8 @@ use tokio::sync::oneshot;
 mod account_actions;
 pub(crate) mod account_save;
 mod accounts;
+pub(crate) mod achievements;
+mod schema22_compat;
 pub(crate) use accounts::email as validate_email;
 pub(crate) mod browser_link;
 mod character_slots;
@@ -252,6 +254,8 @@ pub struct LevelAssist {
 pub struct Character {
     pub schema: u8,
     pub lifetime: FameLifetime,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub(crate) achievements: std::collections::BTreeSet<crate::achievements::Achievement>,
     pub class: u16,
     pub base: [i32; 8],
     #[serde(default)]
@@ -347,6 +351,7 @@ impl Character {
         Ok(Character {
             schema: 1,
             lifetime: FameLifetime::complete(),
+            achievements: Default::default(),
             class: class.kind,
             base: [
                 class.hp,
@@ -522,6 +527,11 @@ pub struct CollectedItem {
     pub item: u16,
     pub source: String,
 }
+fn valid_collection_source(source: &str) -> bool {
+    !source.trim().is_empty()
+        && source.chars().count() <= 128
+        && !source.chars().any(char::is_control)
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InventoryWrite {
     pub id: i32,
@@ -680,12 +690,49 @@ pub(super) fn check_required_state(db: &Connection, version: i32) -> Result<()> 
             ensure!(exists, "{reason}");
         }
     }
-    if version >= 23 {
-        let source: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('collections') WHERE name='source' AND type='TEXT')", [], |r| r.get(0))?;
-        ensure!(
-            source,
-            "schema-23 collection sources missing; restore the matching database"
-        );
+    if version >= 21 {
+        for table in [
+            "competitors",
+            "collections",
+            "discord_links",
+            "discord_recovery",
+            "shore_bots",
+            "vaults",
+            "pictures",
+            "picture_sequence",
+        ] {
+            ensure!(
+                db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
+                    [table],
+                    |r| r.get::<_, bool>(0)
+                )?,
+                "modern public base table {table} missing; preserve database and private backup for review"
+            );
+        }
+    }
+    character_slots::check_schema(db, version)?;
+    if version >= 5 {
+        for (name, sql) in [
+            (
+                "characters_by_account",
+                "CREATE INDEX characters_by_account ON characters(account)",
+            ),
+            (
+                "deaths_by_time",
+                "CREATE INDEX deaths_by_time ON deaths(died_at)",
+            ),
+        ] {
+            let actual: Option<String> = db
+                .query_row("SELECT sql FROM sqlite_schema WHERE name=?1", [name], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            ensure!(
+                actual.as_deref() == Some(sql),
+                "canonical base index {name} missing or altered; preserve input for review"
+            );
+        }
     }
     if version >= 8 {
         let credits: bool = db.query_row(
@@ -749,6 +796,8 @@ impl Store {
                     | 21
                     | 22
                     | 23
+                    | 24
+                    | 25
             ),
             "unsupported game database schema {version}"
         );
@@ -769,7 +818,11 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
-        gold::check_schema(&c, version)?;
+        let layout = schema22_compat::KnownStoreLayout::read(&c, version)?;
+        if version >= 21 {
+            death_awards::validate_state(&c, legacy_base)?;
+            achievements::check_legacy_death_attempts(&c)?;
+        }
         discord_gold::check_schema(&c, version)?;
         let credits_exist: bool = c.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='credits')",
@@ -785,8 +838,11 @@ impl Store {
             guilds::migrate(&c, version)?;
             death_awards::validate_state(&c, legacy_base)?;
         }
-        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
-CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY,guid TEXT NOT NULL UNIQUE,name TEXT NOT NULL);
+        c.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
+        )?;
+        let migration = c.transaction()?;
+        migration.execute_batch("CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY,guid TEXT NOT NULL UNIQUE,name TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS shore_bots(name TEXT PRIMARY KEY,account INTEGER NOT NULL UNIQUE REFERENCES accounts(id));
 CREATE TABLE IF NOT EXISTS characters(id INTEGER PRIMARY KEY,account INTEGER NOT NULL REFERENCES accounts(id),stats TEXT NOT NULL,items TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,alive INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS deaths(character INTEGER PRIMARY KEY REFERENCES characters(id),snapshot TEXT NOT NULL,killed_by TEXT NOT NULL,died_at INTEGER NOT NULL DEFAULT(unixepoch()));
@@ -804,8 +860,8 @@ CREATE TABLE IF NOT EXISTS account_lists(account INTEGER NOT NULL REFERENCES acc
 CREATE TABLE IF NOT EXISTS update_feed(id INTEGER PRIMARY KEY CHECK(id=1),snapshot TEXT NOT NULL CHECK(json_valid(snapshot)),synced_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS deaths_by_time ON deaths(died_at);
 CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
-        let journal: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
-        let synchronous: i32 = c.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
+        let journal: String = migration.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
+        let synchronous: i32 = migration.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
         ensure!(
             journal == "wal" || path == Path::new(":memory:"),
             "WAL unavailable: {journal}"
@@ -815,11 +871,11 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             "FULL durability unavailable: synchronous={synchronous}"
         );
         tracing::info!(%journal, synchronous, "account store durability configured");
-        let migration = c.transaction()?;
         migration.execute_batch("CREATE TABLE IF NOT EXISTS trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE);
  CREATE TABLE IF NOT EXISTS bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)));")?;
         guilds::migrate(&migration, version)?;
-        gold::migrate(&migration, version, rewards_exist)?;
+        gold::migrate(&migration, layout.expand_gold(), rewards_exist)?;
+        achievements::migrate(&migration, !layout.achievements())?;
         if version < 19 {
             migration.execute_batch(&discord_gold::SCHEMA.replacen(
                 "CREATE TABLE",
@@ -828,10 +884,17 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             ))?;
         }
         discord_gold::check_schema(&migration, 19)?;
-        migration.execute_batch(discord_gold::REALM_CLOSE_SCHEMA)?;
+        let tokens: bool = migration.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='discord_realm_close_tokens')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !tokens {
+            migration.execute_batch(discord_gold::REALM_CLOSE_SCHEMA)?;
+        }
         email::migrate(&migration, version)?;
-        if version < 23 {
-            migration.execute_batch("ALTER TABLE collections ADD COLUMN source TEXT CHECK(source IS NULL OR (typeof(source)='text' AND length(trim(source)) BETWEEN 1 AND 128))")?;
+        if !layout.collection_sources() {
+            migration.execute_batch(schema22_compat::COLLECTION_SOURCE)?;
         }
         if !credits_exist {
             migration.execute_batch("ALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647)")?;
@@ -926,8 +989,9 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         }
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
-        account_save::migrate(&migration, version)?;
-        migration.pragma_update(None, "user_version", 23)?;
+        account_save::migrate(&migration, !layout.portable())?;
+        schema22_compat::check(&migration, 25)?;
+        migration.pragma_update(None, "user_version", 25)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -1643,9 +1707,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         );
         if let Some(pickup) = &collected {
             ensure!(
-                !pickup.source.trim().is_empty()
-                    && pickup.source.chars().count() <= 128
-                    && !pickup.source.chars().any(char::is_control),
+                valid_collection_source(&pickup.source),
                 "invalid collection source"
             );
         }
@@ -1708,6 +1770,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 let owners=serde_json::to_string(&writes.iter().map(|w|w.account).collect::<Vec<_>>())?;
                 let market_key=delivery.as_ref().map(|d|format!("{:x}:{}",d.terms.version,d.ordinal));
                 tx.execute("INSERT INTO trade_transactions(id,owners,writes,revisions,delivery,market_key) VALUES(?1,?2,?3,?4,?5,?6)",params![id,owners,raw_writes,serde_json::to_string(&revisions)?,delivery.as_ref().map(serde_json::to_string).transpose()?,market_key])?;
+                if writes.len() == 2 { achievements::trade(&tx, &writes)?; }
             }
             tx.commit()?;
             if rewarded {
@@ -1770,6 +1833,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                     .all(|v| slot.is_none() && v.account == ch.account),
             "potion vault owner mismatch"
         );
+        let self_classes = self.classes.clone();
         self.call(move |db| {
             let tx = db.transaction()?;
             let (raw, items): (String, String) = tx.query_row(
@@ -1788,11 +1852,13 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 ch.items[slot] = -1;
                 ch.lifetime.inventory_potion_used = true;
             }
+            achievements::check_reusable_observation(&tx, &ch)?;
             ch.revision += 1;
             let n = tx.execute("UPDATE characters SET stats=?4,items=?5,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![ch.id, ch.account, ch.revision - 1, serde_json::to_string(&ch)?, serde_json::to_string(&ch.items)?])?;
             ensure!(n == 1, "permanent potion commit lost its reservation");
             for vault in vaults { vaults::save(&tx, &vault)?; }
+            achievements::progress(&tx, &saved, &ch, &self_classes)?;
             tx.commit()?;
             Ok(ch.revision)
         }).await
@@ -1809,6 +1875,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
     }
 
     async fn write_progress(&self, characters: Vec<(Character, Vec<LevelAssist>)>) -> Result<()> {
+        let classes = self.classes.clone();
         ensure!(
             (1..=85).contains(&characters.len()),
             "invalid progress batch size"
@@ -1825,8 +1892,10 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 let saved:Character=serde_json::from_str(&raw)?;
                 ensure!(ch.alive && ch.schema==saved.schema && ch.class==saved.class && ch.level>=saved.level && ch.exp>=saved.exp && ch.fame>=saved.fame && ch.xp_boost.bonus_exp>=saved.xp_boost.bonus_exp,"progress snapshot lost committed experience");
                 ch.lifetime.follows(&saved.lifetime)?;
+                achievements::check_reusable_observation(&tx, &ch)?;
                 tx.execute("UPDATE characters SET stats=?3 WHERE id=?1 AND account=?2",params![ch.id,ch.account,serde_json::to_string(&ch)?])?;
                 death_awards::save_assists(&tx,&ch,saved.level,&assists)?;
+                achievements::progress(&tx, &saved, &ch, &classes)?;
             }
             tx.commit()?;
             Ok(())
@@ -1898,6 +1967,8 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             ensure!(tx.execute("UPDATE account_fame SET balance=balance+?2,earned=earned+?2 WHERE account=?1",params![ch.account,total])? == 1,
                 "account fame wallet missing");
             guilds::credit_death(&tx,ch.account,total)?;
+            achievements::observed(&tx, &ch)?;
+            if (17..=19).contains(&ch.level) { achievements::grant(&tx, ch.account, crate::achievements::Achievement::Potential)?; }
             tx.commit()?;
             tracing::info!(account=ch.account, character=ch.id, policy=?receipt.policy, completeness=?ch.lifetime.completeness, base_fame=ch.fame, awards=%awards, equipment_fame=bonus, total_fame=total, "permanent death award committed");
             Ok(())
@@ -2148,6 +2219,8 @@ fn class_stars_use_inclusive_class_bests_and_the_greater_current_goal() {
     assert_eq!(p.next_quest(0x300, 800), 2000);
 }
 
+#[cfg(test)]
+mod achievement_tests;
 #[cfg(test)]
 mod class_unlock_tests;
 #[cfg(test)]

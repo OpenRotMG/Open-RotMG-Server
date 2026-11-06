@@ -6,16 +6,19 @@ pub const MAX_BYTES: u64 = 32 * 1024 * 1024;
 pub const DISCLOSURE: &str = "Personal progress only. Guild membership, social targets, trade receipts, rankings and external integrations do not transfer. Guild contribution and Discord Realm Close counts are inert history; Discord commands are unavailable offline. Names, artwork and death descriptions are not anonymized.";
 pub(super) const ASSIST_COUNT: &str = "SELECT (SELECT count(*) FROM level_credits WHERE giver=?1)+coalesce((SELECT earned FROM portable_assists WHERE character=?1),0)";
 
-const SCHEMA: &str = "CREATE TABLE save_namespace(id INTEGER PRIMARY KEY CHECK(id=1),namespace TEXT NOT NULL);
+pub(super) const SCHEMA: &str = "CREATE TABLE save_namespace(id INTEGER PRIMARY KEY CHECK(id=1),namespace TEXT NOT NULL);
 CREATE TABLE account_origins(account INTEGER PRIMARY KEY REFERENCES accounts(id),namespace TEXT NOT NULL,source_account INTEGER NOT NULL,UNIQUE(namespace,source_account));
 CREATE TABLE portable_assists(character INTEGER PRIMARY KEY REFERENCES characters(id),earned INTEGER NOT NULL CHECK(earned>=0));
 CREATE TABLE portable_consumed_levels(recipient INTEGER NOT NULL REFERENCES characters(id),reached_level INTEGER NOT NULL CHECK(reached_level BETWEEN 2 AND 20),PRIMARY KEY(recipient,reached_level));
 CREATE TABLE portable_history(account INTEGER PRIMARY KEY REFERENCES accounts(id),guild_fame INTEGER NOT NULL CHECK(guild_fame>=0),realm_unused INTEGER NOT NULL CHECK(realm_unused>=0),realm_spent INTEGER NOT NULL CHECK(realm_spent>=0));";
-pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
-    if version < 22 {
+pub(super) fn migrate(db: &Connection, create: bool) -> Result<()> {
+    if create {
         db.execute_batch(SCHEMA)?;
         db.execute("INSERT INTO save_namespace VALUES(1,?1)", [random_key()])?;
     }
+    check_schema(db)
+}
+pub(super) fn check_schema(db: &Connection) -> Result<()> {
     for statement in SCHEMA.split(';').map(str::trim).filter(|s| !s.is_empty()) {
         let name = statement
             .split_whitespace()
@@ -35,6 +38,49 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
             r.get(0)
         })?;
     ensure!(key(&namespace), "invalid save namespace");
+    let broken:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM account_origins o LEFT JOIN portable_history h ON h.account=o.account WHERE h.account IS NULL) OR EXISTS(SELECT 1 FROM portable_consumed_levels l JOIN characters c ON c.id=l.recipient WHERE l.reached_level>json_extract(c.stats,'$.level'))",[],|r|r.get(0))?;
+    ensure!(!broken, "inconsistent portable account metadata");
+    for origin in rows(
+        db,
+        "SELECT namespace,source_account FROM account_origins WHERE account<>?1",
+        -1,
+        |r| {
+            Ok(Origin {
+                namespace: r.get(0)?,
+                account: r.get(1)?,
+            })
+        },
+    )? {
+        ensure!(
+            key(&origin.namespace) && origin.account > 0,
+            "invalid persisted account origin"
+        );
+    }
+    for (table, columns) in [
+        ("account_origins", &["account", "source_account"][..]),
+        ("portable_assists", &["character", "earned"][..]),
+        (
+            "portable_consumed_levels",
+            &["recipient", "reached_level"][..],
+        ),
+        (
+            "portable_history",
+            &["account", "guild_fame", "realm_unused", "realm_spent"][..],
+        ),
+    ] {
+        for column in columns {
+            ensure!(
+                !db.query_row(
+                    &format!(
+                        "SELECT EXISTS(SELECT 1 FROM {table} WHERE typeof({column})<>'integer')"
+                    ),
+                    [],
+                    |r| r.get::<_, bool>(0)
+                )?,
+                "invalid portable integer metadata {table}.{column}"
+            );
+        }
+    }
     Ok(())
 }
 fn random_key() -> String {
@@ -141,6 +187,48 @@ fn strict_character(raw: &str, base: [i32; 8]) -> Result<Character> {
     );
     Ok(ch)
 }
+#[derive(Debug)]
+pub(crate) enum Format1Refusal {
+    Progress,
+    Replacement,
+}
+impl Format1Refusal {
+    pub(crate) fn message(&self) -> &'static str {
+        match self {
+            Self::Progress => {
+                "Account save format1 cannot represent owned achievement progress; preserve the private backup and use a supported migration or future compatible format"
+            }
+            Self::Replacement => {
+                "Account save format1 cannot safely replace an account with achievement history; preserve the private backup and use a supported migration or future compatible format"
+            }
+        }
+    }
+}
+impl std::fmt::Display for Format1Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+impl std::error::Error for Format1Refusal {}
+fn has_progress(db: &Connection, account: i32) -> Result<bool> {
+    let version = db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))?;
+    if !super::schema22_compat::KnownStoreLayout::read(db, version)?.achievements() {
+        return Ok(false);
+    }
+    for (table, _) in super::schema22_compat::TABLES {
+        if db.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE account=?1)"),
+            [account],
+            |r| r.get::<_, bool>(0),
+        )? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+fn has_achievement_history(db: &Connection, account: i32) -> Result<bool> {
+    Ok(has_progress(db,account)? || db.query_row("SELECT EXISTS(SELECT 1 FROM gold_rewards WHERE account=?1 AND reward GLOB 'achievement_*') OR EXISTS(SELECT 1 FROM characters WHERE account=?1 AND (json_type(stats,'$.achievements') IS NOT NULL AND (json_type(stats,'$.achievements')<>'array' OR json_array_length(stats,'$.achievements')>0))) OR EXISTS(SELECT 1 FROM deaths d JOIN characters c ON c.id=d.character WHERE c.account=?1 AND (json_type(d.snapshot,'$.achievements') IS NOT NULL AND (json_type(d.snapshot,'$.achievements')<>'array' OR json_array_length(d.snapshot,'$.achievements')>0)))",[account],|r|r.get::<_,bool>(0))?)
+}
 fn texture(tex: u32) -> Result<()> {
     // 123.5.1 TextureRedrawer.getTexture uses a type byte and an atlas/color value, not a picture ID.
     ensure!(
@@ -198,15 +286,46 @@ impl AccountSave {
             self.collections.iter().all(|(_, time)| *time > 0),
             "invalid collection timestamp"
         );
+        let mut rewards = BTreeSet::new();
+        for row in &self.rewards {
+            gold::details(&row.reward)?;
+            ensure!(
+                rewards.insert(row.reward.as_str())
+                    && row.awarded_at > 0
+                    && row.notified_at.is_none_or(|t| t > 0),
+                "invalid or duplicate saved Gold receipt"
+            );
+            if matches!(
+                row.reward.as_str(),
+                "achievement_nexus_after_death" | "achievement_ah_7uck"
+            ) {
+                ensure!(
+                    row.awarded_at <= 8_640_000_000_000
+                        && row.notified_at.is_none_or(|t| t <= 8_640_000_000_000),
+                    "invalid fatal achievement receipt date"
+                );
+            }
+        }
+        for ch in self
+            .characters
+            .iter()
+            .map(|r| &r.character)
+            .chain(self.deaths.iter().map(|r| &r.character))
+        {
+            for id in &ch.achievements {
+                ensure!(
+                    rewards.contains(id.reward()),
+                    "unpaid achievement history cannot transfer in format1; preserve input for review"
+                );
+            }
+        }
         let mut sources = BTreeSet::new();
         ensure!(
             self.collection_sources
                 .iter()
                 .all(|(item, source)| sources.insert(*item)
                     && self.collections.iter().any(|(id, _)| id == item)
-                    && !source.trim().is_empty()
-                    && source.chars().count() <= 128
-                    && !source.chars().any(char::is_control)),
+                    && super::valid_collection_source(source)),
             "invalid collection source"
         );
         let mut ids = BTreeSet::new();
@@ -253,6 +372,15 @@ impl AccountSave {
                 ids.contains(&death.character.id) && death.character.account == self.origin.account,
                 "invalid death ownership"
             );
+            let stored = self
+                .characters
+                .iter()
+                .find(|r| r.character.id == death.character.id)
+                .context("saved death owner missing")?;
+            ensure!(
+                stored.character.achievements == death.character.achievements,
+                "saved death achievement flags differ from their character; preserve input for review"
+            );
             texture(death.character.tex1)?;
             texture(death.character.tex2)?;
             death.receipt.validate()?;
@@ -266,6 +394,7 @@ impl AccountSave {
     }
 }
 pub(crate) fn export(db: &Connection, account: i32, base: [i32; 8]) -> Result<AccountSave> {
+    ensure!(!has_progress(db, account)?, Format1Refusal::Progress);
     ensure!(
         !db.query_row(
             "SELECT EXISTS(SELECT 1 FROM shore_bots WHERE account=?1)",
@@ -426,8 +555,11 @@ pub(crate) fn export(db: &Connection, account: i32, base: [i32; 8]) -> Result<Ac
             account,
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?,
-        collection_sources: if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))?
-            >= 23
+        collection_sources: if super::schema22_compat::KnownStoreLayout::read(
+            db,
+            db.query_row("PRAGMA user_version", [], |r| r.get(0))?,
+        )?
+        .collection_sources()
         {
             rows(
                 db,
@@ -530,10 +662,11 @@ pub(crate) fn check_expected(
 pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResult> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=23),
+        matches!(version, 21..=25),
         "unsupported local preview schema {version}"
     );
-    let existing: Option<i32> = if version == 21 {
+    let layout = super::schema22_compat::KnownStoreLayout::read(db, version)?;
+    let existing: Option<i32> = if !layout.portable() {
         None
     } else {
         db.query_row(
@@ -543,6 +676,12 @@ pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResul
         )
         .optional()?
     };
+    if let Some(account) = existing {
+        ensure!(
+            !has_achievement_history(db, account)?,
+            Format1Refusal::Replacement
+        );
+    }
     let next: i32 = db.query_row("SELECT coalesce(max(id),0)+1 FROM accounts", [], |r| {
         r.get(0)
     })?;
@@ -617,8 +756,7 @@ pub(super) fn import(
     accounts::password(password)?;
     let hash = accounts::hash(password)?;
     let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let plan =
-        preview(&tx, save).context("local import identity unavailable; re-preview this file")?;
+    let plan = preview(&tx, save)?;
     if let Some(expectation) = expectation {
         check_expected(save, &plan, &expectation)?;
     }
@@ -657,6 +795,10 @@ pub(super) fn import(
         ensure!(
             !related,
             "replacement cannot preserve functioning local guild/integration history; retain state and backup, use a fresh separate local save or restore a full local backup"
+        );
+        ensure!(
+            !has_achievement_history(&tx, account)?,
+            Format1Refusal::Replacement
         );
         for table in [
             "discord_codes",
@@ -902,21 +1044,13 @@ impl Store {
 pub(crate) fn verify_database(db: &Connection, content: &Content) -> Result<()> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=23),
+        matches!(version, 21..=25),
         "unsupported local snapshot schema {version}"
     );
-    if version >= 22 {
-        migrate(db, version)?;
-    } else {
-        let unexpected:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name IN ('save_namespace','account_origins','portable_assists','portable_consumed_levels','portable_history'))",[],|r|r.get(0))?;
-        ensure!(
-            !unexpected,
-            "schema-21 snapshot contains schema-22 portable metadata; restore the matching schema instead of ignoring it"
-        );
-    }
+    gold::check_schema(db, version)?;
+    super::achievements::check_legacy_death_attempts(db)?;
     check_required_state(db, version)?;
     death_awards::check_schema(db, version)?;
-    gold::check_schema(db, version)?;
     discord_gold::check_schema(db, version)?;
     guilds::migrate(db, version)?;
     email::migrate(db, version)?;
@@ -960,26 +1094,7 @@ pub(crate) fn verify_database(db: &Connection, content: &Content) -> Result<()> 
             "invalid stored character inventory/class"
         );
     }
-    if version >= 22 {
-        let broken:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM account_origins o LEFT JOIN portable_history h ON h.account=o.account WHERE h.account IS NULL) OR EXISTS(SELECT 1 FROM portable_consumed_levels l JOIN characters c ON c.id=l.recipient WHERE l.reached_level>json_extract(c.stats,'$.level'))",[],|r|r.get(0))?;
-        ensure!(!broken, "inconsistent portable account metadata");
-        for origin in rows(
-            db,
-            "SELECT namespace,source_account FROM account_origins WHERE account<>?1",
-            -1,
-            |r| {
-                Ok(Origin {
-                    namespace: r.get(0)?,
-                    account: r.get(1)?,
-                })
-            },
-        )? {
-            ensure!(
-                key(&origin.namespace) && origin.account > 0,
-                "invalid persisted account origin"
-            );
-        }
-    }
+
     Ok(())
 }
 #[cfg(test)]

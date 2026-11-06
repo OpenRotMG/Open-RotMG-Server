@@ -20,6 +20,7 @@ struct RealmPreparation {
     result: tokio::sync::oneshot::Receiver<Result<(World, World, RealmCycle)>>,
 }
 pub(super) struct RealmRecord {
+    achievement_instance: String,
     pub cycle: RealmCycle,
     pub portal: Option<i32>,
     pub portal_slot: usize,
@@ -38,6 +39,7 @@ pub(super) struct RealmRecord {
 impl RealmRecord {
     pub(super) fn new(cycle: RealmCycle, now: u64, created_at: Instant) -> Self {
         Self {
+            achievement_instance: format!("{:032x}", rand::random::<u128>()),
             cycle,
             portal: None,
             portal_slot: 0,
@@ -538,6 +540,15 @@ impl Directory {
                 }
                 let killer = world.critical_killers.remove(&id);
                 if cycle.defeated(id, now) {
+                    if let Some((account, character)) = world.achievement_killers.remove(&id) {
+                        self.achievement_credits
+                            .push(crate::store::achievements::ClosureCredit {
+                                realm: record.achievement_instance.clone(),
+                                root: id,
+                                account,
+                                character,
+                            });
+                    }
                     if let Some((kind, player)) = killer {
                         world.realm_killed_notice(kind, &player);
                     }
@@ -1534,6 +1545,18 @@ fn eight_realm_closures_keep_held_predecessors_across_two_replacement_generation
     let mut d = Directory::prepared(data, content, 16, 1344, 8).unwrap();
     let mut holds = Vec::new();
     for generation in 0..2 {
+        let instances: BTreeSet<_> = d
+            .endgame
+            .realms
+            .values()
+            .map(|r| r.achievement_instance.clone())
+            .collect();
+        assert_eq!(instances.len(), d.endgame.realms.len());
+        assert!(
+            instances
+                .iter()
+                .all(|id| id.len() == 32 && u128::from_str_radix(id, 16).is_ok())
+        );
         let current: Vec<_> = d
             .endgame
             .realms

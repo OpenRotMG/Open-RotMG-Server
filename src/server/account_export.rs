@@ -164,9 +164,18 @@ async fn run(
     lifecycle::account(a, vec![account], "account_export", move |a| async move {
         let _authentication = authentication;
         let _claim = claim;
-        let saved =
-            a.store.export_account_save(account).await.map_err(|_| {
-                internal("Account export snapshot validation failed; contact support.")
+        let saved = a
+            .store
+            .export_account_save(account)
+            .await
+            .map_err(|error| {
+                if let Some(refusal) =
+                    error.downcast_ref::<crate::store::account_save::Format1Refusal>()
+                {
+                    Failure(StatusCode::CONFLICT, refusal.message())
+                } else {
+                    internal("Account export snapshot validation failed; contact support.")
+                }
             })?;
         let mut body = Bounded(Vec::new());
         serde_json::to_writer(&mut body, &saved).map_err(|_| {

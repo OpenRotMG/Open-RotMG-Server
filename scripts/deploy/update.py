@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import signal
 import sqlite3
@@ -394,19 +395,64 @@ def announce(config, text):
         raise RuntimeError('Announcement rejected: HTTP ' + str(error.code)) from error
 
 
+class RestartCancelled(RuntimeError):
+    pass
+
+
+def checked_restart_request(config, process, operation, receipt=None):
+    require(drain_process(config) == process, 'Restart process replaced; refusing countdown operation')
+    host, port = config['bind'].rsplit(':', 1)
+    require(ipaddress.ip_address(host.strip('[]')).is_loopback and 0 < int(port) < 65536,
+            'Restart endpoint must be a literal loopback address')
+    body = {'operation': operation}
+    if receipt is None:
+        require(operation == 'begin', 'Restart receipt required')
+        body['owner'] = secrets.token_hex(32)
+    else:
+        body['receipt'] = receipt
+    token = ANNOUNCE_TOKEN.read_text().strip()
+    require(bool(token), 'Restart authorization token is empty')
+    request = urllib.request.Request(
+        f'http://{host}:{int(port)}/internal/lifecycle/restart', data=json.dumps(body).encode(),
+        headers={'authorization': 'Bearer ' + token, 'content-type': 'application/json'})
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            fp.close()
+            raise RuntimeError('Restart endpoint redirected; refusing countdown operation')
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    try:
+        with opener.open(request, timeout=DRAIN_HTTP_TIMEOUT) as response:
+            value = json.load(response)
+    except urllib.error.HTTPError as error:
+        with error:
+            detail = error.read(4096).decode(errors='replace')
+        raise RuntimeError(f'Restart {operation} rejected: HTTP {error.code}: {detail}') from error
+    require(isinstance(value, dict) and set(value) == {'receipt', 'state'}, 'Invalid restart response')
+    returned = value['receipt']
+    require(isinstance(returned, dict) and set(returned) == {'instance', 'owner', 'deadline_ms'}
+            and all(isinstance(returned[k], str) and re.fullmatch('[0-9a-f]{64}', returned[k]) for k in ['instance', 'owner'])
+            and type(returned['deadline_ms']) is int and returned['deadline_ms'] > 0, 'Invalid restart receipt')
+    require(returned == receipt if receipt is not None else returned['owner'] == body['owner'], 'Stale restart receipt returned')
+    require(value['state'] in ({'pending'} if operation == 'begin' else {'cancelled', 'consumed'}), 'Invalid restart state')
+    require(drain_process(config) == process, 'Restart process replaced during countdown operation')
+    return value
+
+
 def warn_restart(config):
     state = subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'ActiveState', '--value'], text=True).strip()
     if state != 'active':
         print(json.dumps({'restart_warning': 'skipped', 'service_state': state}), flush=True)
         return False
+    process = drain_process(config)
     notice = 'Server restarting in ' + str(RESTART_NOTICE_SECONDS) + ' seconds to apply an update.'
     result = announce(config, notice)
-    if result is None:
-        print(json.dumps({'restart_warning': 'unsupported', 'detail': 'running server predates the announcement endpoint'}), flush=True)
-        return False
-    print(json.dumps({'restart_warning': notice, 'seconds': RESTART_NOTICE_SECONDS, **result}), flush=True)
+    require(result is not None, 'Running server did not acknowledge restart warning')
+    countdown = checked_restart_request(config, process, 'begin')
+    print(json.dumps({'restart_warning': notice, 'seconds': RESTART_NOTICE_SECONDS, **countdown, **result}), flush=True)
     time.sleep(RESTART_NOTICE_SECONDS)
-    return True
+    return {'process': process, 'receipt': countdown['receipt']}
 
 
 def drain_process(config):
@@ -600,14 +646,10 @@ def exchange(live, stage):
             'Atomic source exchange failed; frozen recovery state retained')
 
 
-def restore_service(config, work):
-    """A failed cutover must not leave production stopped; restart whichever release is safest to run."""
+def restore_service(config):
+    # The candidate may already have migrated live state beyond the predecessor's schema.
     if subprocess.run(['systemctl', 'is-active', '--quiet', 'openrotmg.service']).returncode == 0:
         return 'already_running'
-    previous = work / 'previous-server-path'
-    if previous.exists():
-        exchange(LIVE, Path(previous.read_text().strip()))
-        previous.rename(work / 'restored-server-path')
     run('systemctl', 'reset-failed', 'openrotmg.service')
     run('systemctl', 'start', 'openrotmg.service')
     ready(int(config['bind'].rsplit(':', 1)[1]))
@@ -647,20 +689,16 @@ def deploy(stage, work, metadata, config):
                 raise RuntimeError('Main advanced during restart warning; no cutover performed; restart postponement announcement failed: ' + str(error)) from error
             print(json.dumps({'restart_postponed': notice, **result}), flush=True)
         require(current, 'Main advanced during restart warning; no cutover performed')
+        if warned:
+            countdown = checked_restart_request(config, warned['process'], 'consume', warned['receipt'])
+            if countdown['state'] == 'cancelled':
+                raise RestartCancelled('Server restart cancelled; this update was not deployed')
         outcome(work, 'cutover', stage)
         cutover = 'stop'
         try:
-            try:
-                stop_prepared(config, work)
-            except DrainRefused as refused:
-                # Live Nov 3: the build being replaced could not drain its own failed sessions, which blocked every fix.
-                # Saves are atomic, so stopping it loses only those sessions' unsaved work, exactly as a manual restart would.
-                run('systemctl', 'stop', 'openrotmg.service')
-                result = subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip()
-                print(json.dumps({'replacing_undrained_server': str(refused), 'shutdown_result': result}), flush=True)
-            else:
-                cutover = 'shutdown_result'
-                require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
+            stop_prepared(config, work)
+            cutover = 'shutdown_result'
+            require(subprocess.check_output(['systemctl', 'show', 'openrotmg', '-p', 'Result', '--value'], text=True).strip() == 'success', 'Shutdown save failed; no source exchange performed')
             cutover = 'freeze_recovery'
             frozen = work / 'cutover'
             frozen.mkdir(mode=0o700)
@@ -683,11 +721,11 @@ def deploy(stage, work, metadata, config):
             failure = {'stage': cutover, 'error': str(error), 'recovery': str(work), 'previous_server': str(stage)}
             (work / 'post-stop-failure.json').write_text(json.dumps(failure, indent=2) + '\n')
             try:
-                failure['restored'] = restore_service(config, work)
+                failure['restored'] = restore_service(config)
             except BaseException as restore:
                 failure['restore_error'] = str(restore)
             (work / 'post-stop-failure.json').write_text(json.dumps(failure, indent=2) + '\n')
-            raise RuntimeError(f'Post-stop {cutover} failed: {error}; restored: {failure.get("restored")}; recovery: {work}') from error
+            raise RuntimeError(f'Post-stop {cutover} failed: {error}; restored: {failure.get("restored")}; restore error: {failure.get("restore_error")}; recovery: {work}') from error
     try:
         start_backup()
     except BaseException as error:
@@ -746,7 +784,6 @@ def main(desired, raw):
     require(len(raw) <= LIMIT, 'Deployment archive exceeds 64 MiB')
     ROOT.mkdir(mode=0o700, exist_ok=True)
     retain_deployments()
-    require(shutil.disk_usage(ROOT).free >= 2 * 1024**3, 'Less than 2 GiB free; inspect retained recovery data before deploying')
     work = None
     try:
         with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as archive:
@@ -785,6 +822,10 @@ def main(desired, raw):
         install_helper(LIVE / 'scripts/deploy/update.py')
         retain_deployments()
         status('deployed', desired, recovery_directory=str(work), backup=json.loads(LAST_BACKUP.read_text()))
+    except RestartCancelled as error:
+        outcome(work, 'failed', stage, str(error))
+        status('cancelled', desired, recovery_directory=str(work), error=str(error))
+        raise
     except Exception as error:
         if work is not None and (work / 'outcome.json').exists():
             receipt = json.loads((work / 'outcome.json').read_text())

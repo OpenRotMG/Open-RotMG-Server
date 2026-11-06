@@ -100,16 +100,54 @@ impl Directory {
             .grants
             .get(key)
             .context("completed entry grant missing")?;
-        if grant.entry_witness.is_none() {
+        if grant.origin.is_none() {
             return Ok(0);
         }
         let state = grant.authority.state();
         ensure!(
             state & (TRANSFER_REVOKED | TRANSFER_RETIRED) == 0
-                && state & (TRANSFER_ADMITTED | TRANSFER_CONSUMED | TRANSFER_DEPARTED)
-                    == TRANSFER_ADMITTED | TRANSFER_CONSUMED | TRANSFER_DEPARTED,
-            "entry completion lacks successful source/arrival authority"
+                && state & (TRANSFER_ADMITTED | TRANSFER_CONSUMED)
+                    == TRANSFER_ADMITTED | TRANSFER_CONSUMED
+                && (state & TRANSFER_RESERVED == 0 || state & TRANSFER_DEPARTED != 0),
+            "dungeon entry lacks completed transfer authority"
         );
+        let destination = self
+            .worlds
+            .get_mut(&grant.destination)
+            .context("dungeon destination missing")?;
+        let dungeon = destination.name == "Oryx's Castle"
+            || crate::dungeon::DUNGEONS
+                .iter()
+                .chain(crate::endgame::DUNGEONS)
+                .any(|(_, _, name, _)| *name == destination.name);
+        let entrant = destination
+            .players
+            .get_mut(&player)
+            .context("dungeon entrant missing")?;
+        ensure!(
+            entrant.character.account == grant.account
+                && entrant.character.id == grant.character
+                && living(entrant),
+            "dungeon entry character changed"
+        );
+        if !grant.achievement_entry_completed
+            && dungeon
+            && entrant.controller != Controller::Autonomous
+        {
+            entrant.dungeon_entered = if grant.origin == Some(grant.destination) {
+                grant.dungeon_entered
+            } else {
+                Some(entrant.entered_at)
+            };
+        }
+        let has_witness = grant.entry_witness.is_some();
+        if !has_witness {
+            self.grants
+                .get_mut(key)
+                .unwrap()
+                .achievement_entry_completed = true;
+            return Ok(0);
+        }
         let destination_world = self
             .worlds
             .get(&grant.destination)
@@ -119,17 +157,11 @@ impl Directory {
             && crate::dungeon::DUNGEONS
                 .iter()
                 .any(|(_, _, name, _)| *name == destination_world.name);
-        let entrant = destination_world
-            .players
-            .get(&player)
-            .context("completed entry player missing")?;
-        ensure!(
-            living(entrant)
-                && entrant.character.account == grant.account
-                && entrant.character.id == grant.character,
-            "completed entry character changed"
-        );
         let destination = grant.destination;
+        self.grants
+            .get_mut(key)
+            .unwrap()
+            .achievement_entry_completed = true;
         let witness = self
             .grants
             .get_mut(key)

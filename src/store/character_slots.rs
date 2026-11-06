@@ -1,5 +1,11 @@
 use super::*;
 
+pub(super) const TRIGGERS: &[&str] = &[
+    "CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;",
+    "CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;",
+    "CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END;",
+];
+
 #[derive(Debug)]
 pub struct SlotReplay;
 impl std::fmt::Display for SlotReplay {
@@ -66,7 +72,12 @@ pub(super) fn read(db: &Connection, account: i32) -> Result<i32> {
     Ok(slots)
 }
 
-pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
+pub(super) const LIVING_INDEX: &str =
+    "CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1";
+pub(super) const LEGACY_LIVING_INDEX: &str =
+    "CREATE UNIQUE INDEX one_living_character ON characters(account) WHERE alive=1";
+pub(super) const PURCHASE_SCHEMA: &str = "CREATE TABLE character_slot_purchases(account INTEGER NOT NULL REFERENCES accounts(id),timer INTEGER NOT NULL CHECK(typeof(timer)='integer' AND timer BETWEEN -2147483648 AND 2147483647),slots INTEGER NOT NULL CHECK(typeof(slots)='integer' AND slots BETWEEN 2 AND 14),PRIMARY KEY(account,timer),UNIQUE(account,slots));";
+pub(super) fn check_schema(db: &Connection, version: i32) -> Result<bool> {
     let column: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('accounts') WHERE name='character_slots')",
         [],
@@ -77,51 +88,97 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
         column == receipts && (version < 12 || column),
         "character slot capacity or purchase history missing; restore reviewed state"
     );
-    if !column {
-        db.execute_batch("ALTER TABLE accounts ADD COLUMN character_slots INTEGER NOT NULL DEFAULT 1 CHECK(typeof(character_slots)='integer' AND character_slots BETWEEN 1 AND 14);
-CREATE TABLE character_slot_purchases(account INTEGER NOT NULL REFERENCES accounts(id),timer INTEGER NOT NULL CHECK(typeof(timer)='integer' AND timer BETWEEN -2147483648 AND 2147483647),slots INTEGER NOT NULL CHECK(typeof(slots)='integer' AND slots BETWEEN 2 AND 14),PRIMARY KEY(account,timer),UNIQUE(account,slots));
-DROP INDEX IF EXISTS one_living_character;
-CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1;
-CREATE TRIGGER character_slot_insert BEFORE INSERT ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
-CREATE TRIGGER character_slot_update BEFORE UPDATE OF account,alive ON characters WHEN NEW.alive=1 AND NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.account AND character_slots>(SELECT count(*) FROM characters WHERE account=NEW.account AND alive=1 AND id<>OLD.id)) BEGIN SELECT RAISE(ABORT,'No free character slots.'); END;
-CREATE TRIGGER character_slot_capacity BEFORE UPDATE OF character_slots ON accounts WHEN NEW.character_slots<(SELECT count(*) FROM characters WHERE account=NEW.id AND alive=1) BEGIN SELECT RAISE(ABORT,'Living characters exceed capacity.'); END;")?;
+    let living: Option<String> = db
+        .query_row(
+            "SELECT sql FROM sqlite_schema WHERE type='index' AND name=?1",
+            [if column {
+                "living_characters_by_account"
+            } else {
+                "one_living_character"
+            }],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if column || living.is_some() {
+        ensure!(
+            living.as_deref()
+                == Some(if column {
+                    LIVING_INDEX
+                } else {
+                    LEGACY_LIVING_INDEX
+                }),
+            "canonical living character index missing or altered; preserve slot history for review"
+        );
     }
-    for name in [
-        "living_characters_by_account",
-        "character_slot_insert",
-        "character_slot_update",
-        "character_slot_capacity",
-    ] {
-        let exists: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=?1)",
-            [name],
+    let extra: Option<String> = db.query_row("SELECT name FROM pragma_index_list('characters') WHERE [unique]=1 AND (?1 OR name<>'one_living_character') LIMIT 1", [column], |r| r.get(0)).optional()?;
+    ensure!(
+        extra.is_none(),
+        "unsupported unique character index {extra:?}; preserve slot history for review"
+    );
+    if column {
+        let sql: String = db.query_row(
+            "SELECT sql FROM sqlite_schema WHERE name='character_slot_purchases'",
+            [],
             |r| r.get(0),
         )?;
         ensure!(
-            exists,
-            "character slot schema object {name} missing; restore reviewed state"
+            sql == PURCHASE_SCHEMA.trim_end_matches(';'),
+            "character slot purchase metadata mismatch; preserve input for review"
         );
+        for name in [
+            "character_slot_insert",
+            "character_slot_update",
+            "character_slot_capacity",
+        ] {
+            let exists: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=?1)",
+                [name],
+                |r| r.get(0),
+            )?;
+            ensure!(
+                exists,
+                "character slot schema object {name} missing; restore reviewed state"
+            );
+        }
+        let old: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='one_living_character')",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(!old, "obsolete one-living-character index remains");
+        let accounts = {
+            let mut q = db.prepare("SELECT id FROM accounts")?;
+            q.query_map([], |r| r.get::<_, i32>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for account in accounts {
+            read(db, account)?;
+        }
+        let broken: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check('character_slot_purchases'))",
+            [],
+            |r| r.get(0),
+        )?;
+        ensure!(!broken, "character slot purchase ownership inconsistent");
     }
-    let old: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='one_living_character')",
-        [],
-        |r| r.get(0),
-    )?;
-    ensure!(!old, "obsolete one-living-character index remains");
-    let accounts = {
-        let mut q = db.prepare("SELECT id FROM accounts")?;
-        q.query_map([], |r| r.get::<_, i32>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-    };
-    for account in accounts {
-        read(db, account)?;
+    Ok(column)
+}
+
+pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
+    let column = check_schema(db, version)?;
+    if !column {
+        db.execute_batch("ALTER TABLE accounts ADD COLUMN character_slots INTEGER NOT NULL DEFAULT 1 CHECK(typeof(character_slots)='integer' AND character_slots BETWEEN 1 AND 14);")?;
+        db.execute_batch(PURCHASE_SCHEMA)?;
+        db.execute_batch(
+            "DROP INDEX IF EXISTS one_living_character;
+CREATE INDEX living_characters_by_account ON characters(account) WHERE alive=1;
+",
+        )?;
+        for trigger in TRIGGERS {
+            db.execute_batch(trigger)?;
+        }
     }
-    let broken: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check('character_slot_purchases'))",
-        [],
-        |r| r.get(0),
-    )?;
-    ensure!(!broken, "character slot purchase ownership inconsistent");
+    check_schema(db, 12)?;
     Ok(())
 }
 

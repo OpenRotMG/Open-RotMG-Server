@@ -19,6 +19,10 @@ impl Store {
         );
         let previous_items = ch.items.clone();
         ch.items[slot] = -1;
+        ch.achievements
+            .remove(&crate::achievements::Achievement::NexusAfterDeath);
+        ch.achievements
+            .remove(&crate::achievements::Achievement::Ah7uck);
         let stats = ch.effective(&content)?;
         ch.hp = stats[0];
         ch.mp = stats[1];
@@ -42,6 +46,7 @@ impl Store {
                 "UPDATE characters SET stats=?4,items=?5,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![ch.id, ch.account, ch.revision - 1, serde_json::to_string(&ch)?, serde_json::to_string(&ch.items)?])?;
             ensure!(n == 1, "resurrection commit lost its reservation");
+            achievements::observed(&tx, &ch)?;
             tx.commit()?;
             Ok(ch)
         }).await

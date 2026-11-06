@@ -229,7 +229,8 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
     }
     drop(store);
     let db = Connection::open(&path).unwrap();
-    let old = SCHEMA.replace(",'class_star_blue','class_star_red','class_star_orange','class_star_yellow','class_star_white'", "");
+    crate::store::achievement_tests::schema21_fixture(&db);
+    let old = SCHEMA18.replace(",'class_star_blue','class_star_red','class_star_orange','class_star_yellow','class_star_white'", "");
     assert!(!old.contains("class_star_"));
     db.execute_batch("DROP TABLE gold_rewards;").unwrap();
     db.execute_batch(&old).unwrap();
@@ -245,7 +246,7 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
         [account],
     )
     .unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; ALTER TABLE collections DROP COLUMN source;").unwrap();
+    db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts;").unwrap();
     db.pragma_update(None, "user_version", 17).unwrap();
     let rows = || {
         db.prepare("SELECT account,reward,awarded_at,notified_at FROM gold_rewards ORDER BY reward")
@@ -274,9 +275,9 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        23
+        25
     );
-    check_schema(&db, 18).unwrap();
+    check_schema(&db, 25).unwrap();
     let gold = reopened.gold(account).await.unwrap();
     assert_eq!(gold.balance, 123531);
     assert!(
@@ -294,7 +295,7 @@ async fn class_quest_gold_schema18_preserves_schema17_wallet_and_receipts() {
             .err()
             .unwrap()
             .to_string()
-            .contains("schema-18 gold reward metadata mismatch")
+            .contains("schema-25 gold reward metadata mismatch")
     );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }

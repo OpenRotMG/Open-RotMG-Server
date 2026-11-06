@@ -65,6 +65,31 @@ async fn fixture() -> (PathBuf, Content, Store, AccountSave) {
     .unwrap();
     let content = Content::load(Path::new("data")).unwrap();
     let store = Store::open(&source.join("game.db"), &content).unwrap();
+    // These format1 regression cases need a fresh representable account, not the expanded backup-history case.
+    store
+        .call(|db| {
+            let tx = db.transaction()?;
+            for (table, _) in super::super::schema22_compat::TABLES {
+                tx.execute(&format!("DELETE FROM {table} "), [])?;
+            }
+            tx.execute(
+                "DELETE FROM gold_rewards WHERE reward GLOB 'achievement_*'",
+                [],
+            )?;
+            tx.execute("UPDATE accounts SET credits=123 WHERE id=2", [])?;
+            tx.execute(
+                "UPDATE characters SET stats=json_remove(stats,'$.achievements') ",
+                [],
+            )?;
+            tx.execute(
+                "UPDATE deaths SET snapshot=json_remove(snapshot,'$.achievements') ",
+                [],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let deleted = store.create(2, content.get(WIZARD).unwrap()).await.unwrap();
     store.delete_character(2, deleted.id).await.unwrap();
     let mut living = store.create(2, content.get(WIZARD).unwrap()).await.unwrap();
@@ -852,7 +877,8 @@ async fn account_save_schema21_snapshot_precedes_migration_and_preserves_old_cre
         .unwrap();
     drop(store);
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE discord_realm_close_tokens; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=21;").unwrap();
+    crate::store::achievement_tests::schema21_fixture(&db);
+    db.execute_batch("PRAGMA user_version=21;").unwrap();
     let before = dump(&db);
     let backup = root.join("before-migration.db");
     crate::account_save::snapshot(&path, &backup, &content).unwrap();
@@ -869,7 +895,7 @@ async fn account_save_schema21_snapshot_precedes_migration_and_preserves_old_cre
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        23
+        25
     );
     assert_eq!(
         Connection::open(&backup)
@@ -975,7 +1001,7 @@ async fn account_save_snapshot_required_schema_rejected_before_restore_without_r
     let source_before = dump(&Connection::open(&baseline).unwrap());
     let target_db = Connection::open(state.join("game.db")).unwrap();
     let before = dump(&target_db);
-    for version in [21, 22] {
+    for version in [21, 22, 23, 24, 25] {
         let mut damages = vec![
             "DROP TRIGGER character_slot_insert",
             "DROP TRIGGER character_slot_update",
@@ -999,9 +1025,26 @@ async fn account_save_snapshot_required_schema_rejected_before_restore_without_r
             let bad = root.join(format!("bad-{version}-{index}.db"));
             crate::account_save::snapshot(&baseline, &bad, &content).unwrap();
             let db = Connection::open(&bad).unwrap();
-            if version == 21 {
-                db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=21;").unwrap();
+            if version < 24 {
+                for (table, _) in super::super::schema22_compat::TABLES {
+                    db.execute_batch(&format!("DROP TABLE {table};")).unwrap();
+                }
+                db.execute_batch("ALTER TABLE gold_rewards RENAME TO fresh_gold24;")
+                    .unwrap();
+                db.execute_batch(gold::SCHEMA18).unwrap();
+                db.execute_batch(
+                    "INSERT INTO gold_rewards SELECT * FROM fresh_gold24; DROP TABLE fresh_gold24;",
+                )
+                .unwrap();
+                if version == 21 {
+                    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace;").unwrap();
+                }
             }
+            if version != 23 && version != 25 {
+                db.execute_batch("ALTER TABLE collections DROP COLUMN source")
+                    .unwrap();
+            }
+            db.pragma_update(None, "user_version", version).unwrap();
             db.execute_batch(damage).unwrap();
             let unchanged = dump(&db);
             drop(db);
@@ -1069,7 +1112,15 @@ async fn account_save_migrated_legacy_paid_death_exports_without_lifetime_but_mo
         .unwrap();
     drop(source);
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; UPDATE characters SET stats=json_remove(stats,'$.lifetime'); UPDATE deaths SET snapshot=json_remove(snapshot,'$.lifetime'); UPDATE account_fame SET balance=19,earned=19; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=16;").unwrap();
+    crate::store::achievement_tests::schema21_fixture(&db);
+    db.execute_batch("ALTER TABLE gold_rewards RENAME TO fresh_fixture_gold")
+        .unwrap();
+    db.execute_batch(gold::SCHEMA11).unwrap();
+    db.execute_batch(
+        "INSERT INTO gold_rewards SELECT * FROM fresh_fixture_gold; DROP TABLE fresh_fixture_gold",
+    )
+    .unwrap();
+    db.execute_batch("DROP TABLE email_password_resets; DROP TABLE verified_emails; DROP TABLE email_verifications; DROP TABLE email_send_attempts; DROP TABLE legacy_claims; DROP TABLE level_credits; ALTER TABLE deaths DROP COLUMN receipt; UPDATE characters SET stats=json_remove(stats,'$.lifetime'); UPDATE deaths SET snapshot=json_remove(snapshot,'$.lifetime'); UPDATE account_fame SET balance=19,earned=19; PRAGMA user_version=16;").unwrap();
     let source = Store::open(&path, &content).unwrap();
     let before = dump(&db);
     let raw: String = db
@@ -1173,6 +1224,23 @@ async fn account_save_replacement_retained_trade_participation_refused_but_unrel
         .exchange_trade("b".repeat(32), vec![write(&left), write(&right)], None)
         .await
         .unwrap();
+    // This fresh case isolates retained trade independently from the stricter achievement refusal.
+    local
+        .call(move |db| {
+            for (table, _) in super::super::schema22_compat::TABLES {
+                db.execute(
+                    &format!("DELETE FROM {table} WHERE account=?1"),
+                    [imported.account],
+                )?;
+            }
+            db.execute(
+                "DELETE FROM gold_rewards WHERE account=?1 AND reward GLOB 'achievement_*'",
+                [imported.account],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let before = dump(&db);
     let error = local
         .import_account_save(save, "replace-password".into(), true)
@@ -1221,7 +1289,7 @@ async fn account_save_schema21_preview_readonly_login_and_collision_checks() {
         .unwrap();
     drop(local);
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=21;").unwrap();
+    schema21(&db);
     let file = root.join("save.json");
     std::fs::write(&file, serde_json::to_vec(&save).unwrap()).unwrap();
     let before = dump(&db);
@@ -1288,7 +1356,7 @@ async fn account_save_collection_timestamp_rejected_without_destination_mutation
     let mut valid = save;
     valid.collections = vec![(0xa22, 1)];
     valid.collection_sources = vec![(0xa22, "Medusa".into())];
-    for source in ["", "  ", "Medusa\n"] {
+    for source in ["", "  ", "Medusa\n", "Medusa\u{0085}", "Medusa\u{009f}"] {
         let mut bad = valid.clone();
         bad.collection_sources[0].1 = source.into();
         assert!(AccountSave::decode(&serde_json::to_vec(&bad).unwrap()).is_err());
@@ -1440,7 +1508,8 @@ fn write_input(root: &Path, save: &AccountSave) -> PathBuf {
     file
 }
 fn schema21(db: &Connection) {
-    db.execute_batch("DROP TABLE portable_history; DROP TABLE portable_consumed_levels; DROP TABLE portable_assists; DROP TABLE account_origins; DROP TABLE save_namespace; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=21;").unwrap();
+    crate::store::achievement_tests::schema21_fixture(db);
+    db.pragma_update(None, "user_version", 21).unwrap();
 }
 
 #[tokio::test]
@@ -1537,7 +1606,7 @@ async fn account_save_cli_preview_metadata_expected_and_snapshot_counts_preserve
     let verified = cli_ok(&["verify-snapshot", backup.to_str().unwrap(), "data"], b"");
     assert_eq!(
         verified,
-        serde_json::json!({"verified":true,"schema":23,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
+        serde_json::json!({"verified":true,"schema":25,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
     );
     assert_eq!(local.load(peer, other.id).await.unwrap().items, other.items);
     assert_eq!(
@@ -1673,7 +1742,7 @@ async fn account_save_cli_stale_missing_malformed_and_input_changed_fail_before_
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        23
+        25
     );
     let verified = cli_ok(&["verify-snapshot", backup, "data"], b"");
     assert_eq!(
@@ -1811,7 +1880,7 @@ async fn account_save_expected_transaction_rechecks_identity_and_cli_origin_repl
 }
 
 #[tokio::test]
-async fn account_save_cli_failure_outcome_prewrite_retry_and_rolled_back_postwrite_unknown() {
+async fn account_save_cli_prewrite_retry_and_noncanonical_trigger_refusal_preserve_state() {
     let (root, content, source, save) = fixture().await;
     let file = write_input(&root, &save);
     let file = file.to_str().unwrap();
@@ -1848,9 +1917,13 @@ async fn account_save_cli_failure_outcome_prewrite_retry_and_rolled_back_postwri
     );
     assert_eq!(result["login"], confirmed["login"]);
     let db = Connection::open(&dbpath).unwrap();
-    db.execute_batch("CREATE TRIGGER fail_after_character_deletion BEFORE UPDATE ON accounts WHEN OLD.id=2 BEGIN SELECT RAISE(ABORT,'PRIVATE_FAILURE_CANARY'); END;").unwrap();
     let confirmed = cli_ok(&["preview", state, "data", file], b"");
+    db.execute_batch("CREATE TRIGGER fail_after_character_deletion BEFORE UPDATE ON accounts WHEN OLD.id=2 BEGIN SELECT RAISE(ABORT,'PRIVATE_FAILURE_CANARY'); END;").unwrap();
     let before = dump(&db);
+    let (ok, failure, _) = cli(&["preview", state, "data", file], b"");
+    assert!(!ok);
+    assert_eq!(failure["outcome"], "unchanged");
+    assert_eq!(dump(&db), before);
     let backup = root.join("pre-replace.db");
     let (ok, failure, _) = cli(
         &[
@@ -1864,8 +1937,8 @@ async fn account_save_cli_failure_outcome_prewrite_retry_and_rolled_back_postwri
         b"replacement-cli-password\n",
     );
     assert!(!ok);
-    assert_eq!(failure["outcome"], "unknown");
-    assert!(backup.is_file());
+    assert_eq!(failure["outcome"], "unchanged");
+    assert!(!backup.exists());
     assert_eq!(dump(&db), before);
     for operation in ["verify-account", "preview"] {
         let bad = root.join("PRIVATE_FAILURE_CANARY.json");
@@ -2031,4 +2104,166 @@ async fn account_save_cli_truncated_or_broken_acknowledgement_is_nonzero_not_unc
     drop(local);
     drop(source);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn account_save_achievement_history_is_representable_only_without_owned_progress_and_never_replaced()
+ {
+    let (root, content, source, mut save) = fixture().await;
+    save.rewards.push(Reward {
+        reward: "achievement_ah_7uck".into(),
+        awarded_at: 123,
+        notified_at: Some(124),
+    });
+    let character = save
+        .characters
+        .iter_mut()
+        .find(|r| !r.character.alive)
+        .unwrap();
+    character
+        .character
+        .achievements
+        .insert(crate::achievements::Achievement::Ah7uck);
+    let id = character.character.id;
+    save.deaths
+        .iter_mut()
+        .find(|d| d.character.id == id)
+        .unwrap()
+        .character
+        .achievements
+        .insert(crate::achievements::Achievement::Ah7uck);
+    let local = Store::open(&root.join("achievement-local.db"), &content).unwrap();
+    let empty = dump(&Connection::open(root.join("achievement-local.db")).unwrap());
+    for unpaid in [
+        crate::achievements::Achievement::NexusAfterDeath,
+        crate::achievements::Achievement::Ah7uck,
+        crate::achievements::Achievement::BabyMax,
+    ] {
+        let mut invalid = save.clone();
+        invalid.rewards.retain(|r| r.reward != unpaid.reward());
+        invalid
+            .characters
+            .iter_mut()
+            .find(|r| r.character.alive)
+            .unwrap()
+            .character
+            .achievements
+            .insert(unpaid);
+        assert!(
+            local
+                .import_account_save(invalid, "achievement-password".into(), false)
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("unpaid achievement history")
+        );
+        assert_eq!(
+            dump(&Connection::open(root.join("achievement-local.db")).unwrap()),
+            empty
+        );
+    }
+    let imported = local
+        .import_account_save(save.clone(), "achievement-password".into(), false)
+        .await
+        .unwrap();
+    let exported = local.export_account_save(imported.account).await.unwrap();
+    assert_eq!(exported.gold, save.gold);
+    assert_eq!(
+        exported
+            .rewards
+            .iter()
+            .find(|r| r.reward == "achievement_ah_7uck")
+            .map(|r| (r.awarded_at, r.notified_at)),
+        Some((123, Some(124)))
+    );
+    assert!(exported.characters.iter().any(|r| {
+        r.character
+            .achievements
+            .contains(&crate::achievements::Achievement::Ah7uck)
+    }));
+    let path = root.join("achievement-local.db");
+    let before = dump(&Connection::open(&path).unwrap());
+    assert!(
+        local
+            .import_account_save(exported, "achievement-password".into(), true)
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("format1 cannot safely replace")
+    );
+    assert_eq!(dump(&Connection::open(&path).unwrap()), before);
+    for state in [
+        "flags",
+        "receipt",
+        "partner",
+        "dungeon",
+        "realm",
+        "archived-flags",
+    ] {
+        let target = root.join(format!("guard-{state}.db"));
+        let store = Store::open(&target, &content).unwrap();
+        let mut empty = save.clone();
+        empty
+            .rewards
+            .retain(|r| !r.reward.starts_with("achievement_"));
+        for row in &mut empty.characters {
+            row.character.achievements.clear();
+        }
+        for row in &mut empty.deaths {
+            row.character.achievements.clear();
+        }
+        let imported = store
+            .import_account_save(empty.clone(), "guard-password".into(), false)
+            .await
+            .unwrap();
+        let account = imported.account;
+        let state = state.to_owned();
+        let seeded = state.clone();
+        store.call(move |db| {
+            db.execute("INSERT INTO accounts(guid,name) VALUES('unrelated-guard-peer','Unrelated')",[])?;
+            let peer=i32::try_from(db.last_insert_rowid())?;
+            db.execute("INSERT INTO account_fame(account,balance,earned) SELECT ?1,0,0 WHERE NOT EXISTS(SELECT 1 FROM account_fame WHERE account=?1)",[peer])?;
+            db.execute("INSERT INTO achievement_partners VALUES(?1,?2)",params![peer,account])?;
+            match state.as_str() {
+                "flags"=>{db.execute("UPDATE characters SET stats=json_set(stats,'$.achievements',json('[\"hit_by_truck\"]')) WHERE account=?1",[account])?;},
+                "archived-flags"=>{db.execute("UPDATE deaths SET snapshot=json_set(snapshot,'$.achievements',json('[\"hit_by_truck\"]')) WHERE character IN (SELECT id FROM characters WHERE account=?1)",[account])?;},
+                "receipt"=>{db.execute("INSERT INTO gold_rewards VALUES(?1,'achievement_trader',123,124)",[account])?;},
+                "partner"=>{db.execute("INSERT INTO achievement_partners VALUES(?1,?2)",params![account,peer])?;},
+                "dungeon"=>{db.execute("INSERT INTO achievement_dungeons VALUES(?1,'pirate-cave')",[account])?;},
+                "realm"=>{db.execute("INSERT INTO achievement_realm_credits VALUES(?1,?2,1)",params![account,"a".repeat(32)])?;},
+                _=>unreachable!(),
+            } Ok(())
+        }).await.unwrap();
+        let before = dump(&Connection::open(&target).unwrap());
+        assert!(
+            store
+                .import_account_save(empty, "guard-password".into(), true)
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("format1 cannot safely replace"),
+            "{seeded}"
+        );
+        assert_eq!(
+            dump(&Connection::open(&target).unwrap()),
+            before,
+            "{seeded}"
+        );
+        if matches!(seeded.as_str(), "partner" | "dungeon" | "realm") {
+            assert!(
+                store
+                    .export_account_save(account)
+                    .await
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("format1 cannot represent")
+            );
+            assert_eq!(dump(&Connection::open(&target).unwrap()), before);
+        }
+    }
+    drop(source);
 }

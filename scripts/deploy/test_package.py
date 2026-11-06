@@ -16,6 +16,7 @@ class PackageTests(unittest.TestCase):
             os.chdir(root)
             try:
                 files = {name: name.encode() for name in [
+                    'data/reviewed-accounts.json',
                     'data/realm-catalog.json', 'data/realm-sites.json', 'data/realms/world07.json',
                     'data/realms/classic-world-07-reconstruction.wmap',
                     *['data/realms/world07/' + name for name in [
