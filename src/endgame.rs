@@ -884,7 +884,7 @@ pub(crate) fn loot(kind: u16) -> &'static [(f64, crate::loot::Pick)] {
         0xd78 | 0xd79 => &[
             (1., Item(0xa20)),
             (0.1, Item(INCANTATION)),
-            (crate::loot::DUNGEON_UNIQUE_RATE, Item(0xc05)),
+            (0.003, Item(0xc05)),
             (0.1, Tier(7, WEAPONS)),
             (0.08, Tier(8, WEAPONS)),
             (0.05, Tier(9, WEAPONS)),
