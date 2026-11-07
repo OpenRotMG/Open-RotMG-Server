@@ -6409,6 +6409,8 @@ impl World {
                         | crate::dungeon::jungle::BOSS
                         | crate::dungeon::beach::BOSS
                         | crate::dungeon::davy::BOSS
+                        // "Realm Portal [Enter]" after Lord Ruthven in three 2012 fights (YJQPDEw20f4, Dn8ki2prSr0, I0XgIrF-BTQ).
+                        | crate::dungeon::manor::BOSS
                         | crate::dungeon::tomb::ANCHOR
                 ) {
                     0x704

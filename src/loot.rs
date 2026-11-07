@@ -41,6 +41,25 @@ pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
             (0.5, Pick::Item(0xa35)),
         ],
         0x924 => &[(0.001, Pick::Item(0xc07))],
+        // Owner-only Manor hall drops: Nosferatu Bone Dagger and T8 weapons, Armor Guard T6 weapons (Wild Shadow Manor page, 2012-05-16);
+        // Hellhound T6 weapons, client T6-T7 armour, T3 rings and abilities (2013 page; those tiers drop in 2012 hall footage). Rates kept or
+        // estimated.
+        0x1728 => &[(0.01, Pick::Item(0xc22)), (0.03, Tier(8, WEAPONS))],
+        0x1729 => &[(0.05, Tier(6, WEAPONS))],
+        0x172b => &[
+            (0.03, Tier(6, WEAPONS)),
+            (0.03, Tier(6, ARMOR)),
+            (0.02, Tier(7, ARMOR)),
+            (0.03, Tier(3, RINGS)),
+            (0.03, Tier(3, ABILITIES)),
+        ],
+        crate::dungeon::manor::KAGE => &[
+            (0.05, Tier(8, WEAPONS)),
+            (0.05, Tier(7, ARMOR)),
+            (0.05, Tier(4, ABILITIES)),
+            (0.05, Tier(4, RINGS)),
+            (0.005, Pick::Item(0x722)),
+        ],
         0x957 => &[
             (0.02, Tier(5, WEAPONS)),
             (0.01, Tier(6, WEAPONS)),
@@ -86,34 +105,44 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.1, Item(beach::DRINKS[3])),
         ],
         crate::dungeon::beach::BUM => &[(1., Item(0xc2e))],
-        crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN => &[
-            (0.5, Item(0xc21)),
-            (0.01, Item(0xc1d)),
-            (0.01, Item(0xc1f)),
+        // 2012 Manor loot (Wild Shadow Manor/Ruthven pages Apr-Jun 2012; 19 Ruthven and 8 coffin bags read in 2012 footage): no stat
+        // potions anywhere (the dark-blue bags are Holy Water, BagType 3). Rates are estimates fitted to those bag counts.
+        // Lord Ruthven: Holy Water in 16 of 17 bags, T5 abilities 4/17, client-T7 armour 6/17 (T8 once), T8-T9 weapons 3/17, T10 weapons
+        // per two 2012 pages (never seen), and the four priest-set uniques, Bone Dagger and the Incantation.
+        crate::dungeon::manor::BOSS => &[
+            (0.9, Item(0xc21)),
+            (0.25, Tier(5, ABILITIES)),
+            (0.35, Tier(7, ARMOR)),
+            (0.05, Tier(8, ARMOR)),
+            (0.05, Tier(8, WEAPONS)),
+            (0.1, Tier(9, WEAPONS)),
+            (0.03, Tier(10, WEAPONS)),
+            (0.05, Item(0xc1d)),
+            (0.05, Item(0xc1f)),
             (0.05, Item(0xc20)),
             (DUNGEON_UNIQUE_RATE, Item(0xc09)),
             (0.01, Item(0xc22)),
             (0.005, Item(0x722)),
-            (0.03, Tier(9, WEAPONS)),
-            (0.03, Tier(4, ABILITIES)),
         ],
-        crate::dungeon::manor::KAGE => &[
-            (0.1, Tier(6, WEAPONS)),
-            (0.1, Tier(7, WEAPONS)),
-            (0.05, Tier(8, WEAPONS)),
-            (0.1, Tier(6, ARMOR)),
-            (0.1, Tier(7, ARMOR)),
-            (0.05, Tier(8, ARMOR)),
-            (0.1, Tier(3, ABILITIES)),
-            (0.05, Tier(4, ABILITIES)),
-            (0.1, Tier(3, RINGS)),
-            (0.05, Tier(4, RINGS)),
-            (0.1, Item(0xa22)),
-            (0.1, Item(0xa23)),
+        // A real treasure coffin: Holy Water in 6 of 6 readable bags, T4 abilities and rings, T9 weapons, Bone Dagger 2/8, "any of this
+        // dungeon's UT gear, INC, or holy water" (Wild Shadow Manor page, 2012-04-22 and 05-16).
+        crate::dungeon::manor::COFFIN => &[
+            (1., Item(0xc21)),
+            (0.12, Tier(4, ABILITIES)),
+            (0.12, Tier(4, RINGS)),
+            (0.12, Tier(9, WEAPONS)),
+            (0.15, Item(0xc22)),
+            (0.01, Item(0xc1d)),
+            (0.01, Item(0xc1f)),
+            (0.01, Item(0xc20)),
+            (DUNGEON_UNIQUE_RATE, Item(0xc09)),
             (0.005, Item(0x722)),
         ],
-        0x1728 => &[(0.01, Item(0xc22)), (0.03, Tier(8, WEAPONS))],
-        0x1729 => &[(0.05, Tier(6, WEAPONS))],
+        // Kage Kami: a T4 ring (Paramount ring page, 2012-05-28) and the Incantation (2012 pages); the T8 weapon, client-T7 armour and T4
+        // ability come from the 2013 page only. Its Health and Magic potions are public (brown bag): `fauna_private_table` holds the rest.
+        crate::dungeon::manor::KAGE => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
+        // Hall enemies' Health and Magic potions went into public brown bags (2012 hall footage); their equipment is owner-only below.
+        0x1728 | 0x1729 | 0x172b => &[(0.03, Item(0xa22)), (0.03, Item(0xa23))],
         kind if crate::dungeon::manor::ROSTER.contains(&kind)
             || kind == crate::dungeon::manor::BOOKCASE =>
         {
@@ -1207,6 +1236,7 @@ fn fauna_multiplier(kind: u16) -> usize {
         0x20d | 0x952 | 0x903 | 0x924 => 1,
         0x941 => 8,
         0x949 | 0x950 | 0x945 | 0x957 => 2,
+        0x1728 | 0x1729 | 0x172b | crate::dungeon::manor::KAGE => 1,
         _ => unreachable!("unsupported dual-channel fauna kind {kind:#x}"),
     }
 }
@@ -1255,7 +1285,7 @@ pub fn private(kind: u16) -> bool {
         || matches!(kind, 0x649 | 0x91a | 0x6d8 | 0x905..=0x907 | 0x683..=0x686 | 0x927 | 0x640 | 0x645 | 0x646 | 0x650..=0x659
         | 0xd05 | 0x917 | crate::dungeon::snake::GUARD | 0xd06 | 0xd90 | 0xd95 | 0xd98..=0xd9a
         | crate::dungeon::jungle::BOSS | crate::dungeon::beach::BOSS
-        | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN | crate::dungeon::manor::KAGE
+        | crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN
         | crate::dungeon::abyss::MALPHAS | crate::dungeon::abyss::IDOL
         // 2012 brown bags were public: the Commander's HP/MP potions are not owner-only (Wild Shadow bag page, 2012-06-11).
         | 0x668 | 0x67d | 0xd78 | 0xd79 | crate::endgame::ORYX | crate::endgame::ORYX2)
@@ -1720,5 +1750,44 @@ mod tests {
             }
         }
         assert!(bound_success);
+    }
+}
+
+#[cfg(test)]
+mod manor_loot_tests {
+    use super::*;
+    use crate::dungeon::manor::{BOOKCASE, BOSS, COFFIN, KAGE, ROSTER};
+
+    #[test]
+    fn manor_and_kage_kami_loot_follow_the_2012_lists() {
+        // No stat potion came from the 2012 Manor or the Kage Kami; the dark-blue bags are Holy Water.
+        let stats = [0xa1f, 0xa20, 0xa21, 0xa34, 0xa35, 0xa4c];
+        for kind in ROSTER.into_iter().chain([BOOKCASE]) {
+            for (_, pick) in table(kind).iter().chain(fauna_private_table(kind)) {
+                assert!(
+                    !matches!(pick, Pick::Item(id) if stats.contains(id)),
+                    "{kind:#x} drops a stat potion"
+                );
+            }
+        }
+        let holy = |kind| {
+            table(kind)
+                .iter()
+                .find(|(_, p)| matches!(p, Pick::Item(0xc21)))
+                .map(|(chance, _)| *chance)
+        };
+        assert_eq!(holy(BOSS), Some(0.9));
+        assert_eq!(holy(COFFIN), Some(1.));
+        assert!(private(BOSS) && private(COFFIN));
+        // Health and Magic potions are public; equipment is owner-only.
+        assert!(!private(KAGE));
+        for kind in [KAGE, 0x1728, 0x1729, 0x172b] {
+            assert!(
+                table(kind)
+                    .iter()
+                    .all(|(_, p)| matches!(p, Pick::Item(0xa22 | 0xa23)))
+            );
+            assert!(!fauna_private_table(kind).is_empty());
+        }
     }
 }

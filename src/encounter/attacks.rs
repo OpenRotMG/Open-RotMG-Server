@@ -242,10 +242,21 @@ fn manor_schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
             age = t;
             state = phase;
             match phase % 3 {
-                0 => vec![fan(0, blades(hp), 10., 700, 30.)],
-                1 => [(750, 20), (1450, 6), (2250, 15), (2650, 25)]
-                    .into_iter()
-                    .map(|(delay, n)| Attack::ring(1, n, 50, 30.).fixed(0.).delay(delay).once())
+                // A volley every ≈0.45 s, often 90-180° away from the player: the direction rule is unknown, so each volley takes a
+                // pseudo-random bearing (the daggers' count and spacing follow his HP, see `daggers`).
+                0 => {
+                    let (count, gap) = daggers(hp);
+                    let bearing = (phase * 7919 + t / 450 * 104_729) % 360;
+                    vec![fan(0, count, gap, 450, 30.).fixed((bearing as f32).to_radians())]
+                }
+                // Four rings of 24 Ruthven Shots 15° apart, one shot due east, from 0.2 s after the sprite change, ≈0.4 s apart.
+                1 => (0..4)
+                    .map(|k| {
+                        Attack::ring(1, 24, 1, 30.)
+                            .fixed(0.)
+                            .delay(200 + 400 * k)
+                            .once()
+                    })
                     .collect(),
                 2 => vec![],
                 _ => unreachable!(),
@@ -253,12 +264,16 @@ fn manor_schedule(kind: u16, hp: i32, elapsed: u64) -> Schedule {
         }
         BAT | ESCORT | CHASER => vec![fan(0, 1, 0., 900, 1.)],
         0x1727 => vec![fan(0, 1, 0., 100, 1.)],
-        CREATURE => vec![fan(0, 1, 0., 200, 4.).delay(1500)],
+        // A landed coffin opens (red eyes) 0.4-0.8 s after landing, then fires single aimed Coffin Bullets about every 0.2 s.
+        CREATURE => vec![fan(0, 1, 0., 200, 4.).delay(600)],
         FERATU => vec![fan(0, 5, 9., 1200, 8.)],
-        0x1728 => vec![fan(0, 3, 20., 1500, 8.), fan(1, 5, 5., 1700, 9.)],
+        // Bone Swipe: 3 shots 25° apart, aimed, ≈2 s apart (two videos; the interval LOW); Vampire Magic 5 side by side.
+        0x1728 => vec![fan(0, 3, 25., 2000, 8.), fan(1, 5, 5., 1700, 9.)],
         0x1729 => vec![fan(0, 2, 180., 1500, 10.), fan(1, 1, 0., 750, 8.)],
-        ROCK => vec![Attack::ring(0, 8, 50, 0.).fixed(0.).delay(3000).once()],
-        0x172b => vec![fan(0, 5, 10., 1500, 10.)],
+        // A landed RockBomb bursts red and is gone ≈0.5 s later (RouEGVH0_eQ 2012-08-05): its spikes fire on landing (count unknown).
+        ROCK => vec![Attack::ring(0, 8, 50, 0.).fixed(0.).delay(50).once()],
+        // Fans ≈10.5° apart (at least 3 shots seen; count and cadence unmeasured).
+        0x172b => vec![fan(0, 5, 10.5, 1500, 10.)],
         0x172c => vec![fan(0, 3, 5., 1500, 9.)],
         COFFIN | SWARM | DECOY | KAGE | MINE | GRAVE => vec![],
         _ => unreachable!("unregistered Manor attack"),
@@ -274,23 +289,21 @@ pub(crate) fn manor_entry_schedule(kind: u16, stage: u64, elapsed: u64) -> Sched
     let mut state = stage << 32;
     let mut age = elapsed;
     let attacks = match (kind, stage) {
+        // Bursts of 4 volleys 0.2 s apart, each 2 Specter Shots 180° apart, turning 45° per volley from due east; a burst every ≈2.45 s
+        // (tH9A8yA4XQI 2012-04-03 and jhp6TWhv_44, both checked at 1.0×). No aimed pair was ever seen.
         (KAGE, 2) => {
-            let t = elapsed % 1400;
-            let aimed = t >= 1000;
-            state += elapsed / 1400 * 2 + u64::from(aimed);
-            age = if aimed { t - 1000 } else { t };
-            if aimed {
-                vec![Attack::fan(1, 2, 180., 400, 20.)]
-            } else {
-                vec![
-                    Attack::fan(1, 2, 180., 300, 0.)
-                        .fixed((t / 300) as f32 * 30f32.to_radians())
-                        .offset(90.),
-                ]
-            }
+            let t = elapsed % 2450;
+            state += elapsed / 2450;
+            age = t;
+            vec![
+                Attack::fan(1, 2, 180., 200, 0.)
+                    .fixed((t / 200) as f32 * 45f32.to_radians())
+                    .enabled(t < 800),
+            ]
         }
         (KAGE, 3) => vec![Attack::fan(0, 2, 50., 400, 20.)],
-        (MINE, 1) => vec![Attack::fan(0, 4, 45., 50, 60.).once()],
+        // A mine bursts into 4 Specter Spikes 90° apart, one of them at the nearest player.
+        (MINE, 1) => vec![Attack::fan(0, 4, 90., 50, 60.).offset(45.).once()],
         (KAGE, 0 | 1) | (MINE, 0) => vec![],
         _ => unreachable!("invalid Manor entrance phase"),
     };

@@ -816,7 +816,10 @@ impl Brain {
                         crate::dungeon::lab::HEXXER
                             | crate::dungeon::lab::DEHEXXER
                             | crate::dungeon::lab::BUBBLE
+                            | crate::dungeon::manor::GRAVE
                     )
+                    // A Kage Kami nobody has hit is still disguised as a grave; bots do not dig graveyards up, so players find him.
+                    && !(o.kind == crate::dungeon::manor::KAGE && o.hp >= o.max_hp)
             })
             .collect();
         let nearest = enemies.iter().min_by(|a, b| {
