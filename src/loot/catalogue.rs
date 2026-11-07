@@ -207,6 +207,11 @@ pub(crate) fn snapshot(content: &Content, revision: Option<&str>) -> Value {
             );
         }
     }
+    for enemy in content.objects.values() {
+        if let Some((portal, probability)) = crate::dungeon::portal_drop(enemy.kind) {
+            groups.push(json!({"enemy":{"id":enemy.kind,"name":enemy.name,"hp":enemy.hp},"channel":"Dungeon portal","mode":"independent","eligibility":"Defeated in the Realm; no damage requirement.","allocation":"One shared roll per kill; the portal opens for everyone.","rules_file":"src/world.rs","source_file":"src/dungeon.rs","entries":entries(content,enemy.kind,&[(probability,Pick::Item(portal))])}));
+        }
+    }
     for kind in [0xdc2, 0x925, 0x675, 0x678, 0x67d, 0x668] {
         groups.push(json!({"enemy":{"id":kind,"name":format!("{} chest",content.objects[&kind].name),"hp":0},"channel":"Landmark chest","mode":if matches!(kind,0xdc2|0x925){"capped"}else{"independent"},"eligibility":"Reach the spawned landmark chest; not a private kill reward.","allocation":if matches!(kind,0xdc2|0x925){"Shared chest; maximum 3–7 successful item rolls, chosen uniformly. Earlier successes can suppress later entries."}else{"Shared chest; independent tier rolls, including repeated potion attempts."},"rules_file":"src/world/realm_setpieces.rs","source_file":"src/loot.rs","entries":entries(content,kind,&chest_table(kind))}));
     }
@@ -220,7 +225,7 @@ pub(crate) fn snapshot(content: &Content, revision: Option<&str>) -> Value {
         .into_iter()
         .map(|id| {
             let o = &content.objects[&id];
-            json!({"id":id,"name":o.name,"slot":o.slot_type,"tier":o.tier})
+            json!({"id":id,"name":o.dungeon_name.as_deref().unwrap_or(&o.name),"slot":o.slot_type,"tier":o.tier})
         })
         .collect();
     json!({"revision":revision,"items":items,"groups":groups})
@@ -288,6 +293,33 @@ mod tests {
         assert_eq!(
             participation_reward(crate::dungeon::lab::CREATION),
             Some(0xa20)
+        );
+        let portals: Vec<_> = snapshot["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|g| g["channel"] == "Dungeon portal")
+            .map(|g| {
+                (
+                    g["enemy"]["name"].as_str().unwrap().to_owned(),
+                    g["entries"][0].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(portals.len(), 19);
+        assert!(portals.contains(&(
+            "Undead Dwarf God".into(),
+            json!({"probability":0.17,"items":[0x718],"balance":false,"note":""})
+        )));
+        assert!(portals.iter().any(|(name, _)| name == "Sprite Child"));
+        assert_eq!(
+            snapshot["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|i| i["name"] == "Snake Pit")
+                .count(),
+            1
         );
         assert!(snapshot["groups"].as_array().unwrap().len() > 300);
     }
