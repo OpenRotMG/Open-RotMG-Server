@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(portals.len(), 19);
         assert!(portals.contains(&(
             "Undead Dwarf God".into(),
-            json!({"probability":0.17,"items":[0x718],"balance":false,"note":""})
+            json!({"probability":0.17,"items":[0x718],"note":""})
         )));
         assert!(portals.iter().any(|(name, _)| name == "Sprite Child"));
         assert_eq!(
