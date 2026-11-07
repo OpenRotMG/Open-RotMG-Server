@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import signal
 import sqlite3
@@ -399,14 +400,21 @@ def warn_restart(config):
     if state != 'active':
         print(json.dumps({'restart_warning': 'skipped', 'service_state': state}), flush=True)
         return False
+    process = drain_process(config)
+    pending = restart_request(config, process, 'begin', owner=secrets.token_hex(32), seconds=RESTART_NOTICE_SECONDS)
+    require(pending['state'] == 'pending', 'Restart countdown was not acknowledged')
     notice = 'Server restarting in ' + str(RESTART_NOTICE_SECONDS) + ' seconds to apply an update.'
     result = announce(config, notice)
-    if result is None:
-        print(json.dumps({'restart_warning': 'unsupported', 'detail': 'running server predates the announcement endpoint'}), flush=True)
-        return False
+    require(result is not None, 'Running server did not acknowledge restart warning')
     print(json.dumps({'restart_warning': notice, 'seconds': RESTART_NOTICE_SECONDS, **result}), flush=True)
-    time.sleep(RESTART_NOTICE_SECONDS)
-    return True
+    deadline = time.monotonic() + RESTART_NOTICE_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(max(0, min(1, deadline - time.monotonic())))
+        pending = restart_request(config, process, 'status', receipt=pending['receipt'])
+        if pending['state'] == 'cancelled':
+            raise RestartCancelled(pending['actor_id'])
+        require(pending['state'] == 'pending', 'Restart countdown is no longer pending')
+    return {'process': process, 'receipt': pending['receipt']}
 
 
 def drain_process(config):
@@ -435,7 +443,7 @@ def drain_process(config):
             'listener_inode': inodes[0]}
 
 
-def drain_request(config, operation, receipt=None):
+def lifecycle_request(config, operation, payload=None):
     host, port = config['bind'].rsplit(':', 1)
     require(ipaddress.ip_address(host.strip('[]')).is_loopback and 0 < int(port) < 65536,
             'Drain endpoint must be a literal loopback address')
@@ -443,7 +451,7 @@ def drain_request(config, operation, receipt=None):
     require(bool(token), 'Drain authorization token is empty')
     request = urllib.request.Request(
         f'http://{host}:{int(port)}/internal/lifecycle/{operation}',
-        data=json.dumps(receipt).encode() if receipt is not None else b'',
+        data=json.dumps(payload).encode() if payload is not None else b'',
         headers={'authorization': 'Bearer ' + token, 'content-type': 'application/json'})
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -459,6 +467,11 @@ def drain_request(config, operation, receipt=None):
         with error:
             detail = error.read(4096).decode(errors='replace')
         raise RuntimeError(f'Drain {operation} rejected: HTTP {error.code}: {detail}') from error
+    return value
+
+
+def drain_request(config, operation, receipt=None):
+    value = lifecycle_request(config, operation, receipt)
     require(isinstance(value, dict) and set(value) == {'receipt', 'state', 'errors'}, 'Invalid drain response')
     returned = value['receipt']
     require(isinstance(returned, dict) and set(returned) == {'instance', 'generation'}
@@ -469,6 +482,25 @@ def drain_request(config, operation, receipt=None):
             'Invalid drain status')
     require(receipt is None or returned == receipt, 'Stale drain receipt returned')
     require(value['state'] != 'ready' or not value['errors'], 'Ready drain returned errors')
+    return value
+
+
+class RestartCancelled(RuntimeError):
+    pass
+
+
+def restart_request(config, process, operation, **payload):
+    require(drain_process(config) == process, 'Restart process replaced; refusing cutover')
+    value = lifecycle_request(config, 'restart', {'operation': operation, **payload})
+    require(drain_process(config) == process, 'Restart process replaced during request; refusing cutover')
+    require(isinstance(value, dict) and value.get('state') in {'pending', 'cancelled', 'consumed'}, 'Invalid restart status')
+    receipt = value.get('receipt')
+    require(isinstance(receipt, dict) and set(receipt) == {'instance', 'owner', 'deadline_ms'}
+            and all(isinstance(receipt[k], str) and re.fullmatch('[0-9a-f]{64}', receipt[k]) for k in ['instance', 'owner'])
+            and type(receipt['deadline_ms']) is int and receipt['deadline_ms'] > 0, 'Invalid restart receipt')
+    require(receipt == payload['receipt'] if 'receipt' in payload else receipt['owner'] == payload['owner'], 'Stale restart receipt returned')
+    require(value['state'] != 'cancelled' or isinstance(value.get('actor_id'), str)
+            and re.fullmatch('[0-9]{17,20}', value['actor_id']), 'Invalid restart cancellation actor')
     return value
 
 
@@ -516,9 +548,10 @@ class DrainRefused(RuntimeError):
     pass
 
 
-def stop_prepared(config, work):
+def stop_prepared(config, work, process=None):
     """Called under the deploy then backup locks; owns only readiness and the service stop."""
     evidence = {'stage': 'preparing', 'process': drain_process(config)}
+    require(process is None or evidence['process'] == process, 'Restart process replaced before drain')
     write_drain_receipt(work, evidence)
     try:
         evidence['drain'] = checked_drain_request(config, evidence['process'], 'prepare')
@@ -635,8 +668,19 @@ def deploy(stage, work, metadata, config):
     require(main_revision() == metadata['revision'], 'Main advanced during rehearsal; no cutover performed')
     with LAST_BACKUP.with_name('backup.lock').open('rb') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        warned = warn_restart(config)
-        current = main_revision() == metadata['revision']
+        try:
+            warned = warn_restart(config)
+            current = main_revision() == metadata['revision']
+            if warned and current:
+                decision = restart_request(config, warned['process'], 'consume', receipt=warned['receipt'])
+                if decision['state'] == 'cancelled':
+                    raise RestartCancelled(decision['actor_id'])
+                require(decision['state'] == 'consumed', 'Restart cutover was not acknowledged')
+        except RestartCancelled as cancelled:
+            notice = 'Server update restart cancelled. This countdown will not restart the server.'
+            require(announce(config, notice) is not None, 'Restart cancelled but announcement was not acknowledged')
+            print(json.dumps({'restart_cancelled_by': str(cancelled), 'revision': metadata['revision']}), flush=True)
+            raise
         # A safely rejected stale cutover must not leave players expecting the advertised restart: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1026
         if warned and not current:
             notice = 'Server restart postponed. This countdown is cancelled.'
@@ -651,7 +695,7 @@ def deploy(stage, work, metadata, config):
         cutover = 'stop'
         try:
             try:
-                stop_prepared(config, work)
+                stop_prepared(config, work, warned['process'] if warned else None)
             except DrainRefused as refused:
                 # Live Nov 3: the build being replaced could not drain its own failed sessions, which blocked every fix.
                 # Saves are atomic, so stopping it loses only those sessions' unsaved work, exactly as a manual restart would.
@@ -785,6 +829,10 @@ def main(desired, raw):
         install_helper(LIVE / 'scripts/deploy/update.py')
         retain_deployments()
         status('deployed', desired, recovery_directory=str(work), backup=json.loads(LAST_BACKUP.read_text()))
+    except RestartCancelled as cancelled:
+        outcome(work, 'failed', stage, 'Restart cancelled by Discord actor ' + str(cancelled))
+        status('cancelled', desired, recovery_directory=str(work), actor_id=str(cancelled))
+        raise
     except Exception as error:
         if work is not None and (work / 'outcome.json').exists():
             receipt = json.loads((work / 'outcome.json').read_text())
@@ -807,4 +855,7 @@ if __name__ == '__main__':
     raw = sys.stdin.buffer.read(LIMIT + 1)
     with LOCK.open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        main(sys.argv[1], raw)
+        try:
+            main(sys.argv[1], raw)
+        except RestartCancelled:
+            sys.exit('Update cancelled by Discord; running server unchanged')

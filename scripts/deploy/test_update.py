@@ -37,7 +37,8 @@ class UpdateTest(unittest.TestCase):
                         patch.object(update, 'run'), patch.object(update, 'rehearse'), \
                         patch.object(update, 'install_backups'), patch.object(update, 'files', return_value={}), \
                         patch.object(update, 'main_revision', side_effect=['a' * 40, revision]), \
-                        patch.object(update, 'warn_restart', return_value=warned), \
+                        patch.object(update, 'warn_restart', return_value={'process': {}, 'receipt': {}} if warned else False), \
+                        patch.object(update, 'restart_request', return_value={'state': 'consumed'}), \
                         patch.object(update, 'announce', side_effect=reply if isinstance(reply, Exception) else None, return_value=reply) as announce, \
                         patch.object(update, 'outcome', side_effect=RuntimeError('cutover reached')) as outcome, \
                         patch.object(update, 'stop_prepared') as stop, patch.object(update, 'drain_process') as drain, \
@@ -79,7 +80,8 @@ class UpdateTest(unittest.TestCase):
                     for name, value in patches.items():
                         stack.enter_context(patch.object(update, name, value) if value else patch.object(update, name))
                     for name, kwargs in {'run': {'side_effect': lambda *a: calls.append(a)}, 'files': {'return_value': {}},
-                                         'main_revision': {'return_value': 'a' * 40}, 'warn_restart': {'return_value': True},
+                                         'main_revision': {'return_value': 'a' * 40}, 'warn_restart': {'return_value': {'process': {}, 'receipt': {}}},
+                                         'restart_request': {'return_value': {'state': 'consumed'}},
                                          'stop_prepared': {'side_effect': error}, 'digest': {'return_value': 'sha'},
                                          'exchange': {'side_effect': lambda *a: calls.append(('exchange',))}}.items():
                         stack.enter_context(patch.object(update, name, **kwargs))
