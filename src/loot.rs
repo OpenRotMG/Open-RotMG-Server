@@ -70,7 +70,7 @@ pub(crate) fn period_surface(kind: u16) -> bool {
             | 0x64f | 0x650 | 0x65f..=0x661 | 0x669..=0x66b | 0x6c6 | 0x900..=0x902 | 0x91d | 0x91e
     )
 }
-// Unique rates follow Release 7.0 server data (https://www.realmeye.com/forum/t/guide-to-loot-and-drop-rates/60740); per-item damage thresholds are not modelled.
+// Unique rates follow Release 7.0 server data (https://www.realmeye.com/forum/t/guide-to-loot-and-drop-rates/60740), with the Open RotMG Discord's 2026-11-07 tenfold corrections for the dungeon and Tomb uniques; per-item damage thresholds are not modelled.
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
@@ -90,7 +90,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.05, Item(0xc1d)),
             (0.08, Item(0xc1f)),
             (0.1, Item(0xc20)),
-            (0.001, Item(0xc09)),
+            (0.01, Item(0xc09)),
             (0.01, Item(0xc22)),
             (0.001, Item(0x722)),
             (0.03, Tier(9, WEAPONS)),
@@ -133,9 +133,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Tier(11, ARMOR)),
             (0.01, Tier(11, WEAPONS)),
             (0.01, Tier(5, RINGS)),
-            (0.0025, Item(0xc29)),
+            (0.025, Item(0xc29)),
             (0.045, Item(0xc28)),
-            (0.0008, Item(0xc2a)),
+            (0.008, Item(0xc2a)),
             (0.04, Item(0xc27)),
             (0.001, Item(0x722)),
             (0.5, Item(0xa35)),
@@ -171,18 +171,18 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         kind if crate::dungeon::davy::ROSTER.contains(&kind) || kind == 0x182e => &[],
         // Trapped's ordered boss pool is reconstruction evidence, not official 123.5.1 RNG.
         crate::dungeon::tomb::BES => &[
-            (0.007, Item(0xba2)),
-            (0.003, Item(0xc1e)),
+            (0.07, Item(0xba2)),
+            (0.03, Item(0xc1e)),
             (0.007, Item(crate::endgame::INCANTATION)),
             (1., Item(0xae9)),
         ],
         crate::dungeon::tomb::GEB => &[
-            (0.007, Item(0xba1)),
+            (0.07, Item(0xba1)),
             (0.007, Item(crate::endgame::INCANTATION)),
             (1., Item(0xae9)),
         ],
         crate::dungeon::tomb::NUT => &[
-            (0.007, Item(0xba0)),
+            (0.07, Item(0xba0)),
             (0.007, Item(crate::endgame::INCANTATION)),
             (1., Item(0xae9)),
         ],
@@ -216,9 +216,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.02, Item(0xa23)),
         ],
         crate::dungeon::lab::BOSS => &[
-            (0.001, Item(0xc30)),
-            (0.002, Item(0xc32)),
-            (0.005, Item(0xc31)),
+            (0.01, Item(0xc30)),
+            (0.02, Item(0xc32)),
+            (0.05, Item(0xc31)),
             (0.01, Item(crate::endgame::INCANTATION)),
             (0.2, Tier(8, WEAPONS)),
             (0.15, Tier(9, WEAPONS)),
@@ -856,8 +856,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (1., Item(0xa4c)),
             (0.02, Item(0xa4b)),
             (0.001, Item(crate::endgame::INCANTATION)),
-            (0.001, Item(0xc03)),
-            (0.001, Item(0xa5a)),
+            (0.01, Item(0xc03)),
+            (0.01, Item(0xa5a)),
             (0.05, Tier(7, ARMOR)),
             (0.05, Tier(3, ABILITIES)),
             (0.01, Tier(5, ABILITIES)),
@@ -870,7 +870,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0xd90 => &[
             (1., Item(0xa35)),
             (0.001, Item(crate::endgame::INCANTATION)),
-            (0.001, Item(0xc02)),
+            (0.01, Item(0xc02)),
             (0.4, Tier(7, WEAPONS)),
             (0.2, Tier(8, WEAPONS)),
             (0.4, Tier(3, ABILITIES)),
@@ -936,7 +936,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (1., Item(0xa34)),
             (1., Item(0xa20)),
             (0.001, Item(crate::endgame::INCANTATION)),
-            (0.001, Item(0xc01)),
+            (0.01, Item(0xc01)),
             (0.7, Tier(7, WEAPONS)),
             (0.4, Tier(9, WEAPONS)),
             (0.15, Tier(10, WEAPONS)),
@@ -953,7 +953,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             // Legacy Trapped candidates, but our paired guarantees are reconstruction, not original per-account odds: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Abyss.cs#L224-L235
             (1., Item(0xa20)),
             (0.001, Item(crate::endgame::INCANTATION)),
-            (0.0015, Item(0xc01)),
+            (0.015, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
             (0.4, Tier(8, WEAPONS)),
             (0.11, Tier(9, WEAPONS)),

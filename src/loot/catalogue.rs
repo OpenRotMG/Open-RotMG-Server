@@ -219,18 +219,18 @@ mod tests {
     fn catalogue_follows_real_reward_rolls() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         let snapshot = snapshot(&content, Some(&"a".repeat(40)));
-        // Release 7.0 server data, as published in https://www.realmeye.com/forum/t/guide-to-loot-and-drop-rates/60740
+        // Release 7.0 data from https://www.realmeye.com/forum/t/guide-to-loot-and-drop-rates/60740 with the Discord's tenfold corrections
         let pairs = [
             (0x917, 0xc04, 0.001),
-            (0xd06, 0xc03, 0.001),
-            (0xd90, 0xc02, 0.001),
-            (0x90a, 0xc01, 0.001),
-            (0xe1d, 0xc01, 0.0015),
-            (0xd78, 0xc05, 0.003),
-            (crate::dungeon::lab::BOSS, 0xc30, 0.001),
-            (crate::dungeon::lab::BOSS, 0xc32, 0.002),
-            (crate::dungeon::manor::BOSS, 0xc09, 0.001),
-            (crate::dungeon::manor::COFFIN, 0xc09, 0.001),
+            (0xd06, 0xc03, 0.01),
+            (0xd90, 0xc02, 0.01),
+            (0x90a, 0xc01, 0.01),
+            (0xe1d, 0xc01, 0.015),
+            (0xd78, 0xc05, 0.03),
+            (crate::dungeon::lab::BOSS, 0xc30, 0.01),
+            (crate::dungeon::lab::BOSS, 0xc32, 0.02),
+            (crate::dungeon::manor::BOSS, 0xc09, 0.01),
+            (crate::dungeon::manor::COFFIN, 0xc09, 0.01),
             (crate::dungeon::snake::GUARD, 0xc04, 0.001),
             (crate::dungeon::jungle::BOSS, 0xc17, 0.08),
             (0x1705, 0xc10, 0.1),
@@ -261,7 +261,7 @@ mod tests {
         }
         assert_eq!(bonus(0xd59), &[(0.001, 0xc0a)]);
         assert_eq!(bonus(0xd60), &[(0.001, 0xc06)]);
-        assert_eq!(table(crate::dungeon::tomb::BES)[0].0, 0.007);
+        assert_eq!(table(crate::dungeon::tomb::BES)[0].0, 0.07);
         assert!(!item_qualified(0xd90, 0xc02, 1199, 8000));
         assert!(item_qualified(0xd90, 0xc02, 1200, 8000));
         assert_eq!(attempts(crate::dungeon::tomb::BES, 10), 2);
