@@ -37,7 +37,8 @@ class UpdateTest(unittest.TestCase):
                         patch.object(update, 'run'), patch.object(update, 'rehearse'), \
                         patch.object(update, 'install_backups'), patch.object(update, 'files', return_value={}), \
                         patch.object(update, 'main_revision', side_effect=['a' * 40, revision]), \
-                        patch.object(update, 'warn_restart', return_value=warned), \
+                        patch.object(update, 'warn_restart', return_value={'process': {}, 'receipt': {}} if warned else False), \
+                        patch.object(update, 'checked_restart_request', return_value={'state': 'consumed'}), \
                         patch.object(update, 'announce', side_effect=reply if isinstance(reply, Exception) else None, return_value=reply) as announce, \
                         patch.object(update, 'outcome', side_effect=RuntimeError('cutover reached')) as outcome, \
                         patch.object(update, 'stop_prepared') as stop, patch.object(update, 'drain_process') as drain, \
