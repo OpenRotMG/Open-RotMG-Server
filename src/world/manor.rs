@@ -297,12 +297,13 @@ impl World {
                     manor::profile(BOSS).speed,
                 ),
                 1 => (Motion::Stationary, 0.),
+                // In bat form he is the point his swarm follows, so the cloud's speed is his.
                 2 => (
                     Motion::Chase {
                         sight: 20.,
                         stop: 2.,
                     },
-                    manor::profile(BAT).speed,
+                    manor::profile(SWARM).speed,
                 ),
                 _ => unreachable!(),
             }
@@ -682,6 +683,56 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn manor_bats_move_at_their_2012_speeds() {
+        // Tiles per second: `profile()` divides by 1.5 and the engine divides by 1.5 again.
+        let tiles = |kind| manor::profile(kind).speed / 1.5;
+        let measured = [
+            (0x1727, 6.5),
+            (BAT, 5.6),
+            (CHASER, 6.),
+            (ESCORT, 6.),
+            (SWARM, 4.7),
+            (DECOY, 4.7),
+        ];
+        for (kind, speed) in measured {
+            assert!(
+                (tiles(kind) - speed).abs() < 1e-4,
+                "{kind:#x} moves {} tiles/s",
+                tiles(kind)
+            );
+        }
+        // In bat form Ruthven moves with his swarm.
+        let (mut world, boss) = arena();
+        let bats = manor::DAGGERS_MS + manor::RITUAL_MS;
+        assert_eq!(
+            world.manor_movement(boss, None, bats).1,
+            manor::profile(SWARM).speed
+        );
+        // The chasers cover that ground in one second of engine ticks toward a player 18 tiles away.
+        for (kind, speed) in &measured[..3] {
+            let (mut world, player) = crate::world::movement_tests::fixture(0x18, false);
+            world.name = "Manor of the Immortals".into();
+            world.encounter = true;
+            world.players.get_mut(&player).unwrap().pos = Pos { x: 22.5, y: 16.5 };
+            let bat = world
+                .spawn_entity(*kind, Pos { x: 4.5, y: 16.5 }, vec![])
+                .unwrap();
+            world.now += 50;
+            world.npc_step();
+            let start = world.entities[&bat].pos;
+            for _ in 0..20 {
+                world.now += 50;
+                world.npc_step();
+            }
+            let moved = world.entities[&bat].pos.x - start.x;
+            assert!(
+                (moved - speed).abs() < 0.05 * speed,
+                "{kind:#x} moved {moved} tiles in one second"
+            );
         }
     }
 
