@@ -19,6 +19,9 @@ mod news;
 mod projectiles;
 
 const REFERENCE: &str = "07ae4fc3ca021a5bf08bbf94f057f7620be18b85e01abd763b3a198382e8fa48";
+// 123.5.1 builds this with flag "i", the same pattern as 7.0 EmailValidator.EMAIL_REGEX. {2,4} rejects .website before the request; RFC 1035 labels are 63 octets and registration already allows that.
+const CLIENT_EMAIL_PATTERN: &[u8] = b"^[A-Z0-9._%+-]+@(?:[A-Z0-9-]+\\.)+[A-Z]{2,4}$";
+const CLIENT_EMAIL_PATTERN_FIXED: &[u8] = b"^[A-Z0-9._%+-]+@(?:[A-Z0-9-]+\\.)+[A-Z]{2,63}$";
 const OLD: [&str; 4] = [
     "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCqccYHTj4QATbK1m4UVgcTeEYt",
     "DZwZxwdayVTFs1jAwKWzoDt/CXhYUX2cEJnA93T4h6a4ysTfUrgBFZ3Nsb4W3/4C",
@@ -107,7 +110,7 @@ fn put_u30(out: &mut Vec<u8>, mut v: u32) {
 fn patch_abc(
     abc: &[u8],
     replacement: &[String; 4],
-) -> Result<(Vec<u8>, usize, usize, usize, usize)> {
+) -> Result<(Vec<u8>, usize, usize, usize, usize, usize)> {
     ensure!(abc.len() >= 4, "truncated ABC header");
     let mut p = 4;
     for _ in 0..2 {
@@ -132,6 +135,7 @@ fn patch_abc(
     );
     let mut changed = 0;
     let mut music = 0;
+    let mut email_patterns = 0;
     for _ in 1..count {
         let n = u30(abc, &mut p)? as usize;
         let s = abc.get(p..p + n).context("truncated ABC string")?;
@@ -140,6 +144,10 @@ fn patch_abc(
             put_u30(&mut out, replacement[i].len() as u32);
             out.extend(replacement[i].as_bytes());
             changed += 1;
+        } else if s == CLIENT_EMAIL_PATTERN {
+            put_u30(&mut out, CLIENT_EMAIL_PATTERN_FIXED.len() as u32);
+            out.extend(CLIENT_EMAIL_PATTERN_FIXED);
+            email_patterns += 1;
         } else if s == b"/music/sorc.mp3" {
             // Both launchers already redirect Appspot /sfx/ to same-origin audio.
             let path = b"/sfx/music/sorc.mp3";
@@ -190,7 +198,14 @@ fn patch_abc(
         let accepted = count + if gold { 2 } else { 0 };
         email::patch(&mut out, accepted, accepted + 1)?;
     }
-    Ok((out, changed, music, usize::from(gold), usize::from(email)))
+    Ok((
+        out,
+        changed,
+        music,
+        usize::from(gold),
+        usize::from(email),
+        email_patterns,
+    ))
 }
 const LOADING_METHOD: &[u8] = b"\x05\x03\x09\x0a\x76\x27\x26\xd5\x10\x06\x00\x00\x1c\x77\x1d\x87\x26\xa6\xd6\xd0\x30\xd1\x2a\x11\x03\x00\x00\x29\xd0\x76\x12\x3b\x00\x00\xd0\x66\xaa\x30\x10\x06\x00\x00\x85\x96\xb0\xad\xc0\xc7\xd2\x11\x37\x00\x00\x76\xd2\x2a\x12\x0d\x00\x00\x10\x06\x00\x00\x30\x73\x87\x82\xd7\x1d\x29\xd2\x76\x11\x1f\x00\x00\x2a\x12\x1a\x00\x00\xd2\x11\x15\x00\x00\x29\xd1\x12\x18\x00\x00\xd0\x66\xaf\x0f\x66\xaf\x4e\x60\xfc\x29\x60\x8b\x1f\xa3\xb0\x12\x0a\x00\x00\xd1\x12\x05\x00\x00\xd0\x4f\xc6\x3c\x00\x47\x00\x00";
 fn patch_loading(data: &mut [u8]) -> Result<usize> {
@@ -232,6 +247,7 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
     let mut interpolation = 0;
     let mut news = 0;
     let mut emails = 0;
+    let mut email_patterns = 0;
     while p < body.len() {
         let h = u16::from_le_bytes(
             body.get(p..p + 2)
@@ -259,11 +275,12 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
                 .iter()
                 .position(|b| *b == 0)
                 .context("unterminated DoABC name")?;
-            let (mut abc, c, m, g, e) = patch_abc(&data[offset..], replacement)?;
+            let (mut abc, c, m, g, e, patterns) = patch_abc(&data[offset..], replacement)?;
             changed += c;
             music += m;
             gold += g;
             emails += e;
+            email_patterns += patterns;
             loading += patch_loading(&mut abc)?;
             projectiles += projectiles::patch(&mut abc)?;
             interpolation += interpolation::patch(&mut abc)?;
@@ -290,6 +307,10 @@ fn patch_swf(source: &[u8], replacement: &[String; 4]) -> Result<Vec<u8>> {
     ensure!(
         emails == 1,
         "expected one exact email dialog patch, found {emails}"
+    );
+    ensure!(
+        email_patterns == 1,
+        "expected one client email pattern, found {email_patterns}"
     );
     ensure!(
         gold == 1,
@@ -356,10 +377,71 @@ mod tests {
         let input = Path::new("../client/client.swf");
         if input.exists() {
             let before = std::fs::read(input).unwrap();
+            assert_eq!(
+                before
+                    .windows(CLIENT_EMAIL_PATTERN.len())
+                    .filter(|w| *w == CLIENT_EMAIL_PATTERN)
+                    .count(),
+                1
+            );
             let patched = k.client(input).unwrap();
+            assert_eq!(
+                patched
+                    .windows(CLIENT_EMAIL_PATTERN_FIXED.len())
+                    .filter(|w| *w == CLIENT_EMAIL_PATTERN_FIXED)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                patched
+                    .windows(CLIENT_EMAIL_PATTERN.len())
+                    .filter(|w| *w == CLIENT_EMAIL_PATTERN)
+                    .count(),
+                0
+            );
             assert_ne!(patched, before);
             assert_eq!(std::fs::read(input).unwrap(), before);
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn client_email_pattern_accepts_a_63_octet_label() {
+        let mut abc = vec![0, 0, 0, 0, 1, 1, 1, 2];
+        put_u30(&mut abc, CLIENT_EMAIL_PATTERN.len() as u32);
+        abc.extend(CLIENT_EMAIL_PATTERN);
+        abc.extend([0x47, 0x00]);
+        let (patched, keys, _, _, _, patterns) = patch_abc(
+            &abc,
+            &[String::new(), String::new(), String::new(), String::new()],
+        )
+        .unwrap();
+        assert_eq!((keys, patterns), (0, 1));
+        assert!(
+            patched
+                .windows(CLIENT_EMAIL_PATTERN_FIXED.len())
+                .any(|w| w == CLIENT_EMAIL_PATTERN_FIXED)
+        );
+        assert!(
+            !patched
+                .windows(CLIENT_EMAIL_PATTERN.len())
+                .any(|w| w == CLIENT_EMAIL_PATTERN)
+        );
+        assert_eq!(&patched[patched.len() - 2..], &[0x47, 0x00]);
+        let mut absent = vec![0, 0, 0, 0, 1, 1, 1, 2, 1, b'x', 0x47];
+        let (_, _, _, _, _, patterns) = patch_abc(
+            &absent,
+            &[String::new(), String::new(), String::new(), String::new()],
+        )
+        .unwrap();
+        assert_eq!(patterns, 0);
+        absent[8] = 5;
+        assert!(
+            patch_abc(
+                &absent,
+                &[String::new(), String::new(), String::new(), String::new()],
+            )
+            .is_err()
+        );
     }
 }
