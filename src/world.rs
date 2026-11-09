@@ -6447,6 +6447,8 @@ impl World {
                         // "Realm Portal [Enter]" after Lord Ruthven in three 2012 fights (YJQPDEw20f4, Dn8ki2prSr0, I0XgIrF-BTQ).
                         | crate::dungeon::manor::BOSS
                         | crate::dungeon::tomb::ANCHOR
+                        // Dr Terrible leaves a Realm Portal arch where he dies: t0f0_BWpBtw (2012-09-08) t=927-934.
+                        | crate::dungeon::lab::BOSS
                 ) {
                     0x704
                 } else {

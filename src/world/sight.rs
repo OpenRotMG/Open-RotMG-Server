@@ -36,11 +36,16 @@ impl World {
 
     /// Worlds whose closed rooms stay undiscovered until a door, shelf or grate opens. In Davy Jones's Locker a room
     /// behind a closed gate stays black on the minimap until it opens: https://www.youtube.com/watch?v=2C8h5dswJmg&t=282
-    /// (2012-10-02), https://www.youtube.com/watch?v=3BJGr4JLXu0&t=103 (2012-08-13).
+    /// (2012-10-02), https://www.youtube.com/watch?v=3BJGr4JLXu0&t=103 (2012-08-13). In the Mad Lab the minimap stays
+    /// black north of Dr Terrible's room while its Lab Emergency Walls (BlocksSight) stand, though the Horrific
+    /// Creation's room lies in sight range: https://www.youtube.com/watch?v=C4sKt3Se0T0&t=40 (2012-09-27).
     pub(super) fn room_sight_world(&self) -> bool {
         matches!(
             self.name.as_str(),
-            "Snake Pit" | "Manor of the Immortals" | crate::dungeon::davy::NAME
+            "Snake Pit"
+                | "Manor of the Immortals"
+                | crate::dungeon::davy::NAME
+                | crate::dungeon::lab::NAME
         )
     }
 
