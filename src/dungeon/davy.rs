@@ -155,10 +155,16 @@ pub mod tuning {
     pub const HALL_CLEARANCE: i32 = 1;
     pub const PARALLEL_CLEARANCE: i32 = 3;
     pub const ROOM_CLEARANCE: i32 = 0;
-    /// nilly's coloured room doors besides start (purple) and boss (yellow); one video may show a second red.
+    /// nilly's coloured room doors besides start (purple) and boss (yellow).
     pub const GREEN: usize = 5;
-    pub const RED: usize = 1;
     pub const YELLOW: usize = 3;
+    /// Red rooms per run; any one holds the yellow key. 2 is measured: two distinct closed red gates before the red key
+    /// in each of youtu.be/JV80D2whb1Y (2012-08-04) t=6, 13 and youtu.be/tMJCIHPjYdo (2012-08-04) t=10, 30, which
+    /// leaves the rest of each map unseen. 3 is an estimate for those unseen parts.
+    pub const RED: RangeInclusive<usize> = 2..=3;
+    /// Purple rooms besides the start: the green key's ("green key is in a blue room", youtu.be/3BJGr4JLXu0
+    /// 2012-08-13 t=14; the purple key is "blue" there).
+    pub const PURPLE: usize = 1;
     /// Enemy packs per 12-tile hall module or room (a guess).
     pub const PACKS: i32 = 1;
     /// Square world the layout is centred in, as in nilly.
@@ -559,16 +565,25 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>)> {
         .filter(|&i| !nodes[i].t.hall() && nodes[i].color.is_none())
         .collect();
     rooms.shuffle(&mut rng);
-    let colors = [vec![2; RED], vec![1; GREEN], vec![3; YELLOW]].concat();
+    let red = rng.gen_range(RED);
+    let colors = [
+        vec![2; red],
+        vec![1; GREEN],
+        vec![3; YELLOW],
+        vec![0; PURPLE],
+    ]
+    .concat();
     ensure!(
-        rooms.len() > colors.len(),
-        "Davy layout lacks a doorless room for the green key"
+        rooms.len() >= colors.len(),
+        "Davy layout lacks a room for every coloured door"
     );
     for (&i, c) in rooms.iter().zip(colors) {
         nodes[i].color = Some(c);
     }
-    // Purple in the start, green in a doorless room, red behind green, yellow in the red room.
-    let holders = [0, rooms[RED + GREEN + YELLOW], rooms[RED], rooms[0]];
+    // Every key but purple waits behind a closed door of the colour before it: "green key is in a blue room / red key
+    // is in a green room / yellow key is in a red room" (youtu.be/3BJGr4JLXu0 2012-08-13 t=14). Rooms left over stay
+    // doorless and keyless.
+    let holders = [0, rooms[red + GREEN + YELLOW], rooms[red], rooms[0]];
 
     let (x0, y0, x1, y1) = bounds(nodes.iter().map(|n| n.rect).chain(gaps.iter().copied()));
     let (dx, dy) = (
@@ -827,7 +842,7 @@ mod tests {
                 map.cells.iter().zip(&all).all(|(c, r)| *r || !walkable(c)),
                 "seed {seed}: unreachable floor"
             );
-            // Key chain: each key needs exactly the colours before it; Davy needs all four.
+            // Key chain: each key needs exactly the colours before it, so Davy, behind yellow, needs all four.
             let find = |kind: u16| {
                 map.cells
                     .iter()
@@ -844,13 +859,58 @@ mod tests {
                     "seed {seed}: key {c} early"
                 );
             }
+            // Every key but purple sits in a leaf room whose neck is shut, at generation, by the colour before it.
+            let door = |i: usize| map.cells[i].object.and_then(door_color);
+            for (c, &key) in KEYS.iter().enumerate().skip(1) {
+                let room = owner[find(key)].unwrap();
+                let gate: Vec<_> = (0..map.cells.len())
+                    .filter(|&i| owner[i] == Some(room) && door(i).is_some())
+                    .collect();
+                assert!(
+                    !nodes[room].t.hall()
+                        && nodes[room].color == Some(c - 1)
+                        && gate.len() == 2
+                        && gate.iter().all(|&i| door(i) == Some(c - 1)),
+                    "seed {seed}: key {c} room door"
+                );
+            }
+            // Purple shuts the start and the green key's room, nothing else.
+            let green = owner[find(KEYS[1])];
             let purple: Vec<_> = (0..map.cells.len())
-                .filter(|&i| map.cells[i].object.and_then(door_color) == Some(0))
+                .filter(|&i| door(i) == Some(0))
                 .collect();
             assert!(
-                purple.len() == 2 && purple.iter().all(|&i| owner[i] == Some(0)),
-                "seed {seed}: purple door"
+                purple.len() == 4
+                    && purple.iter().filter(|&&i| owner[i] == Some(0)).count() == 2
+                    && purple.iter().filter(|&&i| owner[i] == green).count() == 2,
+                "seed {seed}: purple doors"
             );
+            // 2-3 red rooms beside 5 green and 3 yellow ones, each shut by its own pair of door cells.
+            let leaves = |c: Option<usize>| -> Vec<usize> {
+                (1..nodes.len())
+                    .filter(|&i| !nodes[i].t.hall() && nodes[i].name != "boss")
+                    .filter(|&i| nodes[i].color == c)
+                    .collect()
+            };
+            let red = leaves(Some(2)).len();
+            assert!(
+                tuning::RED.contains(&red)
+                    && leaves(Some(1)).len() == tuning::GREEN
+                    && leaves(Some(3)).len() == tuning::YELLOW,
+                "seed {seed}: room colours"
+            );
+            let reds = (0..map.cells.len()).filter(|&i| door(i) == Some(2));
+            assert_eq!(reds.count(), 2 * red, "seed {seed}: red doors");
+            // The rooms left over have no door and hold no key.
+            let keyed: Vec<_> = KEYS.iter().map(|&k| owner[find(k)]).collect();
+            for i in leaves(None) {
+                assert!(
+                    !keyed.contains(&Some(i))
+                        && (0..map.cells.len()).all(|k| owner[k] != Some(i) || door(k).is_none()),
+                    "seed {seed}: doorless {} holds a key or a door",
+                    nodes[i].name
+                );
+            }
             let (davy, w) = (find(BOSS) as i32, map.width);
             let lamps: Vec<_> = (0..map.cells.len() as i32)
                 .filter(|&i| map.cells[i as usize].object == Some(UNLIT))

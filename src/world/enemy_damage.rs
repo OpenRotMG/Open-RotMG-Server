@@ -151,6 +151,12 @@ impl World {
         if tomb_dying {
             self.flash_inland(target, 0xffff0000, 0.1, 20.);
         }
+        if matches!(
+            kind,
+            crate::dungeon::davy::UNLIT | crate::dungeon::davy::LIT
+        ) {
+            self.locker_lantern_hit();
+        }
         if lantern {
             self.light_locker_lantern(target)?;
         } else if transform {

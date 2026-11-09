@@ -516,6 +516,18 @@ mod tests {
     }
 
     #[test]
+    fn manor_secret_room_refuses_a_blink_until_its_bookshelf_opens() {
+        use super::super::sight::tests::{blink, refused};
+        const CLOAK: u16 = 0xa5a;
+        let (mut world, player, wall, inside) = secret_bookshelf_view();
+        refused(&mut world, player, CLOAK, inside);
+        world.remove_entity(wall);
+        blink(&mut world, player, CLOAK, inside).unwrap();
+        let p = &world.players[&player];
+        assert_eq!((p.pos.x, p.pos.y), (inside.x, inside.y));
+    }
+
+    #[test]
     fn manor_secret_bookshelf_removal_invalidates_stationary_tile_scan() {
         let (mut world, player, wall, _) = secret_bookshelf_view();
         world.updates(player, true).unwrap();
