@@ -75,20 +75,30 @@ pub fn profile(kind: u16) -> Profile {
     use Motion::*;
     let (motion, speed, range) = match kind {
         BOSS => (WanderHome { radius: 1. }, 1., 30.),
+        // Bat speeds are straight flights in YJQPDEw20f4 (2012-10-03), which plays at 1.0× (its SPD-57 warrior tops out at
+        // 8.3 tiles/s), scaled by 2.25 like the Hellhounds below. Room Swarmers fly ≈6.5 tiles/s (24 flights t=88-106, IQR
+        // 6.3-6.7), coffin-wave bats ≈5.6 (11 flights t=160-171, IQR 4.8-6.0). Decoy bats were never told apart from his own
+        // on screen, so they take his own bats' speed (estimate).
         BAT | CHASER | 0x1727 => (
             Chase {
                 sight: 20.,
                 stop: if kind == BAT { 2. } else { 0. },
             },
-            8.,
+            match kind {
+                0x1727 => 6.5 * 2.25,
+                BAT => 5.6 * 2.25,
+                _ => 6. * 2.25,
+            },
             1.,
         ),
+        // Ruthven's own bats fly ≈6.0 tiles/s (9 flights t=220-229, IQR 5.7-6.5; others hover in the cloud) and the cloud they
+        // follow travels ≈4.7 (nine half-second minimap windows t=218-226, 2.5-7.7), YJQPDEw20f4 2012-10-03.
         ESCORT => (
             Protect {
                 anchor: Anchor::Parent,
                 distance: 4.,
             },
-            8.,
+            6. * 2.25,
             1.,
         ),
         SWARM => (
@@ -96,15 +106,16 @@ pub fn profile(kind: u16) -> Profile {
                 anchor: Anchor::Parent,
                 distance: 0.3,
             },
-            8.,
+            4.7 * 2.25,
             0.,
         ),
+        // The minimap groups moved alike whether his own or a decoy, so a decoy's centre takes his swarm's speed (estimate).
         DECOY => (
             Chase {
                 sight: 20.,
                 stop: 2.,
             },
-            6.,
+            4.7 * 2.25,
             0.,
         ),
         CREATURE | COFFIN | ROCK => (Stationary, 0., 10.),
