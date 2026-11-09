@@ -14,7 +14,49 @@ pub(super) struct Toss {
     deadline: u64,
 }
 
+// 123.5.1 chat: t0f0_BWpBtw (2012-09-08) t=170-330, t=908-926. Which phase speaks which line is an estimate.
+pub(super) const OUT_TAUNTS: &[&str] = &[
+    "For Science!",
+    "Try my latest concoction.",
+    "Don't worry, your death will be documented closely.",
+    "Side effects may include your death!",
+    "Time to delegate your death to my minions!",
+    "If my calculations are correct, this will hurt you.",
+    "You'll make a nice snack for my creations.",
+];
+pub(super) const BUBBLE_TAUNTS: &[&str] = &[
+    "Great Scott! I must retreat.",
+    "Time to feed my pets!",
+    "You've beaten me back.",
+];
+// C4sKt3Se0T0 (2012-09-27) t=162-330; the 10 s cadence is an estimate.
+pub(super) const CREATION_TAUNTS: &[&str] = &[
+    "Attacks no hurt me!!!",
+    "RAHHHHHHHHH",
+    "Little people's attacks tickle.",
+    "You hurt master!",
+    "Me can do this all day!",
+    "You no hurt me.",
+    "What, you scared???",
+];
+
 impl World {
+    /// Speech bubble and chat line. Horrific Creation shouts from its sealed room to the whole Lab.
+    fn lab_say(&mut self, id: i32, lines: &[&str]) {
+        let text = *lines.choose(&mut self.rng).expect("Lab taunt lines");
+        let e = &self.entities[&id];
+        tracing::info!(entity = id, kind = e.kind, %text, "Mad Lab taunt");
+        let name = format!("#{}", self.content.objects[&e.kind].name);
+        let packet = chat::text_packet(&name, id, 5, text);
+        for p in self
+            .players
+            .values()
+            .filter(|p| e.kind == lab::CREATION || p.pos.distance(e.pos) < 20.)
+        {
+            send(p, packet.id, packet.body.clone());
+        }
+    }
+
     pub(super) fn lab_step(&mut self) {
         let pools: Vec<_> = self
             .world_effect_actors()
@@ -29,21 +71,30 @@ impl World {
             if player.paused {
                 continue;
             }
+            // Pools act on players standing in a vat, so a walkway beside one stays dry.
+            let wet = matches!(
+                self.map.cells
+                    [(player.pos.y as i32 * self.map.width + player.pos.x as i32) as usize]
+                    .ground,
+                lab::BAD_VAT | lab::GOOD_VAT
+            );
             let inside = |center: Pos| {
                 (center.x as i32 - player.pos.x as i32).abs() < 2
                     && (center.y as i32 - player.pos.y as i32).abs() < 2
             };
             // Actor geometry is reconstructed, not inferred from particle extents or water IDs; blue wins overlaps.
-            let blue = pools
-                .iter()
-                .any(|(kind, pos)| *kind == lab::DEHEXXER && inside(*pos));
+            let blue = wet
+                && pools
+                    .iter()
+                    .any(|(kind, pos)| *kind == lab::DEHEXXER && inside(*pos));
             let old = player.lab_conditions;
             if blue {
                 player.lab_conditions = 0;
                 player.statuses.remove(&condition::HEXED);
-            } else if pools
-                .iter()
-                .any(|(kind, pos)| *kind == lab::HEXXER && inside(*pos))
+            } else if wet
+                && pools
+                    .iter()
+                    .any(|(kind, pos)| *kind == lab::HEXXER && inside(*pos))
             {
                 player.lab_conditions =
                     condition::bit(condition::HEXED) | condition::bit(condition::SPEEDY) | STUNNED;
@@ -116,25 +167,19 @@ impl World {
             let mut stage = e.stage.unwrap_or(0);
             // Approved reconstruction makes the comparator's idle-only rage gate global and irreversible.
             let rage = e.hp < self.content.objects[&kind].hp / 5;
-            let duration = if stage.is_multiple_of(3) {
-                12000
-            } else if stage % 3 == 1 || stage == 13 {
-                10000
-            } else {
-                15000
-            };
-            if e.stage.is_none() || rage && stage < 12 || elapsed >= duration {
-                stage = if rage && stage < 12 {
-                    12
+            // Even stages walk out with gas, odd ones hide in the bubble, 20 s each; stage 8 is rage.
+            // t0f0_BWpBtw (2012-09-08, 2x clip) t=269-330 and hiaac1s96Ow (2012-09-01) t=484-545: 40 s period.
+            let entered = e.stage.is_none() || stage < 8 && (rage || elapsed >= 20000);
+            if entered {
+                stage = if rage {
+                    8
                 } else if e.stage.is_none() {
                     0
-                } else if stage >= 12 {
-                    if stage == 12 { 13 } else { 12 }
                 } else {
-                    (stage + 1) % 12
+                    (stage + 1) % 8
                 };
                 self.lab_stage(id, stage);
-                let hide = stage < 12 && stage % 3 == 2;
+                let hide = stage % 2 == 1;
                 let e = self.entities.get_mut(&id).unwrap();
                 if hide {
                     e.condition |= condition::bit(condition::INVINCIBLE);
@@ -143,6 +188,7 @@ impl World {
                 }
                 self.landmark_texture(id, i32::from(hide));
                 if hide {
+                    let home = self.entities[&id].home;
                     let cages: Vec<_> = self
                         .entities
                         .values()
@@ -150,27 +196,30 @@ impl World {
                         .map(|e| e.pos)
                         .collect();
                     for position in cages {
-                        for kind in [0x1e23, 0x1e24, 0x1e25] {
-                            if !self.actors().any(|e| {
-                                e.parent == Some(id)
-                                    && e.kind == kind
-                                    && e.home.distance(position) < 0.1
-                            }) {
-                                // Selected cages occupy their cell: release inward without bypassing collision.
-                                let home = self.entities[&id].home;
-                                let landing = Pos {
-                                    x: position.x + (home.x - position.x).signum(),
-                                    y: position.y + (home.y - position.y).signum(),
-                                };
-                                let child = self.lab_spawn(id, kind, landing)?;
-                                self.entities.get_mut(&child).unwrap().home = position;
-                            }
+                        let caged: Vec<_> = self
+                            .actors()
+                            .filter(|e| e.parent == Some(id) && matches!(e.kind, 0x1e23..=0x1e25))
+                            .map(|e| e.home)
+                            .collect();
+                        // One minion per cage (https://wikiwiki.jp/rmd/Dr%20Terrible, undated body), at most four alive
+                        // (C4sKt3Se0T0 2012-09-27 minimap). The uniform kind draw is an estimate.
+                        if caged.len() >= 4 || caged.iter().any(|h| h.distance(position) < 0.1) {
+                            continue;
                         }
+                        // Selected cages occupy their wall cell: release straight into the room without bypassing collision.
+                        let landing = Pos {
+                            x: position.x + (home.x - position.x).signum(),
+                            y: position.y,
+                        };
+                        let kind = [0x1e23, 0x1e24, 0x1e25][self.rng.gen_range(0..3)];
+                        let child = self.lab_spawn(id, kind, landing)?;
+                        self.entities.get_mut(&child).unwrap().home = position;
                     }
                 }
             }
-            let hide = stage < 12 && stage % 3 == 2;
-            let safe = (stage / 3) as u16;
+            let elapsed = if entered { 0 } else { elapsed };
+            let hide = stage % 2 == 1;
+            let safe = (stage / 2) as u16;
             let fixtures: Vec<_> = self
                 .entities
                 .values()
@@ -181,7 +230,7 @@ impl World {
                 let e = self.entities.get_mut(&fixture).unwrap();
                 e.parent.set(Some(id), fixture, &mut self.timed_ids);
                 if (0x993..=0x996).contains(&e.kind) {
-                    e.stage = Some(u64::from(!hide && stage < 12 && e.kind != 0x993 + safe));
+                    e.stage = Some(u64::from(!hide && stage < 8 && e.kind != 0x993 + safe));
                 }
                 let kind = e.kind;
                 if kind == lab::BUBBLE {
@@ -198,12 +247,33 @@ impl World {
                     self.landmark_texture(fixture, if hide { 2 } else { 0 });
                 }
             }
+            if entered || !hide && self.now >= self.entities[&id].reaction_until {
+                self.lab_say(id, if hide { BUBBLE_TAUNTS } else { OUT_TAUNTS });
+                self.entities.get_mut(&id).unwrap().reaction_until = self.now + 10000;
+            }
             if !hide
                 && self.now >= self.entities[&id].next_aux
                 && self.entities[&id].conditions(self.now) & STUNNED == 0
             {
-                if let Some(position) = target.filter(|p| p.distance(self.entities[&id].pos) < 5.) {
-                    let kind = if stage == 13 || stage < 12 && stage % 3 == 1 && stage < 3 {
+                // Potions reach a player about 8 tiles away: t0f0_BWpBtw (2012-09-08) t=912-926. 10 tiles is an estimate.
+                let pos = self.entities[&id].pos;
+                let players: Vec<_> = self
+                    .players
+                    .values()
+                    .filter(|p| {
+                        p.character.alive
+                            && !p.death_pending
+                            && !p.departing
+                            && !p.paused
+                            && p.conditions(self.now) & condition::bit(condition::INVISIBLE) == 0
+                            && p.pos.distance(pos) <= 10.
+                            && self.walkable(p.pos)
+                    })
+                    .map(|p| p.pos)
+                    .collect();
+                if let Some(&position) = players.choose(&mut self.rng) {
+                    // No new turrets in rage (t=908-926); OUT alternating potions and turrets is an estimate.
+                    let kind = if stage < 8 && elapsed / 8000 % 2 == 1 {
                         0x12aa
                     } else {
                         0x978
@@ -214,7 +284,6 @@ impl World {
                             < 128,
                         SummonBudget("Dr Terrible owned summon budget exhausted".into())
                     );
-                    ensure!(self.walkable(position), "Lab toss target blocked");
                     self.telegraph_throw(id, position, 0xffffbf00);
                     self.lab_tosses.push(Toss {
                         owner: id,
@@ -223,8 +292,31 @@ impl World {
                         deadline: self.now + 1500,
                     });
                 }
-                self.entities.get_mut(&id).unwrap().next_aux =
-                    self.now + if stage >= 12 { 1500 } else { 2000 };
+                // Rage potions land about every 8 s (t0f0_BWpBtw 2x clip t=912.5-925.5); OUT reuses it as an estimate.
+                self.entities.get_mut(&id).unwrap().next_aux = self.now + 8000;
+            }
+        } else if matches!(kind, 0x981 | 0x1e23) {
+            // Dr Terrible's Experiments heal him +500, also inside his bubble: t0f0_BWpBtw (2012-09-08) t=332-335,
+            // C4sKt3Se0T0 (2012-09-27) t=40. Dungeon ones heal Crushers +300: https://wikiwiki.jp/rmd/Escaped%20Experiment
+            // (2012-12-13). The 2/3-tile reach and the 2.5 s cadence are estimates.
+            let pos = e.pos;
+            let patient = if kind == 0x1e23 {
+                e.parent.filter(|boss| {
+                    self.entities
+                        .get(boss)
+                        .is_some_and(|b| b.pos.distance(pos) <= 2.)
+                })
+            } else {
+                self.actors()
+                    .filter(|c| c.kind == 0x983 && c.pos.distance(pos) <= 3.)
+                    .min_by(|a, b| a.pos.distance(pos).total_cmp(&b.pos.distance(pos)))
+                    .map(|c| c.id)
+            };
+            if let Some(patient) = patient
+                && self.now >= e.next_aux
+            {
+                self.heal_enemy(id, patient, if kind == 0x1e23 { 500 } else { 300 })?;
+                self.entities.get_mut(&id).unwrap().next_aux = self.now + 2500;
             }
         } else if kind == 0x978 {
             if elapsed >= 2000 && e.stage.is_none() {
@@ -260,6 +352,18 @@ impl World {
             let e = self.entities.get_mut(&id).unwrap();
             e.stage = Some(stage);
             e.size = [150, 150, 175, 200][stage as usize];
+        } else if matches!(kind, 0x990 | 0x991) {
+            // Keep each turret on its own beat: the shot due (cooldown less half an interval, or now before the first
+            // shot and once the turret has idled past it) moves to the turret's next beat.
+            let interval = lab::profile(kind).interval;
+            let beat = lab::turret_beat(kind, e.home.y as i32, interval);
+            let e = self.entities.get_mut(&id).unwrap();
+            let due = if e.next_shot == 0 || e.next_shot + interval / 2 < self.now {
+                self.now
+            } else {
+                e.next_shot.saturating_sub(interval / 2)
+            };
+            e.next_shot = due + (beat + interval - due % interval) % interval;
         } else if kind == lab::CREATION {
             let (stage, pos, home) = (e.stage, e.pos, e.home);
             let inside = |pool| {
@@ -283,6 +387,9 @@ impl World {
                     }
                     tracing::info!(walls = walls.len(), "Mad Lab secret room opened");
                     self.lab_stage(id, 1);
+                    // t0f0_BWpBtw (2012-09-08) t=982-984.
+                    self.lab_say(id, &["Me door is open. Come let me crush you!"]);
+                    self.entities.get_mut(&id).unwrap().reaction_until = self.now + 10000;
                 }
                 // Attack/pool shapes: https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation; cycle order and 10/16/1 s windows are reconstruction, not recovered AI or HP thresholds.
                 Some(1 | 5) if inside(lab::HEXXER) => self.lab_stage(id, 2),
@@ -314,19 +421,35 @@ impl World {
                 };
                 self.landmark_texture(id, texture);
             }
+            if current.is_some()
+                && target.is_some()
+                && self.now >= self.entities[&id].reaction_until
+            {
+                self.lab_say(id, CREATION_TAUNTS);
+                self.entities.get_mut(&id).unwrap().reaction_until = self.now + 10000;
+            }
         }
         Ok(())
     }
 
     pub(super) fn lab_movement(&self, id: i32) -> (Motion, f32) {
         let e = &self.entities[&id];
-        if e.kind == lab::BOSS && e.stage.is_some_and(|s| s < 12 && s % 3 == 2) {
+        if e.kind == lab::BOSS && e.stage.is_some_and(|s| s % 2 == 1) {
             (
                 Motion::Protect {
                     anchor: Anchor::Home,
                     distance: 0.1,
                 },
                 nr_speed(1.),
+            )
+        } else if e.kind == 0x1e23 && e.parent.is_some() {
+            // Experiments walk to Dr Terrible to heal him: t0f0_BWpBtw (2012-09-08) t=332.
+            (
+                Motion::Protect {
+                    anchor: Anchor::Parent,
+                    distance: 1.,
+                },
+                lab::profile(e.kind).speed,
             )
         } else if e.kind == lab::CREATION
             && e.stage == Some(2)
@@ -388,7 +511,8 @@ impl World {
             }
             0x978 => vec![],
             0x993..=0x996 if e.stage != Some(1) => vec![],
-            0x993..=0x996 => fan(0, 20, 18., 22.5f32.to_radians() + 171f32.to_radians()),
+            // 18 shots per burst: https://wikiwiki.jp/rmd/Red%20Gas%20Spawner (2012-10-05).
+            0x993..=0x996 => fan(0, 18, 20., 22.5f32.to_radians() + 170f32.to_radians()),
             lab::CREATION => match e.stage {
                 Some(1 | 8) => fan(1, 3, 20., heading),
                 Some(4) => fan(6, 1, 0., heading),
@@ -452,9 +576,19 @@ impl World {
                     .set(None, cage, &mut self.timed_ids);
                 self.landmark_texture(cage, 0);
             }
+            // C4sKt3Se0T0 (2012-09-27) t=162.
+            let creation = self
+                .actors()
+                .find(|e| e.kind == lab::CREATION)
+                .map(|e| e.id);
+            if let Some(creation) = creation {
+                self.lab_say(creation, &["WHO KILL MASTER? RAHHHH!"]);
+            }
         } else if defeated.kind == 0x982 {
-            for n in 0..3 {
-                let angle = n as f32 * std::f32::consts::TAU / 3.;
+            // 1-3 Mini Bots: https://web.archive.org/web/20261025211742/https://wikiwiki.jp/rmd/Mad%20Lab (body 2013-01-30).
+            let count = self.rng.gen_range(1..=3);
+            for n in 0..count {
+                let angle = n as f32 * std::f32::consts::TAU / count as f32;
                 let position = Pos {
                     x: defeated.pos.x + 0.2 * angle.cos(),
                     y: defeated.pos.y + 0.2 * angle.sin(),

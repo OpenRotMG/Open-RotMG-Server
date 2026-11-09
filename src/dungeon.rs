@@ -66,7 +66,7 @@ pub const DUNGEONS: [(u16, &str, &str, u16); 13] = [
     (0x71b, "abyss-of-demons", "Abyss of Demons", abyss::MALPHAS),
     (0x730, "ocean-trench", "Ocean Trench", trench::THESSAL),
     (0x719, "spider-den", "Spider Den", spider::BOSS),
-    (0x890, "mad-lab", "Mad Lab", lab::BOSS),
+    (0x890, "mad-lab", lab::NAME, lab::BOSS),
     (0x733, "forbidden-jungle", "Forbidden Jungle", jungle::BOSS),
     (
         0x739,

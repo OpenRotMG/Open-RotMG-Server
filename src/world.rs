@@ -4173,8 +4173,7 @@ impl World {
         let rescan = initial || self.players[&id].tile_scan != Some(center);
         if rescan {
             // Selected bookshelves carry BlocksSight; keep unopened rooms undiscovered: https://github.com/OpenRotMG/Open-RotMG-Client/blob/4d171652c410fe4da26065b79441d1c0c2da9f94/client.swf
-            let sight = (self.name == "Snake Pit" || self.name == "Manor of the Immortals")
-                .then(|| self.room_sight(center));
+            let sight = self.room_sight_world().then(|| self.room_sight(center));
             if let Some(sight) = &sight {
                 tracing::debug!(
                     player = id,
@@ -6448,6 +6447,8 @@ impl World {
                         // "Realm Portal [Enter]" after Lord Ruthven in three 2012 fights (YJQPDEw20f4, Dn8ki2prSr0, I0XgIrF-BTQ).
                         | crate::dungeon::manor::BOSS
                         | crate::dungeon::tomb::ANCHOR
+                        // Dr Terrible leaves a Realm Portal arch where he dies: t0f0_BWpBtw (2012-09-08) t=927-934.
+                        | crate::dungeon::lab::BOSS
                 ) {
                     0x704
                 } else {
@@ -6917,6 +6918,7 @@ impl World {
                 // Rings wake beyond aimed-shot range: https://web.archive.org/web/20120122074638id_/http://forums.wildshadow.com/wiki/realm-mad-god/undead-hobbit-mage
                 0x61a => 12.,
                 0x6d8 => 12.,
+                crate::dungeon::davy::BOSS => davy::SIGHT,
                 0x91a => 7.,
                 crate::dungeon::spider::BOSS => crate::dungeon::spider::WAKE,
                 crate::dungeon::lab::BOSS => 12.,

@@ -69,8 +69,29 @@ pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
             (0.015, Tier(3, RINGS)),
             (0.015, Tier(3, ABILITIES)),
         ],
+        // Mad Lab minions' owner-only (purple and cyan bag) equipment, as listed by https://wikiwiki.jp/rmd/Escaped%20Experiment
+        // (2012-12-13), https://wikiwiki.jp/rmd/Enforcer%20Bot%203000 (2013-03-25) and https://wikiwiki.jp/rmd/Rampage%20Cyborg (2014),
+        // in client tiers. Dr Terrible's cage minions share their namesakes' lists. No source gives rates: all are estimates.
+        0x981 | 0x1e23 => &[
+            (0.02, Tier(8, WEAPONS)),
+            (0.02, Tier(7, ARMOR)),
+            (0.01, Tier(4, RINGS)),
+        ],
+        0x980 | 0x1e24 => &[(0.02, Tier(3, ABILITIES)), (0.01, Tier(4, RINGS))],
+        0x982 => &[
+            (0.02, Tier(8, WEAPONS)),
+            (0.02, Tier(7, ARMOR)),
+            (0.02, Tier(3, ABILITIES)),
+            (0.02, Tier(4, ABILITIES)),
+            (0.02, Tier(3, RINGS)),
+            (0.01, Tier(4, RINGS)),
+        ],
         _ => &[],
     }
+}
+/// Mad Lab dungeon enemies and Dr Terrible's cage minions.
+fn lab_minion(kind: u16) -> bool {
+    matches!(kind, 0x979 | 0x980..=0x983 | 0x1e23..=0x1e25)
 }
 pub(crate) fn period_dungeon(kind: u16) -> bool {
     matches!(
@@ -250,6 +271,10 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Item(0xc30)),
             (0.02, Item(0xc32)),
             (0.05, Item(0xc31)),
+            // The Conducting Wand dropped in the Lab's first week ("wand is the new wand from lab":
+            // https://www.reddit.com/r/RotMG/comments/zbbac/_/c63lkiu, 2012-09-05); which Lab boss dropped it in 2012 is unrecorded.
+            // Release 7.0 gives it 0.3%, raised tenfold like the other Lab uniques.
+            (0.03, Item(0xc33)),
             (0.01, Item(crate::endgame::INCANTATION)),
             (0.2, Tier(8, WEAPONS)),
             (0.15, Tier(9, WEAPONS)),
@@ -262,6 +287,24 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.15, Tier(4, ABILITIES)),
             (0.1, Tier(5, ABILITIES)),
         ],
+        // Rolled per account like Dr Terrible's, with its Defense guarantee; every item has a coloured, owner-only bag. A T11 staff
+        // and a Defense from it: https://www.reddit.com/r/RotMG/comments/z253d/_/c60u8dj (2012-08-30); an Experimental Ring in a cyan
+        // bag: https://wikiwiki.jp/rmd/%E3%82%B3%E3%83%A1%E3%83%B3%E3%83%88/Mad%20Lab (2012-08-30). Equipment rates are estimates; the
+        // two uniques take their Release 7.0 rates, as from Dr Terrible.
+        crate::dungeon::lab::CREATION => &[
+            (0.1, Tier(10, WEAPONS)),
+            (0.05, Tier(11, WEAPONS)),
+            (0.1, Tier(10, ARMOR)),
+            (0.05, Tier(11, ARMOR)),
+            (0.1, Tier(5, ABILITIES)),
+            (0.05, Item(0xc31)),
+            (0.03, Item(0xc33)),
+        ],
+        // Public brown bags; Lab minions' equipment is owner-only in `fauna_private_table`. Dr Terrible's minions' bags each held one
+        // Magic Potion: 10 of 10 opened in t0f0_BWpBtw (2012-09-08) t=213-680, and no Health Potion appears in that video.
+        0x1e23..=0x1e25 => &[(0.1, Item(0xa23))],
+        // The Japanese wiki lists Health and Magic potions for every dungeon minion. All 10% rates are estimates.
+        kind if lab_minion(kind) => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
         kind if crate::dungeon::lab::ROSTER.contains(&kind) => &[],
         crate::dungeon::jungle::BOSS => &[
             (1., Item(0xc1a)),
@@ -1124,6 +1167,7 @@ fn independent(kind: u16) -> bool {
         || period_surface(kind)
         || crate::encounter::tutorial::ROSTER.contains(&kind)
         || kind == crate::dungeon::tomb::TREASURE
+        || lab_minion(kind)
         || crate::quest::final_root(kind)
         || matches!(kind, crate::dungeon::trench::HERMIT | 0xd50 | 0xd52 | 0xd53)
         || matches!(kind, 0x66d..=0x672 | 0x908 | 0x90b | 0x65a..=0x65d)
@@ -1138,6 +1182,7 @@ fn independent(kind: u16) -> bool {
                 | 0xd79
                 | crate::dungeon::spider::BOSS
                 | crate::dungeon::lab::BOSS
+                | crate::dungeon::lab::CREATION
                 | crate::dungeon::jungle::BOSS
                 | crate::dungeon::beach::BOSS
                 | crate::dungeon::manor::BOSS
@@ -1257,6 +1302,7 @@ fn fauna_multiplier(kind: u16) -> usize {
         0x941 => 8,
         0x949 | 0x950 | 0x945 | 0x957 => 2,
         0x1728 | 0x1729 | 0x172b | crate::dungeon::manor::KAGE => 1,
+        kind if lab_minion(kind) => 1,
         _ => unreachable!("unsupported dual-channel fauna kind {kind:#x}"),
     }
 }
@@ -1351,6 +1397,8 @@ pub(crate) fn attempts(kind: u16, contributors: usize) -> usize {
             || crate::encounter::tutorial::ROSTER.contains(&kind)
             // realm-src Loots.cs Handle rolls public skeleton loot once per death, not per contributor.
             || matches!(kind, 0x65a..=0x65d)
+            // One public brown-bag roll per Lab minion; its equipment is rolled per owner in `fauna_private_rewards`.
+            || lab_minion(kind)
     {
         1
     } else {
@@ -1817,6 +1865,178 @@ mod manor_loot_tests {
                     .all(|(_, p)| matches!(p, Pick::Item(0xa22 | 0xa23)))
             );
             assert!(!fauna_private_table(kind).is_empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod lab_loot_tests {
+    use super::*;
+    use crate::dungeon::lab::{BOSS, CREATION, ROSTER};
+    use rand::rngs::mock::StepRng;
+
+    const MINIONS: [u16; 8] = [0x979, 0x980, 0x981, 0x982, 0x983, 0x1e23, 0x1e24, 0x1e25];
+
+    fn content() -> Content {
+        Content::load(std::path::Path::new("data")).unwrap()
+    }
+    fn every_roll() -> StepRng {
+        StepRng::new(0, 0)
+    }
+    fn no_roll() -> StepRng {
+        StepRng::new(u64::MAX, 0)
+    }
+    /// Just under (`true`) or just over (`false`) a roll of `rate`.
+    fn near(rate: f64, under: bool) -> StepRng {
+        let p = rate * if under { 0.99 } else { 1.01 };
+        StepRng::new((p * u64::MAX as f64) as u64 & !u64::from(u32::MAX), 0)
+    }
+    fn unique_rate(kind: u16, item: u16) -> Option<f64> {
+        table(kind)
+            .iter()
+            .find(|(_, pick)| matches!(pick, Pick::Item(id) if *id == item))
+            .map(|(chance, _)| *chance)
+    }
+    fn tiers(picks: &[(f64, Pick)]) -> Vec<(u8, &'static [i32], f64)> {
+        picks
+            .iter()
+            .filter_map(|(chance, pick)| match pick {
+                Pick::Tier(tier, slots) => Some((*tier, *slots, *chance)),
+                Pick::Item(_) => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn horrific_creation_rolls_t10_t11_gear_both_uniques_and_keeps_defense() {
+        let content = content();
+        validate(&content, CREATION).unwrap();
+        assert_eq!(
+            tiers(table(CREATION)),
+            [
+                (10, WEAPONS, 0.1),
+                (11, WEAPONS, 0.05),
+                (10, ARMOR, 0.1),
+                (11, ARMOR, 0.05),
+                (5, ABILITIES, 0.1),
+            ]
+        );
+        assert_eq!(unique_rate(CREATION, 0xc31), Some(0.05));
+        assert_eq!(unique_rate(CREATION, 0xc33), Some(0.03));
+        // Dr Terrible's channel: independent rolls per account (`lab_loot`) plus the guaranteed potion.
+        assert!(independent(CREATION) && independent(BOSS));
+        assert_eq!(participation_reward(CREATION), Some(0xa20));
+        let all = rewards(&content, CREATION, &mut every_roll());
+        assert_eq!(all.len(), table(CREATION).len());
+        assert!(all.contains(&0xc31) && all.contains(&0xc33));
+        assert!(rewards(&content, CREATION, &mut no_roll()).is_empty());
+        for (unique, rate) in [(0xc31, 0.05), (0xc33, 0.03)] {
+            assert!(rewards(&content, CREATION, &mut near(rate, true)).contains(&unique));
+            assert!(!rewards(&content, CREATION, &mut near(rate, false)).contains(&unique));
+        }
+        // No brown-bag item: everything the Creation drops, Defense included, is owner-only under the 2012 bag rule.
+        for item in table(CREATION)
+            .iter()
+            .flat_map(|(_, pick)| candidates(&content, *pick))
+            .chain([0xa20])
+        {
+            assert!(content.objects[&item].bag_type > 0, "{item:#x}");
+        }
+    }
+
+    #[test]
+    fn dr_terrible_can_drop_the_conducting_wand_and_keeps_wisdom() {
+        let content = content();
+        validate(&content, BOSS).unwrap();
+        assert_eq!(unique_rate(BOSS, 0xc33), Some(0.03));
+        assert!(rewards(&content, BOSS, &mut near(0.03, true)).contains(&0xc33));
+        assert!(!rewards(&content, BOSS, &mut near(0.03, false)).contains(&0xc33));
+        assert_eq!(participation_reward(BOSS), Some(0xa35));
+        // The rest of his table is unchanged (Release 7.0 rates).
+        assert_eq!(unique_rate(BOSS, 0xc30), Some(0.01));
+        assert_eq!(unique_rate(BOSS, 0xc32), Some(0.02));
+        assert_eq!(unique_rate(BOSS, 0xc31), Some(0.05));
+        assert_eq!(unique_rate(BOSS, crate::endgame::INCANTATION), Some(0.01));
+        assert_eq!(tiers(table(BOSS)).len(), 10);
+    }
+
+    #[test]
+    fn lab_minions_drop_public_potions_and_owner_only_equipment() {
+        let content = content();
+        for kind in MINIONS {
+            assert!(ROSTER.contains(&kind) && lab_minion(kind), "{kind:#x}");
+            // One public roll per kill. Dungeon minions: Health and Magic potions at 10% each. Dr Terrible's cage minions: Magic
+            // potions only, as in every 2012 bag read from them.
+            let potions: &[u16] = if (0x1e23..=0x1e25).contains(&kind) {
+                assert!(
+                    matches!(table(kind), [(mp, Pick::Item(0xa23))] if *mp == 0.1),
+                    "{kind:#x}"
+                );
+                &[0xa23]
+            } else {
+                assert!(
+                    matches!(table(kind), [(hp, Pick::Item(0xa22)), (mp, Pick::Item(0xa23))] if *hp == 0.1 && *mp == 0.1),
+                    "{kind:#x}"
+                );
+                &[0xa22, 0xa23]
+            };
+            assert!(!private(kind) && independent(kind));
+            assert_eq!(attempts(kind, 4), 1);
+            assert_eq!(rewards(&content, kind, &mut every_roll()), potions);
+            assert!(rewards(&content, kind, &mut no_roll()).is_empty());
+            assert!(
+                [0xa22, 0xa23]
+                    .iter()
+                    .all(|item| content.objects[item].bag_type == 0)
+            );
+            // Equipment only in the owner-only channel, and all of it in coloured bags.
+            for item in fauna_private_table(kind)
+                .iter()
+                .flat_map(|(_, pick)| candidates(&content, *pick))
+            {
+                assert!(content.objects[&item].bag_type > 0, "{kind:#x} {item:#x}");
+            }
+        }
+        type Tiers<'a> = &'a [(u8, &'static [i32], f64)];
+        let experiment: Tiers = &[(8, WEAPONS, 0.02), (7, ARMOR, 0.02), (4, RINGS, 0.01)];
+        let cyborg: Tiers = &[(3, ABILITIES, 0.02), (4, RINGS, 0.01)];
+        let enforcer: Tiers = &[
+            (8, WEAPONS, 0.02),
+            (7, ARMOR, 0.02),
+            (3, ABILITIES, 0.02),
+            (4, ABILITIES, 0.02),
+            (3, RINGS, 0.02),
+            (4, RINGS, 0.01),
+        ];
+        let potions_only: Tiers = &[];
+        for (kind, expected) in [
+            (0x981, experiment),
+            (0x1e23, experiment),
+            (0x980, cyborg),
+            (0x1e24, cyborg),
+            (0x982, enforcer),
+            (0x979, potions_only),
+            (0x1e25, potions_only),
+            (0x983, potions_only),
+        ] {
+            assert_eq!(tiers(fauna_private_table(kind)), expected, "{kind:#x}");
+            assert_eq!(fauna_private_table(kind).len(), expected.len(), "{kind:#x}");
+        }
+        // One owner-only roll per damaging account, never a public one.
+        let owners = [(10, 500), (20, 2), (30, 1)];
+        let won = fauna_private_rewards(&content, 0x982, &owners, &mut every_roll());
+        assert_eq!(
+            won.iter().map(|(owner, _)| *owner).collect::<Vec<_>>(),
+            [10, 20]
+        );
+        assert!(fauna_private_rewards(&content, 0x982, &owners, &mut no_roll()).is_empty());
+    }
+
+    #[test]
+    fn every_lab_kind_passes_loot_validation() {
+        let content = content();
+        for kind in ROSTER {
+            validate(&content, *kind).unwrap();
         }
     }
 }

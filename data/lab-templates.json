@@ -1,0 +1,632 @@
+{
+ "legend": {
+  "#": [
+   "",
+   "Lab Wall"
+  ],
+  "E": [
+   "",
+   "Lab Equipment Wall"
+  ],
+  ".": [
+   "Lab Floor",
+   ""
+  ],
+  ":": [
+   "Lab Grate Floor",
+   ""
+  ],
+  "g": [
+   "Lab Bad Vat Rug",
+   ""
+  ],
+  "b": [
+   "Lab Good Vat Rug",
+   ""
+  ],
+  "~": [
+   "Liquid Evil",
+   ""
+  ],
+  "m": [
+   "Metal Plates",
+   ""
+  ],
+  "o": [
+   "Lab Floor Power",
+   "Tesla Coil"
+  ],
+  "w": [
+   "Lab Floor NO WALK",
+   "West Automated Defense Turret"
+  ],
+  "e": [
+   "Lab Floor NO WALK",
+   "East Automated Defense Turret"
+  ],
+  "-": [
+   "Bright Grass",
+   "Partial Vertical Catwalk"
+  ],
+  "|": [
+   "Bright Grass",
+   "Partial Horizontal Catwalk"
+  ],
+  "+": [
+   "Bright Grass",
+   "Partial Catwalk"
+  ],
+  "@": [
+   "Lab Grate Floor",
+   "spawn"
+  ],
+  "P": [
+   "Lab Grate Floor",
+   "Portal of Cowardice"
+  ],
+  "D": [
+   "Lab Floor",
+   "Dr Terrible"
+  ],
+  "B": [
+   "Lab Floor",
+   "Dr Terrible Bubble"
+  ],
+  "C": [
+   "Lab Floor",
+   "Monster Cage"
+  ],
+  "1": [
+   "Lab Floor Power",
+   "Red Gas Spawner UL"
+  ],
+  "2": [
+   "Lab Floor Power",
+   "Red Gas Spawner UR"
+  ],
+  "3": [
+   "Lab Floor Power",
+   "Red Gas Spawner LL"
+  ],
+  "4": [
+   "Lab Floor Power",
+   "Red Gas Spawner LR"
+  ],
+  "X": [
+   "Lab Floor",
+   "Lab Emergency Wall"
+  ],
+  "H": [
+   "Lab Floor",
+   "Horrific Creation"
+  ],
+  "T": [
+   "Lab Floor Power",
+   "Tesla Coil"
+  ],
+  "q": [
+   "Lab Bad Vat No Slow",
+   "Partial Horizontal Catwalk"
+  ],
+  "p": [
+   "Lab Good Vat No Slow",
+   "Partial Horizontal Catwalk"
+  ],
+  "k": [
+   "Lab Floor",
+   "table slot"
+  ],
+  "G": [
+   "Lab Bad Vat Rug",
+   "vat field"
+  ],
+  "c": [
+   "Lab Bad Vat No Slow",
+   "Partial Catwalk"
+  ],
+  "n": [
+   "Lab Good Vat No Slow",
+   "Partial Catwalk"
+  ],
+  "v": [
+   "Lab Bad Vat No Slow",
+   "Partial Vertical Catwalk"
+  ],
+  "=": [
+   "Lab Grate Floor",
+   "Partial Catwalk"
+  ],
+  "_": [
+   "Lab Floor",
+   "Partial Catwalk"
+  ],
+  "M": [
+   "Metal Plates",
+   "Partial Catwalk"
+  ]
+ },
+ "templates": {
+  "start": {
+   "ports": [
+    [
+     "N",
+     11
+    ]
+   ],
+   "rows": [
+    "        ##########        ",
+    "        #bbbbbbbb#        ",
+    "        #bbbbbbbb#        ",
+    "        #bbbbbbbb#        ",
+    "        #bbbbbbbb#        ",
+    "        #bbbbbbbb#        ",
+    "###########.::.###########",
+    "#GGGGGGGGG..::..GGGGGGGGG#",
+    "#GGGGGGGGG..::..GGGGGGGGG#",
+    "#GGGGGGGGG..::..GGGGGGGGG#",
+    "#GGGGGGGGG..::..GGGGGGGGG#",
+    "#GGGGGGGGG..::..GGGGGGGGG#",
+    "#GGGGGGGGG..::..GGGGGGGGG#",
+    "#GGGGGG.:...::...:.GGGGGG#",
+    "#GGGGGG::...::...::GGGGGG#",
+    "#GGGGGG.....::.....GGGGGG#",
+    "#GGGGGG...::::::...GGGGGG#",
+    "#GGGGGG...::::::...GGGGGG#",
+    "#GGGGGG...::@:::...GGGGGG#",
+    "#GGGGGG...::::::...GGGGGG#",
+    "#GGGGGG...::P:::...GGGGGG#",
+    "#GGGGGG...::::::...GGGGGG#",
+    "#GGGGGG............GGGGGG#",
+    "#GGGGGG::........::GGGGGG#",
+    "#GGGGGG.:........:.GGGGGG#",
+    "#GGGGGGGGGGGGGGGGGGGGGGGG#",
+    "#GGGGGGGGGGGGGGGGGGGGGGGG#",
+    "#GGGGGGGGGGGGGGGGGGGGGGGG#",
+    "#GGGGGGGGGGGGGGGGGGGGGGGG#",
+    "#GGGGGGGGGGGGGGGGGGGGGGGG#",
+    "#GGGGGGGGGGGGGGGGGGGGGGGG#",
+    "##########################"
+   ],
+   "fixed": true,
+   "note": "wiki map; the Hexxer ring is a border-less field (G)"
+  },
+  "boss": {
+   "ports": [
+    [
+     "S",
+     10
+    ]
+   ],
+   "rows": [
+    "   ###EEEEE############ ",
+    "   #::..............::# ",
+    "   #:....:......:....:# ",
+    "   #.gggg...::...bbbb.# ",
+    "   #.gggg...::...bbbb.# ",
+    "   #.gggg...::...bbbb.# ",
+    "   #.gggg..::::..bbbb.# ",
+    "   #:....:......:....:# ",
+    "   #........H.........# ",
+    "   #:....:......:....:# ",
+    "   #.gggg..::::..bbbb.# ",
+    "   #.gggg...::...bbbb.# ",
+    "   #.gggg...::...bbbb.# ",
+    "   #.gggg...::...bbbb.# ",
+    "   #:....:......:....:# ",
+    "   #::..............::# ",
+    "   ########....######## ",
+    "          #....#        ",
+    "          #....#        ",
+    "          #....#        ",
+    "          #....#        ",
+    "###########XXXX#########",
+    "#:..T...T........T...T:#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#.....1...........2....#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#..C........B........C.#",
+    "#...........D..........#",
+    "#..C.................C.#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#.....3...........4....#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#......................#",
+    "#:....................:#",
+    "##########....##########",
+    "        #......#        ",
+    "        #bbbbbb#        ",
+    "        #bbbbbb#        ",
+    "        #bbbbbb#        ",
+    "        #......#        ",
+    "        ########        "
+   ],
+   "fixed": true,
+   "note": "wiki map; Tesla Coils under the north wall at 4, 8, 17, 21: two each side of the neck, mirrored (t0f0_BWpBtw t=940, t=994); none in the south pool section (t=150-157, t=990-992)"
+  },
+  "acid": {
+   "ports": [
+    [
+     "N",
+     8
+    ],
+    [
+     "S",
+     8
+    ]
+   ],
+   "rows": [
+    "#####E#########EEE###",
+    "#w.................e#",
+    "#w.................e#",
+    "#w~~~~~~|~~~~~~~~~~e#",
+    "#w~~~~~~|~~~~~~~~~~e#",
+    "#w~~~~~~|~~~~~~~~~~e#",
+    "#w~~++--+~~~----++~e#",
+    "#w~~++~~|~~~~~~~++~e#",
+    "#w~~|~~~|~~~~~~~|~~e#",
+    "#w~~|~~~|~~~~~~~|~~e#",
+    "#w~~|~~~|~~~~~~~|~~e#",
+    "#w~~|~~~|~~~~~~~|~~e#",
+    "#w~~|~~~|~~~~~~~|~~e#",
+    "#w~~|~~~|~~~~~~~|~~e#",
+    "#w~~+---++--++--+~~e#",
+    "#w~~|~~~++~~++~~|~~e#",
+    "#w~~|~~~~~~~|~~~|~~e#",
+    "#w~~|~~~~~~~|~~~|~~e#",
+    "#w~~|~~~~~~~|~~~|~~e#",
+    "#w~~|~~~~~~~|~~~|~~e#",
+    "#w~~|~~~~~~~|~~~|~~e#",
+    "#w~~|~~~~~~~|~~~|~~e#",
+    "#w~~++--+~~~+---++~e#",
+    "#w~~++~~~~~~|~~~++~e#",
+    "#w~~~~~~~~~~|~~~~~~e#",
+    "#w~~~~~~~~~~|~~~~~~e#",
+    "#w.................e#",
+    "#w.................e#",
+    "####EE#########EEE###"
+   ],
+   "fixed": true
+  },
+  "l_room": {
+   "ports": [
+    [
+     "S",
+     4
+    ],
+    [
+     "E",
+     4
+    ]
+   ],
+   "rows": [
+    "######################",
+    "#GGGGGGGGGGGGGGGGGGGG#",
+    "#GGGGGGGGGGGGGGGGGGGG#",
+    "#GGGGGGGGGGGGGGGGGGGG#",
+    "#GGGcMMMccccccccccccc#",
+    "#GGGcbbbcqqqcqqqcqqqc#",
+    "#GGGcbbbcqqqcqqqcqqqc#",
+    "#GGGcbbbcqqqcqqqcqqqc#",
+    "#GGGccccccccccccccccc#",
+    "#GGGcvvvcGGGGGGGGGGGG#",
+    "#GGGcvvvcGGGGGGGGGGGG#",
+    "#GGGcvvvcGGGGGGGGGGGG#",
+    "#GGGcccccGGG##########",
+    "#GGGcvvvcGGG#         ",
+    "#GGGcvvvcGGG#         ",
+    "#GGGcvvvcGGG#         ",
+    "#GGGcccccGGG#         ",
+    "#GGGcvvvcGGG#         ",
+    "#GGGcvvvcGGG#         ",
+    "#GGGcvvvcGGG#         ",
+    "#GGGcccccGGG#         ",
+    "#############         "
+   ],
+   "note": "wiki map; ports as used there (S in, E out), also S/E on the 2012-10-09 minimap; the walkway is the 2012 catwalk (s9X t=21.5-23.5, t0f0 v13-15/v40-41): plate edges and 3x3 slat blocks between plate rows/columns over the vat, slats along the run; the field has no hazard border; the DeHexxer pool at the bend is open vat ringed by catwalk plates, no hazard border (t0f0_BWpBtw 2012-09-08 t=40.5-41); the wiki grey above it is Metal Plates under plates (M)"
+  },
+  "vat_hall": {
+   "ports": [
+    [
+     "W",
+     4
+    ],
+    [
+     "E",
+     4
+    ]
+   ],
+   "rows": [
+    "#######EEEEEEE######",
+    "#oEo.:...:..:..:o..#",
+    "#.....bbbbbbbbb....#",
+    "#.:...bbbbbbbbb....#",
+    "#.....bbbbbbbbb....#",
+    "#..................#",
+    "#....::::...::::...#",
+    "#..................#",
+    "#.....ggggggggg....#",
+    "#.....ggggggggg....#",
+    "#.....ggggggggg....#",
+    "#oEo.:...:..:..:o.o#",
+    "####################"
+   ],
+   "note": "wiki map, three copies; doors W and E as used there"
+  },
+  "pair": {
+   "ports": [
+    [
+     "W",
+     4
+    ],
+    [
+     "S",
+     17
+    ]
+   ],
+   "rows": [
+    "############ ############",
+    "#oqqqqqqqqq# #mmmmmppppo#",
+    "#qqmmmmmqqq# #mbbbmppppp#",
+    "#qqmgggmqqq# #mbbbmpoppp#",
+    "#qqmgggmqqq###mbbbmppppp#",
+    "#qqmgggmqqqnnnmmmmmpppop#",
+    "#qqmgggmqqqnnnpppppmmmmm#",
+    "#qqmgggmqqqnnnpppppmbbbm#",
+    "#qqmgggmqqq###oppppmbbbm#",
+    "#qqmmmmmqqq# #pppppmbbbm#",
+    "#oqqqqqqqqo# #oppppmmmmm#",
+    "############ ############"
+   ],
+   "rooms": 2,
+   "note": "wiki map; two cells joined by a 3-wide DeHexxer pool; catwalk (q, p) over the vat outside the metal frames, as in the cluster; links between cells are plates (n), as on t0f0_BWpBtw (2012-09-08) t=69-79"
+  },
+  "table_room": {
+   "ports": [
+    [
+     "N",
+     3
+    ],
+    [
+     "S",
+     9
+    ]
+   ],
+   "rows": [
+    "##########EEE#",
+    "#........kkk.#",
+    "#o...........#",
+    "#...........o#",
+    "#:o..:..:...:#",
+    "#.ggg....bbb.#",
+    "#.ggg....bbb.#",
+    "#.ggg....bbb.#",
+    "#:...:..:..o:#",
+    "#............#",
+    "#............#",
+    "#o...........#",
+    "#.kkk.o......#",
+    "##############"
+   ],
+   "note": "wiki map; doors N and S as used there; six table slots along the north and south walls, of which 0-2 hold a Lab Table, as 2012 players remember it (estimate)"
+  },
+  "cluster": {
+   "ports": [
+    [
+     "N",
+     17
+    ],
+    [
+     "S",
+     4
+    ],
+    [
+     "W",
+     4
+    ],
+    [
+     "E",
+     17
+    ]
+   ],
+   "rows": [
+    "############ ############",
+    "#oppppppppp# #qqqqqqqqqo#",
+    "#pmmmmmmmmp# #qmmmmmqqqq#",
+    "#pmbbbbbbmp# #qmgggmqqqq#",
+    "#pmbbbbbbmp###qmgggmqqqq#",
+    "#pmbbbbbbmpnnnqmgggmmmmq#",
+    "#pmbbbbbbmpnnnqmggggggmq#",
+    "#pmbbbbbbmpnnnqmggggggmq#",
+    "#pmbbbbbbmp###qmggggggmq#",
+    "#pmmmmmmmmp# #qmmmmmmmmq#",
+    "#pppppppppp# #qqqqqqqqqq#",
+    "#####nnn#### #####nnn####",
+    "    #nnn#        #nnn#   ",
+    "#####nnn#### #####nnn####",
+    "#qqqqqqqqqo# #mmmmmppppp#",
+    "#qmmmmmmmmq# #mbbbmppppp#",
+    "#qmggggggmq# #mbbbmppppp#",
+    "#qmggggggmq###mbbbmppppp#",
+    "#qmggggggmqnnnmmmmmppppp#",
+    "#qmgggmmmmqnnnpppppmmmmm#",
+    "#qmgggmqqqqnnnpppppmbbbm#",
+    "#qmgggmqqqq###pppppmbbbm#",
+    "#qmmmmmqqqq# #pppppmbbbm#",
+    "#oqqqqqqqqq# #oppppmmmmm#",
+    "############ ############"
+   ],
+   "rooms": 4,
+   "note": "wiki map and 2012-10-09 minimap: 2x2 cells joined by 3-wide pools; N and S doors as used on the wiki map, W and E estimated; catwalk (q, p) over the vat outside the metal frames, as on t0f0_BWpBtw (2012-09-08) t=946-990; links between cells are plates (n), as on t0f0_BWpBtw (2012-09-08) t=69-79"
+  },
+  "big_room": {
+   "ports": [
+    [
+     "N",
+     8
+    ],
+    [
+     "E",
+     8
+    ],
+    [
+     "S",
+     9
+    ],
+    [
+     "W",
+     8
+    ]
+   ],
+   "rows": [
+    "################EEEE#",
+    "#:...:..........E...#",
+    "#.ggg...........E...#",
+    "#.ggg...........E...#",
+    "#.ggg..............:#",
+    "#.ggg...............#",
+    "#.ggg...............#",
+    "#:...:..............#",
+    "#...................#",
+    "#....o..........o...#",
+    "#.........oo........#",
+    "#...................#",
+    "#....o..........o...#",
+    "#...................#",
+    "#............:.....:#",
+    "#..::.........bbbbb.#",
+    "#..::.........bbbbb.#",
+    "#.............bbbbb.#",
+    "#....o.......:.....:#",
+    "#####################"
+   ],
+   "note": "wiki map, two copies; N, E and S doors as used there, W estimated"
+  },
+  "cross_hollow": {
+   "ports": [
+    [
+     "N",
+     11
+    ],
+    [
+     "W",
+     17
+    ],
+    [
+     "E",
+     17
+    ],
+    [
+     "S",
+     11
+    ]
+   ],
+   "rows": [
+    "####EE#############EEEEE##",
+    "#:......................:#",
+    "#.........:...:..........#",
+    "#..........ggg...........#",
+    "#...:..o...ggg...o...:...#",
+    "#..........ggg........EEE#",
+    "#.........:...:..........#",
+    "#........................#",
+    "#........................#",
+    "#..:...:.########.:...:..#",
+    "#...bbb..#      #..bbb...#",
+    "#...bbb..#      #..bbb...#",
+    "#...bbb..#      #..bbb...#",
+    "#..:...:.#      #.:...:..#",
+    "#........##EEE###........#",
+    "#o..o................o..o#",
+    "#........................#",
+    "#.........:...:..........#",
+    "#..........ggg...........#",
+    "#...:..o...ggg....o..:...#",
+    "#..........ggg...........#",
+    "#.........:...:..........#",
+    "#:......................:#",
+    "##########################"
+   ],
+   "note": "wiki map, two copies; N, W and E doors as used there, S estimated"
+  },
+  "walkway_cross": {
+   "ports": [
+    [
+     "N",
+     14
+    ],
+    [
+     "S",
+     14
+    ]
+   ],
+   "rows": [
+    "        ##EEE###########        ",
+    "        #............o.#        ",
+    "        E.=___=..=___=.#        ",
+    "        E.=vvv=..=vvv=.#        ",
+    "        #.=vvv=..=vvv=.#        ",
+    "#########.=vvv=..=vvv=.#########",
+    "#bbb.o....=___=..=___=...oo.bbb#",
+    "#bbb......=___=..=___=......bbb#",
+    "#bbbbbb...=___=..=___=...bbbbbb#",
+    "#bbbbbb...=vvv=..=vvv=...bbbbbb#",
+    "#bbbbbb...=vvv=..=vvv=...bbbbbb#",
+    "#bbbbbb...=vvv=..=vvv=...bbbbbb#",
+    "#bbbbbb...=___=..=___=...bbbbbb#",
+    "#bbb......=___=..=___=......bbb#",
+    "#bbb..o...=___=..=___=...o..bbb#",
+    "#########.=vvv=..=vvv=.#########",
+    "        #.=vvv=..=vvv=.#        ",
+    "        #.=vvv=..=vvv=.#        ",
+    "        #.=___=..=___=.#        ",
+    "        #..............#        ",
+    "        ##EEE###########        "
+   ],
+   "note": "wiki map (wing block re-centred over a 1-tile stitch seam); N and S doors as used there; its walkways are catwalks like the 2012 L room (plates over the grate columns and floor rows, slats over the 3x3 vat blocks); no frame of this room was found"
+  },
+  "maze": {
+   "ports": [
+    [
+     "N",
+     3
+    ],
+    [
+     "E",
+     8
+    ]
+   ],
+   "rows": [
+    "#################EEE########",
+    "#.::..::.#.................#",
+    "#........#..:.......:...:..#",
+    "#........#o..........ggg...#",
+    "#........#...........ggg...#",
+    "#........#o..........ggg...#",
+    "#..:...:....:...:...:...:..#",
+    "#...ggg......bbb..#........#",
+    "#o..ggg......bbb..#........#",
+    "#o..ggg......bbb..#........#",
+    "#..:...:....:...:.#...oo...#",
+    "#.................#...oo...#",
+    "######EEE##########........#",
+    "#..........................#",
+    "#..:................:...:..#",
+    "EEEE.................bbb...#",
+    "E....................bbb...#",
+    "#.....:..............bbb...#",
+    "#...................:...:..#",
+    "############################"
+   ],
+   "note": "wiki map; N door as used there, E estimated"
+  }
+ }
+}

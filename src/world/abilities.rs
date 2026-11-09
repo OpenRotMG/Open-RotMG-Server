@@ -233,6 +233,14 @@ impl World {
                         origin.distance(pos) <= *distance && self.walkable(pos),
                         controller("teleport target is blocked or outside ability range")
                     );
+                    // Rooms that room sight keeps undiscovered stay closed to blinks until their doors open.
+                    ensure!(
+                        !self.room_sight_world()
+                            || self
+                                .room_sight((origin.x as i32, origin.y as i32))
+                                .contains(&(pos.x as i16, pos.y as i16)),
+                        controller("teleport target is out of sight")
+                    );
                 }
                 Ability::Trap { .. } => {
                     ensure!(self.walkable(pos), controller("trap target is blocked"));
