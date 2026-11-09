@@ -1092,6 +1092,15 @@ pub fn validate(content: &Content, kind: u16) -> Result<()> {
     }
     Ok(())
 }
+/// White bags are bag type 4. Potion bags are bag type 3. A marked account keeps half of its white-bag items and three quarters of its potion-bag items.
+pub fn marked_keep_chance(bag_type: u8) -> Option<f64> {
+    match bag_type {
+        4 => Some(0.5),
+        3 => Some(0.75),
+        _ => None,
+    }
+}
+
 pub fn roll(content: &Content, kind: u16, rng: &mut impl Rng) -> Option<u16> {
     roll_table(content, table(kind), rng)
 }
@@ -1472,6 +1481,15 @@ pub fn landmark_chest(content: &Content, kind: u16, rng: &mut impl Rng) -> Resul
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+
+    #[test]
+    fn marked_accounts_keep_half_of_whites_and_three_quarters_of_potions() {
+        assert_eq!(marked_keep_chance(4), Some(0.5));
+        assert_eq!(marked_keep_chance(3), Some(0.75));
+        for bag in [0, 1, 2, 5] {
+            assert_eq!(marked_keep_chance(bag), None, "{bag}");
+        }
+    }
 
     #[test]
     fn realm_sprites_keep_distinct_independent_public_rewards() {

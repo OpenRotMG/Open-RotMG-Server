@@ -6181,6 +6181,28 @@ impl World {
         tracing::info!(entity = id, owner, kind, "loot bag allocated");
         Ok(id)
     }
+    fn kept_marked_drops(&mut self, account: i32, items: &[i32]) -> Result<Vec<i32>> {
+        if !self
+            .content
+            .reviewed_accounts
+            .iter()
+            .any(|review| review.account == account)
+        {
+            return Ok(items.to_vec());
+        }
+        let mut kept = Vec::new();
+        for item in items {
+            let bag = self.content.get(u16::try_from(*item)?)?.bag_type;
+            let keep = match crate::loot::marked_keep_chance(bag) {
+                Some(chance) => self.rng.gen_bool(chance),
+                None => true,
+            };
+            if keep {
+                kept.push(*item);
+            }
+        }
+        Ok(kept)
+    }
     fn loot_bags(
         &mut self,
         pos: Pos,
@@ -6188,6 +6210,13 @@ impl World {
         items: &[i32],
         source: u16,
     ) -> Result<()> {
+        let items = match owner {
+            Some(account) => self.kept_marked_drops(account, items)?,
+            None => items.to_vec(),
+        };
+        if items.is_empty() {
+            return Ok(());
+        }
         let source = self.content.get(source)?.name.clone();
         for chunk in items.chunks(8) {
             let bag = self.loot_bag(pos, owner, chunk.to_vec())?;
@@ -6220,23 +6249,26 @@ impl World {
         }
         if !loot.shared_owners.is_empty() {
             for chunk in loot.shared.chunks(8) {
-                let bag = self.loot_bag(
-                    scatter(),
-                    None,
-                    chunk.iter().copied().map(i32::from).collect(),
-                )?;
-                let entity = self.entities.get_mut(&bag).unwrap();
+                let items: Vec<_> = chunk.iter().copied().map(i32::from).collect();
+                let appearance = items
+                    .iter()
+                    .map(|item| self.content.get(u16::try_from(*item)?).map(|object| object.bag_type))
+                    .collect::<Result<Vec<_>>>()?
+                    .into_iter()
+                    .max()
+                    .expect("god equipment chunk is nonempty");
                 // Period purple sacks were owner-only, unlike Kithio's shared gear: https://forums.anandtech.com/threads/realm-of-the-mad-god.2228194/post-33073282
-                let owner = (entity.kind != 0x500)
-                    .then(|| *loot.shared_owners.choose(&mut self.rng).unwrap());
-                if let Some(owner) = owner {
-                    entity.extra_stats.push((54, owner));
-                } else {
+                if appearance == 0 {
+                    let bag = self.loot_bag(scatter(), None, items)?;
+                    let entity = self.entities.get_mut(&bag).unwrap();
                     entity.bag_owners = loot.shared_owners.clone();
+                    entity.drop_slots = (0..chunk.len()).collect();
+                    entity.drop_source = Some(self.content.get(source)?.name.clone());
+                    tracing::info!(entity = bag, owners = ?entity.bag_owners, "god equipment bag allocated");
+                } else {
+                    let owner = *loot.shared_owners.choose(&mut self.rng).unwrap();
+                    self.loot_bags(scatter(), Some(owner), &items, source)?;
                 }
-                entity.drop_slots = (0..chunk.len()).collect();
-                entity.drop_source = Some(self.content.get(source)?.name.clone());
-                tracing::info!(entity = bag, ?owner, owners = ?entity.bag_owners, "god equipment bag allocated");
             }
         }
         Ok(())
