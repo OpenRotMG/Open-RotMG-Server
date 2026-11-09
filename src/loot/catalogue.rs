@@ -1,21 +1,6 @@
 use super::*;
 use serde_json::{Value, json};
 
-fn balanced(kind: u16, item: u16) -> bool {
-    matches!(
-        (kind, item),
-        (0x917, 0xc04)
-            | (0xd06, 0xc03)
-            | (0xd90, 0xc02)
-            | (0x90a | 0xe1d, 0xc01)
-            | (0xd78, 0xc05)
-            | (crate::dungeon::lab::BOSS, 0xc30 | 0xc32)
-            | (
-                crate::dungeon::manor::BOSS | crate::dungeon::manor::COFFIN,
-                0xc09
-            )
-    )
-}
 fn entries(content: &Content, kind: u16, picks: &[(f64, Pick)]) -> Vec<Value> {
     picks
         .iter()
@@ -25,7 +10,6 @@ fn entries(content: &Content, kind: u16, picks: &[(f64, Pick)]) -> Vec<Value> {
                 !items.is_empty(),
                 "published loot pool is empty for {kind:#x}"
             );
-            let balance = matches!(pick, Pick::Item(item) if balanced(kind, *item));
             let note = if kind == 0xd90 && matches!(pick, Pick::Item(0xc02)) {
                 format!(
                     "Doom Bow additionally requires at least {} damage (15% HP).",
@@ -34,7 +18,7 @@ fn entries(content: &Content, kind: u16, picks: &[(f64, Pick)]) -> Vec<Value> {
             } else {
                 String::new()
             };
-            json!({"probability":probability,"items":items,"balance":balance,"note":note})
+            json!({"probability":probability,"items":items,"note":note})
         })
         .collect()
 }
@@ -207,6 +191,11 @@ pub(crate) fn snapshot(content: &Content, revision: Option<&str>) -> Value {
             );
         }
     }
+    for enemy in content.objects.values() {
+        if let Some((portal, probability)) = crate::dungeon::portal_drop(enemy.kind) {
+            groups.push(json!({"enemy":{"id":enemy.kind,"name":enemy.name,"hp":enemy.hp},"channel":"Dungeon portal","mode":"independent","eligibility":"Defeated in the Realm; no damage requirement.","allocation":"One shared roll per kill; the portal opens for everyone.","rules_file":"src/world.rs","source_file":"src/dungeon.rs","entries":entries(content,enemy.kind,&[(probability,Pick::Item(portal))])}));
+        }
+    }
     for kind in [0xdc2, 0x925, 0x675, 0x678, 0x67d, 0x668] {
         groups.push(json!({"enemy":{"id":kind,"name":format!("{} chest",content.objects[&kind].name),"hp":0},"channel":"Landmark chest","mode":if matches!(kind,0xdc2|0x925){"capped"}else{"independent"},"eligibility":"Reach the spawned landmark chest; not a private kill reward.","allocation":if matches!(kind,0xdc2|0x925){"Shared chest; maximum 3–7 successful item rolls, chosen uniformly. Earlier successes can suppress later entries."}else{"Shared chest; independent tier rolls, including repeated potion attempts."},"rules_file":"src/world/realm_setpieces.rs","source_file":"src/loot.rs","entries":entries(content,kind,&chest_table(kind))}));
     }
@@ -220,7 +209,7 @@ pub(crate) fn snapshot(content: &Content, revision: Option<&str>) -> Value {
         .into_iter()
         .map(|id| {
             let o = &content.objects[&id];
-            json!({"id":id,"name":o.name,"slot":o.slot_type,"tier":o.tier})
+            json!({"id":id,"name":o.dungeon_name.as_deref().unwrap_or(&o.name),"slot":o.slot_type,"tier":o.tier})
         })
         .collect();
     json!({"revision":revision,"items":items,"groups":groups})
@@ -232,23 +221,28 @@ mod tests {
     use rand::rngs::mock::StepRng;
 
     #[test]
-    fn dungeon_balance_and_catalogue_follow_real_reward_rolls() {
+    fn catalogue_follows_real_reward_rolls() {
         let content = Content::load(std::path::Path::new("data")).unwrap();
         let snapshot = snapshot(&content, Some(&"a".repeat(40)));
+        // Release 7.0 data from https://www.realmeye.com/forum/t/guide-to-loot-and-drop-rates/60740 with the Discord's tenfold corrections
         let pairs = [
-            (0x917, 0xc04),
-            (0xd06, 0xc03),
-            (0xd90, 0xc02),
-            (0x90a, 0xc01),
-            (0xe1d, 0xc01),
-            (0xd78, 0xc05),
-            (crate::dungeon::lab::BOSS, 0xc30),
-            (crate::dungeon::lab::BOSS, 0xc32),
-            (crate::dungeon::manor::BOSS, 0xc09),
-            (crate::dungeon::manor::COFFIN, 0xc09),
+            (0x917, 0xc04, 0.001),
+            (0xd06, 0xc03, 0.01),
+            (0xd90, 0xc02, 0.01),
+            (0x90a, 0xc01, 0.01),
+            (0xe1d, 0xc01, 0.015),
+            (0xd78, 0xc05, 0.03),
+            (crate::dungeon::lab::BOSS, 0xc30, 0.01),
+            (crate::dungeon::lab::BOSS, 0xc32, 0.02),
+            (crate::dungeon::manor::BOSS, 0xc09, 0.01),
+            (crate::dungeon::manor::COFFIN, 0xc09, 0.01),
+            (crate::dungeon::snake::GUARD, 0xc04, 0.001),
+            (crate::dungeon::jungle::BOSS, 0xc17, 0.08),
+            (0x1705, 0xc10, 0.1),
+            (crate::dungeon::trench::THESSAL, 0xc13, 0.041),
         ];
-        for (kind, item) in pairs {
-            for (p, expected) in [(0.0099, true), (0.0101, false)] {
+        for (kind, item, rate) in pairs {
+            for (p, expected) in [(rate * 0.99, true), (rate * 1.01, false)] {
                 let sample = (p * u64::MAX as f64) as u64 & !u64::from(u32::MAX);
                 assert_eq!(
                     rewards(&content, kind, &mut StepRng::new(sample, 0)).contains(&item),
@@ -268,26 +262,44 @@ mod tests {
                 .iter()
                 .find(|e| e["items"] == json!([item]))
                 .unwrap();
-            assert_eq!(entry["probability"], 0.01);
-            assert_eq!(entry["balance"], true);
+            assert_eq!(entry["probability"], rate);
         }
-        assert!(
-            rewards(
-                &content,
-                crate::dungeon::snake::GUARD,
-                &mut StepRng::new((0.04 * u64::MAX as f64) as u64 & !u64::from(u32::MAX), 0)
-            )
-            .contains(&0xc04)
-        );
         assert_eq!(bonus(0xd59), &[(0.001, 0xc0a)]);
-        assert_eq!(bonus(0xd60), &[(0.004, 0xc06)]);
-        assert_eq!(table(crate::dungeon::tomb::BES)[0].0, 0.009);
+        assert_eq!(bonus(0xd60), &[(0.001, 0xc06)]);
+        assert_eq!(table(crate::dungeon::tomb::BES)[0].0, 0.07);
         assert!(!item_qualified(0xd90, 0xc02, 1199, 8000));
         assert!(item_qualified(0xd90, 0xc02, 1200, 8000));
         assert_eq!(attempts(crate::dungeon::tomb::BES, 10), 2);
         assert_eq!(
             participation_reward(crate::dungeon::lab::CREATION),
             Some(0xa20)
+        );
+        let portals: Vec<_> = snapshot["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|g| g["channel"] == "Dungeon portal")
+            .map(|g| {
+                (
+                    g["enemy"]["name"].as_str().unwrap().to_owned(),
+                    g["entries"][0].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(portals.len(), 19);
+        assert!(portals.contains(&(
+            "Undead Dwarf God".into(),
+            json!({"probability":0.17,"items":[0x718],"note":""})
+        )));
+        assert!(portals.iter().any(|(name, _)| name == "Sprite Child"));
+        assert_eq!(
+            snapshot["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|i| i["name"] == "Snake Pit")
+                .count(),
+            1
         );
         assert!(snapshot["groups"].as_array().unwrap().len() > 300);
     }

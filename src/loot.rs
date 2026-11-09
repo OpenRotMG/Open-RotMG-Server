@@ -7,8 +7,6 @@ pub(crate) enum Pick {
     Tier(u8, &'static [i32]),
 }
 pub(crate) mod catalogue;
-// Selected balance for ordinary dungeon uniques, not authenticated historical odds.
-pub(crate) const DUNGEON_UNIQUE_RATE: f64 = 0.01;
 pub(crate) const WEAPONS: &[i32] = &[1, 2, 3, 8, 17];
 pub(crate) const ABILITIES: &[i32] = &[4, 5, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23];
 // The period wiki calls Wolfskin/Neophyte/Iron Mail T0; the selected client calls them T1.
@@ -31,8 +29,8 @@ pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
         0x903 => &[(0.01, Tier(2, RINGS))],
         // Trapped's ordered first-success soul bag: Wand, Sword, then Att/Def/Dex/Spd/Vit/Wis potions: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Crystal.cs#L674-L684
         0x941 => &[
-            (0.02, Pick::Item(0xb3f)),
-            (0.02, Pick::Item(0xa03)),
+            (0.01, Pick::Item(0xb3f)),
+            (0.04, Pick::Item(0xa03)),
             (0.5, Pick::Item(0xa1f)),
             (0.5, Pick::Item(0xa20)),
             (0.5, Pick::Item(0xa4c)),
@@ -58,7 +56,8 @@ pub(crate) fn fauna_private_table(kind: u16) -> &'static [(f64, Pick)] {
             (0.05, Tier(7, ARMOR)),
             (0.05, Tier(4, ABILITIES)),
             (0.05, Tier(4, RINGS)),
-            (0.005, Pick::Item(0x722)),
+            // Not in the 2012 bags, so this keeps the merged Release 7.0 rate rather than the old 0.005 placeholder.
+            (0.001, Pick::Item(0x722)),
         ],
         0x957 => &[
             (0.02, Tier(5, WEAPONS)),
@@ -91,6 +90,7 @@ pub(crate) fn period_surface(kind: u16) -> bool {
             | 0x64f | 0x650 | 0x65f..=0x661 | 0x669..=0x66b | 0x6c6 | 0x900..=0x902 | 0x91d | 0x91e
     )
 }
+// Unique rates follow Release 7.0 server data (https://www.realmeye.com/forum/t/guide-to-loot-and-drop-rates/60740), with the Open RotMG Discord's 2026-11-07 tenfold corrections for the dungeon and Tomb uniques; per-item damage thresholds are not modelled.
 fn table(kind: u16) -> &'static [(f64, Pick)] {
     use Pick::{Item, Tier};
     match kind {
@@ -108,7 +108,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         // 2012 Manor loot (Wild Shadow Manor/Ruthven pages Apr-Jun 2012; 19 Ruthven and 8 coffin bags read in 2012 footage): no stat
         // potions anywhere (the dark-blue bags are Holy Water, BagType 3). Rates are estimates fitted to those bag counts.
         // Lord Ruthven: Holy Water in 16 of 17 bags, T5 abilities 4/17, client-T7 armour 6/17 (T8 once), T8-T9 weapons 3/17, T10 weapons
-        // per two 2012 pages (never seen), and the four priest-set uniques, Bone Dagger and the Incantation.
+        // per two 2012 pages (never seen), and the four priest-set uniques, Bone Dagger and the Incantation. The Incantation was not in
+        // those bags, so it keeps the merged Release 7.0 rate rather than the old 0.005 placeholder.
         crate::dungeon::manor::BOSS => &[
             (0.9, Item(0xc21)),
             (0.25, Tier(5, ABILITIES)),
@@ -120,9 +121,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.05, Item(0xc1d)),
             (0.05, Item(0xc1f)),
             (0.05, Item(0xc20)),
-            (DUNGEON_UNIQUE_RATE, Item(0xc09)),
+            (0.01, Item(0xc09)),
             (0.01, Item(0xc22)),
-            (0.005, Item(0x722)),
+            (0.001, Item(0x722)),
         ],
         // A real treasure coffin: Holy Water in 6 of 6 readable bags, T4 abilities and rings, T9 weapons, Bone Dagger 2/8, "any of this
         // dungeon's UT gear, INC, or holy water" (Wild Shadow Manor page, 2012-04-22 and 05-16).
@@ -135,8 +136,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Item(0xc1d)),
             (0.01, Item(0xc1f)),
             (0.01, Item(0xc20)),
-            (DUNGEON_UNIQUE_RATE, Item(0xc09)),
-            (0.005, Item(0x722)),
+            (0.01, Item(0xc09)),
+            (0.001, Item(0x722)),
         ],
         // Kage Kami: a T4 ring (Paramount ring page, 2012-05-28) and the Incantation (2012 pages); the T8 weapon, client-T7 armour and T4
         // ability come from the 2013 page only. Its Health and Magic potions are public (brown bag): `fauna_private_table` holds the rest.
@@ -163,11 +164,11 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.01, Tier(11, ARMOR)),
             (0.01, Tier(11, WEAPONS)),
             (0.01, Tier(5, RINGS)),
-            (0.01, Item(0xc29)),
-            (0.01, Item(0xc28)),
-            (0.01, Item(0xc2a)),
-            (0.01, Item(0xc27)),
-            (0.01, Item(0x722)),
+            (0.025, Item(0xc29)),
+            (0.045, Item(0xc28)),
+            (0.008, Item(0xc2a)),
+            (0.04, Item(0xc27)),
+            (0.001, Item(0x722)),
             (0.5, Item(0xa35)),
         ],
         0xe31 | 0xe3a | 0xe42 => &[
@@ -201,19 +202,19 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         kind if crate::dungeon::davy::ROSTER.contains(&kind) || kind == 0x182e => &[],
         // Trapped's ordered boss pool is reconstruction evidence, not official 123.5.1 RNG.
         crate::dungeon::tomb::BES => &[
-            (0.009, Item(0xba2)),
-            (0.005, Item(0xc1e)),
-            (0.005, Item(crate::endgame::INCANTATION)),
+            (0.07, Item(0xba2)),
+            (0.03, Item(0xc1e)),
+            (0.007, Item(crate::endgame::INCANTATION)),
             (1., Item(0xae9)),
         ],
         crate::dungeon::tomb::GEB => &[
-            (0.05, Item(0xba1)),
-            (0.015, Item(crate::endgame::INCANTATION)),
+            (0.07, Item(0xba1)),
+            (0.007, Item(crate::endgame::INCANTATION)),
             (1., Item(0xae9)),
         ],
         crate::dungeon::tomb::NUT => &[
-            (0.009, Item(0xba0)),
-            (0.005, Item(crate::endgame::INCANTATION)),
+            (0.07, Item(0xba0)),
+            (0.007, Item(crate::endgame::INCANTATION)),
             (1., Item(0xae9)),
         ],
         crate::dungeon::tomb::SARCOPHAGUS => &[
@@ -246,10 +247,10 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.02, Item(0xa23)),
         ],
         crate::dungeon::lab::BOSS => &[
-            (DUNGEON_UNIQUE_RATE, Item(0xc30)),
-            (DUNGEON_UNIQUE_RATE, Item(0xc32)),
-            (0.01, Item(0xc31)),
-            (0.005, Item(crate::endgame::INCANTATION)),
+            (0.01, Item(0xc30)),
+            (0.02, Item(0xc32)),
+            (0.05, Item(0xc31)),
+            (0.01, Item(crate::endgame::INCANTATION)),
             (0.2, Tier(8, WEAPONS)),
             (0.15, Tier(9, WEAPONS)),
             (0.1, Tier(10, WEAPONS)),
@@ -264,11 +265,11 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         kind if crate::dungeon::lab::ROSTER.contains(&kind) => &[],
         crate::dungeon::jungle::BOSS => &[
             (1., Item(0xc1a)),
-            (0.4, Item(0xc17)),
-            (0.25, Item(0xc15)),
-            (0.3, Item(0xc16)),
-            (0.4, Item(0xc14)),
-            (0.003, Item(0x722)),
+            (0.08, Item(0xc17)),
+            (0.08, Item(0xc15)),
+            (0.08, Item(0xc16)),
+            (0.08, Item(0xc14)),
+            (0.001, Item(0x722)),
         ],
         crate::dungeon::jungle::SHAMAN
         | crate::dungeon::jungle::WARRIOR
@@ -285,21 +286,31 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         // https://web.archive.org/web/20120216023204/http://forums.wildshadow.com/wiki/realm-mad-god/brown-den-spider
         0x21d..=0x220 => &[(0.15, Item(0x707))],
         0x21b | 0x21c | 0x937..=0x93f => &[],
-        crate::dungeon::trench::HERMIT => {
-            &[(0.1, Item(0xa34)), (0.1, Item(0xa4c)), (0.004, Item(0xc08))]
-        }
+        crate::dungeon::trench::HERMIT => &[
+            (0.1, Item(0xa34)),
+            (0.1, Item(0xa4c)),
+            (0.00208, Item(0xc08)),
+        ],
         // BehaviorDb.Sphinx.cs / Oasis.cs, realm-src@1855c017 (GPL-3.0; data/REALM-SRC-LICENSE), NR-Core and Skilly.
-        0xd54 => &[(0.1, Item(0xa34)), (0.1, Item(0xa35)), (0.004, Item(0xc08))],
+        0xd54 => &[(0.1, Item(0xa34)), (0.1, Item(0xa35)), (0.002, Item(0xc08))],
         0xd62 => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
         0x679 | 0x67c => &[(0.05, Item(0xa23))],
         0x67a | 0x67b => &[(0.05, Item(0xa22))],
-        0x1705 | crate::dungeon::trench::THESSAL => &[
+        0x1705 => &[
             (0.3, Item(0xc12)),
-            (0.01, Item(0xc10)),
-            (0.03, Item(0xc1c)),
-            (0.02, Item(0x722)),
+            (0.1, Item(0xc10)),
+            (0.05, Item(0xc1c)),
+            (0.001, Item(0x722)),
+            (0.05, Item(0xc18)),
+            (0.05, Item(0xc13)),
+        ],
+        crate::dungeon::trench::THESSAL => &[
+            (0.3, Item(0xc12)),
+            (0.0045, Item(0xc10)),
+            (0.04, Item(0xc1c)),
+            (0.015, Item(0x722)),
             (0.04, Item(0xc18)),
-            (0.04, Item(0xc13)),
+            (0.041, Item(0xc13)),
         ],
         0xd63..=0xd65 | 0x1700..=0x1704 | 0x1707..=0x170e => &[],
         0x623 => &[
@@ -382,7 +393,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (0.1, Item(0xa35)),
             (0.1, Item(0xa21)),
             (0.1, Item(0xa4c)),
-            (0.004, Item(0xc0f)),
+            (0.002, Item(0xc0f)),
         ],
         0xd52 | 0xd53 => &[(0.1, Item(0xa22)), (0.1, Item(0xa23))],
         0xe37 => &[
@@ -830,7 +841,7 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         0xd03 => &[
             (0.02, Tier(5, WEAPONS)),
             (0.03, Item(0xa23)),
-            (0.03, Item(0xa4b)),
+            (0.015, Item(0xa4b)),
             (0.02, Item(0xa2d)),
         ],
         0xd04 => &[
@@ -850,11 +861,11 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         // https://web.archive.org/web/20120118035706/http://forums.wildshadow.com/wiki/realm-mad-god/stheno-snake-queen
         0x917 => &[
             (1., Item(0xa21)),
-            (0.006, Item(crate::endgame::INCANTATION)),
-            (DUNGEON_UNIQUE_RATE, Item(0xc04)),
-            (0.45, Item(0xa3e)),
-            (0.45, Item(0xa40)),
-            (0.45, Item(0xa41)),
+            (0.001, Item(crate::endgame::INCANTATION)),
+            (0.001, Item(0xc04)),
+            (0.1, Item(0xa3e)),
+            (0.1, Item(0xa40)),
+            (0.1, Item(0xa41)),
             (0.3, Tier(9, WEAPONS)),
             (0.3, Tier(9, ARMOR)),
             (0.05, Tier(10, WEAPONS)),
@@ -862,9 +873,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         ],
         crate::dungeon::snake::GUARD => &[
             (1., Item(0xa21)),
-            (0.05, Item(crate::endgame::INCANTATION)),
-            (0.05, Item(0xc04)),
-            (0.05, Item(0xa3e)),
+            (0.001, Item(crate::endgame::INCANTATION)),
+            (0.001, Item(0xc04)),
+            (0.02, Item(0xa3e)),
             (0.05, Item(0xa40)),
             (0.05, Item(0xa41)),
             (0.2, Tier(9, WEAPONS)),
@@ -874,9 +885,9 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         // The cloak rate is marked "???"; preserve its existing reconstruction.
         0xd06 => &[
             (1., Item(0xa4c)),
-            (0.1, Item(0xa4b)),
-            (0.006, Item(crate::endgame::INCANTATION)),
-            (DUNGEON_UNIQUE_RATE, Item(0xc03)),
+            (0.02, Item(0xa4b)),
+            (0.001, Item(crate::endgame::INCANTATION)),
+            (0.01, Item(0xc03)),
             (0.01, Item(0xa5a)),
             (0.05, Tier(7, ARMOR)),
             (0.05, Tier(3, ABILITIES)),
@@ -889,8 +900,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         // https://web.archive.org/web/20120114021352/http://forums.wildshadow.com/wiki/realm-mad-god/septavius-ghost-god
         0xd90 => &[
             (1., Item(0xa35)),
-            (0.006, Item(crate::endgame::INCANTATION)),
-            (DUNGEON_UNIQUE_RATE, Item(0xc02)),
+            (0.001, Item(crate::endgame::INCANTATION)),
+            (0.01, Item(0xc02)),
             (0.4, Tier(7, WEAPONS)),
             (0.2, Tier(8, WEAPONS)),
             (0.4, Tier(3, ABILITIES)),
@@ -955,8 +966,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
         crate::dungeon::abyss::MALPHAS => &[
             (1., Item(0xa34)),
             (1., Item(0xa20)),
-            (0.006, Item(crate::endgame::INCANTATION)),
-            (DUNGEON_UNIQUE_RATE, Item(0xc01)),
+            (0.001, Item(crate::endgame::INCANTATION)),
+            (0.01, Item(0xc01)),
             (0.7, Tier(7, WEAPONS)),
             (0.4, Tier(9, WEAPONS)),
             (0.15, Tier(10, WEAPONS)),
@@ -972,8 +983,8 @@ fn table(kind: u16) -> &'static [(f64, Pick)] {
             (1., Item(0xa34)),
             // Legacy Trapped candidates, but our paired guarantees are reconstruction, not original per-account odds: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Abyss.cs#L224-L235
             (1., Item(0xa20)),
-            (0.005, Item(crate::endgame::INCANTATION)),
-            (DUNGEON_UNIQUE_RATE, Item(0xc01)),
+            (0.001, Item(crate::endgame::INCANTATION)),
+            (0.015, Item(0xc01)),
             (0.8, Tier(7, WEAPONS)),
             (0.4, Tier(8, WEAPONS)),
             (0.11, Tier(9, WEAPONS)),
@@ -1034,7 +1045,7 @@ fn bonus(kind: u16) -> &'static [(f64, u16)] {
             (0.01, 0x130e),
         ],
         0xd59 => &[(0.001, 0xc0a)],
-        0xd60 => &[(0.004, 0xc06)],
+        0xd60 => &[(0.001, 0xc06)],
         0x1705 => &[(0.04, 0xaea)],
         // Kithio keeps White Demon below the ordinary gods: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Mountain.cs#L15-L35
         0x651 => &[(0.01, 0xa1f)],

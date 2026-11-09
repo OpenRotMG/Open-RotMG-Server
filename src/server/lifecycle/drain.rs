@@ -1,3 +1,4 @@
+pub(crate) mod restart;
 use super::*;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -12,6 +13,7 @@ pub(super) struct AdmissionState {
     instance: String,
     pub(super) generation: u64,
     current: Option<DrainStatus>,
+    restart: Option<restart::Status>,
     entries: usize,
     http_entries: usize,
 }
@@ -25,6 +27,7 @@ impl Default for Admission {
                 instance: bytes.iter().map(|b| format!("{b:02x}")).collect(),
                 generation: 0,
                 current: None,
+                restart: None,
                 entries: 0,
                 http_entries: 0,
             }),
@@ -318,6 +321,7 @@ pub(crate) fn routes() -> Router<App> {
         .route("/internal/lifecycle/prepare", post(prepare_request))
         .route("/internal/lifecycle/status", post(status_request))
         .route("/internal/lifecycle/cancel", post(cancel_request))
+        .route("/internal/lifecycle/restart", post(restart::request))
 }
 async fn prepare_request(
     State(a): State<App>,
