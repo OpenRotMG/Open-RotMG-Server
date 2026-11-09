@@ -21,6 +21,17 @@ impl World {
         position: Pos,
         lifetime: u64,
     ) -> Result<()> {
+        // Phoenix TossEnemy lands after its flight timer, not alongside the telegraph.
+        self.manor_toss_in(parent, kind, position, lifetime, 1500)
+    }
+    pub(super) fn manor_toss_in(
+        &mut self,
+        parent: i32,
+        kind: u16,
+        position: Pos,
+        lifetime: u64,
+        flight: u64,
+    ) -> Result<()> {
         crate::encounter::validate(&self.content, kind)?;
         crate::loot::validate(&self.content, kind)?;
         if self.walkable(position) {
@@ -32,8 +43,7 @@ impl World {
                 parent,
                 kind,
                 position,
-                // Phoenix TossEnemy lands after its flight timer, not alongside the telegraph.
-                deadline: self.now + 1500,
+                deadline: self.now + flight,
                 lifetime,
             });
         } else {
@@ -151,8 +161,9 @@ impl World {
                         "Ruthven bat formation requires four walkable nearby cells"
                     );
                     for i in 0..4 {
+                        // His own swarm is ≈18-20 bats where they converge (2012 footage); the decoy groups are not counted.
                         let (root, bat, count, site) = if i == 0 {
-                            (SWARM, ESCORT, 15, sites[0])
+                            (SWARM, ESCORT, 19, sites[0])
                         } else {
                             (
                                 DECOY,
@@ -180,9 +191,8 @@ impl World {
             let e = self.entities.get_mut(&id).unwrap();
             e.condition &=
                 !(condition::bit(condition::INVULNERABLE) | condition::bit(condition::INVINCIBLE));
-            // Preserve the queued opening before bat immunity, not uninterrupted ritual protection.
-            // https://github.com/cp-nilly/nillys-realm-phoenix/blob/e5eb61dddd921ef605fbcd09c7b352f4af9504e6/wServer/logic/db/BehaviorDb.Manor.cs#L70-L83
-            if part == 1 && (750..6650).contains(&age) {
+            // No damage numbers from the sprite change until at least 4.9 s after ring 1, and no vulnerable gap before the bats was seen.
+            if part == 1 {
                 e.condition |= condition::bit(condition::INVULNERABLE);
             } else if part == 2 {
                 e.condition |= condition::bit(condition::INVINCIBLE);
@@ -197,7 +207,7 @@ impl World {
                     0
                 },
             )];
-            if part == 1 && age >= 2650 && e.next_aux == 0 {
+            if part == 1 && age >= manor::COFFIN_TOSS_MS && e.next_aux == 0 {
                 let sites = [(12., 0.), (-12., 0.), (0., 12.), (0., -12.)].map(|(dx, dy)| Pos {
                     x: pos.x + dx,
                     y: pos.y + dy,
@@ -210,7 +220,7 @@ impl World {
                 // The period corridor tactic relies on wall-bound throws failing, not being relocated.
                 // https://www.reddit.com/r/RotMG/comments/u6lp3/damn_those_lil_feratu/
                 for site in sites {
-                    self.manor_toss(id, CREATURE, site, 20000)?;
+                    self.manor_toss_in(id, CREATURE, site, 20000, manor::COFFIN_FLIGHT_MS)?;
                 }
                 self.entities.get_mut(&id).unwrap().next_aux = 1;
                 tracing::info!(
@@ -222,66 +232,34 @@ impl World {
                     "Ruthven coffin tosses scheduled"
                 );
             }
-        } else if kind == 0x1727 && e.stage.is_none() {
-            let count = self.rng.gen_range(15..=20);
-            self.spawn_children(id, BAT, count, 0.4)?;
-            self.entities.get_mut(&id).unwrap().stage = Some(0);
-        } else if kind == COFFIN {
-            if hp < self.content.objects[&COFFIN].hp && e.next_aux == 0 {
-                self.entities.get_mut(&id).unwrap().next_aux = 1;
-                if self.rng.gen_ratio(1, 5) {
-                    let new = self.transform_fauna(id, CREATURE)?;
-                    self.entities.get_mut(&new).unwrap().expires.set(
-                        Some(self.now + 20000),
-                        new,
-                        &mut self.timed_ids,
-                    );
-                    tracing::info!(
-                        entity = id,
-                        replacement = new,
-                        "false treasure coffin awakened without rewards"
-                    );
-                    return Ok(());
-                }
+        } else if kind == COFFIN && hp <= 15000 && e.stage != Some(1) {
+            // The first drop below 15 000 decides it: an impostor (which took ≈5 600 damage first, uOYS8_HhIZ4 2012-08-29) becomes a
+            // Coffin Creature that is killed, not timed out; a real coffin releases 1 Nosferatu and ≈20 bats once (15-25 seen; wRCpJLqPxLw
+            // 2012-07-25, RouEGVH0_eQ 2012-08-05) and drops its loot later, with no second wave below 8 000. `stage` Some(0) marks a coffin
+            // already known to be real. The impostor share is unmeasured (1 of 4 seen).
+            if e.stage.is_none() && self.rng.gen_ratio(1, 5) {
+                let new = self.transform_fauna(id, CREATURE)?;
+                tracing::info!(
+                    entity = id,
+                    replacement = new,
+                    "false treasure coffin awakened without rewards"
+                );
+                return Ok(());
             }
-            let e = &self.entities[&id];
-            let stage = if hp <= 8000 {
-                2
-            } else if hp <= 15000 {
-                1
-            } else {
-                0
-            };
-            let old = e.stage.unwrap_or(0);
-            if old < 1 && stage >= 1 {
-                self.spawn_children(id, BAT, 15, 1.5)?;
-            }
-            if old < 2 && stage == 2 {
-                let alive = self
-                    .actors()
-                    .filter(|e| e.parent == Some(id) && e.kind == BAT)
-                    .count();
-                self.spawn_children(id, BAT, alive + 8, 2.)?;
-                self.spawn_children(id, 0x1728, 2, 3.)?;
-            }
-            self.entities.get_mut(&id).unwrap().stage = Some(stage);
-        } else if kind == CREATURE && e.expires.is_none() {
-            self.entities.get_mut(&id).unwrap().expires.set(
-                Some(self.now + 20000),
-                id,
-                &mut self.timed_ids,
-            );
+            self.entities.get_mut(&id).unwrap().stage = Some(1);
+            self.spawn_children(id, BAT, 20, 1.5)?;
+            self.spawn_children(id, 0x1728, 1, 2.)?;
         } else if kind == 0x1729
             && self.now >= e.next_aux
             && let Some(site) = target
         {
             if self.walkable(site) {
-                self.manor_toss(id, ROCK, site, 3050)?;
+                self.manor_toss(id, ROCK, site, 550)?;
             }
             self.entities.get_mut(&id).unwrap().next_aux = self.now + 3000;
         } else if kind == ROCK && e.expires.is_none() {
             self.entities.get_mut(&id).unwrap().expires.set(
-                Some(self.now + 3050),
+                Some(self.now + 550),
                 id,
                 &mut self.timed_ids,
             );
@@ -299,7 +277,7 @@ impl World {
             return match e.stage.expect("Kage movement phase") {
                 2 => (
                     Motion::WanderHome { radius: 1. },
-                    crate::encounter::nr_speed(0.4),
+                    crate::endgame::tiles_per_s(1.),
                 ),
                 3 => (
                     Motion::Chase {
@@ -356,17 +334,27 @@ impl World {
     }
     pub(super) fn manor_death(&mut self, e: &Entity) -> Result<()> {
         if e.kind == BOSS {
+            // His bats go with him; his Coffin Creatures and Lil Feratus stay and keep attacking (2012 footage, 5 kills).
             self.manor_clear_swarms(e.id);
             let children: Vec<_> = self
                 .actors()
                 .filter(|x| x.parent == Some(e.id))
-                .map(|e| e.id)
+                .map(|x| (x.id, matches!(x.kind, CREATURE | FERATU)))
                 .collect();
-            for child in children {
-                self.remove_entity(child);
+            for (child, stays) in children {
+                if stays {
+                    self.entities.get_mut(&child).unwrap().parent.set(
+                        None,
+                        child,
+                        &mut self.timed_ids,
+                    );
+                } else {
+                    self.remove_entity(child);
+                }
             }
         } else if e.kind == CREATURE {
-            let count = self.rng.gen_range(1..=4);
+            // An impostor's Coffin Creature left at least 2 Lil Feratus (uOYS8_HhIZ4 2012-08-29).
+            let count = self.rng.gen_range(2..=4);
             let sites: Vec<_> = (0..32)
                 .map(|i| {
                     let a = i as f32 * std::f32::consts::TAU / 32.;
@@ -667,8 +655,8 @@ mod tests {
         let id = world
             .spawn_entity(COFFIN, world.entities[&boss].home, vec![])
             .unwrap();
-        world.entities.get_mut(&id).unwrap().next_aux = 1;
-        for (hp, bats, vampires) in [(14999, 15, 0), (7999, 23, 2)] {
+        world.entities.get_mut(&id).unwrap().stage = Some(0);
+        for (hp, bats, vampires) in [(14999, 20, 1), (7999, 20, 1)] {
             world.entities.get_mut(&id).unwrap().hp = hp;
             for _ in 0..2 {
                 world.manor_mechanics(id, None, 0).unwrap();
@@ -686,11 +674,77 @@ mod tests {
     }
 
     #[test]
+    fn ruthven_fires_the_2012_cycle() {
+        use crate::encounter::attacks::schedule;
+        let degrees = |shots: Vec<(u8, f32)>| -> Vec<i32> {
+            let mut out: Vec<i32> = shots
+                .iter()
+                .map(|s| s.1.to_degrees().rem_euclid(360.).round() as i32 % 360)
+                .collect();
+            out.sort();
+            out.dedup();
+            out
+        };
+        assert_eq!(manor::CYCLE_MS, 20200);
+        // Daggers every 0.45 s: 3 at full HP, 5 in the middle, a full ring of 18 late.
+        for (hp, count) in [(15000, 3), (9000, 5), (4000, 18)] {
+            for t in [0, 450] {
+                assert_eq!(schedule(BOSS, hp, t).unwrap().snapshot(0.).len(), count);
+            }
+        }
+        assert_eq!(
+            degrees(schedule(BOSS, 4000, 0).unwrap().snapshot(0.)).len(),
+            18
+        );
+        // Four rings of 24 Ruthven Shots 15° apart, one due east, 0.2 s after the sprite change and 0.4 s apart.
+        for k in 0..4 {
+            let ring = schedule(BOSS, 15000, manor::DAGGERS_MS + 200 + 400 * k)
+                .unwrap()
+                .snapshot(0.);
+            assert!(ring.iter().all(|s| s.0 == 1));
+            assert_eq!(degrees(ring), (0..24).map(|i| i * 15).collect::<Vec<_>>());
+        }
+        // Nothing but bats for the last 12 s.
+        assert!(
+            schedule(BOSS, 15000, manor::DAGGERS_MS + manor::RITUAL_MS + 450)
+                .unwrap()
+                .snapshot(0.)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn kage_kami_reveals_on_the_first_hit_and_cycles_its_2012_phases() {
+        let (mut world, boss) = arena();
+        let home = world.entities[&boss].home;
+        let kage = world.spawn_entity(KAGE, home, vec![]).unwrap();
+        world.manor_mechanics(kage, None, 0).unwrap();
+        assert_eq!(world.entities[&kage].stage, Some(0));
+        world.entities.get_mut(&kage).unwrap().hp -= 1;
+        world.manor_mechanics(kage, None, 0).unwrap();
+        assert_eq!(world.entities[&kage].stage, Some(1));
+        world.manor_mechanics(kage, None, 2399).unwrap();
+        assert_eq!(world.entities[&kage].stage, Some(1));
+        world.manor_mechanics(kage, None, 2400).unwrap();
+        assert_eq!(world.entities[&kage].stage, Some(2));
+        let left = world.entities[&kage].reaction_until - world.now;
+        assert!((6000..=10000).contains(&left), "phase A for {left} ms");
+        world.now += left;
+        world.manor_mechanics(kage, None, 0).unwrap();
+        assert_eq!(world.entities[&kage].stage, Some(3));
+        world.manor_mechanics(kage, None, 6999).unwrap();
+        assert_eq!(world.entities[&kage].stage, Some(3));
+        world.manor_mechanics(kage, None, 7000).unwrap();
+        assert_eq!(world.entities[&kage].stage, Some(2));
+    }
+
+    #[test]
     fn ruthven_return_clears_only_his_bats_once_per_cycle() {
         let (mut world, boss) = arena();
         let home = world.entities[&boss].home;
         let other = world.spawn_entity(BOSS, home, vec![]).unwrap();
-        world.manor_mechanics(other, None, 16750).unwrap();
+        let bats_at = manor::DAGGERS_MS + manor::RITUAL_MS;
+        world.manor_mechanics(other, None, bats_at).unwrap();
         let foreign = cohort(&world, other);
         world.entities.get_mut(&boss).unwrap().hp = 14000;
         world
@@ -700,22 +754,24 @@ mod tests {
             .damage
             .insert(123, 1000);
         for cycle in 0..2 {
-            let start = cycle * 21750 + 16750;
+            let start = cycle * manor::CYCLE_MS + bats_at;
             world.now = start;
             let coffin = world
                 .manor_child(boss, CREATURE, home, Some(20000))
                 .unwrap();
             world.manor_mechanics(boss, None, start).unwrap();
             let bats = cohort(&world, boss);
-            assert_eq!(bats.len(), 49);
+            assert_eq!(bats.len(), 53);
             assert!(
                 bats.iter()
                     .all(|id| world.content.objects[&world.entities[id].kind].xp_multiplier == 0.)
             );
             world.manor_mechanics(boss, None, start + 50).unwrap();
             assert_eq!(cohort(&world, boss), bats);
-            world.now = start + 5000;
-            world.manor_mechanics(boss, None, start + 5000).unwrap();
+            world.now = start + manor::BATS_MS;
+            world
+                .manor_mechanics(boss, None, start + manor::BATS_MS)
+                .unwrap();
             assert!(cohort(&world, boss).is_empty());
             assert!(bats.iter().all(|id| !world.entities.contains_key(id)));
             assert_eq!(cohort(&world, other), foreign);
@@ -726,12 +782,15 @@ mod tests {
     }
 
     #[test]
-    fn ruthven_death_cleans_descendants_and_cancels_only_his_pending_coffins() {
+    fn ruthven_death_clears_his_bats_keeps_his_coffins_and_cancels_only_his_pending_ones() {
         let (mut world, boss) = arena();
         let home = world.entities[&boss].home;
         let other = world.spawn_entity(BOSS, home, vec![]).unwrap();
-        world.manor_mechanics(boss, None, 16750).unwrap();
-        let mut owned = cohort(&world, boss);
+        world
+            .manor_mechanics(boss, None, manor::DAGGERS_MS + manor::RITUAL_MS)
+            .unwrap();
+        let bats = cohort(&world, boss);
+        let mut kept = BTreeSet::new();
         let coffin = world.manor_child(boss, CREATURE, home, None).unwrap();
         let defeated = world.remove_entity(coffin);
         world.manor_death(&defeated).unwrap();
@@ -740,15 +799,16 @@ mod tests {
             .filter(|e| e.parent == Some(boss) && e.kind == FERATU)
             .map(|e| e.id)
             .collect();
-        assert!((1..=4).contains(&brood.len()));
-        owned.extend(brood);
-        owned.insert(world.manor_child(boss, CREATURE, home, None).unwrap());
+        assert!((2..=4).contains(&brood.len()));
+        kept.extend(brood);
+        kept.insert(world.manor_child(boss, CREATURE, home, None).unwrap());
         let foreign = world.manor_child(other, CREATURE, home, None).unwrap();
         world.manor_toss(boss, CREATURE, home, 20000).unwrap();
         world.manor_toss(other, CREATURE, home, 20000).unwrap();
         let defeated = world.remove_entity(boss);
         world.manor_death(&defeated).unwrap();
-        assert!(owned.iter().all(|id| !world.entities.contains_key(id)));
+        assert!(bats.iter().all(|id| !world.entities.contains_key(id)));
+        assert!(kept.iter().all(|id| world.entities[id].parent.is_none()));
         assert!(world.entities.contains_key(&foreign));
         world.now = 1499;
         world.manor_birth_step();

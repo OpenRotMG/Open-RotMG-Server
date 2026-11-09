@@ -29,21 +29,38 @@ pub const ROSTER: [u16; 18] = [
     0x172c, COFFIN, FERATU, KAGE, MINE, GRAVE,
 ];
 
-// Phoenix supplies reconstruction timers; the 2012 guide establishes timed return, not a coffin kill gate.
+// Ruthven's cycle in five 2012 fights (OvCgRMN_JAw 2012-05-23 … I0XgIrF-BTQ 2012-12-22; YJQPDEw20f4 2012-10-03 the cleanest):
+// ≈20.3 s (17.7-22.8, n = 9) of daggers ≈2.5 s (2.2-3.2), a ritual from the sprite change to the bats ≈5.7 s (rings, then the coffin
+// throws ≈3.4 s after ring 1), and bats ≈12 s (11.5-13). The 2012 guide establishes timed returns, not a coffin kill gate:
 // https://web.archive.org/web/20120516045129id_/http://forums.wildshadow.com/wiki/realm-mad-god/manor-immortals
+pub const DAGGERS_MS: u64 = 2500;
+pub const RITUAL_MS: u64 = 5700;
+pub const BATS_MS: u64 = 12000;
+pub const CYCLE_MS: u64 = DAGGERS_MS + RITUAL_MS + BATS_MS;
+/// Ring 1 comes 0.2 s after the sprite change; the four coffins are thrown ≈3.1-3.7 s after ring 1 and fly ≈1.0-1.4 s.
+pub const COFFIN_TOSS_MS: u64 = 3600;
+pub const COFFIN_FLIGHT_MS: u64 = 1200;
 pub fn phase(elapsed: u64) -> (u64, u64) {
-    let t = elapsed % 21750;
-    let (part, start) = if t < 9100 {
+    let t = elapsed % CYCLE_MS;
+    let (part, start) = if t < DAGGERS_MS {
         (0, 0)
-    } else if t < 16750 {
-        (1, 9100)
+    } else if t < DAGGERS_MS + RITUAL_MS {
+        (1, DAGGERS_MS)
     } else {
-        (2, 16750)
+        (2, DAGGERS_MS + RITUAL_MS)
     };
-    (elapsed / 21750 * 3 + part, t - start)
+    (elapsed / CYCLE_MS * 3 + part, t - start)
 }
-pub fn blades(hp: i32) -> usize {
-    (3 + (15000 - hp).max(0) as usize / 1000).min(18)
+/// Dagger volleys grow 3 → 5 → 18 over the fight, ≈11° → ≈15° → exactly 20° apart (18 make a full ring). The HP bands are estimated
+/// from one fight (YJQPDEw20f4: 5 from about a third of his HP lost, 18 from about two thirds).
+pub fn daggers(hp: i32) -> (usize, f32) {
+    if hp * 3 > 15000 * 2 {
+        (3, 11.)
+    } else if hp * 3 > 15000 {
+        (5, 15.)
+    } else {
+        (18, 20.)
+    }
 }
 pub fn initial_condition(kind: u16) -> i32 {
     use crate::condition::{ARMORED, INVINCIBLE, bit};
@@ -108,7 +125,20 @@ pub fn profile(kind: u16) -> Profile {
             2.,
             10.,
         ),
-        0x172b | 0x172c => (
+        // Hellhounds dash at ≈9.5 tiles/s and stop ≈1.5 tiles short (two hounds, wRCpJLqPxLw 2012-07-25 at 1.00×); `speed` here is
+        // divided by 1.5 below and again by the engine, so the measured speed is scaled by 2.25.
+        0x172b => (
+            Charge {
+                sight: 6.,
+                cooldown: 0,
+                delay: 0,
+                stop: 1.5,
+                idle: 0.,
+            },
+            9.5 * 2.25,
+            10.,
+        ),
+        0x172c => (
             Charge {
                 sight: 6.,
                 cooldown: 0,
@@ -117,7 +147,7 @@ pub fn profile(kind: u16) -> Profile {
                 idle: 0.,
             },
             6.,
-            if kind == 0x172b { 10. } else { 9. },
+            9.,
         ),
         FERATU => (WanderHome { radius: 1. }, 1., 8.),
         _ => unreachable!("unregistered Manor actor {kind:#x}"),
@@ -648,21 +678,28 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
             );
         }
     }
-    // One pack per room, as before; the first room past the start holds Hellhounds (Bleeding within 12-25 s in all
-    // three 2012 runs; seven Hellhounds in TKR's first room).
+    // The first room past the start holds Hellhounds (Bleeding 6-8 s after entering in two 2012 runs; seven Hellhounds in TKR's first
+    // room). Other rooms mixed their enemies in 2012: an Armor Guard room also held a Nosferatu and bats (RouEGVH0_eQ 2012-08-05,
+    // wRCpJLqPxLw 2012-07-25), and 2-3 Lesser Bald Vampires guarded a hidden coffin room. Room bats are Vampire Bat Swarmers placed
+    // directly (125 HP, they give XP). Pack and bat-group sizes are estimates.
     for (i, n) in nodes.iter().enumerate() {
-        if i == 0 || n.name == "boss" || n.name.starts_with("vault") {
+        if i == 0 || n.name == "boss" {
             continue;
         }
-        let family = if i == path[1] {
-            0x172b
-        } else if rng.gen_bool(0.3) {
-            0x1727
+        let mut pack: Vec<u16> = if n.name.starts_with("vault") {
+            vec![0x172c; rng.gen_range(2..=3)]
+        } else if i == path[1] {
+            vec![0x172b; 4]
         } else {
-            *[0x1728, 0x1729, 0x172b, 0x172c].choose(&mut rng).unwrap()
+            (0..rng.gen_range(3..=5))
+                .map(|_| *[0x1728, 0x1729, 0x172b, 0x172c].choose(&mut rng).unwrap())
+                .collect()
         };
-        for p in floors[i].choose_multiple(&mut rng, 4) {
-            map.cells[at(*p)].object = Some(family);
+        if !n.name.starts_with("vault") && i != path[1] && rng.gen_bool(0.4) {
+            pack.extend(std::iter::repeat_n(0x1727, rng.gen_range(5..=10)));
+        }
+        for (p, kind) in floors[i].choose_multiple(&mut rng, pack.len()).zip(pack) {
+            map.cells[at(*p)].object = Some(kind);
         }
     }
     for c in &map.cells {
