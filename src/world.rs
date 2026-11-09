@@ -6252,7 +6252,11 @@ impl World {
                 let items: Vec<_> = chunk.iter().copied().map(i32::from).collect();
                 let appearance = items
                     .iter()
-                    .map(|item| self.content.get(u16::try_from(*item)?).map(|object| object.bag_type))
+                    .map(|item| {
+                        self.content
+                            .get(u16::try_from(*item)?)
+                            .map(|object| object.bag_type)
+                    })
                     .collect::<Result<Vec<_>>>()?
                     .into_iter()
                     .max()
