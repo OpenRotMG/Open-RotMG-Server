@@ -94,12 +94,27 @@ def characters(values, *, legacy=False):
     binary = os.environ.get('OPENROTMG_BACKUP_BINARY')
     if not binary:
         raise RuntimeError('OPENROTMG_BACKUP_BINARY must name the matching release binary')
-    result = subprocess.run([binary, '--backup-validate'] + (['legacy'] if legacy else []), input=json.dumps(values),
-                            text=True, capture_output=True, timeout=30)
-    if result.returncode:
-        raise ValueError('Release character validation failed: ' + result.stderr.strip())
-    if json.loads(result.stdout) != {'validated_characters': len(values)}:
-        raise ValueError('Release character validator returned an invalid receipt')
+    def validate(batch):
+        result = subprocess.run([binary, '--backup-validate'] + (['legacy'] if legacy else []), input='[' + ','.join(batch) + ']',
+                                text=True, capture_output=True, timeout=30)
+        if result.returncode:
+            raise ValueError('Release character validation failed: ' + result.stderr.strip())
+        if json.loads(result.stdout) != {'validated_characters': len(batch)}:
+            raise ValueError('Release character validator returned an invalid receipt')
+
+    # The release validator's 32 MiB input limit is per process, not a cap on preserved history.
+    limit = 4 * 1024 * 1024
+    batch, size = [], 2
+    for value in values:
+        record = json.dumps(value, ensure_ascii=True)
+        if len(record) + 2 > limit:
+            raise ValueError('Backup character exceeds the 4 MiB validation batch limit')
+        if size + len(record) + bool(batch) > limit:
+            validate(batch)
+            batch, size = [], 2
+        size += len(record) + bool(batch)
+        batch.append(record)
+    validate(batch)
 
 
 def update_snapshot(raw):
