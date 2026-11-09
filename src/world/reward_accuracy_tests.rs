@@ -503,6 +503,29 @@ fn mad_lab_portal_drop_uses_ten_percent_balance_policy() {
 }
 
 #[tokio::test]
+async fn kage_kami_death_always_requests_a_manor_portal_in_the_realm() {
+    let (mut w, _store, _owners) = reward_world().await;
+    for name in ["Realm", "Tutorial"] {
+        w.name = name.into();
+        for seed in 0..16u64 {
+            clear_bags(&mut w);
+            w.portal_requests.clear();
+            let pos = Pos { x: 3.5, y: 3.5 };
+            let id = w.spawn_entity(0x6db, pos, vec![]).unwrap();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.defeat_entity(id).unwrap();
+            if name == "Realm" {
+                assert_eq!(w.portal_requests.len(), 1, "seed={seed}");
+                assert_eq!(w.portal_requests[0].0, 0x739, "seed={seed}");
+                assert!(w.portal_requests[0].1.distance(pos) < 0.01, "seed={seed}");
+            } else {
+                assert!(w.portal_requests.is_empty(), "seed={seed}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn arachna_stages_one_realm_exit_until_durable_clear_commit() {
     let (mut world, store, owners) = reward_world().await;
     world.name = "Spider Den".into();

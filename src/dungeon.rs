@@ -89,7 +89,8 @@ pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
         beach::BUM => Some((0x742, 0.5)),
         trench::HERMIT => Some((0x730, 1.)),
         0xdc2 => Some((0x733, 0.2)),
-        0x6db => Some((0x739, 0.5)),
+        // Guaranteed drop: https://www.realmeye.com/wiki/kage-kami
+        0x6db => Some((0x739, 1.)),
         tomb::SPHINX => Some((tomb::PORTAL, 1.)),
         0x60e..=0x610 => Some((0x717, 0.01)),
         0x654 => Some((0x71b, 0.1)),

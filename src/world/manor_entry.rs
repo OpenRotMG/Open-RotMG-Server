@@ -1,5 +1,5 @@
 // Phase comparator: LoE bc11dff7, Kage Kami Setpiece; selected XML overrides its stats.
-// The March2012 build122.2.1 notes establish the hidden grave and probabilistic Manor entrance.
+// The March2012 build122.2.1 notes establish the hidden grave.
 use super::*;
 use crate::{
     condition,
