@@ -6086,7 +6086,7 @@ impl World {
         self.leave(id)?;
         Ok(())
     }
-    pub fn inspect_map(&self, player: Option<i32>) -> Result<Vec<u8>> {
+    pub fn inspect_map(&self, player: Option<i32>, entity_summary: bool) -> Result<Vec<u8>> {
         let account = match player {
             Some(id) => {
                 self.players
@@ -6109,17 +6109,33 @@ impl World {
         let entities: Vec<_> = self
             .entities
             .values()
-            .filter(|e| e.accessible(account))
+            .filter(|e| e.accessible(account) && (!entity_summary || e.hp > 0))
             .collect();
         // A full Realm's JSON value tree dwarfs the actual map and pins allocator memory.
         #[derive(Serialize)]
         struct Snapshot<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            projection: Option<&'static str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            damaging_ground: Option<Vec<(i32, i32)>>,
             width: i32,
             height: i32,
             blocked: Vec<(i32, i32)>,
             entities: Vec<&'a Entity>,
         }
         serde_json::to_vec(&Snapshot {
+            projection: entity_summary.then_some("entity_summary"),
+            damaging_ground: entity_summary.then(|| {
+                self.map
+                    .cells
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, cell)| self.content.hazards.contains_key(&cell.ground))
+                    .map(|(index, _)| {
+                        (index as i32 % self.map.width, index as i32 / self.map.width)
+                    })
+                    .collect()
+            }),
             width: self.map.width,
             height: self.map.height,
             blocked,
