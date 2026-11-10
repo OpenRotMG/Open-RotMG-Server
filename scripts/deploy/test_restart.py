@@ -9,7 +9,7 @@ import test_update
 from test_update import update
 
 ACTOR = '175037041837473797'
-RECEIPT = {'instance': 'a' * 64, 'owner': 'b' * 64, 'deadline_ms': 90000}
+RECEIPT = {'instance': 'a' * 64, 'owner': 'b' * 64, 'deadline_ms': 180000}
 
 
 class RestartTest(unittest.TestCase):
@@ -19,7 +19,7 @@ class RestartTest(unittest.TestCase):
             with self.subTest(result=result), patch.object(update.subprocess, 'check_output', return_value='active'), \
                     patch.object(update, 'drain_process', return_value={}), \
                     patch.object(update, 'announce', return_value={'players': 2}), \
-                    patch.object(update.time, 'monotonic', side_effect=[0, 0, 0, 90]), \
+                    patch.object(update.time, 'monotonic', side_effect=[0, 0, 0, 180]), \
                     patch.object(update.time, 'sleep'), \
                     patch.object(update, 'restart_request', side_effect=[pending, result]) as request, \
                     contextlib.redirect_stdout(io.StringIO()):
@@ -28,6 +28,7 @@ class RestartTest(unittest.TestCase):
                 else:
                     with self.assertRaises(update.RestartCancelled if isinstance(result, dict) else OSError):
                         update.warn_restart({})
+                self.assertEqual(request.call_args_list[0].kwargs['seconds'], 180)
                 self.assertEqual(request.call_args.args, ({}, {}, 'status'))
                 self.assertEqual(request.call_args.kwargs, {'receipt': RECEIPT})
 
