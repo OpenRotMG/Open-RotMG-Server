@@ -6,7 +6,7 @@ fn begin(a: &App, owner: char) -> Status {
         a,
         Request::Begin {
             owner: owner.to_string().repeat(64),
-            seconds: 90,
+            seconds: 180,
         },
     )
     .unwrap()
@@ -31,7 +31,7 @@ async fn cancellation_and_cutover_are_receipt_bound_and_mutually_exclusive() {
             &app,
             Request::Begin {
                 owner: "b".repeat(64),
-                seconds: 90
+                seconds: 180
             }
         )
         .is_err()
@@ -163,7 +163,19 @@ async fn private_http_route_rejects_unauthorized_forwarded_and_malformed_request
         .unwrap();
     });
     let client = reqwest::Client::new();
-    let body = json!({"operation":"begin","owner":"a".repeat(64),"seconds":90});
+    for seconds in [0, 181] {
+        assert!(
+            apply(
+                &app,
+                Request::Begin {
+                    owner: "a".repeat(64),
+                    seconds,
+                }
+            )
+            .is_err()
+        );
+    }
+    let body = json!({"operation":"begin","owner":"a".repeat(64),"seconds":180});
     for token in ["", "wrong"] {
         assert_eq!(
             client

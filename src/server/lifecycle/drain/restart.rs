@@ -40,8 +40,8 @@ fn apply(a: &App, request: Request) -> Result<Status> {
             "invalid restart owner"
         );
         ensure!(
-            (1..=90).contains(&seconds),
-            "restart countdown must be 1–90 seconds"
+            (1..=180).contains(&seconds),
+            "restart countdown must be 1–180 seconds"
         );
         ensure!(
             state
