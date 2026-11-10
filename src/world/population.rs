@@ -192,12 +192,19 @@ pub(super) const REPRODUCTION: &[(u16, u16, f32, usize, u64)] = &[
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Reproduction {
+    PlayerNearby,
     Density,
     NoSite,
     Born(i32),
 }
 
 impl World {
+    pub(super) fn outside_player_view(&self, pos: Pos) -> bool {
+        self.players
+            .values()
+            .all(|p| p.pos.distance(pos) >= PLAYER_VIEW_RADIUS)
+    }
+
     pub(super) fn reproduce(&mut self, id: i32, delta: u64) -> Result<()> {
         let e = self
             .entities
@@ -272,6 +279,10 @@ impl World {
         radius: f32,
         maximum: usize,
     ) -> Result<Reproduction> {
+        // Offscreen regrowth follows this comparator; the owner selected our existing view radius, not its 30 tiles: https://github.com/kaos00723/betterSkillys/blob/069d4816f45d151c7df14be84d0d04ee11d31307/source/WorldServer/logic/behaviors/Reproduce.cs#L71
+        if !self.outside_player_view(center) {
+            return Ok(Reproduction::PlayerNearby);
+        }
         // CountEntity includes the parent and every same-type enemy, not just its camp or spawn group.
         if self
             .actors_near(center, radius)
@@ -300,6 +311,9 @@ impl World {
             let Some(positions) = positions else {
                 continue;
             };
+            if !positions.iter().all(|pos| self.outside_player_view(*pos)) {
+                continue;
+            }
             let id = match family {
                 Some(family) => {
                     let slot = self.population.len();

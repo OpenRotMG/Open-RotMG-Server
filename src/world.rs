@@ -727,6 +727,7 @@ pub struct Slot {
 }
 // Ordinary entrances last a minute in the June 2012 guide; keys share that window: https://web.archive.org/web/20120609023836/http://forums.wildshadow.com/wiki/realm-mad-god/dungeons
 const DUNGEON_PORTAL_TICKS: u64 = 60_000 / 50;
+const PLAYER_VIEW_RADIUS: f32 = 20.;
 
 #[derive(Clone, Copy)]
 pub struct PortalPlan {
@@ -4138,7 +4139,7 @@ impl World {
     fn visible_with(&self, id: i32, quest: Option<i32>) -> BTreeSet<i32> {
         let player = &self.players[&id];
         let pos = player.pos;
-        self.entities_near(pos, 20.)
+        self.entities_near(pos, PLAYER_VIEW_RADIUS)
             .filter(|e| e.accessible(player.character.account))
             .filter(|e| {
                 player
@@ -4151,7 +4152,7 @@ impl World {
             .chain(
                 self.players
                     .iter()
-                    .filter(|(_, p)| p.pos.distance(pos) < 20.)
+                    .filter(|(_, p)| p.pos.distance(pos) < PLAYER_VIEW_RADIUS)
                     .map(|(i, _)| *i),
             )
             .collect()
