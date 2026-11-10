@@ -166,10 +166,7 @@ impl World {
                     None => Some(vec![pos]),
                 };
                 if let Some(positions) = positions
-                    // Oryx avoids only players, by Kithio's AnyPlayerNearby radius: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Utils.cs#L34-L43
-                    && positions
-                        .iter()
-                        .all(|pos| self.players.values().all(|p| p.pos.distance(*pos) >= 16.))
+                    && positions.iter().all(|pos| self.outside_player_view(*pos))
                 {
                     layout = Some(positions);
                     break;
@@ -387,6 +384,28 @@ impl World {
             bodies = self.population_count(terrain),
             "Realm ordinary population culled"
         );
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn natural_replenishment_checks_complete_footprints_and_the_view_boundary() {
+    for (kind, distance, expected) in [(0x6d8, 19.99, 0), (0x652, 20.5, 0), (0x6d8, 20., 1)] {
+        let (mut world, player) = movement_tests::fixture(0x18, false);
+        for cell in &mut Arc::make_mut(&mut world.map).cells {
+            cell.terrain = 1;
+        }
+        let pos = world.players[&player].pos;
+        world.population_regions[1].sites = vec![Pos {
+            x: pos.x + distance,
+            y: pos.y,
+        }];
+        assert_eq!(world.spawn_population_group(1, kind).unwrap(), expected);
+        assert_eq!(world.population.len(), expected);
+        if expected == 1 {
+            let id = world.population[0].entity.unwrap();
+            assert!(!world.visible_with(player, None).contains(&id));
+        }
     }
 }
 

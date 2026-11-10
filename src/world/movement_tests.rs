@@ -966,6 +966,126 @@ fn server_driven_movement_still_enforces_speed_ingress_and_collision() {
 }
 
 #[test]
+fn ordinary_reproduction_waits_until_the_parent_is_out_of_view() {
+    for kind in [0x602, 0x659, 0x652] {
+        let (mut world, player) = fixture_map(0x18, None, 128);
+        let terrain = world.content.objects[&kind].terrain;
+        for cell in &mut Arc::make_mut(&mut world.map).cells {
+            cell.terrain = terrain;
+        }
+        world.rng = rand::rngs::StdRng::seed_from_u64(42);
+        let center = Pos { x: 64.5, y: 64.5 };
+        let parent = world.place_population_solo(kind, center).unwrap();
+        let entry = population::REPRODUCTION
+            .iter()
+            .position(|r| r.0 == kind)
+            .unwrap();
+        world.reproduction.insert((parent, entry), 0);
+        let p = world.players.get_mut(&player).unwrap();
+        p.pos = Pos {
+            x: center.x + 19.99,
+            y: center.y,
+        };
+        p.paused = true;
+        world
+            .apply_condition(player, crate::condition::INVISIBLE, 60000)
+            .unwrap();
+        world.reproduce(parent, 1).unwrap();
+        assert_eq!(world.population.len(), 1, "watched {kind:#x} reproduced");
+        assert_eq!(world.reproduction[&(parent, entry)], 60000);
+        world.players.get_mut(&player).unwrap().pos.x = center.x + 30.;
+        world.reproduce(parent, 60000).unwrap();
+        assert_eq!(
+            world.population.len(),
+            1,
+            "refusal must consume the normal cooldown"
+        );
+        world.reproduce(parent, 1).unwrap();
+        assert!(
+            world.population.len() > 1,
+            "unwatched {kind:#x} cannot recover"
+        );
+        assert!(
+            world
+                .population
+                .iter()
+                .skip(1)
+                .all(|slot| { slot.pos.distance(world.players[&player].pos) >= 20. })
+        );
+    }
+}
+
+#[test]
+fn ordinary_reproduction_cannot_enter_any_players_view() {
+    for kind in [0x602, 0x659, 0x652] {
+        let (mut world, first) = fixture_map(0x18, None, 128);
+        for cell in &mut Arc::make_mut(&mut world.map).cells {
+            cell.terrain = world.content.objects[&kind].terrain;
+        }
+        let center = Pos { x: 64.5, y: 64.5 };
+        let parent = world.place_population_solo(kind, center).unwrap();
+        for i in 0..8 {
+            let player = if i == 0 {
+                first
+            } else {
+                let mut ch = world.players[&first].character.clone();
+                ch.id = i + 1;
+                ch.account = i + 1;
+                world.enter(ch, None).unwrap()
+            };
+            let angle = i as f32 * std::f32::consts::TAU / 8.;
+            world.players.get_mut(&player).unwrap().pos = Pos {
+                x: center.x + 21. * angle.cos(),
+                y: center.y + 21. * angle.sin(),
+            };
+        }
+        let entry = population::REPRODUCTION
+            .iter()
+            .position(|r| r.0 == kind)
+            .unwrap();
+        world.reproduction.insert((parent, entry), 0);
+        world.reproduce(parent, 1).unwrap();
+        assert_eq!(
+            world.population.len(),
+            1,
+            "unseen {kind:#x} spawned into a player's view"
+        );
+    }
+}
+
+#[test]
+fn reproduced_families_keep_their_entire_footprint_out_of_view() {
+    let mut births = 0;
+    for seed in 0..8 {
+        let (mut world, player) = fixture_map(0x18, None, 128);
+        for cell in &mut Arc::make_mut(&mut world.map).cells {
+            cell.terrain = 1;
+        }
+        world.rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let parent = world
+            .place_population_solo(0x652, Pos { x: 64.5, y: 64.5 })
+            .unwrap();
+        world.players.get_mut(&player).unwrap().pos = Pos { x: 85., y: 64.5 };
+        let entry = population::REPRODUCTION
+            .iter()
+            .position(|r| r.0 == 0x652)
+            .unwrap();
+        world.reproduction.insert((parent, entry), 0);
+        world.reproduce(parent, 1).unwrap();
+        births += world.population.len() - 1;
+        assert!(
+            world
+                .population
+                .iter()
+                .skip(1)
+                .all(|slot| { slot.pos.distance(world.players[&player].pos) >= 20. }),
+            "family crossed the view boundary for seed {seed}"
+        );
+    }
+    assert!(births > 0, "safe family reproduction was disabled");
+}
+
+#[test]
 fn snakes_reproduce_back_to_kithio_density() {
     let (mut world, _) = fixture(0x18, false);
     for cell in &mut Arc::make_mut(&mut world.map).cells {
