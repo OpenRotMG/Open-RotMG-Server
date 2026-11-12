@@ -84,14 +84,14 @@ async fn community_schema17_migrates_canonical16_and_committed_reopen_preserves_
     assert_eq!(canonical_schema_rows(&db), before);
     assert_eq!(feature_rows(&db), features);
     drop(reopened);
-    db.execute_batch("PRAGMA user_version=24").unwrap();
+    db.execute_batch("PRAGMA user_version=25").unwrap();
     let bytes = std::fs::read(&path).unwrap();
     assert!(
         Store::open(&path, &content)
             .err()
             .unwrap()
             .to_string()
-            .contains("unsupported game database schema 24")
+            .contains("unsupported game database schema 25")
     );
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }

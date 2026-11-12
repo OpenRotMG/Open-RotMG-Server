@@ -1537,7 +1537,7 @@ async fn account_save_cli_preview_metadata_expected_and_snapshot_counts_preserve
     let verified = cli_ok(&["verify-snapshot", backup.to_str().unwrap(), "data"], b"");
     assert_eq!(
         verified,
-        serde_json::json!({"verified":true,"schema":23,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
+        serde_json::json!({"verified":true,"schema":24,"scope":"all-local-accounts","account_count":2,"character_count":save.characters.len()+1})
     );
     assert_eq!(local.load(peer, other.id).await.unwrap().items, other.items);
     assert_eq!(

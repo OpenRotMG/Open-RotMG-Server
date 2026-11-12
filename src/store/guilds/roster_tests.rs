@@ -19,6 +19,17 @@ async fn guild_roster_pages_permissions_and_rejoined_contribution() {
         accounts.push(account);
     }
     let [founder, alpha, beta, outsider]: [i32; 4] = accounts.try_into().unwrap();
+    for name in ["50", "", "Guild!", "Twenty One Letters Long"] {
+        let error = store
+            .change_guild(outsider, GuildAction::Create(name.into()))
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Guild names must contain 1–20 letters and spaces.")
+        );
+    }
     store
         .create_prepared_guild(vec![founder, alpha, beta], "Roster Research".into())
         .await
