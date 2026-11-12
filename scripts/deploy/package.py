@@ -14,8 +14,9 @@ from update import LIMIT, unpack
 
 
 def source_archive(revision, destination):
-    # Witness ledgers stay in Git; runtime loading and the Realm rebuild contract do not consume them.
+    # Preservation references and witness ledgers stay in Git, not the size-bounded runtime release.
     subprocess.run(['git', 'archive', revision, '-o', str(destination), '--', '.',
+                    ':(exclude)data/reference',
                     ':(exclude,glob)data/realms/*/reconstruction-decisions.json'], check=True)
 
 
