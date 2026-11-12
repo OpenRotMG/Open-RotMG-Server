@@ -1,0 +1,1117 @@
+<Objects>
+	<Object type="0x7500" id="NM Altar of Draconis">
+        	<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>719246357</Id></RemoteTexture>
+		<Size>100</Size>
+		<ShadowSize>200</ShadowSize>
+		<OccupySquare/>
+		<Quest/>
+
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+
+		<State id="Ini">
+			<Behavior setGlobalTag="blue">SetTag</Behavior>
+			<Behavior setGlobalTag="red">SetTag</Behavior>
+			<Behavior setGlobalTag="green">SetTag</Behavior>
+			<Behavior setGlobalTag="black">SetTag</Behavior>
+
+			<Transition playerWithin="1">Choose</Transition>
+		</State>
+
+		<State id="Choose">
+			<Behavior text="Choose the Dragon Soul you wish to commune with!">Say</Behavior>
+
+			<Transition hasGlobalTag="blue" playerSays="blue">Blue</Transition>
+			<Transition hasGlobalTag="red" playerSays="red">Red</Transition>
+			<Transition hasGlobalTag="green" playerSays="green">Green</Transition>
+			<Transition hasGlobalTag="black" playerSays="black">Black</Transition>
+		</State>
+
+		<State id="Blue">
+			<Behavior tagName="blue">ClearTag</Behavior>
+			<Behavior text="Ah, the Blue Dragon God shall be ready!">Say</Behavior>
+
+			<Transition afterTime="1.2" hasGlobalTag="choose">Check</Transition>
+		</State>
+
+		<State id="Red">
+			<Behavior tagName="red">ClearTag</Behavior>
+			<Behavior text="Ah, the Red Dragon God shall be ready!">Say</Behavior>
+
+			<Transition afterTime="1.2" hasGlobalTag="choose">Check</Transition>
+		</State>
+
+		<State id="Green">
+			<Behavior tagName="green">ClearTag</Behavior>
+			<Behavior text="Ah, the Green Dragon God shall be ready!">Say</Behavior>
+
+			<Transition afterTime="1.2" hasGlobalTag="choose">Check</Transition>
+		</State>
+
+		<State id="Black">
+			<Behavior tagName="black">ClearTag</Behavior>
+			<Behavior text="Oh my, the Black Dragon God shall be ready!">Say</Behavior>
+		</State>
+
+		<State id="Check">
+			<Transition playerWithin="2">Choose</Transition>
+		</State>
+
+	</Object>
+	
+	<Object type="0x7509" id="NM Blue Dragon Soul">
+		<Group>Dragon Souls</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<Z>.4</Z>
+		<Flying/>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+
+		<State id="Ini">
+			<Behavior cooldown="15" bubbletime="15" text="I am the BLUE Dragon Soul!;Tell the Altar BLUE to help me regain my power!;">Say</Behavior>
+                	<Behavior protecteeId="NM Altar of Draconis" acquireRange="10" speed="0.4" radius="3">Orbit</Behavior>
+			<Transition afterTime="1.2" noGlobalTag="blue">Go</Transition>
+		</State>
+		
+		<State id="Go">
+                	<Behavior protecteeId="NM Blue Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoFast</Transition>
+		</State>
+		
+		<State id="GoFast">
+                	<Behavior protecteeId="NM Blue Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="blueshrink">Shrink</Transition>
+		</State>
+		
+		<State id="Shrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="blueshrink">UnShrink</Transition>
+		</State>
+		
+		<State id="UnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Blue Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+		
+		<State id="GoBack">
+                	<Behavior protecteeId="NM Altar of Draconis" acquireRange="10" speed="2" radius="3">Orbit</Behavior>
+			<Transition afterTime="1.2" noGlobalTag="red">GoRed</Transition>
+			<Transition afterTime="1.2" noGlobalTag="green">GoGreen</Transition>
+                </State>
+		
+		<State id="GoRed">
+                	<Behavior protecteeId="NM Red Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoRedFast</Transition>
+		</State>
+		
+		<State id="GoRedFast">
+                	<Behavior protecteeId="NM Red Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="redshrink">RedShrink</Transition>
+		</State>
+		
+		<State id="RedShrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="redshrink">RedUnShrink</Transition>
+		</State>
+		
+		<State id="RedUnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Red Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+		
+		<State id="GoGreen">
+                	<Behavior protecteeId="NM Green Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoGreenFast</Transition>
+		</State>
+		
+		<State id="GoGreenFast">
+                	<Behavior protecteeId="NM Green Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="greenshrink">GreenShrink</Transition>
+		</State>
+		
+		<State id="GreenShrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="greenshrink">UnShrink</Transition>
+		</State>
+		
+		<State id="GreenUnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Green Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+	</Object>
+	
+	<Object type="0x750A" id="NM Red Dragon Soul">
+		<Group>Dragon Souls</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>197662237</Id></RemoteTexture>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<Z>.4</Z>
+		<Flying/>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+
+		<State id="Ini">
+			<Behavior cooldown="15" bubbletime="15" text="I am the RED Dragon Soul!;Tell the Altar RED to help me regain my power!;">Say</Behavior>
+                	<Behavior protecteeId="NM Altar of Draconis" acquireRange="10" speed="0.4" radius="3">Orbit</Behavior>
+			<Transition afterTime="1.2" noGlobalTag="red">Go</Transition>
+		</State>
+		
+		<State id="Go">
+                	<Behavior protecteeId="NM Red Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoFast</Transition>
+		</State>
+		
+		<State id="GoFast">
+                	<Behavior protecteeId="NM Red Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="redshrink">Shrink</Transition>
+		</State>
+		
+		<State id="Shrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="redshrink">UnShrink</Transition>
+		</State>
+		
+		<State id="UnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Red Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+		
+		<State id="GoBack">
+                	<Behavior protecteeId="NM Altar of Draconis" acquireRange="10" speed="2" radius="3">Orbit</Behavior>
+			<Transition afterTime="1.2" noGlobalTag="blue">GoBlue</Transition>
+			<Transition afterTime="1.2" noGlobalTag="green">GoGreen</Transition>
+                </State>
+		
+		<State id="GoBlue">
+                	<Behavior protecteeId="NM Blue Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoBlueFast</Transition>
+		</State>
+		
+		<State id="GoBlueFast">
+                	<Behavior protecteeId="NM Blue Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="greenshrink">BlueShrink</Transition>
+		</State>
+		
+		<State id="BlueShrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="blueshrink">BlueUnShrink</Transition>
+		</State>
+		
+		<State id="BlueUnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Blue Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+		
+		<State id="GoGreen">
+                	<Behavior protecteeId="NM Green Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoGreenFast</Transition>
+		</State>
+		
+		<State id="GoGreenFast">
+                	<Behavior protecteeId="NM Green Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="greenshrink">GreenShrink</Transition>
+		</State>
+		
+		<State id="GreenShrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="greenshrink">GreenUnShrink</Transition>
+		</State>
+		
+		<State id="GreenUnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Green Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+	</Object>
+	
+	<Object type="0x750B" id="NM Green Dragon Soul">
+		<Group>Dragon Souls</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>197635631</Id></RemoteTexture>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<Z>.4</Z>
+		<Flying/>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+
+		<State id="Ini">
+			<Behavior cooldown="15" bubbletime="15" text="I am the GREEN Dragon Soul!;Tell the Altar GREEN to help me regain my power!;">Say</Behavior>
+                	<Behavior protecteeId="NM Altar of Draconis" acquireRange="10" speed="0.4" radius="3">Orbit</Behavior>
+			<Transition afterTime="1.2" noGlobalTag="blue">Go</Transition>
+		</State>
+		
+		<State id="Go">
+                	<Behavior protecteeId="NM Green Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoFast</Transition>
+		</State>
+		
+		<State id="GoFast">
+                	<Behavior protecteeId="NM Green Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="greenshrink">Shrink</Transition>
+		</State>
+		
+		<State id="Shrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="greenshrink">UnShrink</Transition>
+		</State>
+		
+		<State id="UnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Green Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+		
+		<State id="GoBack">
+                	<Behavior protecteeId="NM Altar of Draconis" acquireRange="10" speed="2" radius="3">Orbit</Behavior>
+			<Transition afterTime="1.2" noGlobalTag="red">GoRed</Transition>
+			<Transition afterTime="1.2" noGlobalTag="blue">GoBlue</Transition>
+                </State>
+		
+		<State id="GoBlue">
+                	<Behavior protecteeId="NM Blue Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoRedFast</Transition>
+		</State>
+		
+		<State id="GoBlueFast">
+                	<Behavior protecteeId="NM Blue Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="blueshrink">BlueShrink</Transition>
+		</State>
+		
+		<State id="BlueShrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="blueshrink">BlueUnShrink</Transition>
+		</State>
+		
+		<State id="BlueUnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Blue Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+		
+		<State id="GoRed">
+                	<Behavior protecteeId="NM Red Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoRedFast</Transition>
+		</State>
+		
+		<State id="GoRedFast">
+                	<Behavior protecteeId="NM Red Dragon God" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition hasGlobalTag="redshrink">RedShrink</Transition>
+		</State>
+		
+		<State id="RedShrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="redshrink">RedUnShrink</Transition>
+		</State>
+		
+		<State id="RedUnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Red Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+	</Object>
+	
+	<Object type="0x750C" id="NM Black Dragon Soul">
+		<Group>Dragon Souls</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>197661070</Id></RemoteTexture>
+		<Size>140</Size>
+		<ShadowSize>160</ShadowSize>
+		<Z>.4</Z>
+		<Flying/>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+
+		<State id="Ini">
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="black">Go</Transition>
+			<Transition hasGlobalTag="blackgrow">Grow</Transition>
+		</State>
+		
+		<State id="Go">
+                	<Behavior protecteeId="NM Black Dragon God" acquireRange="255" speed="0.8">Protect</Behavior>
+			<Transition afterTime="4">GoFast</Transition>
+		</State>
+		
+		<State id="GoFast">
+                	<Behavior protecteeId="NM Black Dragon God" acquireRange="255" speed="4" radius="3">Protect</Behavior>
+			<Transition hasGlobalTag="blackshrink">Shrink</Transition>
+		</State>
+		
+		<State id="Shrink">			
+			<Behavior rate="10" minSize="0">ChangeSize</Behavior>
+			<Transition noGlobalTag="blackshrink">UnShrink</Transition>
+		</State>
+		
+		<State id="UnShrink">			
+			<Behavior rate="10" minSize="100">ChangeSize</Behavior>
+                	<Behavior protecteeId="NM Black Dragon Dead" acquireRange="255" speed="4" range="2">Protect</Behavior>
+			<Transition afterTime="10">GoBack</Transition>
+		</State>
+		
+		<State id="GoBack">
+                	<Behavior protecteeId="NM Altar of Draconis" acquireRange="10" speed="2" radius="3">Orbit</Behavior>
+                </State>
+	</Object>
+
+	<Object type="0x7501" id="NM Blue Dragon God">
+        	<DisplayId>Nikao the Azure Dragon</DisplayId>
+		<Group>Dragon Gods</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>765173846</Id></RemoteTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>200</Size>
+		<MaxHitPoints>7500</MaxHitPoints>
+		<Defense>40</Defense>
+		<XpMult>5.0</XpMult>
+		<Level>20</Level>
+        	<Quest/>
+	        
+		<Projectile id="0">
+			<ObjectId>Black Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="1">
+			<ObjectId>Red Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="2">
+			<ObjectId>Green Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="3">
+			<ObjectId>Blue Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+        	
+		<Behavior childId="NM Blue Dragon Dead">MetamorphoseAtDeath</Behavior>
+        
+		<State id="Ini">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			
+			<Transition afterTime="1.2" noGlobalTag="blue">Ready</Transition>
+			<Transition afterTime="1.2" noneExist="Black Dragon God">Hardmode</Transition>
+		</State>
+		
+		<State id="Ready">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition playerWithin="1">AbsorbSouls</Transition>
+		</State>
+		
+		<State id="AbsorbSouls">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>	
+			<Transition afterTime="0.0" noneExist="NM Green Dragon God,NM Red Dragon God">AbsorbGreenRed</Transition>	
+			<Transition afterTime="1.2" noneExist="NM Green Dragon God">AbsorbGreen</Transition>
+			<Transition afterTime="1.2" noneExist="NM Red Dragon God">AbsorbRed</Transition>	
+			<Transition afterTime="2.0">AbsorbBlue</Transition>	
+		</State>
+		
+		<State id="AbsorbBlue">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>	
+			<Transition afterTime="2.0">Attack</Transition>	
+		</State>
+		
+			<DefineEmbed name="Attack">
+				<Behavior type="targeted" numShots="12" projectileId="3" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="Attack">
+			<Embed name="Attack"></Embed>
+		</State>
+		
+		<State id="AbsorbRed">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackR</Transition>	
+		</State>
+		
+			<DefineEmbed name="AttackR">
+				<Behavior type="targeted" numShots="12" projectileId="1" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="AttackR">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackR"></Embed>
+		</State>
+		
+		<State id="AbsorbGreen">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackG</Transition>	
+		</State>
+		
+			<DefineEmbed name="AttackG">
+				<Behavior type="targeted" numShots="12" projectileId="2" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="AttackG">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackG"></Embed>
+		</State>
+		
+		<State id="AbsorbGreenRed">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackGR</Transition>	
+		</State>
+		
+		<State id="AttackGR">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackG"></Embed>
+			<Embed name="AttackR"></Embed>
+		</State>
+		
+		<State id="Hardmode">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="blackgrow">SetTag</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>
+			<Transition afterTime="3.0">AttackHm</Transition>
+		</State>
+		
+		<State id="AttackHm">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackG"></Embed>
+			<Embed name="AttackR"></Embed>
+			<Behavior type="targeted" numShots="12" projectileId="0" cooldown=".8" range="10">Shoot</Behavior>
+		</State>
+		
+	</Object>
+	
+	<Object type="0x7502" id="NM Red Dragon God">
+        	<DisplayId>Pyyr the Crimson Dragon</DisplayId>
+		<Group>Dragon Gods</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>122500196</Id></RemoteTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>200</Size>
+		<MaxHitPoints>7500</MaxHitPoints>
+		<Defense>40</Defense>
+		<XpMult>5.0</XpMult>
+		<Level>20</Level>
+        	<Quest/>
+	        
+		<Projectile id="0">
+			<ObjectId>Black Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="1">
+			<ObjectId>Red Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="2">
+			<ObjectId>Green Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="3">
+			<ObjectId>Blue Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+        	        	
+		<Behavior childId="NM Red Dragon Dead">MetamorphoseAtDeath</Behavior>
+		        
+		<State id="Ini">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+			<Transition afterTime="1.2" noGlobalTag="red">Ready</Transition>
+			<Transition afterTime="1.2" noneExist="Black Dragon God">Hardmode</Transition>
+		</State>
+		
+		<State id="Ready">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition playerWithin="1">AbsorbSouls</Transition>
+		</State>
+		
+		<State id="AbsorbSouls">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition afterTime="0.0" noneExist="NM Green Dragon God,NM Blue Dragon God">AbsorbGreenBlue</Transition>		
+			<Transition afterTime="1.2" noneExist="NM Green Dragon God">AbsorbGreen</Transition>
+			<Transition afterTime="1.2" noneExist="NM Blue Dragon God">AbsorbBlue</Transition>	
+			<Transition afterTime="2.0">AbsorbRed</Transition>	
+		</State>
+		
+		<State id="AbsorbRed">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">Attack</Transition>	
+		</State>
+		
+			<DefineEmbed name="Attack">
+				<Behavior type="targeted" numShots="12" projectileId="1" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="Attack">
+			<Embed name="Attack"></Embed>
+		</State>
+		
+		<State id="AbsorbBlue">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackB</Transition>	
+		</State>
+		
+			<DefineEmbed name="AttackB">
+				<Behavior type="targeted" numShots="12" projectileId="3" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="AttackB">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackB"></Embed>
+		</State>
+		
+		<State id="AbsorbGreen">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackG</Transition>	
+		</State>
+		
+			<DefineEmbed name="AttackG">
+				<Behavior type="targeted" numShots="12" projectileId="2" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="AttackG">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackG"></Embed>
+		</State>
+		
+		<State id="AbsorbGreenBlue">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackGB</Transition>	
+		</State>
+		
+		<State id="AttackGB">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackB"></Embed>
+			<Embed name="AttackG"></Embed>
+		</State>
+		
+		<State id="Hardmode">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="blackgrow">SetTag</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Transition afterTime="3.0">AttackHm</Transition>
+		</State>
+		
+		<State id="AttackHm">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackB"></Embed>
+			<Embed name="AttackG"></Embed>
+			<Behavior type="targeted" numShots="12" projectileId="0" cooldown=".8" range="10">Shoot</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x7503" id="NM Green Dragon God">
+        	<DisplayId>Limoz the Veridian Dragon</DisplayId>
+		<Group>Dragon Gods</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>134151849</Id></RemoteTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>200</Size>
+		<MaxHitPoints>7500</MaxHitPoints>
+		<Defense>40</Defense>
+		<XpMult>5.0</XpMult>
+		<Level>20</Level>
+        	<Quest/>
+	        
+		<Projectile id="0">
+			<ObjectId>Black Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="1">
+			<ObjectId>Red Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="2">
+			<ObjectId>Green Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="3">
+			<ObjectId>Blue Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+        
+		<Behavior childId="NM Green Dragon Dead">MetamorphoseAtDeath</Behavior>
+		
+		<State id="Ini">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			
+			<Transition afterTime="1.2" noGlobalTag="green">Ready</Transition>
+			<Transition afterTime="1.2" noneExist="Black Dragon God">Hardmode</Transition>
+		</State>
+		
+		<State id="Ready">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition playerWithin="1">AbsorbSouls</Transition>
+		</State>
+		
+		<State id="AbsorbSouls">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>	
+			<Transition afterTime="1.2" noneExist="NM Red Dragon God,NM Blue Dragon God">AbsorbRedBlue</Transition>	
+			<Transition afterTime="0.0" noneExist="NM Red Dragon God">AbsorbRed</Transition>
+			<Transition afterTime="0.0" noneExist="NM Blue Dragon God">AbsorbBlue</Transition>	
+			<Transition afterTime="2.0">AbsorbGreen</Transition>	
+		</State>
+		
+		<State id="AbsorbGreen">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">Attack</Transition>
+		</State>
+		
+			<DefineEmbed name="Attack">
+				<Behavior type="targeted" numShots="12" projectileId="2" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="Attack">
+			<Embed name="Attack"></Embed>
+		</State>
+		
+		<State id="AbsorbBlue">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackB</Transition>
+		</State>
+		
+			<DefineEmbed name="AttackB">
+				<Behavior type="targeted" numShots="12" projectileId="3" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="AttackB">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackB"></Embed>
+		</State>
+		
+		<State id="AbsorbRed">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackR</Transition>
+		</State>
+		
+			<DefineEmbed name="AttackR">
+				<Behavior type="targeted" numShots="12" projectileId="1" cooldown=".8" range="10">Shoot</Behavior>
+			</DefineEmbed>
+		
+		<State id="AttackR">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackR"></Embed>
+		</State>
+		
+		<State id="AbsorbRedBlue">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="redshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="blueshrink">SetTag</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Transition afterTime="2.0">AttackRB</Transition>
+		</State>
+		
+		<State id="AttackRB">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackB"></Embed>
+			<Embed name="AttackR"></Embed>
+		</State>
+		
+		<State id="Hardmode">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="blackgrow">SetTag</Behavior>
+			<Behavior setGlobalTag="greenshrink">SetTag</Behavior>
+			<Transition afterTime="3.0">AttackHm</Transition>
+		</State>
+		
+		<State id="AttackHm">
+			<Embed name="Attack"></Embed>
+			<Embed name="AttackB"></Embed>
+			<Embed name="AttackR"></Embed>
+			<Behavior type="targeted" numShots="12" projectileId="0" cooldown=".8" range="10">Shoot</Behavior>
+		</State>
+		
+	</Object>
+	
+	<Object type="0x7504" id="NM Black Dragon God">
+        	<DisplayId>Thanatos the Obsidian Dragon</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>765378691</Id></RemoteTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>240</Size>
+		<MaxHitPoints>10000</MaxHitPoints>
+		<Defense>60</Defense>
+		<XpMult>7.5</XpMult>
+        	<Quest/>
+	        
+		<Projectile id="0">
+			<ObjectId>Black Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="1">
+			<ObjectId>Red Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="2">
+			<ObjectId>Green Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+	        
+		<Projectile id="3">
+			<ObjectId>Blue Missile</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+        	
+		<Behavior childId="NM Black Dragon Dead">MetamorphoseAtDeath</Behavior>
+		        
+		<State id="Ini">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			
+			<Transition noneExist="Dragon Gods">Prepare</Transition>
+			<Transition noGlobalTag="black">Ready</Transition>
+		</State>
+		
+		<State id="Prepare">
+		</State>
+				
+		<State id="Ready">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition playerWithin="8">AbsorbBlack</Transition>
+		</State>
+		
+		<State id="AbsorbBlack">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior setGlobalTag="blackshrink">SetTag</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x7505" id="NM Blue Dragon Dead">
+		<Group>Dead Dragons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<Behavior tagName="choose">SetTag</Behavior>
+	</Object>
+	
+	<Object type="0x7506" id="NM Red Dragon Dead">
+		<Group>Dead Dragons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<Behavior tagName="choose">SetTag</Behavior>
+	</Object>
+	
+	<Object type="0x7507" id="NM Green Dragon Dead">
+		<Group>Dead Dragons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<Behavior tagName="choose">SetTag</Behavior>
+	</Object>
+	
+	<Object type="0x7508" id="NM Black Dragon Dead">
+		<Group>Dead Dragons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+	</Object>
+	
+	<Object type="0x750D" id="NM Dragon Cultist 1">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x750E" id="NM Dragon Cultist 2">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x750F" id="NM Dragon Cultist 3">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x750D" id="NM Abberation 1">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x750E" id="NM Abberation 2">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x750F" id="NM Abberation 3">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x750D" id="NM Abberation 4">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x750E" id="NM Abberation 5">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x750F" id="NM Abberation 6">
+		<Group>Dragon Cultists</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<RemoteTexture><Instance>production</Instance><Id>196198485</Id></RemoteTexture>
+		<Size>100</Size>
+        	<MaxHitPoints>5000</MaxHitPoints>
+        	<Defense>20</Defense>
+		
+	</Object>
+	
+	<Object type="0x7510" id="NM Bones">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x79</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x7a</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x7b</Index></Texture>
+			</RandomTexture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7511" id="NM Scratches">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x79</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x7a</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x7b</Index></Texture>
+			</RandomTexture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7512" id="NM Occult Symbol 1">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x7c</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7513" id="NM Occult Symbol 2">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x7d</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7514" id="NM Occult Symbol 3">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x7e</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7515" id="NM Occult Symbol 4">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x7f</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7516" id="NM Occult Symbol 5">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x80</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7517" id="NM Occult Symbol 6">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x81</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7518" id="NM Occult Symbol 7">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x82</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x7519" id="NM Occult Symbol 8">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x83</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x751A" id="NM Occult Symbol 9">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x84</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+</Objects>

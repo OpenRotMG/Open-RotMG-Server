@@ -1,0 +1,1932 @@
+<!-- object types: 0x0d7X 0x0d8X next: 0x0d88 -->
+<Objects>
+	<Object type="0x0d70" id="Destructible Castle Wall">
+		<Class>Wall</Class>
+        <Texture><File>lofiEnvironment</File><Index>0x23</Index></Texture>
+        <Top><Texture><File>lofiEnvironment</File><Index>0x26</Index></Texture></Top>
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/wooden_walls_death</DeathSound>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Static/>
+		<FullOccupy/>
+		<OccupySquare/>
+		<EnemyOccupySquare/>
+		<Enemy/>
+		<XpMult>0.0</XpMult>
+		<BlocksSight/>
+	</Object>
+	
+	<Object type="0x0d71" id="Suit of Armor">
+		<Class>GameObject</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x07</Index></Texture> <!-- 4030364 big // 4025407 small-->
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<MaxHitPoints>4000</MaxHitPoints>
+		<Size>80</Size>
+		<StasisImmune/>
+		<Static/>
+		<OccupySquare/>
+		<Enemy/>
+		<XpMult>0.0</XpMult>
+		<SoulboundLoot tier="1" prob=".03">Potion</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".002">Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0d72" id="Suit of Armor Sm">
+		<DisplayId>Suit of Armor</DisplayId>
+		<Class>GameObject</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>14</Index></AnimatedTexture> <!-- 4030364 big // 4025407 small-->
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<MaxHitPoints>4000</MaxHitPoints>
+		<Size>120</Size>
+		<Static/>
+		<OccupySquare/>
+		<Enemy/>
+		<XpMult>0.0</XpMult>
+		<SoulboundLoot tier="1" prob=".03">Potion</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".002">Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d73" id="CastleArch Wall Flame">
+		<DisplayId>Castle Arch Wall</DisplayId>
+		<Class>Wall</Class>
+		<Texture><File>lofiEnvironment2</File><Index>0x5f</Index></Texture>
+		<Top><Texture><File>lofiEnvironment2</File><Index>0x62</Index></Texture></Top>
+		
+        <AltTexture id="1">
+		<Texture><File>lofiEnvironment2</File><Index>0x63</Index></Texture> <!-- fire 2 -->
+		</AltTexture>
+        <AltTexture id="2">
+		<Texture><File>lofiEnvironment2</File><Index>0x64</Index></Texture> <!-- fire 3 -->
+		</AltTexture>
+		
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<Static/>
+		<FullOccupy/>
+		<OccupySquare/>
+		<EnemyOccupySquare/>
+		<BlocksSight/>
+	</Object>
+	
+	<Object type="0x0d74" id="CastleArch Wall">
+		<DisplayId>Castle Arch Wall</DisplayId>
+		<Class>Wall</Class>
+		<Texture><File>lofiEnvironment2</File><Index>0x65</Index></Texture>
+		<Top><Texture><File>lofiEnvironment2</File><Index>0x62</Index></Texture></Top>
+		
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<Static/>
+		<FullOccupy/>
+		<OccupySquare/>
+		<EnemyOccupySquare/>
+		<BlocksSight/>
+	</Object>
+	
+	<Object type="0x0d75" id="Castle Wall Blank">
+		<Class>Wall</Class>
+		<Texture><File>lofiEnvironment2</File><Index>0x66</Index></Texture> <!-- 4030359_dark   4022396_light-->
+		<Top><Texture><File>lofiEnvironment2</File><Index>0x62</Index></Texture></Top>
+		
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<Static/>
+		<FullOccupy/>
+		<OccupySquare/>
+		<EnemyOccupySquare/>
+		<BlocksSight/>
+	</Object>
+	
+	<Object type="0x0d76" id="Castle Brick Wall2">
+		<DisplayId>Brick Castle Wall</DisplayId>
+		<Class>Wall</Class>
+		<Texture><File>lofiEnvironment2</File><Index>0x67</Index></Texture>
+		<Top><Texture><File>lofiEnvironment2</File><Index>0x62</Index></Texture></Top>
+		
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<Static/>
+		<FullOccupy/>
+		<OccupySquare/>
+		<EnemyOccupySquare/>
+		<BlocksSight/>
+	</Object>
+	
+	<Object type="0x0d77" id="Castle Brick Wall3">
+		<DisplayId>Brick Castle Wall</DisplayId>
+		<Class>Wall</Class>
+		<Texture><File>lofiEnvironment2</File><Index>0x68</Index></Texture>
+		<Top><Texture><File>lofiEnvironment2</File><Index>0x62</Index></Texture></Top>
+		
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<Static/>
+		<FullOccupy/>
+		<OccupySquare/>
+		<EnemyOccupySquare/>
+		<BlocksSight/>
+	</Object>
+	
+	
+	<Object type="0x0d78" id="Oryx Stone Guardian Right">
+		<DisplayId>Stone Guardian</DisplayId>
+		<Group>Oryx Minions</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<StasisImmune/>
+	    <Quest/>
+		<Level>20</Level>
+	    
+		<!-- Alive:4088045 Stone:4082042 StoneNoSword:4078042 -->
+	        
+	 	<AnimatedTexture><File>chars16x16dEncounters</File><Index>20</Index></AnimatedTexture>
+	        
+		<AltTexture id="1"> <!-- stone -->
+			<AnimatedTexture><File>chars16x16dEncounters</File><Index>21</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="2"> <!-- throw sword -->
+			<AnimatedTexture><File>chars16x16dEncounters</File><Index>22</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="3"> <!-- spin 1 -->
+			<AnimatedTexture><File>chars16x16dEncounters</File><Index>23</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="4"> <!-- spin 2 -->
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>0</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="5"> <!-- fly 2 -->
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>1</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<HitSound>monster/stone_walls_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+	        
+		<MaxHitPoints>60000</MaxHitPoints>
+	        
+		<Projectile id="0">
+			<ObjectId>Purple Blast</ObjectId>
+			<Speed>60</Speed>
+			<Damage>75</Damage>
+			<Size>100</Size>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Super Blast Purple</ObjectId>
+			<Speed>60</Speed>
+			<Damage>120</Damage>
+			<Size>140</Size>
+			<LifetimeMS>900</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="2">
+			<ObjectId>Small White Blast</ObjectId>
+			<Speed>40</Speed>
+			<Damage>50</Damage>
+			<Size>100</Size>
+			<LifetimeMS>1000</LifetimeMS>
+		</Projectile>
+	        
+		<Size>120</Size>
+		<Defense>100</Defense>
+		<XpMult>0.135</XpMult>
+	        
+		<State id="ini">
+			<Behavior bucket="orders" listenIds="Oryx Guardian TaskMaster">FollowOrders</Behavior>
+			
+	        <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+	        <Behavior bucket="movement" speed="0">Wander</Behavior>
+			<Transition playerWithin="4">glow</Transition>	
+			<Transition hasTag="wakeUp">glow</Transition>
+		</State>
+	        
+		<State id="glow">
+			<Order>
+				<Behavior tagName="on">SetTag</Behavior>
+			</Order>
+	        <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+	        <Behavior type="Flash" color="888888" flashPeriod='1' flashRepeats="3">ShowEffect</Behavior>
+	        <Transition afterTime="3">duoMode</Transition>
+		</State>
+		
+		<State id="duoMode">
+			<Behavior listenIds="Oryx Guardian TaskMaster">FollowOrders</Behavior>
+			
+			<State id="independant">
+				<State id="chooser">
+					<Transition random="0.5">action1</Transition>
+					<Transition random="0.5">action2</Transition>
+					<Transition random="1.0">action3</Transition>
+				</State>
+				
+				<State id="action1">
+					<Transition random="1">wanderAttack</Transition>
+				</State>
+				<State id="action2">
+					<Transition random="1">chargeAttack</Transition>
+				</State>
+				<State id="action3">
+					<Transition random="1">wanderAttack</Transition>
+				</State>
+				
+				<Embed name="cancelable"></Embed>
+				
+				<State id="chooseBehavior">
+					<Transition afterTime=".2">chooser</Transition>
+				</State>
+				
+				<Transition hasTag="duo1">Duo1</Transition>
+				<Transition hasTag="duo2">Duo2</Transition>
+				<Transition hasTag="duo3">Duo3</Transition>
+				<Transition hasTag="duo4">Duo4</Transition>
+			</State>
+			
+			<State id="Duo1">
+				<Behavior tagName="duo1">ClearTag</Behavior>
+				<Transition random="1">circleFormationAttack</Transition>
+			</State>
+			
+			<State id="Duo2">
+				<Behavior tagName="duo2">ClearTag</Behavior>
+				<Transition random="1">sideSpray</Transition>
+			</State>
+			
+			<State id="Duo3">
+				<Behavior tagName="spinSprayDone">ClearTag</Behavior>
+				<Behavior tagName="duo3">ClearTag</Behavior>
+				<Transition random="1">spinSpray</Transition>
+			</State>
+			
+			<State id="Duo4">
+				<Behavior tagName="duo4">ClearTag</Behavior>
+				<Transition random="1">superBlast</Transition>
+			</State>
+			
+			<Embed name="circleFormationAttack"></Embed>
+			<Embed name="sideSpray"></Embed>
+			<Embed name="spinSpray"></Embed>
+			<Embed name="superBlast"></Embed>
+			
+			<State id="chooseBehavior">
+				<Order>
+					<Behavior tagName="complete">SetTag</Behavior>
+				</Order>
+				<Transition afterTime=".2">independant</Transition>
+			</State>
+			
+			<Transition noneExist="Oryx Stone Guardian Left">duoSoloTransition</Transition>
+		</State>
+		
+		<State id="duoSoloTransition">
+	        <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	        <Behavior type="Flash" color="888888" flashPeriod='1' flashRepeats="5">ShowEffect</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+	        <Behavior targetIds="Oryx Stone Guardian Right" maxTargets="1" maxHeal="2400" cooldown=".5" range=".2">Heal</Behavior>
+			<Transition afterTime="5">soloMode</Transition>
+		</State>
+		
+		<State id="soloMode">
+			<State id="startWithSword">
+				<Transition random="1">throwSword</Transition>
+			</State>
+		
+			<State id="chooseBehavior">
+				<Transition random=".4">atkType</Transition>
+				<Transition random=".5">formType</Transition>
+				<Transition random="1">specialType</Transition>
+			</State>
+			
+			<State id="atkType">
+				<Transition random=".5">wanderAttack</Transition>
+				<Transition random="1">chargeAttack</Transition>
+			</State>
+			
+			<State id="formType">
+				<Behavior tagName="spinSprayDone">ClearTag</Behavior>
+				<Transition random=".5">spinSpray</Transition>
+				<Transition random="1">circleFormationAttack</Transition>
+			</State>
+		
+			<State id="specialType">
+				<Transition random=".4">sideSpray</Transition>
+				<Transition random="1">throwSword</Transition>
+			</State>
+			
+			<Embed name="cancelable"></Embed>
+			<Embed name="circleFormationAttack"></Embed>
+			<Embed name="sideSpray"></Embed>
+			<Embed name="spinSpray"></Embed>
+			<Embed name="throwSword"></Embed>
+		</State>
+	        	
+		<DefineEmbed name="cancelable">
+			<State id="wanderAttack">
+				<Behavior bucket="movement" speed=".5">Wander</Behavior>
+				<Behavior type="auto" numShots="10" cooldown="2" projectileId="2" angle="36" defaultAngle="0" offset="0">Shoot</Behavior>
+		        <Transition afterTime="3">chooseBehavior</Transition>
+			</State>
+			
+			<State id="chargeAttack">
+				<Behavior bucket="movement" speed="1.5" cooldown="0" range="8">Charge</Behavior>
+				<Behavior type="targeted" range="7" numShots="5" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="0" offset="0">Shoot</Behavior>
+		        <Transition afterTime="3">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="circleFormationAttack">
+			<State id="circleFormationAttack">
+				<Behavior bucket="movement1" speed="1.5" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" protectionRange="5" reprotectRange="4.25">Protect</Behavior>
+				<Behavior bucket="movement1" speed=".75" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" radius="4" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="0" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="90" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="180" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="270" offset="0">Shoot</Behavior>
+		        <Transition afterTime="4">chooseBehavior</Transition>
+			</State>
+			
+			<State id="stayInFormation">
+				<Behavior bucket="movement1" speed=".75" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" radius="4" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+		        <Transition afterTime=".8">circleFormationAttack</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="throwSword">
+			<State id="throwSword">
+				<Behavior speed="2" cooldown="0" range="0">StayCloseToSpawn</Behavior>
+		        <Transition afterTime="1">tsPart2</Transition>
+			</State>
+			<State id="tsPart2">
+				<Behavior speed="1.5" distance="3" angle="180" cooldown="1">Move</Behavior>
+		        <Transition afterTime=".6">tsPart3</Transition>
+			</State>
+			<State id="tsPart3">
+	        	<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		        <Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Behavior type="auto" childId="Oryx Guardian Sword" range="10" defaultAngle="90" cooldown="5" centerObject="true">ObjectToss</Behavior>
+		        <Transition afterTime="2">tsPart4</Transition>
+			</State>
+			<State id="tsPart4">
+	        	<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		        <Behavior altTextureId="2">SetAltTexture</Behavior>
+		        <Transition noneExist="Oryx Guardian Sword">tsPart5</Transition>
+			</State>
+			<State id="tsPart5">
+	        	<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		        <Behavior altTextureId="2">SetAltTexture</Behavior>
+		        <Transition afterTime="1.6">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="spinSpray">
+			<State id="spinSpray">
+				<State id="spinSpray">
+					<Behavior bucket="movement" speed="2" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" protectionRange="1" reprotectRange=".3">Protect</Behavior>
+					<Transition afterTime="1">spP1</Transition>
+				</State>
+				<State id="spP1">
+					<Behavior bucket="movement" speed="2" distance="4" angle="0" cooldown="5">Move</Behavior>
+					<Transition afterTime=".4">spP2</Transition>
+				</State>
+				<State id="spP2">
+					<Behavior bucket="movement" speed=".4" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" radius="4" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			
+					<State id="a1">
+						<Behavior altTextureId="3">SetAltTexture</Behavior>
+		       			<Transition afterTime=".2">a2</Transition>
+					</State>
+					<State id="a2">
+						<Behavior altTextureId="4">SetAltTexture</Behavior>
+		       			<Transition afterTime=".2">a1</Transition>
+					</State>
+					<State id="unused">
+						<Behavior altTextureId="5">SetAltTexture</Behavior>
+					</State>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="0" offset="0">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="40" offset=".2">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="80" offset=".4">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="120" offset=".6">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="160" offset=".8">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="200" offset="1">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="240" offset="1.2">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="280" offset="1.4">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="320" offset="1.6">Shoot</Behavior>
+					<Embed name="radialSpray2"></Embed>
+					<Transition afterTime="4.8">spDone</Transition>
+				</State>
+				<State id="spDone">
+					<Behavior tagName="spinSprayDone">SetTag</Behavior>
+					<Transition afterTime=".4">spP2</Transition>
+				</State>
+		        <Transition hasTag="spinSprayDone">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+	        
+		<DefineEmbed name="radialSpray2">
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="180" offset="0">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="220" offset=".2">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="260" offset=".4">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="300" offset=".6">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="340" offset=".8">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="20" offset="1">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="60" offset="1.2">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="100" offset="1.4">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="140" offset="1.6">Shoot</Behavior>
+		</DefineEmbed>
+			
+		<DefineEmbed name="sideSpray">
+			<State id="sideSpray">
+				<Behavior bucket="movement" speed="2" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" protectionRange="1" reprotectRange=".3">Protect</Behavior>
+				<Transition afterTime="1">ssP1</Transition>
+			</State>
+			<State id="ssP1">
+				<Behavior type="auto" numShots="10" cooldown="2" projectileId="2" angle="36" defaultAngle="0" offset="0">Shoot</Behavior>
+				<Behavior bucket="movement" speed="2" distance="11" angle="0" cooldown="5">Move</Behavior>
+				<Transition afterTime="1">ssP2</Transition>
+			</State>
+			<State id="ssP2">
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="120" predictive="true" defaultAngle="60" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="140" predictive="true" defaultAngle="70" offset=".2">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="160" predictive="true" defaultAngle="80" offset=".4">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="180" predictive="true" defaultAngle="90" offset=".8">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="200" predictive="true" defaultAngle="100" offset="1">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="220" predictive="true" defaultAngle="110" offset="1.2">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="240" predictive="true" defaultAngle="120" offset="1.4">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="260" predictive="true" defaultAngle="130" offset="1.6">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="280" predictive="true" defaultAngle="140" offset="1.8">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="300" predictive="true" defaultAngle="150" offset="2">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="320" predictive="true" defaultAngle="160" offset="2.2">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="340" predictive="true" defaultAngle="170" offset="2.4">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="1" cooldown="3" projectileId="0" angle="0" predictive="true" defaultAngle="180" offset="2.6">Shoot</Behavior>
+				<Behavior range="4.33" cooldown=".5" radius="2.5" damage="50">GrenadeToss</Behavior>
+				<Transition afterTime="2.6">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="superBlast">
+			<State id="superBlast">
+				<Behavior bucket="movement" speed="2" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" protectionRange="1" reprotectRange=".3">Protect</Behavior>
+				<Transition afterTime="1">sbP1</Transition>
+			</State>
+			<State id="sbP1">
+				<Behavior bucket="movement" speed="2" distance=".2" angle="0" cooldown="5">Move</Behavior>
+				<Transition afterTime="1">sbP2</Transition>
+			</State>
+			<State id="sbP2">
+				<Behavior type="auto" range="10" numShots="7" cooldown="1" projectileId="1" angle="26" defaultAngle="0" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="10" numShots="8" cooldown="1" projectileId="1" angle="22" defaultAngle="0" offset=".2">Shoot</Behavior>
+				<Behavior range="4.33" cooldown=".5" radius="2.5" damage="50">GrenadeToss</Behavior>
+				<Transition afterTime="4">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+			
+		<SoulboundLoot tier="7" prob=".2">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".11" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".05" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".2">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".11" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".05" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".1">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".06" threshold=".18">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".1">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".06" threshold=".18">Ring</SoulboundLoot>
+		<SoulboundLoot prob=".001">Wine Cellar Incantation</SoulboundLoot>
+		<SoulboundLoot prob=".001" min="1">Potion of Defense</SoulboundLoot>
+		<SoulboundLoot prob=".003" threshold=".15">Ancient Stone Sword</SoulboundLoot>
+	</Object> 
+
+	<Object type="0x0d79" id="Oryx Stone Guardian Left">
+		<DisplayId>Stone Guardian</DisplayId>
+		<Group>Oryx Minions</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<StasisImmune/>
+	    <Quest/>
+		<Level>20</Level>
+	        
+	    <!-- Alive:4053074 Stone:4053078 StoneNoSword:4057098 -->
+	        
+	 	<AnimatedTexture><File>chars16x16dEncounters2</File><Index>2</Index></AnimatedTexture>
+	        
+		<AltTexture id="1"> <!-- stone -->
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>3</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="2"> <!-- throw sword -->
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>4</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="3"> <!-- spin 1 -->
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>5</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="4"> <!-- spin 2 -->
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>6</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="5"> <!-- fly 2 -->
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>1</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<HitSound>monster/stone_walls_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+	        
+		<MaxHitPoints>60000</MaxHitPoints>
+	        
+		<Projectile id="0">
+			<ObjectId>Red Blast</ObjectId>
+			<Speed>60</Speed>
+			<Damage>75</Damage>
+			<Size>100</Size>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Super Blast Red</ObjectId>
+			<Speed>60</Speed>
+			<Damage>120</Damage>
+			<Size>140</Size>
+			<LifetimeMS>900</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="2">
+			<ObjectId>Small White Blast</ObjectId>
+			<Speed>40</Speed>
+			<Damage>50</Damage>
+			<Size>100</Size>
+			<LifetimeMS>1000</LifetimeMS>
+		</Projectile>
+	        
+		<Size>120</Size>
+		<Defense>100</Defense>
+		<XpMult>0.135</XpMult>
+	        
+		<State id="ini">
+			<Behavior bucket="orders" listenIds="Oryx Guardian TaskMaster">FollowOrders</Behavior>
+			
+	        <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+	        <Behavior bucket="movement" speed="0">Wander</Behavior>
+			<Transition playerWithin="4">glow</Transition>	
+			<Transition hasTag="wakeUp">glow</Transition>
+		</State>
+	        
+		<State id="glow">
+			<Order>
+				<Behavior tagName="on">SetTag</Behavior>
+			</Order>
+	        <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+	        <Behavior type="Flash" color="888888" flashPeriod='1' flashRepeats="3">ShowEffect</Behavior>
+	        <Transition afterTime="3">duoMode</Transition>
+		</State>
+		
+		<State id="duoMode">
+			<Behavior listenIds="Oryx Guardian TaskMaster">FollowOrders</Behavior>
+			
+			<State id="independant">
+				<State id="chooser">
+					<Transition random="0.5">action1</Transition>
+					<Transition random="0.5">action2</Transition>
+					<Transition random="1.0">action3</Transition>
+				</State>
+				
+				<State id="action1">
+					<Transition random="1">wanderAttack</Transition>
+				</State>
+				<State id="action2">
+					<Transition random="1">chargeAttack</Transition>
+				</State>
+				<State id="action3">
+					<Transition random="1">wanderAttack</Transition>
+				</State>
+				
+				<Embed name="cancelable"></Embed>
+				
+				<State id="chooseBehavior">
+					<Transition afterTime=".2">chooser</Transition>
+				</State>
+				
+				<Transition hasTag="duo1">Duo1</Transition>
+				<Transition hasTag="duo2">Duo2</Transition>
+				<Transition hasTag="duo3">Duo3</Transition>
+				<Transition hasTag="duo4">Duo4</Transition>
+			</State>
+			
+			<State id="Duo1">
+				<Behavior tagName="duo1">ClearTag</Behavior>
+				<Transition random="1">circleFormationAttack</Transition>
+			</State>
+			
+			<State id="Duo2">
+				<Behavior tagName="duo2">ClearTag</Behavior>
+				<Transition random="1">sideSpray</Transition>
+			</State>
+			
+			<State id="Duo3">
+				<Behavior tagName="spinSprayDone">ClearTag</Behavior>
+				<Behavior tagName="duo3">ClearTag</Behavior>
+				<Transition random="1">spinSpray</Transition>
+			</State>
+			
+			<State id="Duo4">
+				<Behavior tagName="duo4">ClearTag</Behavior>
+				<Transition random="1">superBlast</Transition>
+			</State>
+			
+			<Embed name="circleFormationAttack"></Embed>
+			<Embed name="sideSpray"></Embed>
+			<Embed name="spinSpray"></Embed>
+			<Embed name="superBlast"></Embed>
+			
+			<State id="chooseBehavior">
+				<Order>
+					<Behavior tagName="complete">SetTag</Behavior>
+				</Order>
+				<Transition afterTime=".2">independant</Transition>
+			</State>
+			
+			<Transition noneExist="Oryx Stone Guardian Right">duoSoloTransition</Transition>
+		</State>
+		
+		<State id="duoSoloTransition">
+	        <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	        <Behavior type="Flash" color="888888" flashPeriod='1' flashRepeats="5">ShowEffect</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+	        <Behavior targetIds="Oryx Stone Guardian Left" maxTargets="1" maxHeal="1600" cooldown=".5" range=".2">Heal</Behavior>
+			<Transition afterTime="5">soloMode</Transition>
+		</State>
+		
+		<State id="soloMode">
+			<State id="startWithSword">
+				<Transition random="1">throwSword</Transition>
+			</State>
+			
+			<State id="chooseBehavior">
+				<Transition random=".4">atkType</Transition>
+				<Transition random=".5">formType</Transition>
+				<Transition random="1">specialType</Transition>
+			</State>
+			
+			<State id="atkType">
+				<Transition random=".5">wanderAttack</Transition>
+				<Transition random="1">chargeAttack</Transition>
+			</State>
+			
+			<State id="formType">
+				<Behavior tagName="spinSprayDone">ClearTag</Behavior>
+				<Transition random=".5">spinSpray</Transition>
+				<Transition random="1">circleFormationAttack</Transition>
+			</State>
+		
+			<State id="specialType">
+				<Transition random=".4">sideSpray</Transition>
+				<Transition random="1">throwSword</Transition>
+			</State>
+			
+			<Embed name="cancelable"></Embed>
+			<Embed name="circleFormationAttack"></Embed>
+			<Embed name="sideSpray"></Embed>
+			<Embed name="spinSpray"></Embed>
+			<Embed name="throwSword"></Embed>
+		</State>
+	        	
+		<DefineEmbed name="cancelable">
+			<State id="wanderAttack">
+				<Behavior bucket="movement" speed=".5">Wander</Behavior>
+				<Behavior type="auto" numShots="10" cooldown="2" projectileId="2" angle="36" defaultAngle="0" offset="0">Shoot</Behavior>
+		        <Transition afterTime="3">chooseBehavior</Transition>
+			</State>
+			
+			<State id="chargeAttack">
+				<Behavior bucket="movement" speed="1.5" cooldown="0" range="8">Charge</Behavior>
+				<Behavior type="targeted" range="7" numShots="5" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="0" offset="0">Shoot</Behavior>
+		        <Transition afterTime="3">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="circleFormationAttack">
+			<State id="circleFormationAttack">
+				<Behavior bucket="movement1" speed="1.5" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" protectionRange="5" reprotectRange="4.25">Protect</Behavior>
+				<Behavior bucket="movement1" speed=".75" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" radius="4" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="0" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="90" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="180" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="1" projectileId="0" angle="10" predictive="true" defaultAngle="270" offset="0">Shoot</Behavior>
+		        <Transition afterTime="4">chooseBehavior</Transition>
+			</State>
+			
+			<State id="stayInFormation">
+				<Behavior bucket="movement1" speed=".75" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" radius="4" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+		        <Transition afterTime=".8">circleFormationAttack</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="throwSword">
+			<State id="throwSword">
+				<Behavior speed="2" cooldown="0" range="0">StayCloseToSpawn</Behavior>
+		        <Transition afterTime="1">tsPart2</Transition>
+			</State>
+			<State id="tsPart2">
+				<Behavior speed="1.5" distance="3" cooldown="1">Move</Behavior>
+		        <Transition afterTime=".6">tsPart3</Transition>
+			</State>
+			<State id="tsPart3">
+	        	<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		        <Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Behavior type="auto" childId="Oryx Guardian Sword" range="10" defaultAngle="90" cooldown="5" centerObject="true">ObjectToss</Behavior>
+		        <Transition afterTime="2">tsPart4</Transition>
+			</State>
+			<State id="tsPart4">
+	        	<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		        <Behavior altTextureId="2">SetAltTexture</Behavior>
+		        <Transition noneExist="Oryx Guardian Sword">tsPart5</Transition>
+			</State>
+			<State id="tsPart5">
+	        	<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		        <Behavior altTextureId="2">SetAltTexture</Behavior>
+		        <Transition afterTime="1.6">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="spinSpray">
+			<State id="spinSpray">
+				<State id="spinSpray">
+					<Behavior bucket="movement" speed="2" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" protectionRange="1" reprotectRange=".3">Protect</Behavior>
+					<Transition afterTime="1">spP1</Transition>
+				</State>
+				<State id="spP1">
+					<Behavior bucket="movement" speed="2" distance="4" angle="180" cooldown="5">Move</Behavior>
+					<Transition afterTime=".4">spP2</Transition>
+				</State>
+				<State id="spP2">
+					<Behavior bucket="movement" speed=".4" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" radius="4" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			
+					<State id="a1">
+						<Behavior altTextureId="3">SetAltTexture</Behavior>
+		       			<Transition afterTime=".2">a2</Transition>
+					</State>
+					<State id="a2">
+						<Behavior altTextureId="4">SetAltTexture</Behavior>
+		       			<Transition afterTime=".2">a1</Transition>
+					</State>
+					<State id="unused">
+						<Behavior altTextureId="5">SetAltTexture</Behavior>
+					</State>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="0" offset="0">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="40" offset=".2">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="80" offset=".4">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="120" offset=".6">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="160" offset=".8">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="200" offset="1">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="240" offset="1.2">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="280" offset="1.4">Shoot</Behavior>
+					<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="320" offset="1.6">Shoot</Behavior>
+					<Embed name="radialSpray2"></Embed>
+					<Transition afterTime="4.8">spDone</Transition>
+				</State>
+				<State id="spDone">
+					<Behavior tagName="spinSprayDone">SetTag</Behavior>
+					<Transition afterTime=".4">spP2</Transition>
+				</State>
+		        <Transition hasTag="spinSprayDone">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+	        
+		<DefineEmbed name="radialSpray2">
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="180" offset="0">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="220" offset=".2">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="260" offset=".4">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="300" offset=".6">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="340" offset=".8">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="20" offset="1">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="60" offset="1.2">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="100" offset="1.4">Shoot</Behavior>
+			<Behavior type="auto" range="7" numShots="1" cooldown="1.8" projectileId="0" angle="0" predictive="true" defaultAngle="140" offset="1.6">Shoot</Behavior>
+		</DefineEmbed>
+			
+		<DefineEmbed name="sideSpray">
+			<State id="sideSpray">
+				<Behavior bucket="movement" speed="2" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" protectionRange="1" reprotectRange=".3">Protect</Behavior>
+				<Behavior type="auto" numShots="10" cooldown="2" projectileId="2" angle="36" defaultAngle="18" offset="0">Shoot</Behavior>
+				<Transition afterTime="1">ssP1</Transition>
+			</State>
+			<State id="ssP1">
+				<Behavior bucket="movement" speed="2" distance="11" angle="180" cooldown="5">Move</Behavior>
+				<Transition afterTime="1">ssP2</Transition>
+			</State>
+			<State id="ssP2">
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-120" predictive="true" defaultAngle="120" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-140" predictive="true" defaultAngle="110" offset=".2">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-160" predictive="true" defaultAngle="100" offset=".4">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-180" predictive="true" defaultAngle="90" offset=".8">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-200" predictive="true" defaultAngle="80" offset="1">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-220" predictive="true" defaultAngle="70" offset="1.2">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-240" predictive="true" defaultAngle="60" offset="1.4">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-260" predictive="true" defaultAngle="50" offset="1.6">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-280" predictive="true" defaultAngle="40" offset="1.8">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-300" predictive="true" defaultAngle="30" offset="2">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-320" predictive="true" defaultAngle="20" offset="2.2">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="2" cooldown="3" projectileId="0" angle="-340" predictive="true" defaultAngle="10" offset="2.4">Shoot</Behavior>
+				<Behavior type="auto" range="7" numShots="1" cooldown="3" projectileId="0" angle="0" predictive="true" defaultAngle="0" offset="2.6">Shoot</Behavior>
+				<Behavior range="4.33" cooldown=".5" radius="2" damage="50">GrenadeToss</Behavior>
+				<Transition afterTime="2.6">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+	
+		<DefineEmbed name="superBlast">
+			<State id="superBlast">
+				<Behavior bucket="movement" speed="2" protecteeId="Oryx Guardian TaskMaster" acquireRange="20" protectionRange="1" reprotectRange=".3">Protect</Behavior>
+				<Transition afterTime="1">sbP1</Transition>
+			</State>
+			<State id="sbP1">
+				<Behavior bucket="movement" speed="2" distance="0.2" angle="180" cooldown="5">Move</Behavior>
+				<Transition afterTime="1">sbP2</Transition>
+			</State>
+			<State id="sbP2">
+				<Behavior type="auto" range="10" numShots="7" cooldown="1" projectileId="1" angle="26" defaultAngle="180" offset="0">Shoot</Behavior>
+				<Behavior type="auto" range="10" numShots="8" cooldown="1" projectileId="1" angle="22" defaultAngle="180" offset=".2">Shoot</Behavior>
+				<Behavior range="4.33" cooldown=".5" radius="2.5" damage="50">GrenadeToss</Behavior>
+				<Transition afterTime="4">chooseBehavior</Transition>
+			</State>
+		</DefineEmbed>
+			
+		<SoulboundLoot tier="7" prob=".2">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".11" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".05" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".2">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".11" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".05" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".1">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".06" threshold=".18">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".1">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".06" threshold=".18">Ring</SoulboundLoot>
+		<SoulboundLoot prob=".001">Wine Cellar Incantation</SoulboundLoot>
+		<SoulboundLoot prob=".001" min="1">Potion of Defense</SoulboundLoot>
+		<SoulboundLoot prob=".003" threshold=".15">Ancient Stone Sword</SoulboundLoot>
+	</Object> 
+
+	<Object type="0x0d7a" id="Oryx Guardian TaskMaster">
+		<Group>Oryx Minions</Group>
+		<Class>Character</Class>
+		<StasisImmune/>
+		<NoMiniMap/>
+		
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+	     
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/dwarves_death</DeathSound>
+	        
+		<MaxHitPoints>100</MaxHitPoints>
+	        
+		<Size>0</Size>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		  
+	    <Behavior effect="Invincible">ConditionEffect</Behavior>
+	    <Behavior listenIds="Oryx Stone Guardian Right">FollowOrders</Behavior>
+	    <Behavior listenIds="Oryx Stone Guardian Left">FollowOrders</Behavior>
+	    
+	    <State id="off">
+		    <Transition hasTag="on">WakeAll</Transition>
+	    </State>
+	        
+	    <State id="WakeAll">
+		    <Order>
+		   		<Behavior tagName="wakeUp">SetTag</Behavior>
+		    </Order>
+		    <Transition afterTime="3">duoMode</Transition>
+	    </State>
+	    
+	    <State id="duoMode">
+	    	<State id="ReChoose">
+				<Transition afterTime="3">Chooser</Transition>
+	    	</State>
+	    	
+	    	<State id="Chooser">
+	    		<Behavior tagName="complete">ClearTag</Behavior>
+	    		
+				<Transition random=".43">ReChoose</Transition>
+				<Transition random=".5">DuoType1</Transition>
+				<Transition random="1">DuoType2</Transition>
+	    	</State>
+	    	
+	    	<State id="DuoType1">
+				<Transition random=".5">Duo1</Transition>
+				<Transition random="1">Duo2</Transition>
+	    	</State>
+	    	
+	    	<State id="DuoType2">
+				<Transition random=".5">Duo3</Transition>
+				<Transition random="1">Duo4</Transition>
+	    	</State>
+	    	
+	    	<State id="Duo1">
+		    	<Order>
+		    		<Behavior tagName="duo1">SetTag</Behavior>
+		    	</Order>
+		    	<Transition afterTime=".2">Wait</Transition>
+	    	</State>
+	    	<State id="Duo2">
+		    	<Order>
+		    		<Behavior tagName="duo2">SetTag</Behavior>
+		    	</Order>
+		    	<Transition afterTime=".2">Wait</Transition>
+	    	</State>
+	    	<State id="Duo3">
+		    	<Order>
+		    		<Behavior tagName="duo3">SetTag</Behavior>
+		    	</Order>
+		    	<Transition afterTime=".2">Wait</Transition>
+	    	</State>
+	    	<State id="Duo4">
+		    	<Order>
+		    		<Behavior tagName="duo4">SetTag</Behavior>
+		    	</Order>
+		    	<Transition afterTime=".2">Wait</Transition>
+	    	</State>
+	    	
+	    	<State id="Wait">
+		    	<Transition hasTag="complete">ReChoose</Transition>
+	    	</State>
+	    
+			<Transition noneExist="Oryx Stone Guardian Right">soloMode</Transition>
+			<Transition noneExist="Oryx Stone Guardian Left">soloMode</Transition>
+		</State>
+	    
+	    <State id="soloMode">
+			<Behavior bucket="movement" speed="0">Wander</Behavior>
+			<Transition noneExist="Oryx Stone Guardian Right,Oryx Stone Guardian Left">CreatePortal</Transition>
+		</State>
+		<State id="CreatePortal">
+			<Behavior time="0.0" childId="Oryx's Chamber Portal">Metamorphose</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x0d7b" id="Oryx's Chamber Portal">
+		<Class>Portal</Class>
+		<IntergamePortal/>
+		<DungeonName>Oryx's Chamber</DungeonName>
+		<Texture><File>lofiEnvironment</File><Index>0x7c</Index></Texture>
+	</Object>
+	
+	<Object type="0x0d7c" id="Oryx Guardian Sword">
+		<DisplayId>Stone Guardian Sword</DisplayId>
+		<Group>Oryx Minions</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<StasisImmune/>
+		
+	 	<AnimatedTexture><File>chars8x8dEncounters</File><Index>16</Index></AnimatedTexture>
+	       
+		<HitSound>monster/ents_hit</HitSound>
+		<DeathSound>monster/traps_hit</DeathSound>
+	        
+		<MaxHitPoints>20000</MaxHitPoints>
+	        
+		<Projectile id="0">
+			<ObjectId>Lightning Spiral</ObjectId>
+			<Speed>35</Speed>
+			<Damage>100</Damage>
+			<Size>120</Size>
+			<LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="1.5">Paralyzed</ConditionEffect>
+		</Projectile>
+	        
+		<Size>120</Size>
+		<Defense>40</Defense>
+		<XpMult>0.0</XpMult>
+		
+		<State id="part1">
+			<Embed name="AttackOne"></Embed>
+	        <Transition hitpointsLessThan=".5">return</Transition>
+		</State>
+			
+		<State id="return">
+			<Behavior type="auto" range="10" cooldown="10" radius="4" defaultAngle="270" damage="50">GrenadeToss</Behavior>
+			<Behavior initialDelay="0" range="0" numShots="8" projectileId="0">Explode</Behavior>
+		</State>
+	        
+		<State id="behaviors">
+	        <!-- 
+	         - when one guardian is left, he throws moves to his starting location, and throws this object into the middle of the field.
+	         - guardian turns back into invulnerable stone while the sword is out
+	         - the sword then spits out lightning balls in different directions
+	         - either:
+	         	a) a timer runns out, and the sword throws a grenade back at the guardian, then dies
+	         	b) sword is killed, and guardian revives
+	         	c) sword's health reaches 50% and then returns to the guardian
+	         -->
+		</State>
+			 
+	        
+		<DefineEmbed name="AttackOne">
+			<Behavior type="auto" numShots="5" cooldown="2" projectileId="0" angle="72" defaultAngle="36" offset="0">Shoot</Behavior>
+			<Behavior type="auto" numShots="5" cooldown="2" projectileId="0" angle="72" defaultAngle="0" offset=".5">Shoot</Behavior>
+		</DefineEmbed>
+			
+	</Object> 
+
+	<Object type="0x0d7d" id="Oryx Armor Spawner">
+        <Group>Oryx Minions</Group>
+        <Class>Character</Class>
+        <StasisImmune/>
+        <NoMiniMap/>
+        
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+        
+        <HitSound>monster/skeletons_hit</HitSound>
+        <DeathSound>monster/dwarves_death</DeathSound>
+        
+        <MaxHitPoints>100</MaxHitPoints>
+        <Size>0</Size>
+        <Defense>20</Defense>
+        <XpMult>0.0</XpMult>
+        
+    	<Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Behavior cooldown="1" childIds="Oryx Suit of Armor" maxChildren="1">MakeMinions</Behavior>
+	</Object>
+
+	<Object type="0x0d7e" id="Oryx Suit of Armor">
+		<DisplayId>Haunted Armor</DisplayId>
+        <Group>Oryx Minions</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>11</Index></AnimatedTexture>
+        
+        <AltTexture id="1">
+			<AnimatedTexture><File>chars8x8rEncounters</File><Index>12</Index></AnimatedTexture>
+		</AltTexture>
+        <AltTexture id="2">
+			<Texture><File>invisible</File><Index>0</Index></Texture>
+		</AltTexture>
+		
+        
+        <HitSound>monster/traps_hit</HitSound>
+        <DeathSound>monster/stone_walls_death</DeathSound>
+        
+        <MaxHitPoints>3000</MaxHitPoints>
+        
+        
+        <Projectile id="0">
+            <ObjectId>Armor Sword Attack</ObjectId>
+            <Speed>55</Speed>
+            <Damage>65</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Armor Creation</ObjectId>
+            <Speed>20</Speed>
+            <Damage>1</Damage>
+            <Size>120</Size>
+            <LifetimeMS>400</LifetimeMS>
+        </Projectile>
+        
+        <Size>120</Size>
+        <Defense>20</Defense>
+        <XpMult>0.0</XpMult>
+        
+        <State id="ini">
+        	<Behavior altTextureId="2">SetAltTexture</Behavior>
+        	<Behavior effect="Invincible">ConditionEffect</Behavior>
+        	<State id="wait">
+        		<Transition afterTime="1">create</Transition>	
+        	</State>
+        	<State id="create">
+        		<Behavior numShots="6" angle="60" defaultAngle="0" projectileId="1" cooldown="2" type="auto">Shoot</Behavior>
+        		<Behavior tagName="ready">SetTag</Behavior>
+        	</State>
+			<Transition hasTag="ready">choose</Transition>
+        </State>
+        
+        <State id="choose">
+        	<Behavior altTextureId="2">SetAltTexture</Behavior>
+        	<Behavior effect="Invincible">ConditionEffect</Behavior>
+        	<Transition random=".45">dead</Transition>
+			<Transition afterTime="0">alive</Transition>	
+        </State>
+      
+        <State id="dead">
+        	<Behavior bucket="movement" speed="0">Wander</Behavior>
+        </State>
+        
+        <State id="alive">
+        	<Transition playerWithin="4">part1</Transition>
+			<Transition hitpointsLessThan=".995">part1</Transition>	
+        </State>
+        
+        <State id="part1">
+        	<Behavior altTextureId="1">SetAltTexture</Behavior>
+        	<State id="close">
+        		<Behavior bucket="movement" speed=".35" aquireRange="6" range="2">Follow</Behavior>
+        	
+        		<Embed name="AttackOne">
+					<Param name="cooldown">.75</Param>
+        		</Embed>
+        		
+       			<Behavior bucket="movement" speed=".35">Wander</Behavior>
+        		<Transition noPlayerWithin="5">far</Transition>
+       		</State>
+        	<State id="far">
+        		<Behavior bucket="movement" speed="2.25" range="10">Charge</Behavior>
+        		<Transition playerWithin="3">close</Transition>
+       		</State>
+       		<Transition hitpointsLessThan=".45">part2</Transition>	
+		</State>
+		
+		 <State id="part2">
+		 	<Behavior prob="1" bubbleTime="1.5" text=" ... ">Say</Behavior>
+        	<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+        	<Behavior numShots="6" angle="60" projectileId="0" cooldown="1" range="5">Shoot</Behavior>
+        	<Behavior targetIds="Oryx Suit of Armor" maxTargets="1" maxHeal="200" cooldown=".5" range=".2">Heal</Behavior>
+        	<Transition afterTime="4">part3</Transition>
+		</State>
+		
+        <State id="part3">
+        	<Behavior altTextureId="1">SetAltTexture</Behavior>
+        	<State id="close">
+        		<Behavior bucket="movement" speed=".35" aquireRange="6" range="2">Follow</Behavior>
+        	
+        		<Embed name="AttackOne">
+					<Param name="cooldown">.4</Param>
+        		</Embed>
+        		
+       			<Behavior bucket="movement" speed=".35">Wander</Behavior>
+        		<Transition noPlayerWithin="6">far</Transition>
+       		</State>
+        	<State id="far">
+        		<Behavior bucket="movement" speed="2.25" range="10">Charge</Behavior>
+        		<Transition playerWithin="3">close</Transition>
+       		</State>
+		</State>
+        
+        <DefineEmbed name="AttackOne">
+			<Behavior numShots="2" angle="17" defaultAngle="180" projectileId="0" cooldown="{cooldown}" range="4">Shoot</Behavior>
+		</DefineEmbed>
+	</Object> 
+
+	<Object type="0x0d7f" id="Oryx Insect Commander">
+		<DisplayId>Commander of Oryx</DisplayId>
+        <Group>Oryx Minions</Group>
+        <Enemy/>
+        <Class>Character</Class>
+	    <StasisImmune/>
+        
+        <AnimatedTexture><File>chars16x16dEncounters2</File><Index>7</Index></AnimatedTexture>
+        	
+        <HitSound>monster/medusa_hit</HitSound>
+        <DeathSound>monster/snake_queen_death</DeathSound>
+        
+        <MaxHitPoints>3500</MaxHitPoints>
+		<Flying/>
+        
+        <Projectile id="0">
+            <ObjectId>Oryx Knight Swipe</ObjectId>
+            <Speed>65</Speed>
+            <Damage>65</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        
+        <Size>120</Size>
+        <Defense>30</Defense>
+        
+		
+        <State id="move test">
+       		<Behavior childIds="Oryx Insect Minion" maxChildren="12" cooldown="0.5">MakeMinions</Behavior>
+      		<State id="chill">
+      			<Behavior speed=".75">Wander</Behavior>
+      			<Transition playerWithin="4">attack</Transition>
+      			<Order>
+      	 			<Behavior bucket="skin" altTextureId="2">SetAltTexture</Behavior>
+      	 			<Behavior bucket="movement" cooldown="1.5" speed="3" range="8">Charge</Behavior>
+				</Order>
+      		</State>
+      		<State id="attack">
+      			<Order>
+      	 			<Behavior bucket="skin" altTextureId="1">SetAltTexture</Behavior>
+      	 	
+        			<!-- Behavior speed="2" acceleration=".5" turnRate="2">Swirl</Behavior-->
+        			<Behavior bucket="movement" cooldown='2' speed="2" range="2.25">Charge</Behavior>
+        			<Behavior bucket="movement" speed="2" acquireRange="6" distance="2">Circle</Behavior>
+        			<Behavior bucket="attack" angle="60" numShots="6"  projectileId="1" cooldown=".5" range="1.8">Shoot</Behavior>
+				</Order>
+				<Transition afterTime="4">chill</Transition>
+      		</State>
+		</State>
+        
+        <Behavior bucket="attack" radius="3" damage="80" cooldown="1.2" range="5">GrenadeToss</Behavior>
+        
+        <DefineEmbed name="AttackOne">
+		</DefineEmbed>
+		
+		<SoulboundLoot tier="7" prob=".035">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".02">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".01">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".035">ClassSpecial</SoulboundLoot>
+		
+		<SoulboundLoot tier="1" prob=".15">Potion</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".05">Potion</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".01">Potion</SoulboundLoot>
+		<SoulboundLoot prob=".005">Potion of Attack</SoulboundLoot>
+    </Object> 
+
+	<Object type="0x0d80" id="Oryx Insect Minion">
+		<DisplayId>Insect Minion</DisplayId>
+        <Group>Oryx Minions</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>14</Index></AnimatedTexture>
+        <AltTexture id="1">
+			<AnimatedTexture><File>chars8x8rEncounters</File><Index>14</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="2">
+			<AnimatedTexture><File>chars8x8rEncounters</File><Index>15</Index></AnimatedTexture>
+		</AltTexture>
+        	
+        
+        <HitSound>monster/snake_queen_hit</HitSound>
+        <DeathSound>monster/snakes_hit</DeathSound>
+        
+        <MaxHitPoints>500</MaxHitPoints>
+		<Flying/>
+        
+        <Projectile id="0">
+            <ObjectId>Oryx Insect Sting</ObjectId>
+            <Speed>65</Speed>
+            <Damage>55</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Oryx Insect Sting Status</ObjectId>
+            <Speed>50</Speed>
+            <Damage>60</Damage>
+            <Size>120</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        
+        <Size>100</Size>
+        <Defense>10</Defense>
+        <XpMult>0.2</XpMult>
+        
+		<Behavior bucket="movement" listenIds="Oryx Insect Commander">FollowOrders</Behavior>
+        
+        <State id="ini">
+        	<Behavior bucket="skin" altTextureId="2">SetAltTexture</Behavior>
+        	<Transition afterTime=".2">regular</Transition>
+        </State>
+        
+        <State id="regular">
+       		<Behavior bucket="skin" altTextureId="2">SetAltTexture</Behavior>
+        	<Behavior bucket="movement" protecteeId="Oryx Insect Commander" speed="1.5" acquireRange="4" protectionRange="3.5" reprotectRange="3">Protect</Behavior>
+        	<Behavior bucket="movement" acceleration="5" speed="5" aquireRange="4" turnRate="2">Buzz</Behavior>
+        	<Behavior bucket="movement" cooldown="0" speed="3" range="8">Charge</Behavior>
+        	<Behavior bucket="attack" angle="60" numShots="6"  projectileId="0" cooldown="1.2" range="1.8">Shoot</Behavior>
+        </State>
+        
+		<Behavior bucket="movement" speed=".5">Wander</Behavior>
+		
+		<SoulboundLoot tier="1" prob=".001">Potion</SoulboundLoot>
+    </Object> 
+    
+	<Object type="0x0d81" id="Oryx Eye Warrior">
+		<DisplayId>Warrior of Oryx</DisplayId>
+        <Group>Oryx Minions</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars8x8dEncounters</File><Index>18</Index></AnimatedTexture>
+        
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/trees_hit</DeathSound>
+        
+        <MaxHitPoints>1500</MaxHitPoints>
+        
+        
+        <Projectile id="0">
+            <ObjectId>Oryx Eye Warrior Swipe</ObjectId>
+            <Speed>40</Speed>
+            <Damage>60</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Oryx Knight Blast Sm</ObjectId>
+            <Speed>70</Speed>
+            <Damage>45</Damage>
+            <Size>80</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        
+        <Size>100</Size>
+        <Defense>20</Defense>
+        <XpMult>0.4</XpMult>
+        
+		<!-- Behavior bucket="movement" listenIds="Oryx Knight Commander">FollowOrders</Behavior -->
+        
+        
+        <State id="part1">
+        	<State id="search">
+        		<Behavior cooldown="0" speed="2" range="8">Charge</Behavior>
+        		<Transition playerWithin="2">buzz</Transition>
+        	</State>
+        	<State id="buzz">
+        		<Behavior bucket="movement" acceleration="3" speed="3" aquireRange="4" turnRate="2">Buzz</Behavior>
+        		<Behavior speed="1" aquireRange="8" range="2">Follow</Behavior>
+        		<Transition afterTime="5">search</Transition>
+        		<Embed name="AttackOne"></Embed>
+        	</State>
+		</State>
+        
+        <Behavior bucket="movement" speed="1">Wander</Behavior>
+        
+        <DefineEmbed name="AttackOne">
+			<Behavior numShots="8" angle="45" projectileId="0" cooldown="2" range="1">Shoot</Behavior>
+			<Behavior numShots="1" angle="5" projectileId="1" cooldown=".25" range="5">Shoot</Behavior>
+			<Transition afterTime="5">Attack1</Transition>
+		</DefineEmbed>
+		
+		<SoulboundLoot tier="1" prob=".06">Potion</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".002">Potion</SoulboundLoot>
+    </Object> 
+    
+	<Object type="0x0d82" id="Oryx Brute">
+		<DisplayId>Brute of Oryx</DisplayId>
+        <Group>Oryx Minions</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        <StasisImmune/>
+        
+        <AnimatedTexture><File>chars16x16dEncounters2</File><Index>8</Index></AnimatedTexture>
+        <AltTexture id="1">
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>9</Index></AnimatedTexture> <!-- run attack -->
+		</AltTexture>
+        
+        
+        <HitSound>monster/ogres_hit</HitSound>
+        <DeathSound>monster/ogres_death</DeathSound>
+        
+        <MaxHitPoints>7000</MaxHitPoints>
+        
+        <Projectile id="0">
+            <ObjectId>Oryx Brute Rush</ObjectId>
+            <Speed>45</Speed>
+            <Damage>65</Damage>
+            <Size>200</Size>
+            <LifetimeMS>400</LifetimeMS>
+            <MultiHit/>
+            <PassesCover/>
+			<ConditionEffect duration="4">Armor Broken</ConditionEffect>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Oryx Brute Line</ObjectId>
+            <Speed>65</Speed>
+            <Damage>55</Damage>
+            <Size>80</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        <Projectile id="2">
+            <ObjectId>Oryx Knight Blast Sm</ObjectId>
+            <Speed>35</Speed>
+            <Damage>60</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        
+        <Size>100</Size>
+        <Defense>30</Defense>
+        <XpMult>0.7</XpMult>
+        
+		<DefineEmbed name="AttackOne">
+			<State id="p1">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior offset="0.25" numShots="{sh1}" projectileId="0" angle="40" cooldown="0.15" range="8">Shoot</Behavior>
+			<Behavior offset="0.25" numShots="{sh2}" projectileId="0" angle="60" cooldown="0.15" range="8">Shoot</Behavior>
+			<Behavior bucket="movement" cooldown="0" speed="{chargeSpeed}" range="8">Charge</Behavior>
+			<Transition afterTime="3">p2</Transition>
+			</State>
+			<State id="p2">	
+				<Transition afterTime="1">p1</Transition>
+			</State>
+		</DefineEmbed>
+        
+       	<DefineEmbed name="AttackTwo">
+			<State id="p1">
+				<Behavior bucket="movement" speed="0.00001" range="0.5" aquireRange="7" duration="2" cooldown="2" predictive="true">Follow</Behavior>
+				<Behavior type="auto" defaultAngle="0" projectileId="2" numShots="12" angle="30" cooldown="3" range="6">Shoot</Behavior>
+				<Transition afterTime="0.25">p2</Transition>
+			</State>
+			<State id="p2">
+				<Behavior type="auto" defaultAngle="15" projectileId="1" numShots="12" angle="30" cooldown="4" range="6">Shoot</Behavior>
+				<Transition afterTime="1.75">p1</Transition>
+			</State>
+		</DefineEmbed>
+        
+		<State id="Part0">
+			<Behavior bucket="movement" radius="3" speed="0.0001">BackAndForth</Behavior>
+			<Transition playerWithin="6">Part1</Transition>
+			<Transition hitpointsLessThan=".95">Part1</Transition>	
+		</State>
+		
+		
+		<State id="Part1">
+			<State id="Attack1">
+				<Behavior effect="Armored">ConditionEffect</Behavior>
+				<Embed name="AttackOne">
+					<Param name="sh1">1</Param>
+					<Param name="sh2">2</Param>
+					<Param name="chargeSpeed">1</Param>
+				</Embed>
+				<Transition afterTime="4">Trans1</Transition>
+			</State>
+			<State id="Trans1">
+				<Behavior childIds="Oryx Eye Warrior" maxChildren="3" cooldown="0.2">MakeMinions</Behavior>
+				<Transition afterTime=".06">Attack2</Transition>
+			</State>
+			<State id="Attack2">
+				<Embed name="AttackTwo"></Embed>
+				<Behavior bucket="movement" speed="0.5" range="0.5" aquireRange="7" duration="2" cooldown="2" predictive="true">Follow</Behavior>
+				<Transition afterTime="6">Trans2</Transition>
+			</State>
+			<State id="Trans2">
+				<Behavior childIds="Oryx Eye Warrior" maxChildren="3" cooldown="0.2">MakeMinions</Behavior>
+				<Transition afterTime=".6">Attack1</Transition>
+			</State>
+			<Transition hitpointsLessThan=".35">Part2</Transition>	
+			<Transition noPlayerWithin="5">far1</Transition>
+		</State>
+		
+		<State id="Part2">
+			<Embed name="AttackOne">
+				<Param name="sh1">3</Param>
+				<Param name="sh2">2</Param>
+				<Param name="chargeSpeed">1.65</Param>
+			</Embed>
+			<Behavior childIds="Oryx Eye Warrior" maxChildren="3" cooldown="0.5">MakeMinions</Behavior>
+			<Transition noPlayerWithin="5">far2</Transition>
+		</State>
+		
+        <State id="far1">
+        	<Behavior bucket="movement" speed="2.25" range="10">Charge</Behavior>
+        	<Transition playerWithin="2.5">Part1</Transition>
+       	</State>
+        <State id="far2">
+        	<Behavior bucket="movement" speed="2.25" range="10">Charge</Behavior>
+        	<Transition playerWithin="2.5">Part2</Transition>
+       	</State>
+		
+		<Behavior bucket="movement" speed=".5">Wander</Behavior>
+		
+		<SoulboundLoot tier="6" prob=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".025">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".03">Armor</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".01">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".015">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".01">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".02">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".10">Potion</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".005">Potion</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".005">Potion</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".1">Potion</SoulboundLoot>
+    </Object> 
+
+	<Object type="0x0d83" id="Oryx Knight">
+		<DisplayId>Knight of Oryx</DisplayId>
+        <Group>Oryx Minions</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>16</Index></AnimatedTexture>
+        
+        <HitSound>monster/dwarves_hit</HitSound>
+        <DeathSound>monster/dragons_hit</DeathSound>
+        
+        <MaxHitPoints>2500</MaxHitPoints>
+        
+        
+        <Projectile id="0">
+            <ObjectId>Oryx Knight Swipe Spin</ObjectId>
+            <Speed>65</Speed>
+            <Damage>55</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="3">Slowed</ConditionEffect>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Oryx Bubble</ObjectId>
+            <Speed>0.02</Speed>
+            <Damage>100</Damage>
+            <Size>160</Size>
+            <LifetimeMS>400</LifetimeMS>
+            <MultiHit/>
+            <PassesCover/>
+        </Projectile>
+        <Projectile id="2">
+            <ObjectId>Oryx Knight Blast Sm</ObjectId>
+            <Speed>35</Speed>
+            <Damage>60</Damage>
+            <Size>80</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        <Projectile id="3">
+            <ObjectId>Oryx Knight Line</ObjectId>
+            <Speed>55</Speed>
+            <Damage>55</Damage>
+            <Size>80</Size>
+            <LifetimeMS>1200</LifetimeMS>
+        </Projectile>
+        
+        <Size>100</Size>
+        <Defense>20</Defense>
+        
+		<!-- Behavior bucket="movement" listenIds="Oryx Knight Commander">FollowOrders</Behavior -->
+        
+        <DefineEmbed name="AttackTwo">
+			<Behavior numShots="1" projectileId="1" cooldown="0.15" range="10">Shoot</Behavior>
+			<Behavior defaultAngle="0" type="auto" angle="90" numShots="4"  projectileId="2" cooldown="1" range="10">Shoot</Behavior>
+			<Behavior offset="0.5" defaultAngle="45" type="auto" angle="90"  numShots="4" projectileId="2" cooldown="1" range="10">Shoot</Behavior>
+			<Behavior childIds="Oryx Pet" maxChildren="3" cooldown="0.6">MakeMinions</Behavior>
+			<Transition afterTime="3">Attack1</Transition>
+		</DefineEmbed>
+		
+		<DefineEmbed name="AttackOne">
+			<State id="p1">
+				<Behavior projectileId="0" numShots="2" angle="17" cooldown="4" range="6">Shoot</Behavior>
+				<Transition afterTime="0.25">p2</Transition>
+			</State>
+			<State id="p2">
+				<Behavior projectileId="0" numShots="3" angle="17" cooldown="4" range="6">Shoot</Behavior>
+				<Transition afterTime="0.25">p3</Transition>
+			</State>
+			<State id="p3">
+				<Behavior projectileId="0" numShots="2" angle="17" cooldown="4" range="6">Shoot</Behavior>
+				<Transition afterTime="0.25">p4</Transition>
+			</State>
+			<State id="p4">
+				<Behavior projectileId="0" numShots="3" angle="17" cooldown="4" range="6">Shoot</Behavior>
+				<Transition afterTime="0.25">p5</Transition>
+			</State>
+			<State id="p5">
+				<Behavior projectileId="0" numShots="2" angle="17" cooldown="4" range="6">Shoot</Behavior>
+				<Transition afterTime="0.25">p6</Transition>
+			</State>
+			<State id="p6"> 
+				<Transition afterTime="1.5">p1</Transition>
+			</State>
+		</DefineEmbed>
+        
+		<DefineEmbed name="AttackThree">
+			<State id="Atk3">
+				<Behavior acquireRange="7" speed="1.2" distance="3">KeepDistance</Behavior>
+				<Behavior projectileId="3" numShots="4" angle="10" cooldown=".4" range="4">Shoot</Behavior>
+				<Transition afterTime="3.5">Attack2</Transition>
+			</State>
+		</DefineEmbed>
+        
+		<State id="Part0">
+			<Behavior bucket="movement" radius="3" speed="0.5">BackAndForth</Behavior>
+			<Embed name="AttackOne"></Embed>
+			<Transition hitpointsLessThan=".99">Trans</Transition>	
+			<Transition playerWithin="3">Trans</Transition>	
+		</State>
+		
+		<State id="Trans">
+			<Behavior bucket="movement" speed=".2">Wander</Behavior>
+			<Transition afterTime=".2">Part1</Transition>
+		</State>
+		
+		<State id="Part1">
+			<State id="Attack1">
+				<Behavior bucket="movement" speed="1" range="1.5" aquireRange="7" duration="2" cooldown="2" predictive="true">Follow</Behavior>
+				<Embed name="AttackOne"></Embed>
+				<Transition afterTime="5">Atk3</Transition>
+			</State>
+			<State id="Attack2">
+				<Behavior effect="Armored">ConditionEffect</Behavior>
+        		<Behavior bucket="movement" speed=".2">Wander</Behavior>
+				<Embed name="AttackTwo"></Embed>
+				<Transition afterTime="3">Attack1</Transition>
+			</State>
+			<Embed name="AttackThree"></Embed>
+			<Transition noPlayerWithin="5">far</Transition>
+		</State>
+		
+        <State id="far">
+        	<Behavior bucket="movement" speed="2.25" range="10">Charge</Behavior>
+        	<Transition playerWithin="2.5">Part1</Transition>
+       	</State>
+		
+		<SoulboundLoot tier="1" prob=".1">Potion</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".002">Potion</SoulboundLoot>
+    </Object> 
+    
+	<Object type="0x0d84" id="Oryx Pet">
+		<DisplayId>Pet of Oryx</DisplayId>
+        <Group>Oryx Minions</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>17</Index></AnimatedTexture>
+        
+        <HitSound>monster/night_elves_hit</HitSound>
+        <DeathSound>monster/medusa_hit</DeathSound>
+        
+        <MaxHitPoints>750</MaxHitPoints>
+        
+        <Projectile id="0">
+            <ObjectId>Pet Bubble</ObjectId>
+            <Speed>0.02</Speed>
+            <Damage>60</Damage>
+            <Size>80</Size>
+            <LifetimeMS>400</LifetimeMS>
+            <MultiHit/>
+            <PassesCover/>
+        </Projectile>
+        
+        <Size>100</Size>
+        <Defense>15</Defense>
+        <XpMult>0.2</XpMult>
+        
+        <DefineEmbed name="AttackOne">
+        	<State id="Atk1">
+				<Behavior bucket="movement" speed="1.5" cooldown="0" range="9">Charge</Behavior>
+				<Behavior numShots="1" projectileId="0" cooldown="0.15" range="10">Shoot</Behavior>
+				<Transition afterTime="3">AttackDone</Transition>
+			</State>
+		</DefineEmbed>
+        
+		<State id="Part1">
+			<Embed name="AttackOne"></Embed>
+        	<State id="AttackDone">
+				<Behavior bucket="movement" speed=".75">Wander</Behavior>
+				<Transition afterTime="1">Atk1</Transition>
+			</State>
+		</State>
+		
+		<SoulboundLoot tier="1" prob=".02">Potion</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".0001">Potion</SoulboundLoot>
+    </Object> 
+
+	<Object type="0x0d85" id="Oryx's Living Floor Fire Down">
+		<DisplayId>Oryx's Living Floor</DisplayId>
+		<Group>Oryx's Minions</Group>
+		<Class>GameObject</Class>
+		<Enemy/>
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<MaxHitPoints>2600</MaxHitPoints>
+		
+		<DrawOnGround/>
+		 
+		<Texture><File>lofiEnvironment3</File><Index>0x1d</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x1e</Index></Texture>
+		</AltTexture>
+		<AltTexture id="2">
+			<Texture><File>lofiEnvironment3</File><Index>0x1f</Index></Texture>
+		</AltTexture>
+		
+		<Projectile id="0">
+			<ObjectId>Mute Spell</ObjectId>
+			<Speed>50</Speed>
+			<MinDamage>10</MinDamage>
+			<MaxDamage>20</MaxDamage>
+			<Size>80</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="5">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+	
+		<State id="NoTarget">
+			<State id="Random">
+				<Transition random="0.5">Attack1</Transition>
+				<Transition random="1">Attack2</Transition>
+			</State>
+			<State id="Attack1">
+				<Behavior type="auto" childId="Quiet Bomb" range="10" cooldown="1" rangeJitter="1" defaultAngle="90">ObjectToss</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="Attack2">
+				<Behavior type="auto" childId="Quiet Bomb" range="10" cooldown="1" rangeJitter="2" defaultAngle="90">ObjectToss</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="EyeClosed1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".2">EyeClosed2</Transition>		
+			</State>
+			<State id="EyeClosed2">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>	
+				<Transition afterTime=".2">EyeClosedWait</Transition>			
+			</State>
+			<State id="EyeClosedWait">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>	
+				<Transition afterTime=".6">Random</Transition>			
+			</State>
+			<Transition playerWithin="6" afterTime="1.6">CloseTarget</Transition>
+			<Transition playerWithin="15" afterTime="1.6">Target</Transition>
+		</State>
+		
+		<State id="Target">
+			<State id="Random">
+				<Transition random="0.5">Attack1</Transition>
+				<Transition random="1">Attack2</Transition>
+			</State>
+			<State id="Attack1">
+				<Behavior type="targeted" childId="Quiet Bomb" range="12" cooldown="1" rangeJitter="1">ObjectToss</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="Attack2">
+				<Behavior type="targeted" childId="Quiet Bomb" range="12" cooldown="1" rangeJitter="2">ObjectToss</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="EyeClosed1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".2">EyeClosed2</Transition>		
+			</State>
+			<State id="EyeClosed2">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>	
+				<Transition afterTime=".2">EyeClosedWait</Transition>			
+			</State>
+			<State id="EyeClosedWait">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>	
+				<Transition afterTime=".6">Random</Transition>			
+			</State>
+			<Transition noPlayerWithin="15" afterTime="1.6">NoTarget</Transition>
+			<Transition playerWithin="6" afterTime="1.6">CloseTarget</Transition>
+		</State>
+		
+		<State id="CloseTarget">
+			<State id="Attack1">
+				<Behavior type="targeted" numShots="18" projectileId="0" cooldown="1" range="10" offset="0" angle="20" predictive="1">Shoot</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="Attack2">
+				<Behavior type="auto" numShots="18" projectileId="0" cooldown="1" range="10" offset="0" angle="20">Shoot</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="EyeClosed1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".2">EyeClosed2</Transition>		
+			</State>
+			<State id="EyeClosed2">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Transition afterTime=".2" random="0.5">Attack1</Transition>	
+				<Transition afterTime=".2">Attack2</Transition>			
+			</State>
+			<Transition noPlayerWithin="15" afterTime="1.2">NoTarget</Transition>
+			<Transition playerWithin="15" noPlayerWithin="6" afterTime="1.2">Target</Transition>
+		</State>		
+	</Object>
+	
+	<Object type="0x0d86" id="Quiet Bomb">
+		<Group>Oryx's Minions</Group>
+	    <Class>Character</Class>
+	    <StasisImmune/>
+		<Enemy/>
+		<NoMiniMap/>
+		
+		<MaxHitPoints>100</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Size>90</Size>
+		<Defense>0</Defense>
+		
+		<Texture><File>lofiEnvironment3</File><Index>0x22</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x23</Index></Texture>
+		</AltTexture>
+		<AltTexture id="2">
+			<Texture><File>lofiEnvironment3</File><Index>0x24</Index></Texture>
+		</AltTexture>
+	        	
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skull_shrine_hit</DeathSound>
+		
+		<Projectile id="0">
+			<ObjectId>Mute Spell</ObjectId>
+			<Speed>50</Speed>
+			<MinDamage>10</MinDamage>
+			<MaxDamage>20</MaxDamage>
+			<Size>80</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="5">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<Behavior type="Flash" color="FF7700" flashPeriod=".2" flashRepeats="5">ShowEffect</Behavior>
+		
+		<State id="Ini">
+			<Transition afterTime="0.2">Shrink</Transition>
+		</State>
+		<State id="Shrink">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Transition afterTime="0.2">Grow</Transition>
+		</State>
+		<State id="Grow">
+			<Transition afterTime="0.2">Shrink2</Transition>
+		</State>
+		<State id="Shrink2">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Transition afterTime="0.2">Explode</Transition>
+		</State>
+		<State id="Explode">
+			<Behavior initialDelay="0" numShots="18" projectileId="0" range="0">Explode</Behavior>
+		</State>
+	</Object>
+		
+	<Object type="0x0d87" id="Oryx's Living Floor">
+		<Group>Oryx's Minions</Group>
+		<Class>GameObject</Class>
+		<Enemy/>
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<MaxHitPoints>2600</MaxHitPoints>
+		<DrawOnGround/>
+		
+		<Texture><File>lofiEnvironment3</File><Index>0x1d</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x1e</Index></Texture>
+		</AltTexture>
+		<AltTexture id="2">
+			<Texture><File>lofiEnvironment3</File><Index>0x1f</Index></Texture>
+		</AltTexture>
+		
+		<Projectile id="0">
+			<ObjectId>Mute Spell</ObjectId>
+			<Speed>50</Speed>
+			<MinDamage>10</MinDamage>
+			<MaxDamage>20</MaxDamage>
+			<Size>80</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="5">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+	
+	
+		<State id="Target">
+			<State id="Random">
+				<Transition random="0.5">Attack1</Transition>
+				<Transition random="1">Attack2</Transition>
+			</State>
+			<State id="Attack1">
+				<Behavior type="targeted" childId="Quiet Bomb" range="12" cooldown="1" rangeJitter="1">ObjectToss</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="Attack2">
+				<Behavior type="targeted" childId="Quiet Bomb" range="12" cooldown="1" rangeJitter="2">ObjectToss</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="EyeClosed1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".2">EyeClosed2</Transition>		
+			</State>
+			<State id="EyeClosed2">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>	
+				<Transition afterTime=".2">EyeClosedWait</Transition>			
+			</State>
+			<State id="EyeClosedWait">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>	
+				<Transition afterTime=".6">Random</Transition>			
+			</State>
+			<Transition noPlayerWithin="13" afterTime="1.6">NoTarget</Transition>
+			<Transition playerWithin="6" afterTime="1.6">NoTarget</Transition>
+		</State>
+		
+		<State id="NoTarget">
+			<State id="Attack1">
+				<Behavior type="targeted" numShots="18" projectileId="0" cooldown="1" range="10" offset="0" angle="20" predictive="1">Shoot</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="Attack2">
+				<Behavior type="auto" numShots="18" projectileId="0" cooldown="1" range="10" offset="0" angle="20">Shoot</Behavior>
+				<Transition afterTime="0.6" random="0.65">EyeClosed1</Transition>
+				<Transition afterTime="0.6" random="1">EyeClosed2</Transition>
+			</State>
+			<State id="EyeClosed1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".2">EyeClosed2</Transition>		
+			</State>
+			<State id="EyeClosed2">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Transition afterTime=".2" random="0.5">Attack1</Transition>	
+				<Transition afterTime=".2">Attack2</Transition>			
+			</State>
+			<Transition playerWithin="15" noPlayerWithin="6" afterTime="1.2">Target</Transition>
+		</State>		
+	</Object>
+</Objects>

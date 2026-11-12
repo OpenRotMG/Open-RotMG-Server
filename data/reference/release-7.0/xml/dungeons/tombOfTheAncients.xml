@@ -1,0 +1,3752 @@
+<!-- object types: 0x0d1X 0x0d2X 0x0d3X 0x0d4X next: 0x0d41 -->
+<Objects>
+	<Object type="0x0d40" id="Tomb Portal of Cowardice">
+		<DisplayId>Portal of Cowardice</DisplayId>
+		<Class>Portal</Class>
+		<IntergamePortal/>
+		<Texture><File>lofiEnvironment</File><Index>0x7c</Index></Texture>
+		<SpawnPoint/>
+		
+		<State id="Normal">
+			<Transition exist="Realm Portal">KillPortal</Transition>
+		</State>
+		<State id="KillPortal">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+	</Object>
+
+<!--
+********************************************************************************* 
+
+Swarms
+
+- Three colors - Red (Damage), Yellow (Status Effect), Blue (Defensive)
+
+*********************************************************************************
+-->	
+
+	<Object type="0x0d10" id="Red Swarm Minions">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rMid2</File><Index>10</Index></AnimatedTexture>
+		<HitSound>monster/scorpions_hit</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+		
+		<Size>40</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Fire Missile</ObjectId>
+			<Damage>20</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>400</LifetimeMS>	
+			<ArmorPiercing/>
+			<MultiHit/>
+			<Size>140</Size>
+		</Projectile>		
+		
+		<Behavior listenIds="Red Swarm Masters">FollowOrders</Behavior>
+		
+		<Behavior bucket="movement" range="2" speed="0.6">Follow</Behavior>
+		<Behavior numShots="2" projectileId="0" range="8" angle="10" cooldown="0.8">Shoot</Behavior>
+		
+	</Object>
+
+	<Object type="0x0d11" id="Red Swarm Masters">
+		<Group>Tomb Swarms</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rMid2</File><Index>10</Index></AnimatedTexture>
+		<HitSound>monster/scorpions_hit</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+		
+		<Size>120</Size>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>1.2</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>80</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>2000</LifetimeMS>	
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Fire Missile</ObjectId>
+			<Damage>40</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>2000</LifetimeMS>	
+			<ArmorPiercing/>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="2">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>80</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>2000</LifetimeMS>	
+		</Projectile>
+		
+		<Projectile id="3">
+			<ObjectId>Fire Missile</ObjectId>
+			<Damage>60</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>2000</LifetimeMS>	
+			<ArmorPiercing/>
+			<MultiHit/>
+		</Projectile>
+		
+		<Behavior bucket="movement" range="6" speed="0.6">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>  
+				
+		<Behavior childIds="Red Swarm Minions" cooldown="1.4" maxChildren="6" startWithMinions="true">MakeMinions</Behavior>
+							
+		<State id="Wait">	
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="0" range="11" angle="25" cooldown="0.8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" range="11" cooldown="0.8">Shoot</Behavior>
+				
+			<Order targetIds="Red Swarm Minions">
+				<Behavior bucket="movement" protecteeId="Red Swarm Masters" acquireRange="11" speed="1.2" protectionRange="0.2" reprotectRange="0.2">Protect</Behavior>
+			</Order> 
+					
+			<Transition hitpointsLessThan="0.60">Swarm</Transition>
+		</State>
+							
+		<State id="Swarm">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>	
+			<Behavior numShots="4" projectileId="0" range="11" angle="25" cooldown="0.8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" range="11" cooldown="0.8">Shoot</Behavior>
+				
+			<Order targetIds="Red Swarm Minions">
+				<Behavior bucket="movement" range="1.2" speed="1.8">Follow</Behavior>
+			</Order> 
+					
+			<Transition hitpointsLessThan="0.15">OrderKamakaze</Transition>	
+		</State>
+							
+		<State id="OrderKamakaze">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="2" range="11" angle="25" cooldown="0.8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="3" range="11" cooldown="0.8">Shoot</Behavior>
+				
+			<Order targetIds="Red Swarm Minions, Yellow Swarm Minions, Blue Swarm Minions">
+				<Behavior bucket="movement" range="1.2" speed="1.8">Follow</Behavior>
+				<Behavior range="2.0" projectileId="0">Explode</Behavior>
+			</Order> 
+					
+		</State>
+		
+		<SoulboundLoot prob=".1">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".05">Health Potion</SoulboundLoot>
+		
+	</Object>
+
+	<Object type="0x0d12" id="Yellow Swarm Minions">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>10</Index></AnimatedTexture>
+		<HitSound>monster/scorpions_hit</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+		
+		<Size>40</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Yellow Magic</ObjectId>
+			<Damage>0</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>500</LifetimeMS>	
+			<Wavy/>
+			<ConditionEffect duration="1">Blind</ConditionEffect>
+			<Size>140</Size>
+		</Projectile>
+		
+		<Behavior listenIds="Yellow Swarm Masters">FollowOrders</Behavior>
+		
+		<Behavior numShots="1" projectileId="0" range="8" angle="5" cooldown="1.2">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="0.6">Follow</Behavior>
+		
+	</Object>
+
+	<Object type="0x0d13" id="Yellow Swarm Masters">
+		<Group>Tomb Swarms</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>10</Index></AnimatedTexture>
+		<HitSound>monster/scorpions_hit</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+		
+		<Size>120</Size>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>1.2</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Yellow Magic</ObjectId>
+			<Damage>40</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>2000</LifetimeMS>	
+			<Wavy/>
+			<ConditionEffect duration="4">Blind</ConditionEffect>	
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Yellow Missile</ObjectId>
+			<Damage>80</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="2">Confused</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="2">
+			<ObjectId>Yellow Magic</ObjectId>
+			<Damage>40</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>	
+			<Wavy/>
+			<ConditionEffect duration="4">Blind</ConditionEffect>	
+		</Projectile>
+		
+		<Projectile id="3">
+			<ObjectId>Yellow Missile</ObjectId>
+			<Damage>80</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="2">Confused</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<Behavior childIds="Yellow Swarm Minions" cooldown="1.4" maxChildren="6" startWithMinions="true">MakeMinions</Behavior>
+		
+		<Behavior bucket="movement" range="7" speed="0.7">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		
+		<State id="Wait">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>			
+			<Behavior numShots="2" projectileId="0" range="11" cooldown="1.2">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" range="11" cooldown="0.6">Shoot</Behavior>
+				
+			<Order targetIds="Yellow Swarm Minions">
+				<Behavior bucket="movement" protecteeId="Yellow Swarm Masters" acquireRange="11" speed="1.2" protectionRange="0.2" reprotectRange="0.2">Protect</Behavior>
+			</Order>
+					
+			<Transition hitpointsLessThan="0.60">Swarm</Transition>
+		</State>
+							
+		<State id="Swarm">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>				
+			<Behavior numShots="2" projectileId="0" range="11" cooldown="1.2">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" range="11" cooldown="0.6">Shoot</Behavior>
+				
+			<Order targetIds="Yellow Swarm Minions">
+				<Behavior bucket="movement" range="1.2" speed="1.8">Follow</Behavior>
+			</Order> 
+					
+			<Transition hitpointsLessThan="0.15">OrderKamakaze</Transition>	
+		</State>
+							
+		<State id="OrderKamakaze">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>				
+			<Behavior numShots="4" projectileId="2" range="11" angle="25" cooldown="0.8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="3" range="11" cooldown="0.8">Shoot</Behavior>
+				
+			<Order targetIds="Red Swarm Minions, Yellow Swarm Minions, Blue Swarm Minions">
+				<Behavior bucket="movement" range="1.2" speed="1.8">Follow</Behavior>
+				<Behavior range="2.0" projectileId="0">Explode</Behavior>
+			</Order> 
+					
+		</State>
+		
+		<SoulboundLoot prob=".1">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".05">Health Potion</SoulboundLoot>
+		
+	</Object>
+
+	<Object type="0x0d14" id="Blue Swarm Minions">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>9</Index></AnimatedTexture>
+		<HitSound>monster/scorpions_hit</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+		
+		<Size>40</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>5</Defense>
+		<XpMult>0.0</XpMult>
+				
+		<Projectile id="0">
+			<ObjectId>Blue Missile</ObjectId>
+			<Damage>0</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>700</LifetimeMS>
+			<ConditionEffect duration="1.2">Weak</ConditionEffect>
+			<MultiHit/>
+			<Size>140</Size>
+		</Projectile>
+		
+		<Behavior listenIds="Blue Swarm Masters">FollowOrders</Behavior>
+		
+		<Behavior numShots="1" projectileId="0" range="9" cooldown="0.8">Shoot</Behavior>
+		<Behavior bucket="movement" range="4" speed="1.8">Follow</Behavior>
+		
+	</Object>
+
+	<Object type="0x0d15" id="Blue Swarm Masters">
+		<Group>Tomb Swarms</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>9</Index></AnimatedTexture>
+		<HitSound>monster/scorpions_hit</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+		
+		<Size>120</Size>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>20</Defense>
+		<XpMult>1.2</XpMult>
+				
+		<Projectile id="0">
+			<ObjectId>Blue Magic</ObjectId>
+			<Damage>60</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>3000</LifetimeMS>		
+			<Wavy/>	
+		</Projectile>
+				
+		<Projectile id="1">
+			<ObjectId>Blue Missile</ObjectId>
+			<Damage>100</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="1.2">Weak</ConditionEffect>
+			<MultiHit/>
+		</Projectile>	
+				
+		<Projectile id="2">
+			<ObjectId>Blue Magic</ObjectId>
+			<Damage>60</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>3000</LifetimeMS>		
+			<Wavy/>	
+		</Projectile>
+				
+		<Projectile id="3">
+			<ObjectId>Blue Missile</ObjectId>
+			<Damage>100</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="1.2">Weak</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<Behavior listenIds="Red Swarm Masters, Blue Swarm Masters, Yellow Swarm Masters">FollowOrders</Behavior>
+		
+		<Behavior childIds="Blue Swarm Minions" cooldown="1.4" maxChildren="6" startWithMinions="true">MakeMinions</Behavior>
+								
+		<Behavior bucket="movement" range="8" speed="0.8">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>	
+							
+		<State id="Wait">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>									
+			<Behavior numShots="8" projectileId="0" range="14" angle="45" cooldown="0.8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" range="14" cooldown="0.8">Shoot</Behavior>
+				
+			<Order targetIds="Blue Swarm Minions">
+				<Behavior bucket="movement" protecteeId="Blue Swarm Masters" acquireRange="11" speed="1.2" protectionRange="0.2" reprotectRange="0.2">Protect</Behavior>
+			</Order>
+					
+			<Transition hitpointsLessThan="0.60">Swarm</Transition>
+		</State>
+							
+		<State id="Swarm">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>									
+			<Behavior numShots="8" projectileId="0" range="14" angle="45" cooldown="0.8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" range="14" cooldown="0.8">Shoot</Behavior>
+				
+			<Order targetIds="Blue Swarm Minions">
+				<Behavior bucket="movement" range="1.2" speed="1.8">Follow</Behavior>
+			</Order> 
+					
+			<Transition hitpointsLessThan="0.15">OrderKamakaze</Transition>	
+		</State>
+							
+		<State id="OrderKamakaze">
+				
+			<Behavior numShots="4" projectileId="2" range="11" angle="25" cooldown="0.8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="3" range="11" cooldown="0.8">Shoot</Behavior>
+				
+			<Order targetIds="Red Swarm Minions, Yellow Swarm Minions, Blue Swarm Minions">
+				<Behavior bucket="movement" range="1.2" speed="1.8">Follow</Behavior>
+				<Behavior range="2.0" projectileId="0">Explode</Behavior>
+			</Order> 
+					
+		</State>
+		
+				
+		<SoulboundLoot prob=".1">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".05">Health Potion</SoulboundLoot>
+		
+	</Object>
+
+<!--
+********************************************************************************* 
+
+Jackal Team
+
+- Jackal Lord leads the attack, warriors come behind
+- As Jackal Lord takes damage, he drops back a bit and orders remaing
+  warriors to become "veteran" who follow suit at a farther range
+- At the last of his health, Lord orders remaining Vets to become Assassins
+  who get close with a strong harder to dodge attack
+
+*********************************************************************************
+-->
+
+	<Object type="0x0d16" id="Jackal Warrior">
+		<Group>Tomb Jackals</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>0</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		
+		<Size>100</Size>
+		<MaxHitPoints>1400</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0.6</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>80</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>800</LifetimeMS>	
+		</Projectile> 
+		
+		<Behavior listenIds="Jackal Lord">FollowOrders</Behavior>
+		
+		<Behavior numShots="2" projectileId="0" range="8" angle="5" cooldown="1.0">Shoot</Behavior>
+		<Behavior bucket="movement" range="4" speed="1.0">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Jackal Lord" speed="0.7" protectionRange="4" reprotectRange="4">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>  
+		
+	</Object>
+
+
+	<Object type="0x0d17" id="Jackal Veteran">
+		<Group>Tomb Jackals</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>1</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		
+		<Size>100</Size>
+		<MaxHitPoints>1800</MaxHitPoints>
+		<Defense>20</Defense>
+		<XpMult>0.8</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>120</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+		
+		<Behavior listenIds="Jackal Lord">FollowOrders</Behavior>
+		
+		<Behavior projectileId="0" range="8" cooldown="0.9">Shoot</Behavior>
+		<Behavior bucket="movement" range="4" speed="1.0">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Jackal Lord" speed="0.7" protectionRange="4" reprotectRange="4">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		
+		<Behavior effect="Armored" duration="2">ConditionEffect</Behavior>
+	</Object>
+
+
+	<Object type="0x0d18" id="Jackal Assassin">
+		<Group>Tomb Jackals</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>2</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		
+		<Size>100</Size>
+		<MaxHitPoints>2000</MaxHitPoints>
+		<Defense>30</Defense>
+		<XpMult>1.1</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>100</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>800</LifetimeMS>
+			<Wavy/>
+		</Projectile>
+		
+		<Behavior numShots="2" projectileId="0" range="8" cooldown="0.8">Shoot</Behavior>
+		<Behavior bucket="movement" range="2" speed="1.7">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Jackal Lord" speed="0.7" protectionRange="4" reprotectRange="4">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+	</Object>
+
+
+	<Object type="0x0d19" id="Jackal Lord">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16dEncounters</File><Index>13</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		
+		<Size>120</Size>
+		<MaxHitPoints>6000</MaxHitPoints>
+		<Defense>40</Defense>
+		<XpMult>1.4</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Darkness Bolt</ObjectId>
+			<Damage>140</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+		
+		<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+		<Behavior numShots="2" projectileId="0" range="8" cooldown="1.0" angle="10">Shoot</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<Behavior childIds="Jackal Warrior" cooldown="60" maxChildren="4" startWithMinions="true">MakeMinions</Behavior>
+					
+		<State id="Wait">
+			<Behavior bucket="movement" acquirerange="11" range="3" speed="0.8">Follow</Behavior>	
+			<Behavior targetIds="Jackal Warrior" cooldown="2" range="15" maxTargets="2">Heal</Behavior>
+			<Behavior effect="Armored" duration="5">ConditionEffect</Behavior>
+			
+			<Transition hitpointsLessThan="0.65">PromoteRank1</Transition>
+		</State>
+					
+		<State id="PromoteRank1">
+			<Behavior bucket="movement" acquirerange="11" range="4" speed="0.8">Follow</Behavior>	
+			<Behavior targetIds="Jackal Veteran" cooldown="2" range="15" maxTargets="1">Heal</Behavior>
+			<Behavior effect="Armored" duration="5">ConditionEffect</Behavior>
+			
+			<Order targetIds="Jackal Warrior">
+				<Behavior time="0.2" childId="Jackal Veteran">Metamorphose</Behavior>
+			</Order> 
+			
+			<Transition hitpointsLessThan="0.35">PromoteRank2</Transition>
+		</State>
+					
+		<State id="PromoteRank2">
+			<Behavior bucket="movement" acquirerange="11" range="5" speed="0.8">KeepDistance</Behavior>	
+			<Behavior targetIds="Jackal Master" cooldown="4" range="15" maxTargets="1">Heal</Behavior>
+			<Behavior effect="Armored" duration="5">ConditionEffect</Behavior>
+			
+			<Order targetIds="Jackal Veteran">
+				<Behavior time="0.2" childId="Jackal Assassin">Metamorphose</Behavior>
+			</Order> 
+		</State>
+		
+		<SoulboundLoot prob=".1">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".05">Health Potion</SoulboundLoot>
+	</Object>
+
+<!--
+********************************************************************************* 
+
+BLOATED MUMMY
+
+- Kill it before it becomes a problem!
+
+*********************************************************************************
+-->
+
+	<Object type="0x0d1a" id="Bloated Mummy">
+		<Group>Tomb Mummies</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>3</Index></AnimatedTexture>
+		<HitSound>monster/mummies_hit</HitSound>
+		<DeathSound>monster/mummies_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>20</Defense>
+		<XpMult>1.4</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Green Star</ObjectId>
+			<Damage>30</Damage>
+			<Speed>40</Speed>
+			<ConditionEffect duration="2">Confused</ConditionEffect>
+			<LifetimeMS>3500</LifetimeMS>
+			<Size>140</Size>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Green Star</ObjectId>
+			<Damage>30</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>3500</LifetimeMS>
+			<Size>140</Size>
+		</Projectile>
+		
+		<State id="Simmer">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+			<Transition playerWithin="10">TurnOnStove</Transition>
+		</State>
+		<State id="TurnOnStove">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+			<Behavior projectileId="0" cooldown="1.8" range="10">Shoot</Behavior>
+			<Behavior projectileId="1" numShots="6" angle="34" cooldown="2.4" range="10">Shoot</Behavior>
+			<Transition playerWithin="10">Heating_Up</Transition>
+		</State>
+		<State id="Heating_Up">	
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+			<Behavior projectileId="0" cooldown="1.4" range="10">Shoot</Behavior>
+			<Behavior projectileId="1" numShots="6" angle="34" cooldown="2.4" range="10">Shoot</Behavior>
+			<Behavior range="6" speed="0.5" acquireRange="10">KeepDistance</Behavior>
+			<Behavior rate="20" maxSize="100">ChangeSize</Behavior>				
+			<Behavior min="0" max="1" childId="Scarab">ReleaseSpawnAtDeath</Behavior>
+			<Behavior childId="Scarab" cooldown="2" type="targeted" range="7">ObjectToss</Behavior>
+			<Transition afterTime="3">HalfPoint</Transition>
+		</State>
+		<State id="HalfPoint">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>	
+			<Behavior projectileId="0" cooldown="1.0" range="10">Shoot</Behavior>
+			<Behavior projectileId="1" numShots="6" angle="34" cooldown="2.0" range="10">Shoot</Behavior>
+			<Behavior range="7" speed="0.4" acquireRange="10">KeepDistance</Behavior>
+			<Behavior rate="20" maxSize="120">ChangeSize</Behavior>				
+			<Behavior min="1" max="2" childId="Scarab">ReleaseSpawnAtDeath</Behavior>
+			<Behavior childId="Scarab" cooldown="1.8" type="targeted" range="7">ObjectToss</Behavior>
+			<Behavior type="Flash" color="FF0000" flashPeriod="0.1" flashRepeats="10">ShowEffect</Behavior>
+			<Transition afterTime="3">Boiling</Transition>
+		</State>
+		<State id="Boiling">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>	
+			<Behavior projectileId="0" cooldown="0.6" range="10">Shoot</Behavior>
+			<Behavior projectileId="1" numShots="6" angle="34" cooldown="1.6" range="10">Shoot</Behavior>
+			<Behavior range="8" speed="0.4" acquireRange="10">KeepDistance</Behavior>
+			<Behavior rate="20" maxSize="140">ChangeSize</Behavior>				
+			<Behavior min="2" max="3" childId="Scarab">ReleaseSpawnAtDeath</Behavior>
+			<Behavior childId="Scarab" cooldown="1.4" type="targeted" range="7">ObjectToss</Behavior>
+			<Behavior type="Flash" color="FF0000" flashPeriod="0.1" flashRepeats="30">ShowEffect</Behavior>
+			<Transition afterTime="3">BoilingOver</Transition>
+		</State>
+		<State id="BoilingOver">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>	
+			<Behavior projectileId="0" cooldown="0.4" range="10">Shoot</Behavior>
+			<Behavior projectileId="1" numShots="8" angle="34" cooldown="1.2" range="10">Shoot</Behavior>
+			<Behavior range="1" speed="0.8" acquireRange="10">Follow</Behavior>
+			<Behavior rate="20" maxSize="160">ChangeSize</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			
+			<Behavior childId="Scarab" cooldown="3.5" type="auto" range="3" defaultAngle="90">ObjectToss</Behavior>
+			<Behavior childId="Scarab" cooldown="3.5" type="auto" range="3" defaultAngle="270" offset=".6">ObjectToss</Behavior>
+			<Behavior childId="Scarab" cooldown="3.5" type="auto" range="3" defaultAngle="180" offset="1.2">ObjectToss</Behavior>
+			<Behavior childId="Scarab" cooldown="3.5" type="auto" range="3" defaultAngle="0" offset="1.8">ObjectToss</Behavior>					
+			<Behavior min="2" max="3" childId="Scarab">ReleaseSpawnAtDeath</Behavior>
+			<Behavior type="Flash" color="FF0000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			<Transition afterTime="4">Explode</Transition>
+		</State>
+		<State id="Explode">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>					
+			<Behavior min="3" max="4" childId="Scarab">ReleaseSpawnAtDeath</Behavior>
+			<Behavior range="1" speed="0.8" acquireRange="10">Follow</Behavior>
+			<Behavior numshots="10" range="8.0" projectileId="0">Explode</Behavior>
+		</State>
+		
+		<SoulboundLoot prob=".1">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".05">Health Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d1b" id="Scarab">
+		<Group>Scarabs</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>4</Index></AnimatedTexture>
+		<HitSound>monster/spiders_hit</HitSound>
+		<DeathSound>monster/spiders_death</DeathSound>
+		<Size>60</Size>
+		<MaxHitPoints>300</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>50</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>200</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Violet Claw</ObjectId>
+			<Damage>20</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>200</LifetimeMS>
+			<ConditionEffect duration="0.8">Paralyzed</ConditionEffect>
+			<Size>40</Size>
+		</Projectile>
+		
+		<Behavior numShots="6" projectileId="1" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+		<Behavior bucket="movement" acquireRange="20" range="0.2" speed="2.4">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior projectileId="0" cooldown="0.8" numShots="2" range="1" offset="1.2">Shoot</Behavior>
+		<Behavior projectileId="1" cooldown="2.4" numShots="1" range="1">Shoot</Behavior>
+	</Object>
+	
+
+
+
+
+<!--
+********************************************************************************* 
+
+BOSS ARTIFACTS
+
+- The three bosses will lend protective/destructive/enfeebling artifacts to each other
+- Destructable
+
+*********************************************************************************
+-->
+
+	<Object type="0x0d1c" id="Sphinx Artifact 1">
+		<DisplayId>Sphinx Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>11</Index></AnimatedTexture>
+		<Size>100</Size>
+		<MaxHitPoints>2000</MaxHitPoints>
+		<Defense>20</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Green Spinner</ObjectId>
+			<Damage>90</Damage>
+			<Speed>80</Speed>
+			<Size>80</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="3">Slowed</ConditionEffect>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Green Spinner</ObjectId>
+			<Damage>130</Damage>
+			<Speed>80</Speed>
+			<Size>120</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="5">Slowed</ConditionEffect>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Behavior bucket="movement" acquireRange="20" speed="2.4" radius="2" protecteeId="Tomb Support">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="3">Follow</Behavior>
+		<Behavior numShots="1" projectileId="0" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+		<Behavior numShots="2" angle="270" projectileId="1" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0d1d" id="Sphinx Artifact 2">
+		<DisplayId>Sphinx Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>11</Index></AnimatedTexture>
+		<Size>100</Size>
+		<MaxHitPoints>2000</MaxHitPoints>
+		<Defense>20</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Green Spinner</ObjectId>
+			<Damage>90</Damage>
+			<Speed>80</Speed>
+			<Size>80</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="3">Slowed</ConditionEffect>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Projectile id="1">
+			<ObjectId>Green Spinner</ObjectId>
+			<Damage>130</Damage>
+			<Speed>80</Speed>
+			<Size>120</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="5">Slowed</ConditionEffect>
+		</Projectile>
+		
+		<Behavior bucket="movement" acquireRange="20" speed="2.4"  radius="2" protecteeId="Tomb Defender">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="3">Follow</Behavior>
+		<Behavior numShots="1" projectileId="0" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+		<Behavior numShots="2" angle="270" projectileId="1" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0d1e" id="Sphinx Artifact 3">
+		<DisplayId>Sphinx Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>11</Index></AnimatedTexture>
+		<Size>100</Size>
+		<MaxHitPoints>2000</MaxHitPoints>
+		<Defense>20</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Green Spinner</ObjectId>
+			<Damage>90</Damage>
+			<Speed>100</Speed>
+			<Size>80</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="3">Slowed</ConditionEffect>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Green Spinner</ObjectId>
+			<Damage>130</Damage>
+			<Speed>80</Speed>
+			<Size>120</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="5">Slowed</ConditionEffect>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Behavior bucket="movement" acquireRange="20" speed="2.4"  radius="2" protecteeId="Tomb Attacker">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="3">Follow</Behavior>
+		<Behavior numShots="1" projectileId="0" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+		<Behavior numShots="2" angle="270" projectileId="1" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0d1f" id="Nile Artifact 1">
+		<DisplayId>Nile Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>12</Index></AnimatedTexture>
+		<Size>100</Size>
+		<MaxHitPoints>2500</MaxHitPoints>
+		<Defense>20</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Black Missile</ObjectId>
+			<Damage>190</Damage>
+			<Speed>40</Speed>
+			<Size>120</Size>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Behavior bucket="movement" acquireRange="20" speed="2.4" radius="2" protecteeId="Tomb Attacker">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="4">Follow</Behavior>
+		<Behavior numShots="1" projectileId="0" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+		<Behavior numShots="3" angle="120" projectileId="0" cooldown="5.0" type="auto" predictive="0" range="16">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0d20" id="Nile Artifact 2">
+		<DisplayId>Nile Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>12</Index></AnimatedTexture>
+		<Size>100</Size>
+		<MaxHitPoints>2500</MaxHitPoints>
+		<Defense>20</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Black Missile</ObjectId>
+			<Damage>190</Damage>
+			<Speed>40</Speed>
+			<Size>120</Size>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Behavior bucket="movement" acquireRange="20" speed="2.4" radius="2" protecteeId="Tomb Defender">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="4">Follow</Behavior>
+		<Behavior numShots="1" projectileId="0" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+		<Behavior numShots="3" angle="120" projectileId="0" cooldown="5.0" type="auto" predictive="0" range="16">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0d21" id="Nile Artifact 3">
+		<DisplayId>Nile Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>12</Index></AnimatedTexture>
+		<Size>100</Size>
+		<MaxHitPoints>2500</MaxHitPoints>
+		<Defense>20</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Black Missile</ObjectId>
+			<Damage>190</Damage>
+			<Speed>40</Speed>
+			<Size>120</Size>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Behavior bucket="movement" acquireRange="20" speed="2.4" radius="2" protecteeId="Tomb Support">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="4">Follow</Behavior>
+		<Behavior numShots="1" projectileId="0" cooldown="2.4" type="targeted" predictive="0" range="16">Shoot</Behavior>
+		<Behavior numShots="3" angle="120" projectileId="0" cooldown="5.0" type="auto" predictive="0" range="16">Shoot</Behavior>
+	</Object>
+
+	<Object type="0x0d22" id="Pyramid Artifact 1">
+		<DisplayId>Pyramid Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x8dEncounters</File><Index>0</Index></AnimatedTexture>
+		<Size>120</Size>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>50</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Beam</ObjectId>
+			<Damage>50</Damage>
+			<Speed>200</Speed>
+			<Size>140</Size>
+			<LifetimeMS>200</LifetimeMS>
+			<ConditionEffect duration="2">Weak</ConditionEffect>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Behavior acquireRange="20" speed="2" radius="2" protecteeId="Tomb Defender">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="1.6">Follow</Behavior>
+		
+		<Behavior numShots="3" projectileId="0" type="auto" angle="120" cooldown="3">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0d23" id="Pyramid Artifact 2">
+		<DisplayId>Pyramid Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x8dEncounters</File><Index>0</Index></AnimatedTexture>
+		<Size>120</Size>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>50</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Beam</ObjectId>
+			<Damage>50</Damage>
+			<Speed>200</Speed>
+			<Size>140</Size>
+			<LifetimeMS>200</LifetimeMS>
+			<ConditionEffect duration="2">Weak</ConditionEffect>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Behavior bucket="movement" acquireRange="20" speed="2.4" radius="2" protecteeId="Tomb Attacker">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="1.6">Follow</Behavior>
+		
+		<Behavior numShots="3" projectileId="0" type="auto" angle="120" cooldown="3">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0d24" id="Pyramid Artifact 3">
+		<DisplayId>Pyramid Artifact</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x8dEncounters</File><Index>0</Index></AnimatedTexture>
+		<Size>120</Size>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>50</Defense>
+        <!--
+         <StasisImmune/>
+         -->
+		<XpMult>0.0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Beam</ObjectId>
+			<Damage>50</Damage>
+			<Speed>200</Speed>
+			<Size>140</Size>
+			<LifetimeMS>200</LifetimeMS>
+			<ConditionEffect duration="2">Weak</ConditionEffect>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable" duration="4">ConditionEffect</Behavior>
+		
+		<Behavior bucket="movement" acquireRange="20" speed="2.4" radius="2" protecteeId="Tomb Support">Orbit</Behavior>
+		<Behavior bucket="movement" acquireRange="20" speed="1.4" range="1.6">Follow</Behavior>
+		
+		<Behavior numShots="3" projectileId="0" type="auto" angle="120" cooldown="3">Shoot</Behavior>
+	</Object>
+
+
+
+<!--
+********************************************************************************* 
+
+THREE BOSS ENCOUNTER
+
+- Three roles: support, attack, defense.
+
+*********************************************************************************
+-->
+	<Object type="0x0d25" id="Tomb Boss Anchor">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x0e</Index></Texture>
+		<Size>0</Size>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		<NoMiniMap/>
+		<State id="Normal">
+			<Transition noneExist="Tomb Boss Statues,Tomb Bosses">CreatePortal</Transition>
+		</State>
+		<State id="CreatePortal">
+			<Behavior time="0.0" childId="Realm Portal">Metamorphose</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0d3d" id="Tomb Support Statue">
+		<Group>Tomb Boss Statues</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Nut Statue</DisplayId>
+		<Size>140</Size>
+        <MaxHitPoints>100000</MaxHitPoints>
+
+		<Texture><File>lofiChar216x16</File><Index>0x3a</Index></Texture>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<State id="Normal">
+			<Transition noneExist="Active Sarcophagus">ComeAlive</Transition>
+		</State>
+		<State id="ComeAlive">
+			<Behavior time="0.0" childId="Tomb Support">Metamorphose</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0d3e" id="Tomb Attacker Statue">
+		<Group>Tomb Boss Statues</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Geb Statue</DisplayId>
+		<Size>140</Size>
+        <MaxHitPoints>100000</MaxHitPoints>
+
+		<Texture><File>lofiChar216x16</File><Index>0x3b</Index></Texture>
+		
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<State id="Normal">
+			<Transition noneExist="Active Sarcophagus">ComeAlive</Transition>
+		</State>
+		<State id="ComeAlive">
+			<Behavior time="2.0" childId="Tomb Attacker">Metamorphose</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0d3f" id="Tomb Defender Statue">
+		<Group>Tomb Boss Statues</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Bes Statue</DisplayId>
+		<Size>140</Size>
+        <MaxHitPoints>100000</MaxHitPoints>
+
+		<Texture><File>lofiChar216x16</File><Index>0x3c</Index></Texture>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<State id="Normal">
+			<Transition noneExist="Active Sarcophagus">ComeAlive</Transition>
+		</State>
+		<State id="ComeAlive">
+			<Behavior time="4.0" childId="Tomb Defender">Metamorphose</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0d26" id="Tomb Support">
+		<Group>Tomb Bosses</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Nut</DisplayId>
+		<Quest/>
+		<Level>1</Level>
+		
+		<AnimatedTexture><File>chars16x16dEncounters</File><Index>10</Index></AnimatedTexture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>80000</MaxHitPoints>
+		<Size>140</Size>
+		<Defense>15</Defense>
+		<XpMult>1</XpMult>
+		<God/>  
+		<NoArticle/>
+
+		<Projectile id="0">
+			<ObjectId>Darkness Bolt</ObjectId>
+			<Damage>180</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>120</Size>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Grey Boomerang</ObjectId>
+			<Damage>40</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>4000</LifetimeMS>
+			<ConditionEffect duration="1">Quiet</ConditionEffect>
+			<Boomerang/>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="2">
+			<ObjectId>Blue Boomerang</ObjectId>
+			<Damage>40</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>4000</LifetimeMS>
+			<ConditionEffect duration="5">Weak</ConditionEffect>
+			<Boomerang/>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="3">
+			<ObjectId>Green Boomerang</ObjectId>
+			<Damage>40</Damage>
+			<Speed>20</Speed>
+			<LifetimeMS>4000</LifetimeMS>
+			<ConditionEffect duration="5">Slowed</ConditionEffect>
+			<Boomerang/>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="4">
+			<ObjectId>Purple Boomerang</ObjectId>
+			<Damage>40</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>4000</LifetimeMS>
+			<ConditionEffect duration="5">Blind</ConditionEffect>
+			<Boomerang/>
+			<MultiHit/>
+		</Projectile>
+
+		<Projectile id="5">
+			<ObjectId>Black Arrow</ObjectId>
+			<Damage>40</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>4000</LifetimeMS>
+			<ConditionEffect duration="3">Armor Broken</ConditionEffect>
+			<Size>100</Size>
+		</Projectile>
+
+		<Projectile id="6">
+			<ObjectId>Spring Green Arrow</ObjectId>
+			<Damage>200</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>4000</LifetimeMS>
+			<ConditionEffect duration="1.4">Paralyzed</ConditionEffect>
+			<MultiHit/>
+			<Size>200</Size>
+		</Projectile>
+
+		<Projectile id="7">
+			<ObjectId>Dark Gray Spinner</ObjectId>
+			<Damage>0</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>5000</LifetimeMS>
+			<ConditionEffect duration="10">Weak</ConditionEffect>
+			<MultiHit/>
+			<Size>200</Size>
+		</Projectile>	
+
+		<Projectile id="8">
+			<ObjectId>Ice Magic</ObjectId>
+			<Damage>50</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>4000</LifetimeMS>
+			<ConditionEffect duration="1.0">Paralyzed</ConditionEffect>
+			<Size>120</Size>
+		</Projectile>
+		
+		<Behavior bucket="movement" listenIds="Tomb Attacker, Tomb Defender" acquireRange="20">FollowOrders</Behavior>
+		<Behavior broadcast="1" prob="1" text="ENOUGH OF YOUR VANDALISM!">Say</Behavior>
+									
+		<State id="Waiting">						
+			<Behavior effect="Armored">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="4.8" speed="0.6">Orbit</Behavior>
+			
+			<Behavior prob=".20" text="We have ancient powers you have never seen before!">Say</Behavior>
+			<Behavior prob=".20" text="Geb's scarab venom is quite nasty, I use it on my finest arrows!">Say</Behavior>
+			
+			<Behavior targetIds="Tomb Defender, Tomb Attacker" cooldown="1.6" range="10" maxTargets="1" maxHeal="100">Heal</Behavior>
+			<Behavior targetIds="Tomb Defender, Tomb Attacker" cooldown="2.4" range="4" maxTargets="2" maxHeal="100">Heal</Behavior>
+						
+			<Transition hitpointsLessThan="0.989">Impudence</Transition>
+		</State>
+			
+		<State id="Impudence">	
+			<Behavior effect="Invulnerable" cooldown="10" duration="2">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+		
+			<Behavior numShots="20" projectileId="7" cooldown="10" type="auto" angle="18" range="12">Shoot</Behavior>
+			<Behavior numShots="20" projectileId="7" cooldown="10" type="auto" angle="18" range="12" offset="1">Shoot</Behavior>	
+					        
+			<Behavior effect="Armored" duration="12">ConditionEffect</Behavior>
+			
+			<Behavior prob=".5" text="Impudence! I am an immortal, I needn't take you seriously.">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="4.8" speed="0.6">Orbit</Behavior>
+			
+			<Behavior targetIds="Tomb Defender, Tomb Attacker" cooldown="1.6" range="10" maxTargets="1" maxHeal="100">Heal</Behavior>
+			<Behavior targetIds="Tomb Defender, Tomb Attacker" cooldown="2.4" range="6" maxTargets="2" maxHeal="100">Heal</Behavior>
+			
+			<Transition hitpointsLessThan="0.979">TeamWork</Transition>
+			<Transition afterTime="12">Waiting</Transition>
+		</State>
+
+		<State id="TeamWork">             
+			<Behavior numShots="1" projectileId="6" cooldown="6" type="targeted" predictive="0.6" angle="10" range="12" blastEffect="1">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="6" type="auto" angle="120" range="10" offset="4">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="2" cooldown="5" type="auto" angle="90" range="10" offset="6">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="3" cooldown="4" type="auto" angle="72" range="10" offset="8">Shoot</Behavior>
+			<Behavior numShots="6" projectileId="4" cooldown="8" type="auto" angle="60" range="10" offset="10">Shoot</Behavior>	
+			<Behavior numShots="1" projectileId="5" cooldown="0.8" type="targeted" range="12">Shoot</Behavior>
+			
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="4.8" speed="0.8">Orbit</Behavior> 
+			<Behavior targetIds="Tomb Defender" cooldown="0.5" range="10" maxHeal="40">Heal</Behavior>
+			<Behavior targetIds="Tomb Defender, Tomb Attacker" cooldown="1.2" range="10" maxTargets="1" maxHeal="100">Heal</Behavior>
+			<Behavior targetIds="Tomb Defender, Tomb Attacker" cooldown="2.0" range="6" maxTargets="2" maxHeal="100">Heal</Behavior>
+			
+			<State id="Remind">
+			<Order targetIds="Tomb Defender, Tomb Attacker">			
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>
+				<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="5">Shoot</Behavior>
+			</Order>
+			<Transition afterTime="6">Remind</Transition>
+			</State> 
+			
+			<Transition hitpointsLessThan="0.90">OrderProtection</Transition>
+			<Transition afterTime="30">Waiting</Transition>
+		</State>
+		
+		<State id="InBetween"> 
+			<State id="Spiral1">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="0">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral2</Transition>
+			</State>
+			<State id="Spiral2">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="15">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral3</Transition>
+			</State>
+			<State id="Spiral3">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="30">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral4</Transition>
+			</State>
+			<State id="Spiral4">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="45">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral5</Transition>
+			</State>	
+			<State id="Spiral5">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="60">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral6</Transition>				
+			</State>		
+			<State id="Spiral6">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="75">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral7</Transition>				
+			</State>		
+			<State id="Spiral7">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="90">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral8</Transition>				
+			</State>		
+			<State id="Spiral8">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="105">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral9</Transition>				
+			</State>		
+			<State id="Spiral9">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="120">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral10</Transition>				
+			</State>		
+			<State id="Spiral10">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="135">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral11</Transition>				
+			</State>		
+			<State id="Spiral11">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="150">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral12</Transition>				
+			</State>		
+			<State id="Spiral12">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="165">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral13</Transition>				
+			</State>		
+			<State id="Spiral13">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral14</Transition>				
+			</State> 
+			<State id="Spiral14">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="360">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral15</Transition>
+			</State>
+			<State id="Spiral15">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="345">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral16</Transition>
+			</State>
+			<State id="Spiral16">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="330">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral17</Transition>
+			</State>
+			<State id="Spiral17">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="315">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral18</Transition>
+			</State>	
+			<State id="Spiral18">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="300">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral19</Transition>				
+			</State>		
+			<State id="Spiral19">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="285">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral20</Transition>				
+			</State>		
+			<State id="Spiral20">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="270">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral21</Transition>				
+			</State>		
+			<State id="Spiral21">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="255">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral22</Transition>				
+			</State>		
+			<State id="Spiral22">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="240">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral23</Transition>				
+			</State>		
+			<State id="Spiral23">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="225">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral24</Transition>				
+			</State>		
+			<State id="Spiral24">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="210">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral25</Transition>				
+			</State>		
+			<State id="Spiral25">
+					<Behavior numShots="2" projectileId="8" cooldown="0.5" type="auto" defaultAngle="195">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral26</Transition>				
+			</State>		
+			<State id="Spiral26">
+					<Behavior numShots="2" projectileId="8" cooldown="1.3" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Transition afterTime="1.4">Spiral1</Transition>				
+			</State>
+			
+			<Behavior numShots="3" projectileId="1" cooldown="6" type="auto" angle="120" range="10" offset="2">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="2" cooldown="5" type="auto" angle="90" range="10" offset="2.2">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="3" cooldown="4" type="auto" angle="72" range="10" offset="2.4">Shoot</Behavior>
+			<Behavior numShots="6" projectileId="4" cooldown="8" type="auto" angle="60" range="10" offset="2.8">Shoot</Behavior>	
+			<Behavior numShots="1" projectileId="5" cooldown="1" type="targeted" range="12" blastEffect="1" offset="4">Shoot</Behavior>
+			
+			<Behavior protecteeId="Tomb Boss Anchor" radius="6" speed="0.8">Orbit</Behavior> 
+			<Behavior targetIds="Tomb Defender" cooldown="0.5" range="10" maxHeal="40">Heal</Behavior>
+			
+			<Behavior effect="Armor Broken" cooldown="6" duration="3">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			
+			<Transition afterTime="10">NextPhase</Transition>
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>
+		</State>
+		
+		<State id="NextPhase">   
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>
+			<Transition hitpointsLessThan="0.30">Artifacts1</Transition>
+			<Transition hitpointsLessThan="0.50">Artifacts</Transition>
+			<Transition hitpointsLessThan="0.70">OrderPain</Transition>
+						
+			<Transition afterTime="2">InBetween</Transition>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="4.2" speed="1">Orbit</Behavior>
+		</State>
+		
+		
+		<State id="OrderProtection">
+			<Behavior effect="Invulnerable" cooldown="20" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="4.2" speed="0.8">Orbit</Behavior>
+			<Behavior targetIds="Tomb Attacker" cooldown="0.5" range="10" maxTargets="2" maxHeal="100">Heal</Behavior>
+			
+			<Behavior numShots="4" projectileId="2" cooldown="5" type="auto" angle="90" range="10" offset="4.2">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="3" cooldown="4" type="auto" angle="72" range="10" offset="3.4">Shoot</Behavior>
+			<Behavior numShots="6" projectileId="4" cooldown="8" type="auto" angle="60" range="10" offset="2.8">Shoot</Behavior>
+			
+			<State id="Remind">			
+			<Behavior prob=".2" text="Bes, protect me at once!">Say</Behavior>
+			
+			<Order targetIds="Tomb Defender">
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>			
+				<Behavior bucket="movement" protecteeId="Tomb Support" acquireRange="20" speed="1.6" protectionRange="3" reprotectRange="1.8" radius="1">Orbit</Behavior>
+				<Behavior type="Flash" color="000000" flashPeriod=".1" flashRepeats="60">ShowEffect</Behavior>
+			</Order>
+			<Transition afterTime="6">Remind</Transition>
+			</State> 
+			
+			<Transition afterTime="20">InBetween</Transition>
+			<Transition hitpointsLessThan="0.70">OrderPain</Transition>			
+		</State>  
+		
+		<State id="OrderPain">
+			<Behavior effect="Invulnerable" cooldown="19" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="4.2" speed="0.9">Orbit</Behavior>
+			<Behavior numShots="1" projectileId="6" cooldown="5.6" type="targeted" predictive="0.6" angle="10" range="12">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="5.6" type="auto" angle="120" range="10" offset="2">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="2" cooldown="4.7" type="auto" angle="90" range="10" offset="3">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="3" cooldown="3.8" type="auto" angle="72" range="10" offset="4">Shoot</Behavior>
+			<Behavior numShots="6" projectileId="4" cooldown="7.8" type="auto" angle="60" range="10" offset="5">Shoot</Behavior>	
+			<Behavior numShots="1" projectileId="5" cooldown="0.8" type="targeted" range="12">Shoot</Behavior>	
+			
+			<State id="Remind">
+			<Behavior prob=".2" text="Geb, eradicate these cretins from our tomb!">Say</Behavior>
+			
+			<Order targetIds="Tomb Attacker">
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>			
+				<Behavior bucket="movement" protecteeId="Tomb Support" acquireRange="20" speed="1.7" protectionRange="3" reprotectRange="1.8" radius="1">Orbit</Behavior>
+				<Behavior type="Flash" color="000000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			</Order>
+			<Transition afterTime="6">Remind</Transition>
+			</State> 
+			
+			<Transition afterTime="20">InBetween</Transition>
+			<Transition hitpointsLessThan="0.50">Artifacts</Transition>			
+		</State>      
+		
+		<State id="Artifacts">
+			<Behavior effect="Invulnerable" cooldown="18" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior prob="1" text="My artifacts shall make your lethargic lives end much more swiftly!">Say</Behavior>
+			
+			<Behavior protecteeId="Tomb Boss Anchor" radius="4.2" speed="1">Orbit</Behavior>
+			<Behavior numShots="1" projectileId="6" cooldown="5.3" type="targeted" predictive="0.6" angle="10" range="12">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="5.3" type="auto" angle="120" range="10">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="2" cooldown="4.7" type="auto" angle="90" range="10">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="3" cooldown="3.6" type="auto" angle="72" range="10">Shoot</Behavior>
+			<Behavior numShots="6" projectileId="4" cooldown="7.2" type="auto" angle="60" range="10">Shoot</Behavior>	
+			<Behavior numShots="1" projectileId="5" cooldown="0.7" type="targeted" range="12">Shoot</Behavior>
+			<Behavior targetIds="Tomb Attacker" cooldown="0.5" range="10" maxTargets="1" maxHeal="40">Heal</Behavior>
+			
+			<Behavior childIds="Sphinx Artifact 1" cooldown="28" maxChildren="3" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Sphinx Artifact 2" cooldown="28" maxChildren="3" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Sphinx Artifact 3" cooldown="28" maxChildren="3" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			
+			<Transition hitpointsLessThan="0.30">Artifacts1</Transition>			
+		</State> 
+		
+		<State id="Artifacts1">
+			<Behavior effect="Invulnerable" cooldown="17" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="4.2" speed="0.9">Orbit</Behavior>
+			<Behavior numShots="2" projectileId="6" cooldown="5" type="targeted" angle="15" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="5" type="auto" angle="120" range="10">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="2" cooldown="4.8" type="auto" angle="90" range="10">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="3" cooldown="3.4" type="auto" angle="72" range="10">Shoot</Behavior>
+			<Behavior numShots="6" projectileId="4" cooldown="6.4" type="auto" angle="60" range="10">Shoot</Behavior>	
+			<Behavior numShots="2" projectileId="5" cooldown="0.6" type="targeted" angle="15" range="12">Shoot</Behavior>
+			
+			<Behavior childIds="Sphinx Artifact 1" cooldown="24" maxChildren="3" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior childIds="Sphinx Artifact 2" cooldown="24" maxChildren="3" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior childIds="Sphinx Artifact 3" cooldown="24" maxChildren="3" startWithMinions="false">MakeMinions</Behavior>	
+			
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>			
+		</State> 
+		
+		<State id="GoInsane">  
+			<Behavior type="Flash" color="FF0000" flashPeriod="10" flashRepeats="6000">ShowEffect</Behavior>
+				
+			<Behavior prob="1" text="This cannot be! You shall not succeed!">Say</Behavior>
+			
+			 
+			<State id="Spiral1">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="0">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="180" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral2</Transition>
+			</State>
+			<State id="Spiral2">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="15">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral3</Transition>
+			</State>
+			<State id="Spiral3">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="30">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="210" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral4</Transition>
+			</State>
+			<State id="Spiral4">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="45">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral5</Transition>
+			</State>	
+			<State id="Spiral5">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="60">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="180" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral6</Transition>				
+			</State>		
+			<State id="Spiral6">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="75">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral7</Transition>				
+			</State>		
+			<State id="Spiral7">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="90">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="270" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral8</Transition>				
+			</State>		
+			<State id="Spiral8">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="105">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral9</Transition>				
+			</State>		
+			<State id="Spiral9">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="120">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="300" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral10</Transition>				
+			</State>		
+			<State id="Spiral10">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="135">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral11</Transition>				
+			</State>		
+			<State id="Spiral11">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="150">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="330" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral12</Transition>				
+			</State>		
+			<State id="Spiral12">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="165">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral13</Transition>				
+			</State>		
+			<State id="Spiral13">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="360" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral14</Transition>				
+			</State> 
+			<State id="Spiral14">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="360">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral15</Transition>
+			</State>
+			<State id="Spiral15">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="345">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="165" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral16</Transition>
+			</State>
+			<State id="Spiral16">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="330">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral17</Transition>
+			</State>
+			<State id="Spiral17">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="315">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="135" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral18</Transition>
+			</State>	
+			<State id="Spiral18">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="300">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral19</Transition>				
+			</State>		
+			<State id="Spiral19">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="285">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="105" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral20</Transition>				
+			</State>		
+			<State id="Spiral20">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="270">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral21</Transition>				
+			</State>		
+			<State id="Spiral21">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="255">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="75" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral22</Transition>				
+			</State>		
+			<State id="Spiral22">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="240">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral23</Transition>				
+			</State>		
+			<State id="Spiral23">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="225">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="45" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral24</Transition>				
+			</State>		
+			<State id="Spiral24">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="210">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral25</Transition>				
+			</State>		
+			<State id="Spiral25">
+					<Behavior numShots="3" projectileId="8" cooldown="0.3" type="auto" defaultAngle="195">Shoot</Behavior>
+					<Behavior numShots="2" projectileId="6" cooldown="0.6" type="auto" defaultAngle="15" offset="0.2">Shoot</Behavior>
+					<Transition afterTime="0.5">Spiral26</Transition>				
+			</State>		
+			<State id="Spiral26">
+					<Behavior numShots="3" projectileId="8" cooldown="1.3" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Transition afterTime="1.2">Spiral1</Transition>				
+			</State>
+			
+			<Behavior bucket="movement" range="10" speed="1.6">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" cooldown="6" acquireRange="10" range="2.4" speed="1.3">Follow</Behavior>	
+			
+			<Behavior childIds="Sphinx Artifact 1" cooldown="16" maxChildren="3" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Sphinx Artifact 2" cooldown="16" maxChildren="3" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Sphinx Artifact 3" cooldown="16" maxChildren="3" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			
+			<Behavior numShots="2" projectileId="6" cooldown="4" type="targeted" predictive="0.6" angle="10" range="12">Shoot</Behavior>	
+			<Behavior numShots="2" projectileId="0" cooldown="0.7" type="targeted" angle="15" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="1" cooldown="5.0" type="auto" angle="90" range="10">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="2" cooldown="3.6" type="targeted" angle="72" range="10">Shoot</Behavior>
+			<Behavior numShots="6" projectileId="3" cooldown="2.8" type="auto" angle="60" range="10" >Shoot</Behavior>
+			<Behavior numShots="7" projectileId="4" cooldown="6.0" type="targeted" angle="51" range="10">Shoot</Behavior>	
+			<Behavior numShots="1" projectileId="5" cooldown="0.6" type="targeted" range="12">Shoot</Behavior>	
+		        
+			<Behavior effect="Invulnerable" cooldown="10" duration="2">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="5">ConditionEffect</Behavior>
+		</State>
+
+		<SoulboundLoot prob="0.25" min="1">Potion of Life</SoulboundLoot>
+		<SoulboundLoot prob="0.007">Wine Cellar Incantation</SoulboundLoot>
+		<SoulboundLoot prob="0.007" threshold="0.04">Ring of the Sphinx</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0d27" id="Tomb Attacker">
+		<Group>Tomb Bosses</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Geb</DisplayId>
+		<Quest/>
+		<Level>1</Level>
+		
+		<AnimatedTexture><File>chars16x16dEncounters</File><Index>11</Index></AnimatedTexture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>90000</MaxHitPoints>
+		<Size>140</Size>
+		<Defense>30</Defense>
+		<XpMult>1</XpMult>
+		<God/>		
+		<NoArticle/>
+
+		<Projectile id="0">
+			<ObjectId>Darkness Bolt</ObjectId>
+			<Damage>280</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>140</Size>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Green Boomerang</ObjectId>
+			<Damage>100</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>3600</LifetimeMS>
+			<ConditionEffect duration="5">Slowed</ConditionEffect>
+			<Boomerang/>
+			<MultiHit/>
+		</Projectile>
+
+		<Projectile id="2">
+			<ObjectId>Fire Magic</ObjectId>
+			<Damage>30</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<ArmorPiercing/>
+			<Size>100</Size>
+		</Projectile>	
+
+		<Projectile id="3">
+			<ObjectId>Dark Gray Spinner</ObjectId>
+			<Damage>0</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>5000</LifetimeMS>
+			<ConditionEffect duration="10">Weak</ConditionEffect>
+			<MultiHit/>
+			<Size>200</Size>
+		</Projectile>	
+
+		<Projectile id="4">
+			<ObjectId>Fireball</ObjectId>
+			<Damage>80</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>140</Size>
+			<Parametric/>
+		</Projectile>	
+
+		<Projectile id="5">
+			<ObjectId>Darkness Bolt</ObjectId>
+			<Damage>200</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>4000</LifetimeMS>
+			<Size>140</Size>
+			<MultiHit/>
+		</Projectile>
+		
+		<Behavior bucket="movement" listenIds="Tomb Support, Tomb Defender" acquireRange="20">FollowOrders</Behavior>
+		<Behavior broadcast="1" prob="1" text="YOU HAVE AWAKENED US!">Say</Behavior>
+
+		<State id="Waiting">
+			<Behavior effect="Armored">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			
+			<Behavior prob=".20" text="Imbeciles, don't think your attacks are special, we have mastered them long ago!">Say</Behavior>
+			<Behavior prob=".20" text="My ancient powers shall make even the most skilled tremble with fear!">Say</Behavior>
+		
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="5.8" speed="0.6">Orbit</Behavior>
+					
+			<Transition hitpointsLessThan="0.989">Impudence</Transition>
+		</State>
+		
+		<State id="Impudence">		
+			<Behavior effect="Invulnerable" cooldown="10" duration="2">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+		
+			<Behavior numShots="20" projectileId="3" cooldown="10" type="auto" angle="18" range="12">Shoot</Behavior>
+			<Behavior numShots="20" projectileId="3" cooldown="10" type="auto" angle="18" range="12" offset="1">Shoot</Behavior>	
+					        
+			<Behavior effect="Armored" duration="12">ConditionEffect</Behavior>
+			
+			<Behavior prob=".5" text="Impudence! I am an immortal, I needn't take you seriously.">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="5.8" speed="0.6">Orbit</Behavior>
+				
+			<Transition hitpointsLessThan="0.979">TeamWork</Transition>
+			<Transition afterTime="12">Waiting</Transition>
+		</State>	
+
+		<State id="TeamWork">
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="5.8" speed="0.8">Orbit</Behavior>
+			<Behavior numShots="2" projectileId="2" cooldown="0.6" type="targeted" angle="5" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior cooldown="3.5" type="targeted" radius="3" damage="120" range="10">GrenadeToss</Behavior>
+			<Behavior cooldown="6" type="targeted" radius="4" damage="160" range="10">GrenadeToss</Behavior>
+				
+			<State id="Remind">
+			<Order targetIds="Tomb Support, Tomb Defender">			
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>
+				<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="5">Shoot</Behavior>
+			</Order>
+			<Transition afterTime="6">Remind</Transition>
+			</State> 
+			
+			<Transition hitpointsLessThan="0.72">OrderProtection</Transition>
+			<Transition afterTime="60">Waiting</Transition>
+		</State>  
+		
+		<State id="OrderProtection">
+			<Behavior effect="Invulnerable" cooldown="20" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="5.8" speed="0.8">Orbit</Behavior>
+			<Behavior numShots="2" projectileId="0" cooldown="2" type="targeted" angle="40" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="8" projectileId="1" cooldown="5" type="auto" angle="45" range="12">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="2" cooldown="1.0" type="targeted" angle="80" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.4" type="targeted" range="12">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="2" cooldown="0.4" type="targeted" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior cooldown="4" type="targeted" radius="3" damage="100" range="10">GrenadeToss</Behavior>
+			<Behavior cooldown="6" type="targeted" radius="4" damage="120" range="10">GrenadeToss</Behavior>
+			
+			<Behavior childIds="Scarab" cooldown="10" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="10" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="10" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+			
+			<State id="Remind">
+			<Behavior prob=".2" text="Bes, protect me at once!">Say</Behavior>
+			
+			<Order targetIds="Tomb Defender">			
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>
+				<Behavior numShots="12" projectileId="2" cooldown="0.8" type="auto" angle="30" range="3.8">Shoot</Behavior>
+				<Behavior bucket="movement" protecteeId="Tomb Attacker" acquireRange="20" speed="1.6" protectionRange="3" reprotectRange="1.8" radius="1">Orbit</Behavior>
+				<Behavior type="Flash" color="000000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			</Order>
+			<Transition afterTime="6">Remind</Transition>
+			</State> 
+			
+			<Transition afterTime="20">InBetween</Transition>
+			<Transition hitpointsLessThan="0.60">OrderSupport</Transition>
+		</State> 
+		
+		<State id="InBetween"> 
+			<State id="Spiral1">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="0">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral2</Transition>
+			</State>
+			<State id="Spiral2">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="15">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral3</Transition>
+			</State>
+			<State id="Spiral3">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="30">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral4</Transition>
+			</State>
+			<State id="Spiral4">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="45">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral5</Transition>
+			</State>	
+			<State id="Spiral5">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="60">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral6</Transition>				
+			</State>		
+			<State id="Spiral6">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="75">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral7</Transition>				
+			</State>		
+			<State id="Spiral7">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="90">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral8</Transition>				
+			</State>		
+			<State id="Spiral8">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="105">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral9</Transition>				
+			</State>		
+			<State id="Spiral9">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="120">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral10</Transition>				
+			</State>		
+			<State id="Spiral10">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="135">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral11</Transition>				
+			</State>		
+			<State id="Spiral11">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="150">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral12</Transition>				
+			</State>		
+			<State id="Spiral12">
+					<Behavior numShots="2" projectileId="4" cooldown="0.9" type="auto" defaultAngle="165">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral13</Transition>				
+			</State>		
+			<State id="Spiral13">
+					<Behavior numShots="2" projectileId="4" cooldown="1.3" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Transition afterTime="1.2">Spiral1</Transition>				
+			</State>
+		
+			<Behavior protecteeId="Tomb Boss Anchor" radius="7.2" speed="0.9">Orbit</Behavior>
+			<Behavior numShots="2" projectileId="0" cooldown="2" type="targeted" angle="35" predictive="0.6" range="12" offset="3">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.5" type="targeted" range="12" offset="5">Shoot</Behavior>
+			<Behavior cooldown="3.75" type="targeted" radius="3" damage="100" range="10">GrenadeToss</Behavior>
+			<Behavior cooldown="5.75" type="targeted" radius="4" damage="120" range="10">GrenadeToss</Behavior>
+			
+			<Behavior childIds="Scarab" cooldown="4" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="6" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="8" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+		        
+			<Behavior effect="Armor Broken" cooldown="6" duration="3">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			
+			<Transition afterTime="10">NextPhase</Transition>
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>
+		</State>
+		
+		<State id="NextPhase">   
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>
+			<Transition hitpointsLessThan="0.20">OrderSupport</Transition>
+			<Transition hitpointsLessThan="0.40">OrderProtection</Transition>
+			<Transition hitpointsLessThan="0.60">OrderSupport</Transition>
+			
+			<Transition afterTime="2">InBetween</Transition>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="7.2" speed="1">Orbit</Behavior>
+		</State>
+		
+		<State id="OrderSupport">
+			<Behavior effect="Invulnerable" cooldown="19" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="5.0" speed="0.9">Orbit</Behavior>
+			<Behavior numShots="2" projectileId="0" cooldown="2" type="targeted" angle="35" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="10" projectileId="1" cooldown="5" type="auto" angle="36" range="12">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="2" cooldown="1.2" type="targeted" angle="60" defaultangle="180" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.2" type="targeted" range="12">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="2" cooldown="0.6" type="targeted" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior cooldown="3.75" type="targeted" radius="3" damage="100" range="10">GrenadeToss</Behavior>
+			<Behavior cooldown="5.75" type="targeted" radius="4" damage="120" range="10">GrenadeToss</Behavior>
+			
+			<Behavior childIds="Scarab" cooldown="9" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="9" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="9" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+			
+			<State id="Remind">
+			<Behavior prob=".2" text="Nut, disable our foes!">Say</Behavior>
+			
+			<Order targetIds="Tomb Support">
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>			
+				<Behavior bucket="movement" protecteeId="Tomb Attacker" acquireRange="20" speed="1.7" protectionRange="3" reprotectRange="1.8" radius="1">Orbit</Behavior>
+				<Behavior type="Flash" color="000000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			</Order>
+			<Transition afterTime="6">Remind</Transition>
+			</State> 
+			
+			<Transition afterTime="20">InBetween</Transition>
+			<Transition hitpointsLessThan="0.40">Artifacts</Transition>
+		</State>    
+		
+		<State id="Artifacts">
+			<Behavior effect="Invulnerable" cooldown="18" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior prob="1" text="My artifacts shall destroy you from your soul to your flesh!">Say</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="5.0" speed="1.0">Orbit</Behavior>
+		
+			<Behavior numShots="4" projectileId="0" cooldown="2" type="targeted" angle="35" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="10" projectileId="1" cooldown="15" type="auto" angle="36" range="12">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="2" cooldown="1.2" type="targeted" angle="60" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.4" type="targeted" range="12">Shoot</Behavior>
+			<Behavior numShots="2" projectileId="2" cooldown="0.6" type="targeted" angle="15" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior cooldown="3.5" type="targeted" radius="3" damage="100" range="10">GrenadeToss</Behavior>
+			<Behavior cooldown="5.5" type="targeted" radius="4" damage="120" range="10">GrenadeToss</Behavior>
+			<Behavior cooldown="2" type="auto" radius="10" damage="40" range="6" defaultangle="180">GrenadeToss</Behavior>
+			
+			<Behavior childIds="Scarab" cooldown="8" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="8" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="8" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+			
+			<Behavior childIds="Nile Artifact 1" cooldown="24" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Nile Artifact 2" cooldown="24" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Nile Artifact 3" cooldown="24" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			
+			<Transition hitpointsLessThan="0.20">Artifacts1</Transition>
+		</State>   
+		
+		<State id="Artifacts1">
+			<Behavior effect="Invulnerable" cooldown="17" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="5.0" speed="1.1">Orbit</Behavior>
+			
+			<Behavior numShots="4" projectileId="0" cooldown="1.8" type="targeted" angle="35" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="10" projectileId="1" cooldown="14" type="auto" angle="36" range="12">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="2" cooldown="1.0" type="targeted" angle="60" defaultangle="180" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.2" type="targeted" range="12">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="2" cooldown="0.6" type="targeted" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior cooldown="3" type="targeted" radius="3" damage="100" range="10">GrenadeToss</Behavior>
+			<Behavior cooldown="5" type="targeted" radius="4" damage="120" range="10">GrenadeToss</Behavior>
+			
+			<Behavior childIds="Scarab" cooldown="7" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="7" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="7" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+			
+			<Behavior childIds="Nile Artifact 1" cooldown="20" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior childIds="Nile Artifact 2" cooldown="20" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior childIds="Nile Artifact 3" cooldown="20" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+			
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>
+		</State> 
+		
+		<State id="GoInsane">
+			<Behavior prob="1" text="Argh! You shall pay for your crimes!">Say</Behavior>
+		
+			<Behavior type="Flash" color="FF0000" flashPeriod="10" flashRepeats="6000">ShowEffect</Behavior>
+				 
+			<State id="Spiral1">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="0">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral2</Transition>
+			</State>
+			<State id="Spiral2">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="15">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="345">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral3</Transition>
+			</State>
+			<State id="Spiral3">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="30">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="330">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral4</Transition>
+			</State>
+			<State id="Spiral4">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="45">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="315">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral5</Transition>
+			</State>	
+			<State id="Spiral5">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="60">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="300">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral6</Transition>				
+			</State>		
+			<State id="Spiral6">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="75">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="285">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral7</Transition>				
+			</State>		
+			<State id="Spiral7">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="90">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="270">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral8</Transition>				
+			</State>		
+			<State id="Spiral8">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="105">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="255">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral9</Transition>				
+			</State>		
+			<State id="Spiral9">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="120">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="240">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral10</Transition>				
+			</State>		
+			<State id="Spiral10">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="135">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="225">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral11</Transition>				
+			</State>		
+			<State id="Spiral11">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="150">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="210">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral12</Transition>				
+			</State>		
+			<State id="Spiral12">
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="165">Shoot</Behavior>
+					<Behavior numShots="1" projectileId="5" cooldown="0.5" type="auto" defaultAngle="195">Shoot</Behavior>
+					<Transition afterTime="0.8">Spiral13</Transition>				
+			</State>		
+			<State id="Spiral13">
+					<Behavior numShots="1" projectileId="5" cooldown="1.5" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Transition afterTime="1.4">Spiral1</Transition>				
+			</State>
+			
+			<Behavior bucket="movement" range="7" speed="4" cooldown="10">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" acquireRange="10" range="1.8" speed="1.8">KeepDistance</Behavior>
+			
+			<Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" angle="35" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="10" projectileId="1" cooldown="4.8" type="auto" angle="36" range="12">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="2" cooldown="1.2" type="targeted" angle="42" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="2" projectileId="0" cooldown="1.4" type="targeted" angle="5" range="12">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="2" cooldown="0.4" type="targeted" predictive="0.6" range="12">Shoot</Behavior>
+			
+			<Behavior cooldown="3.5" type="targeted" radius="3" damage="120" range="12">GrenadeToss</Behavior>
+			<Behavior cooldown="5.5" type="targeted" radius="4" damage="150" range="12">GrenadeToss</Behavior>
+			
+			<Behavior childIds="Scarab" cooldown="6.5" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="6.5" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>			
+			<Behavior childIds="Scarab" cooldown="6.5" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+			
+			<Behavior childIds="Nile Artifact 1" cooldown="12" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Nile Artifact 2" cooldown="12" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Nile Artifact 3" cooldown="12" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			
+			<Behavior effect="Invulnerable" cooldown="10" duration="2">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="5">ConditionEffect</Behavior>
+		</State> 
+
+		<SoulboundLoot prob="0.25" min="1">Potion of Life</SoulboundLoot>
+		<SoulboundLoot prob="0.007">Wine Cellar Incantation</SoulboundLoot>
+		<SoulboundLoot prob="0.007" threshold="0.04">Ring of the Nile</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0d28" id="Tomb Defender">
+		<Group>Tomb Bosses</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Bes</DisplayId>
+		<Quest/>
+		<Level>1</Level>
+		
+		<AnimatedTexture><File>chars16x16dEncounters</File><Index>12</Index></AnimatedTexture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>100000</MaxHitPoints>
+		<Size>140</Size>
+		<Defense>50</Defense>
+		<XpMult>1</XpMult>
+		<God/> 
+		<NoArticle/>
+
+		<Projectile id="0">
+			<ObjectId>Darkness Bolt</ObjectId>
+			<Damage>240</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>180</Size>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Fire Boomerang</ObjectId>
+			<Damage>150</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>5000</LifetimeMS>
+			<ConditionEffect duration="5">Armor Broken</ConditionEffect>
+			<Boomerang/>
+			<MultiHit/>
+		</Projectile>
+
+		<Projectile id="2">
+			<ObjectId>Silver Shield</ObjectId>
+			<Damage>160</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>540</LifetimeMS>
+			<ConditionEffect duration="1.2">Stunned</ConditionEffect>
+			<Size>200</Size>
+		</Projectile>	
+
+		<Projectile id="3">
+			<ObjectId>Dark Gray Spinner</ObjectId>
+			<Damage>0</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>5000</LifetimeMS>
+			<ConditionEffect duration="10">Weak</ConditionEffect>
+			<MultiHit/>
+			<Size>200</Size>
+		</Projectile>
+
+		<Projectile id="4">
+			<ObjectId>Silver Shield</ObjectId>
+			<Damage>60</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>1200</LifetimeMS>
+			<ConditionEffect duration="1.2">Stunned</ConditionEffect>
+			<Size>200</Size>
+		</Projectile>	
+		
+		<Behavior bucket="movement" listenIds="Tomb Support, Tomb Attacker" acquireRange="20">FollowOrders</Behavior>
+		<Behavior broadcast="1" prob="1" text="THIS WILL NOW BE YOUR TOMB!">Say</Behavior>
+		
+		<State id="Waiting">
+			<Behavior effect="Armored">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			
+			<Behavior prob=".20" text="You shall awe at my wonderous defense!">Say</Behavior>
+			<Behavior prob=".20" text="The others use tricks, but I shall stun you with brute strength!">Say</Behavior>
+		
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="4.0" speed="0.6">Orbit</Behavior>
+					
+			<Transition hitpointsLessThan="0.989">Impudence</Transition>
+		</State>
+		
+		<State id="Impudence">		
+			<Behavior effect="Invulnerable" cooldown="10" duration="2">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+		
+			<Behavior numShots="20" projectileId="3" cooldown="10" type="auto" angle="18" range="12">Shoot</Behavior>
+			<Behavior numShots="20" projectileId="3" cooldown="10" type="auto" angle="18" range="12" offset="1">Shoot</Behavior>	
+					        
+			<Behavior effect="Armored" duration="12">ConditionEffect</Behavior>
+			
+			<Behavior prob=".5" text="Impudence! I am an immortal, I needn't waste time on you.">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="4.0" speed="0.6">Orbit</Behavior>
+				
+			<Transition hitpointsLessThan="0.979">TeamWork</Transition>
+			<Transition afterTime="12">Waiting</Transition>
+		</State>
+
+		<State id="TeamWork">
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="4.0" speed="0.6">Orbit</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="5">Shoot</Behavior>
+			<Behavior numShots="8" projectileId="2" cooldown="1.2" type="auto" angle="45" range="3.8">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="5.4" angle="100" type="targeted" predictive="0.6" range="12">Shoot</Behavior>
+					        
+			<Behavior effect="Armored" duration="12">ConditionEffect</Behavior>
+			
+			<State id="Remind">
+			<Order targetIds="Tomb Support, Tomb Attacker">			
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>
+				<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="5">Shoot</Behavior>
+			</Order>
+			<Transition afterTime="6">Remind</Transition>
+			</State> 
+			
+			<Transition hitpointsLessThan="0.70">OrderSupport</Transition>
+			<Transition afterTime="60">Waiting</Transition>
+		</State> 
+		
+		<State id="OrderSupport">
+			<Behavior effect="Invulnerable" cooldown="18" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior prob="1" text="Nut, disable our foes!">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Tomb Boss Anchor" radius="4.0" speed="0.65">Orbit</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="3" type="targeted" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="9" projectileId="2" cooldown="1.2" type="auto" angle="40" range="3.8">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="1" cooldown="6" type="targeted" angle="60" defaultangle="180" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="6" type="targeted" angle="10" predictive="0.6" range="12">Shoot</Behavior>			
+					        
+			<Behavior effect="Armored" cooldown="18" duration="10">ConditionEffect</Behavior>
+			
+			<State id="Remind">
+			<Order targetIds="Tomb Support">			
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>
+				<Behavior numShots="1" projectileId="6" cooldown="5" type="targeted" predictive="0.6" angle="10" range="12">Shoot</Behavior>
+				<Behavior bucket="movement" protecteeId="Tomb Defender" acquireRange="20" speed="1.7" protectionRange="3" reprotectRange="1.8" radius="1">Orbit</Behavior>
+				<Behavior type="Flash" color="000000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			</Order>
+			<Transition afterTime="6">Remind</Transition>
+			</State> 
+			
+			<Transition afterTime="20">InBetween</Transition>
+			<Transition hitpointsLessThan="0.55">OrderPain</Transition>
+		</State>   
+		
+		<State id="InBetween">		
+			<State id="Spiral1">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="0">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral2</Transition>
+			</State>
+			<State id="Spiral2">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="15">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral3</Transition>
+			</State>
+			<State id="Spiral3">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="30">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral4</Transition>
+			</State>
+			<State id="Spiral4">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="45">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral5</Transition>
+			</State>	
+			<State id="Spiral5">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="60">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral6</Transition>				
+			</State>		
+			<State id="Spiral6">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="75">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral7</Transition>				
+			</State>		
+			<State id="Spiral7">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="90">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral8</Transition>				
+			</State>		
+			<State id="Spiral8">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="105">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral9</Transition>				
+			</State>		
+			<State id="Spiral9">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="120">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral10</Transition>				
+			</State>		
+			<State id="Spiral10">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="135">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral11</Transition>				
+			</State>		
+			<State id="Spiral11">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="150">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral12</Transition>				
+			</State>		
+			<State id="Spiral12">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="165">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral13</Transition>				
+			</State>		
+			<State id="Spiral13">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral14</Transition>				
+			</State> 
+			<State id="Spiral14">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="360">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral15</Transition>
+			</State>
+			<State id="Spiral15">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="345">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral16</Transition>
+			</State>
+			<State id="Spiral16">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="330">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral17</Transition>
+			</State>
+			<State id="Spiral17">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="315">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral18</Transition>
+			</State>	
+			<State id="Spiral18">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="300">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral19</Transition>				
+			</State>		
+			<State id="Spiral19">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="285">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral20</Transition>				
+			</State>		
+			<State id="Spiral20">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="270">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral21</Transition>				
+			</State>		
+			<State id="Spiral21">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="255">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral22</Transition>				
+			</State>		
+			<State id="Spiral22">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="240">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral23</Transition>				
+			</State>		
+			<State id="Spiral23">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="225">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral24</Transition>				
+			</State>		
+			<State id="Spiral24">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="210">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral25</Transition>				
+			</State>		
+			<State id="Spiral25">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="195">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral26</Transition>				
+			</State>		
+			<State id="Spiral26">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="1.9" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Transition afterTime="1.8">Spiral1</Transition>				
+			</State>
+		
+			<Behavior protecteeId="Tomb Boss Anchor" radius="8.0" speed="0.8">Orbit</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+			<Behavior numShots="2" projectileId="0" cooldown="3.2" type="targeted" angle="5" predictive="0.6" range="12" offset="3">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="1" cooldown="6" type="targeted" angle="30" defaultangle="180" predictive="0.6" range="12" offset="2">Shoot</Behavior>
+			<Behavior numShots="2" projectileId="1" cooldown="6" type="targeted" angle="10" predictive="0.6" range="12" offset="2">Shoot</Behavior>
+		        
+			<Behavior effect="Armor Broken" cooldown="6" duration="3">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			
+			<Transition afterTime="10">NextPhase</Transition>
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>
+		</State>
+		
+		<State id="NextPhase">   
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>
+			<Transition hitpointsLessThan="0.25">OrderPain</Transition>
+			<Transition hitpointsLessThan="0.40">OrderSupport</Transition>
+			<Transition hitpointsLessThan="0.55">OrderPain</Transition>
+			
+			<Transition afterTime="2">InBetween</Transition>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="4.0" speed="1">Orbit</Behavior>
+		</State>
+		
+		<State id="OrderPain">
+			<Behavior effect="Invulnerable" cooldown="17" duration="4">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior prob="1" text="Geb, eradicate these cretins from our tomb!">Say</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="4.0" speed="0.7">Orbit</Behavior>
+			<Behavior numShots="2" projectileId="0" cooldown="3.2" type="targeted" angle="5" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="9" projectileId="2" cooldown="1.0" type="auto" angle="40" range="3.8">Shoot</Behavior>
+			<Behavior numShots="4" projectileId="1" cooldown="6" type="targeted" angle="30" defaultangle="180" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="2" projectileId="1" cooldown="6" type="targeted" angle="10" predictive="0.6" range="12">Shoot</Behavior>
+		        
+			<Behavior effect="Armored" cooldown="17" duration="10">ConditionEffect</Behavior>
+			
+			<Order targetIds="Tomb Attacker">
+				<Behavior effect="Invulnerable" cooldown="20" duration="2">ConditionEffect</Behavior>
+				<Behavior effect="Stasis Immune" duration="2">ConditionEffect</Behavior>			
+				<Behavior bucket="movement" protecteeId="Tomb Defender" acquireRange="20" speed="1.7" protectionRange="3" reprotectRange="1.8" radius="1">Orbit</Behavior>
+				<Behavior type="Flash" color="000000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			</Order>
+			
+			<Transition afterTime="30">InBetween</Transition>
+			<Transition hitpointsLessThan="0.40">Artifacts</Transition>			
+		</State>       
+		
+		<State id="Artifacts">
+			<Behavior effect="Invulnerable" cooldown="19" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior prob="1" text="Nut, let them wish they were dead!">Say</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="6.0" speed="0.75">Orbit</Behavior>
+			<Behavior numShots="2" projectileId="0" cooldown="3.0" type="targeted" angle="5" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="10" projectileId="2" cooldown="1.0" type="auto" angle="36" range="3.8">Shoot</Behavior>
+			<Behavior numShots="6" projectileId="1" cooldown="6" type="targeted" angle="24" defaultangle="180" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="6" type="targeted" angle="10" predictive="0.6" range="12">Shoot</Behavior>
+						
+			<Behavior childIds="Pyramid Artifact 1" cooldown="30" maxChildren="3" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Pyramid Artifact 2" cooldown="30" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Pyramid Artifact 3" cooldown="30" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			
+			<Behavior effect="Armored" cooldown="16" duration="10">ConditionEffect</Behavior>
+			
+			<Order targetIds="Tomb Support">			
+				<Behavior bucket="movement" protecteeId="Tomb Defender" acquireRange="12" speed="1.8" protectionRange="3" reprotectRange="1.8" radius="1">Orbit</Behavior>
+				<Behavior type="Flash" color="000000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			</Order>
+			
+			<Transition hitpointsLessThan="0.25">Artifacts1</Transition>
+		</State> 
+		
+		<State id="Artifacts1">
+			<Behavior effect="Invulnerable" cooldown="18" duration="6">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="6">ConditionEffect</Behavior>
+			<Behavior prob="1" text="My artifacts shall prove my wall of defense is impenetrable!">Say</Behavior>
+			<Behavior protecteeId="Tomb Boss Anchor" radius="6.0" speed="0.8">Orbit</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="2.8" type="targeted" angle="15" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="10" projectileId="2" cooldown="0.9" type="auto" angle="36" range="4.0">Shoot</Behavior>
+			<Behavior numShots="7" projectileId="1" cooldown="6" type="targeted" angle="24" defaultangle="180" predictive="0.6" range="12">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="6" type="targeted" angle="10" predictive="0.6" range="12">Shoot</Behavior>
+						
+			<Behavior childIds="Pyramid Artifact 1" cooldown="24" maxChildren="3" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior childIds="Pyramid Artifact 2" cooldown="24" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior childIds="Pyramid Artifact 3" cooldown="24" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+		        
+			<Behavior effect="Armor Broken" cooldown="15" duration="4">ConditionEffect</Behavior>
+			
+			<Transition hitpointsLessThan="0.06">GoInsane</Transition>			
+		</State> 
+		
+		<State id="GoInsane">
+				
+			<Behavior prob="0.5" text="The end of your path is here!">Say</Behavior>
+
+			<Behavior type="Flash" color="FF0000" flashPeriod="10" flashRepeats="6000">ShowEffect</Behavior>
+								
+			<State id="Spiral1">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="0">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral2</Transition>
+			</State>
+			<State id="Spiral2">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="15">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral3</Transition>
+			</State>
+			<State id="Spiral3">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="30">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral4</Transition>
+			</State>
+			<State id="Spiral4">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="45">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral5</Transition>
+			</State>	
+			<State id="Spiral5">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="60">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral6</Transition>				
+			</State>		
+			<State id="Spiral6">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="75">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral7</Transition>				
+			</State>		
+			<State id="Spiral7">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="90">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral8</Transition>				
+			</State>		
+			<State id="Spiral8">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="105">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral9</Transition>				
+			</State>		
+			<State id="Spiral9">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="120">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral10</Transition>				
+			</State>		
+			<State id="Spiral10">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="135">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral11</Transition>				
+			</State>		
+			<State id="Spiral11">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="150">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral12</Transition>				
+			</State>		
+			<State id="Spiral12">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="165">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral13</Transition>				
+			</State>		
+			<State id="Spiral13">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="180">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral14</Transition>				
+			</State> 
+			<State id="Spiral14">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="195">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral15</Transition>
+			</State>
+			<State id="Spiral15">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="210">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral16</Transition>
+			</State>
+			<State id="Spiral16">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="225">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral17</Transition>
+			</State>
+			<State id="Spiral17">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="240">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral18</Transition>
+			</State>	
+			<State id="Spiral18">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="255">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral19</Transition>				
+			</State>		
+			<State id="Spiral19">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="270">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral20</Transition>				
+			</State>		
+			<State id="Spiral20">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="285">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral21</Transition>				
+			</State>		
+			<State id="Spiral21">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="255">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral22</Transition>				
+			</State>		
+			<State id="Spiral22">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="300">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral23</Transition>				
+			</State>		
+			<State id="Spiral23">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="315">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral24</Transition>				
+			</State>		
+			<State id="Spiral24">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="330">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral25</Transition>				
+			</State>		
+			<State id="Spiral25">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="0.5" type="auto" defaultAngle="345">Shoot</Behavior>
+					<Transition afterTime="0.4">Spiral26</Transition>				
+			</State>		
+			<State id="Spiral26">
+					<Behavior numShots="5" angle="5" projectileId="4" cooldown="1.9" type="auto" defaultAngle="360">Shoot</Behavior>
+					<Transition afterTime="1.8">Spiral1</Transition>				
+			</State>
+			
+			<Behavior bucket="movement" range="7" speed="1.6" cooldown="0">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" acquireRange="10" range="2.4" speed="1.0">Follow</Behavior>
+
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.4" type="targeted" predictive="0.6" range="20">Shoot</Behavior>
+			<Behavior numShots="12" projectileId="4" cooldown="0.8" type="targeted" angle="6" range="20">Shoot</Behavior>
+			<Behavior numShots="7" projectileId="1" cooldown="5.5" type="targeted" angle="24" defaultangle="180" predictive="0.6" range="20">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="1" cooldown="5.5" type="targeted" angle="10" predictive="0.6" range="20">Shoot</Behavior>
+						
+			<Behavior childIds="Pyramid Artifact 1" cooldown="20" maxChildren="3" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Pyramid Artifact 2" cooldown="20" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+			<Behavior childIds="Pyramid Artifact 3" cooldown="20" maxChildren="2" startWithMinions="false" offset="5">MakeMinions</Behavior>
+					        
+			<Behavior effect="Armored" duration="3.4">ConditionEffect</Behavior>
+			
+			<Behavior effect="Invulnerable" cooldown="10" duration="2">ConditionEffect</Behavior>
+			<Behavior effect="Stasis Immune" duration="5">ConditionEffect</Behavior>
+		</State> 
+
+		<SoulboundLoot prob="0.25" min="1">Potion of Life</SoulboundLoot>
+		<SoulboundLoot prob="0.007">Wine Cellar Incantation</SoulboundLoot>
+		<SoulboundLoot prob="0.007" threshold="0.04">Ring of the Pyramid</SoulboundLoot>
+		<SoulboundLoot prob="0.003" threshold="0.03">Tome of Holy Protection</SoulboundLoot>
+	</Object>
+
+
+<!--
+********************************************************************************* 
+
+TESTING branchEND SUPPORT BEAMS
+w
+- Main boss in starter room, invincible because...
+- Minions at end room(s) with dungeon wide heal for boss
+- Also moderate chance that one of the Sarcophagus won't be active, but instead is full of treasure
+
+*********************************************************************************
+-->	
+
+	<Object type="0x0d29" id="Active Sarcophagus">
+		<Group>Support Beam</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Sarcophagus</DisplayId>
+		<Quest/>
+		<Level>20</Level>
+		
+		<Texture><File>lofiChar216x16</File><Index>0x0e</Index></Texture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>15000</MaxHitPoints>
+		<Size>140</Size>
+		<Defense>100</Defense>
+		<StasisImmune/>
+		<XpMult>1.4</XpMult>
+		<God/>
+
+		<Projectile id="0">
+			<ObjectId>Silver Shield</ObjectId>
+			<Damage>0</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>200</Size>
+			<ConditionEffect duration="3">Stunned</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<SoulboundLoot prob=".075">Tincture of Defense</SoulboundLoot>
+		<SoulboundLoot prob=".15">Tincture of Dexterity</SoulboundLoot>
+		<SoulboundLoot prob=".22">Tincture of Life</SoulboundLoot>
+		<SoulboundLoot prob=".25">Tincture of Mana</SoulboundLoot>
+
+		<Behavior listenIds="Beam Priest, Beam Priestess">FollowOrders</Behavior>
+		<Behavior childId="Beam Priest" cooldown="36000" type="auto" range="6" defaultAngle="0">ObjectToss</Behavior>
+		<Behavior childId="Beam Priestess" cooldown="36000" type="auto" range="7.5" defaultAngle="45">ObjectToss</Behavior>
+		<Behavior childId="Beam Priest" cooldown="36000" type="auto" range="6" defaultAngle="90">ObjectToss</Behavior>
+		<Behavior childId="Beam Priestess" cooldown="36000" type="auto" range="7.5" defaultAngle="135">ObjectToss</Behavior>
+		<Behavior childId="Beam Priest" cooldown="36000" type="auto" range="6" defaultAngle="180">ObjectToss</Behavior>
+		<Behavior childId="Beam Priestess" cooldown="36000" type="auto" range="7.5" defaultAngle="225">ObjectToss</Behavior>
+		<Behavior childId="Beam Priest" cooldown="36000" type="auto" range="6" defaultAngle="270">ObjectToss</Behavior>
+		<Behavior childId="Beam Priestess" cooldown="36000" type="auto" range="7.5" defaultAngle="315">ObjectToss</Behavior>
+        
+		<Behavior targetGroups="Beam Priests" cooldown="0.3" range="1.4" maxTargets="1" maxHeal="160">Heal</Behavior>
+
+		<State id="Idle">	
+			<Transition playerWithin="24">SpeedBump</Transition>
+		</State>
+		
+		<State id="SpeedBump">	
+			<Transition hitpointsLessThan="0.80">Stun</Transition>
+		</State>
+		
+		<State id="Stun">	
+	        	<Behavior numShots="12" projectileId="0" cooldown="20" type="auto" angle="30" range="12">Shoot</Behavior>
+	        	<Behavior numShots="16" projectileId="0" cooldown="20" type="auto" angle="22" range="12" offset="1">Shoot</Behavior>
+	        	<Behavior numShots="20" projectileId="0" cooldown="20" type="auto" angle="18" range="12" offset="2">Shoot</Behavior>
+		
+			<Transition afterTime="18">SpeedBump</Transition>
+		</State>
+	</Object>
+
+	<Object type="0x0d2a" id="Beam Priest">
+		<Group>Beam Priests</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Worshiping Priest</DisplayId>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>5</Index></AnimatedTexture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>8000</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>20</Defense>
+		<XpMult>1.0</XpMult>
+		<God/>			
+
+		<Projectile id="0">
+			<ObjectId>Purple Boomerang</ObjectId>
+			<Damage>60</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>80</Size>
+			<ConditionEffect duration="5">Weak</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Violet Missile</ObjectId>
+			<Damage>100</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>120</Size>
+		</Projectile>
+
+		<State id="FocusHealing">
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="6.0" speed="0.4">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.6" speed="1.0">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Transition playerWithin="6">Intruders</Transition>
+			<Transition hitpointsLessThan="0.85">Attack</Transition>
+		</State>
+
+		<State id="Intruders">
+			<Behavior prob="0.20" text="Beware - The tomb gives power to those who protect it.">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="6.0" speed="0.4">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.6" speed="1.0">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Transition afterTime="6">Intruders1</Transition>
+			<Transition hitpointsLessThan="0.85">Attack</Transition>
+		</State>
+
+		<State id="Intruders1">
+			<Behavior rate="20" maxSize="110">ChangeSize</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="6.0" speed="0.45">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.6" speed="1.0">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.2" type="targeted" angle="20" range="12">Shoot</Behavior>	
+			<Behavior numShots="2" projectileId="1" cooldown="1.5" type="targeted" angle="20" range="12">Shoot</Behavior>
+			<Transition afterTime="4">Intruders2</Transition>
+			<Transition hitpointsLessThan="0.85">Attack</Transition>
+		</State>
+
+		<State id="Intruders2">
+			<Behavior rate="20" maxSize="120">ChangeSize</Behavior>
+			<Behavior prob="0.20" text="Haha, yes, we feed the artifact power!">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="6.0" speed="0.5">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.6" speed="1.0">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.0" type="targeted" range="12">Shoot</Behavior>	
+			<Behavior numShots="2" projectileId="1" cooldown="1.4" type="targeted" angle="18" range="12">Shoot</Behavior>
+			<Transition afterTime="4">Intruders3</Transition>
+			<Transition hitpointsLessThan="0.85">Attack</Transition>
+		</State>
+
+		<State id="Intruders3">
+			<Behavior rate="20" maxSize="130">ChangeSize</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="6.0" speed="0.55">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.6" speed="1.0">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.8" type="targeted" range="12">Shoot</Behavior>	
+			<Behavior numShots="2" projectileId="1" cooldown="1.3" type="targeted" angle="17" range="12">Shoot</Behavior>
+			<Transition hitpointsLessThan="0.75">Attack</Transition>
+		</State>
+
+		<State id="Attack">
+			<Behavior rate="20" maxSize="130">ChangeSize</Behavior>
+			<Behavior type="Flash" color="FFFF00" flashPeriod="0.1" flashRepeats="40">ShowEffect</Behavior>
+			<Behavior prob="0.14" text="It flows through us like the great Nile itself!">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="6.0" speed="0.6">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.6" speed="1.0">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="100">Heal</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+	       	<Behavior numShots="1" projectileId="0" cooldown="0.6" type="targeted" range="12">Shoot</Behavior>	
+	       	<Behavior numShots="3" projectileId="1" cooldown="1.2" type="targeted" angle="15" range="12">Shoot</Behavior>
+			<Transition afterTime="30">PreFocusAttack</Transition>
+			<Transition hitpointsLessThan="0.33">Wounded</Transition>
+		</State>
+
+		<State id="Wounded"><Behavior type="Flash" color="000000" flashPeriod="1" flashRepeats="100">ShowEffect</Behavior>
+			<Behavior prob="0.29" text="The tomb... shall tend to my wounds...">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" acquireRange="12" speed="0.3" protectionRange="0.4" reprotectRange="0.4">Protect</Behavior>
+			<Transition hitpointsLessThan="0.1">FlashBeforeExplode</Transition>
+			<Transition afterTime="4">PreFocusAttack</Transition>
+		</State>
+
+		<State id="PreFocusAttack">
+			<Behavior type="Flash" color="FF0000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			<Behavior rate="20" maxSize="140">ChangeSize</Behavior>
+			<Behavior prob="0.4" text="The ancients have chosen me! The power is immense!">Say</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Transition hitpointsLessThan="0.1">FlashBeforeExplode</Transition>
+			<Transition afterTime="4">FocusAttack</Transition>
+		</State> 
+
+		<State id="FocusAttack">
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="20">Heal</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="7.5" speed="1.2">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.6" speed="1.0">Follow</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+        	<Behavior numShots="2" projectileId="0" cooldown="1.8" type="targeted" range="12">Shoot</Behavior>	
+        	<Behavior numShots="4" projectileId="1" cooldown="0.8" type="targeted" angle="15" range="12">Shoot</Behavior>
+			<Transition hitpointsLessThan="0.1">FlashBeforeExplode</Transition>
+		</State> 
+		
+		<State id="FlashBeforeExplode">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior bucket="movement" range="1.6" speed="1.0">Follow</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+			<Behavior type="Flash" color="FF0000" flashPeriod="0.3" flashRepeats="3">ShowEffect</Behavior>
+			<Transition afterTime="1">Explode</Transition>
+		</State>
+
+		<State id="Explode"> 
+			<Behavior prob="0.29" text="The power... it's too much!">Say</Behavior>
+			<Order targetIds="Active Sarcophagus">			
+				<Behavior effect="Armor Broken" duration="4">ConditionEffect</Behavior>
+			</Order>
+			<Behavior range="0.0" projectileId="0" dropLoot="true" giveXP="true">Explode</Behavior>
+		</State>
+		
+		<SoulboundLoot prob=".2" tier="1">Potion</SoulboundLoot>
+
+	</Object>
+
+	<Object type="0x0d2b" id="Beam Priestess">
+		<Group>Beam Priests</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Worshiping Priestess</DisplayId>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>6</Index></AnimatedTexture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>7000</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>15</Defense>
+		<XpMult>1.0</XpMult>
+		<God/>
+			
+		<Projectile id="0">
+			<ObjectId>Blue Boomerang</ObjectId>
+			<Damage>0</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>80</Size>
+			<ConditionEffect duration="7">Weak</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Blue Missile</ObjectId>
+			<Damage>80</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>120</Size>
+		</Projectile>
+
+		<State id="FocusHealing">
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="7.5" speed="0.6">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.9" speed="1.2">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Transition playerWithin="6">Intruders</Transition>
+			<Transition hitpointsLessThan="0.75">Attack</Transition>
+		</State>
+
+		<State id="Intruders">
+			<Behavior prob="0.20" text="Who dares interrupt our sacred ceremony?">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="7.5" speed="0.6">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.9" speed="1.2">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Transition afterTime="8">Intruders1</Transition>
+			<Transition hitpointsLessThan="0.75">Attack</Transition>
+		</State>
+
+		<State id="Intruders1">
+			<Behavior rate="20" maxSize="110">ChangeSize</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="7.5" speed="0.65">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.9" speed="1.2">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+	       	<Behavior numShots="1" projectileId="0" cooldown="2" type="targeted" angle="15" range="12">Shoot</Behavior>	
+	       	<Behavior numShots="2" projectileId="1" cooldown="1.4" type="targeted" range="12">Shoot</Behavior>
+			<Transition afterTime="6">Intruders2</Transition>
+			<Transition hitpointsLessThan="0.75">Attack</Transition>
+		</State>
+
+		<State id="Intruders2">
+			<Behavior rate="20" maxSize="120">ChangeSize</Behavior>
+			<Behavior prob="0.20" text="Haha, yes, this tomb's power gives us strength as well!">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="7.5" speed="0.7">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.9" speed="1.2">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+        	<Behavior numShots="1" projectileId="0" cooldown="1.8" type="targeted" angle="14" range="12">Shoot</Behavior>	
+        	<Behavior numShots="2" projectileId="1" cooldown="1.2" type="targeted" range="12">Shoot</Behavior>
+			<Transition afterTime="4">Intruders3</Transition>
+			<Transition hitpointsLessThan="0.75">Attack</Transition>
+		</State>
+
+		<State id="Intruders3">
+			<Behavior rate="20" maxSize="130">ChangeSize</Behavior>
+			<Behavior prob="0.20" text="It flows through us like the great Nile itself!">Say</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="7.5" speed="0.75">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.9" speed="1.2">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="200">Heal</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+        	<Behavior numShots="1" projectileId="0" cooldown="1.7" type="targeted" angle="12" range="12">Shoot</Behavior>	
+        	<Behavior numShots="2" projectileId="1" cooldown="1.0" type="targeted" range="12">Shoot</Behavior>
+			<Transition hitpointsLessThan="0.75">Attack</Transition>
+		</State>
+
+		<State id="Attack">
+			<Behavior rate="20" maxSize="130">ChangeSize</Behavior>
+			<Behavior prob="0.14" text="Interrupt our ceremony and we'll interrupt your life!">Say</Behavior>
+			<Behavior type="Flash" color="FFFF00" flashPeriod="10" flashRepeats="10">ShowEffect</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="7.5" speed="0.8">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.9" speed="1.2">Follow</Behavior>
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="100">Heal</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+	       	<Behavior numShots="1" projectileId="0" cooldown="1.6" type="targeted" angle="10" range="12">Shoot</Behavior>	
+	       	<Behavior numShots="3" projectileId="1" cooldown="0.8" type="targeted" range="12">Shoot</Behavior>
+			<Transition afterTime="30">PreFocusAttack</Transition>
+			<Transition hitpointsLessThan="0.33">Wounded</Transition>
+		</State>
+
+		<State id="Wounded">
+			<Behavior prob="0.29" text="The tomb's power... shall tend to my wounds...">Say</Behavior>
+			<Behavior type="Flash" color="000000" flashPeriod="1" flashRepeats="100">ShowEffect</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" acquireRange="12" speed="0.4" protectionRange="0.4" reprotectRange="0.4">Protect</Behavior>
+			<Transition hitpointsLessThan="0.1">FlashBeforeExplode</Transition>
+			<Transition afterTime="4">PreFocusAttack</Transition>
+		</State>
+
+		<State id="PreFocusAttack">
+			<Behavior type="Flash" color="FF0000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			<Behavior rate="20" maxSize="140">ChangeSize</Behavior>
+			<Behavior prob="0.4" text="The ancients have chosen me! The power is immense!">Say</Behavior>
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" acquireRange="12" speed="0.7" protectionRange="0.4" reprotectRange="0.4">Protect</Behavior>
+			<Transition hitpointsLessThan="0.1">FlashBeforeExplode</Transition>
+			<Transition afterTime="4">FocusAttack</Transition>
+		</State> 
+
+		<State id="FocusAttack">
+			<Behavior targetIds="Active Sarcophagus" cooldown="0.4" range="10" maxTargets="1" maxHeal="20">Heal</Behavior>
+			<Behavior type="Flash" color="FF0000" flashPeriod="0.1" flashRepeats="60">ShowEffect</Behavior>
+			<Behavior bucket="movement" protecteeId="Active Sarcophagus" radius="7.5" speed="1.2">Orbit</Behavior>
+			<Behavior bucket="movement" range="1.9" speed="1.2">Follow</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+        	<Behavior numShots="2" projectileId="0" cooldown="1.8" type="targeted" range="12">Shoot</Behavior>	
+        	<Behavior numShots="4" projectileId="1" cooldown="0.8" type="targeted" range="12">Shoot</Behavior>
+			<Transition hitpointsLessThan="0.1">FlashBeforeExplode</Transition>
+		</State> 
+		
+		<State id="FlashBeforeExplode">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior bucket="movement" range="1.9" speed="1.2">Follow</Behavior>
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="8">Shoot</Behavior>
+			<Behavior type="Flash" color="FF0000" flashPeriod="0.3" flashRepeats="3">ShowEffect</Behavior>
+			<Transition afterTime="1">Explode</Transition>
+		</State>
+
+		<State id="Explode"> 
+			<Behavior prob="0.33" text="The power... it's too much!">Say</Behavior>
+			<Order targetIds="Active Sarcophagus">			
+				<Behavior effect="Armor Broken" duration="4">ConditionEffect</Behavior>
+			</Order>
+			<Behavior range="0.0" projectileId="0" dropLoot="true" giveXP="true">Explode</Behavior>
+		</State> 
+		
+		<SoulboundLoot prob=".2" tier="1">Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d2c" id="Inactive Sarcophagus">
+		<Group>Tomb Treasure</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Treasure Sarcophagus</DisplayId>
+		
+		<Texture><File>lofiChar216x16</File><Index>0x0f</Index></Texture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>50000</MaxHitPoints>
+		<Size>180</Size>
+		<Defense>100</Defense>
+		<XpMult>0.0</XpMult>
+		<God/>
+
+		<State id="Idle">
+			<Transition hitpointsLessThan="0.999">Yell</Transition>
+		</State>
+		<State id="Yell">
+		
+		<Behavior>Taunt</Behavior>
+		
+		<Behavior effect="Invulnerable" duration="5">ConditionEffect</Behavior>
+			<Transition hitpointsLessThan="0.95">Toss1</Transition>
+		</State>
+		<State id="Toss1">
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior childId="Canopic Jar 1" cooldown="6000" type="auto" range="7" defaultAngle="0">ObjectToss</Behavior>
+			<Transition hitpointsLessThan="0.875">Toss2</Transition>
+		</State>
+		<State id="Toss2">
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior childId="Canopic Jar 2" cooldown="6000" type="auto" range="6.5" defaultAngle="45">ObjectToss</Behavior>
+			<Transition hitpointsLessThan="0.75">Toss3</Transition>
+		</State>
+		<State id="Toss3">
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior childId="Canopic Jar 3" cooldown="6000" type="auto" range="6" defaultAngle="90">ObjectToss</Behavior>
+			<Transition hitpointsLessThan="0.625">Toss4</Transition>
+		</State>
+		<State id="Toss4">
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior childId="Canopic Jar 4" cooldown="6000" type="auto" range="5.5" defaultAngle="135">ObjectToss</Behavior>
+			<Transition hitpointsLessThan="0.50">Toss5</Transition>
+		</State>
+		<State id="Toss5">
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior childId="Canopic Jar 1" cooldown="6000" type="auto" range="5" defaultAngle="180">ObjectToss</Behavior>
+			<Transition hitpointsLessThan="0.375">Toss6</Transition>
+		</State>
+		<State id="Toss6">
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior childId="Canopic Jar 2" cooldown="6000" type="auto" range="4.5" defaultAngle="225">ObjectToss</Behavior>
+			<Transition hitpointsLessThan="0.25">Toss7</Transition>
+		</State>
+		<State id="Toss7">
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior childId="Canopic Jar 3" cooldown="6000" type="auto" range="4" defaultAngle="270">ObjectToss</Behavior>
+			<Transition hitpointsLessThan="0.125">Toss8</Transition>
+		</State>
+		<State id="Toss8">
+			<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+			<Behavior childId="Canopic Jar 4" cooldown="6000" type="auto" range="3.5" defaultAngle="315">ObjectToss</Behavior>
+		</State>
+
+		<SoulboundLoot prob="0.25" threshold="0.05" tier="9">Weapon</SoulboundLoot>
+		<SoulboundLoot prob="0.25" threshold="0.05" tier="10">Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.35" threshold="0.05">Potion of Defense</SoulboundLoot>
+		<SoulboundLoot prob="0.35" threshold="0.05">Potion of Attack</SoulboundLoot> 
+		<SoulboundLoot prob="0.35" threshold="0.05">Potion of Speed</SoulboundLoot> 
+		<SoulboundLoot prob="0.99" threshold="0.05" tier="4">Ring</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d2d" id="Canopic Jar 1">
+		<Group>Tomb Treasure</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Canopic Jar</DisplayId>
+		
+		<Texture><File>lofiObj4</File><Index>0xb0</Index></Texture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>1</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		<God/>
+			
+		<Behavior prob="0.33" childId="Scarab">MetamorphoseAtDeath</Behavior>
+		
+		<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+		<SoulboundLoot prob="1" tier="1">Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d2e" id="Canopic Jar 2">
+		<Group>Tomb Treasure</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Canopic Jar</DisplayId>
+		
+		<Texture><File>lofiObj4</File><Index>0xb1</Index></Texture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>1</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		<God/>
+			
+		<Behavior prob="0.33" childId="Scarab">MetamorphoseAtDeath</Behavior>
+		<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+		
+		<SoulboundLoot prob="1" tier="1">Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d2f" id="Canopic Jar 3">
+		<Group>Tomb Treasure</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Canopic Jar</DisplayId>
+		
+		<Texture><File>lofiObj4</File><Index>0xb2</Index></Texture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>1</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		<God/>
+			
+		<Behavior prob="0.33" childId="Scarab">MetamorphoseAtDeath</Behavior>
+		<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+		
+		<SoulboundLoot prob="1" tier="1">Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d30" id="Canopic Jar 4">
+		<Group>Tomb Treasure</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Canopic Jar</DisplayId>
+		
+		<Texture><File>lofiObj4</File><Index>0xb3</Index></Texture>
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>		
+	
+		<MaxHitPoints>1</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		<God/>
+			
+		<Behavior prob="0.33" childId="Scarab">MetamorphoseAtDeath</Behavior>
+		<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+		
+		<SoulboundLoot prob="1" tier="1">Potion</SoulboundLoot>
+	</Object>
+        
+
+<!--
+********************************************************************************* 
+
+TOMB TURRETS
+
+- Indestructable
+
+*********************************************************************************
+-->
+
+	<Object type="0x0d31" id="Tomb Fire Turret">
+		<Group>Tomb Turrets</Group>
+		<Class>GameObject</Class>
+		<Model>Obelisk</Model>
+		<Enemy/>
+		<Texture><File>lofiEnvironment3</File><Index>0x40</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x41</Index></Texture>
+		</AltTexture>
+		<Projectile>
+			<ObjectId>Hellfire</ObjectId>
+			<Speed>100</Speed>
+			<MinDamage>30</MinDamage>
+			<MaxDamage>70</MaxDamage>
+			<LifetimeMS>500</LifetimeMS>
+			<ConditionEffect duration="2">Armor Broken</ConditionEffect>
+		</Projectile>
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+
+		<State id="Wait">
+			<Transition playerWithin="7">Attack</Transition>
+		</State>
+		<State id="Attack">
+			<Behavior type="targeted" cooldown="0.2" range="8">Shoot</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Transition noPlayerWithin="8">Wait</Transition>		
+		</State>
+	</Object>
+
+	<Object type="0x0d32" id="Tomb Thunder Turret">
+		<Group>Tomb Turrets</Group>
+		<Class>GameObject</Class>
+		<Model>Obelisk</Model>
+		<Enemy/>
+		<Texture><File>lofiEnvironment3</File><Index>0x42</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x43</Index></Texture>
+		</AltTexture>
+		<Projectile>
+			<ObjectId>Thunderbolt</ObjectId>
+			<Speed>40</Speed>
+			<MinDamage>10</MinDamage>
+			<MaxDamage>100</MaxDamage>
+			<LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="1.4">Paralyzed</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>		
+
+		
+		<State id="Attack">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<State id="Spiral1">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="0">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral2</Transition>
+			</State>
+			<State id="Spiral2">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="15">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral3</Transition>
+			</State>
+			<State id="Spiral3">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="30">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral4</Transition>
+			</State>
+			<State id="Spiral4">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="45">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral5</Transition>
+			</State>	
+			<State id="Spiral5">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="60">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral6</Transition>				
+			</State>		
+			<State id="Spiral6">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="75">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral7</Transition>				
+			</State>		
+			<State id="Spiral7">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="90">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral8</Transition>				
+			</State>		
+			<State id="Spiral8">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="105">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral9</Transition>				
+			</State>		
+			<State id="Spiral9">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="120">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral10</Transition>				
+			</State>		
+			<State id="Spiral10">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="135">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral11</Transition>				
+			</State>		
+			<State id="Spiral11">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="150">Shoot</Behavior>
+					<Transition afterTime="0.2">Spiral12</Transition>				
+			</State>		
+			<State id="Spiral12">
+					<Behavior angle="180" numShots="2" projectileId="0" cooldown="0.3" type="auto" defaultAngle="165">Shoot</Behavior>
+					<Transition afterTime="0.2">SpiralDone</Transition>				
+			</State>
+			<State id="SpiralDone"></State>
+			<Transition afterTime="3">NoAttack</Transition>
+		</State>
+		<State id="NoAttack">
+			<Transition afterTime="2">Attack</Transition>		
+		</State>
+	</Object>
+
+	<Object type="0x0d33" id="Tomb Frost Turret">
+		<Group>Tomb Turrets</Group>
+		<Class>GameObject</Class>
+		<Model>Obelisk</Model>
+		<Enemy/>
+		<Texture><File>lofiEnvironment3</File><Index>0x44</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x45</Index></Texture>
+		</AltTexture>
+		<Projectile>
+			<ObjectId>Ice Spinner</ObjectId>
+			<Speed>80</Speed>
+			<Damage>70</Damage>
+			<LifetimeMS>1400</LifetimeMS>
+			<ConditionEffect duration="2">Slowed</ConditionEffect>
+		</Projectile>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+
+		<State id="Attack">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior type="targeted" cooldown="0.2" range="7">Shoot</Behavior>
+			<Transition afterTime="2">NoAttack</Transition>		
+		</State>
+		<State id="NoAttack">
+			<Transition afterTime="2">Attack</Transition>		
+		</State>
+	</Object>
+
+	<Object type="0x0d34" id="Center Tomb Fire Turret">
+		<DisplayId>Tomb Fire Turret</DisplayId>
+		<Group>Center Tomb Turrets</Group>
+		<Class>GameObject</Class>
+		<Model>Obelisk</Model>
+		<Enemy/>
+		<Texture><File>lofiEnvironment3</File><Index>0x46</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x47</Index></Texture>
+		</AltTexture>
+		<Projectile>
+			<ObjectId>Hellfire</ObjectId>
+			<Speed>80</Speed>
+			<MinDamage>20</MinDamage>
+			<MaxDamage>60</MaxDamage>
+			<LifetimeMS>800</LifetimeMS>
+			<ConditionEffect duration="2">Armor Broken</ConditionEffect>
+		</Projectile>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+
+		<State id="Wait">
+			<Transition playerWithin="10">Attack</Transition>
+		</State>
+		<State id="Attack">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+
+			<State id="Attack1">
+				<Behavior numShots="3" angle="10" type="auto" defaultAngle="0" cooldown="0.4" range="6">Shoot</Behavior>
+				<Behavior numShots="3" angle="10" type="auto" defaultAngle="120" cooldown="0.4" range="6">Shoot</Behavior>
+				<Behavior numShots="3" angle="10" type="auto" defaultAngle="240" cooldown="0.4" range="6">Shoot</Behavior>
+				<Transition afterTime="2.2">Attack2</Transition>		
+			</State>
+
+			<State id="Attack2">
+				<Behavior numShots="3" angle="10" type="auto" defaultAngle="60" cooldown="0.4" range="6">Shoot</Behavior>
+				<Behavior numShots="3" angle="10" type="auto" defaultAngle="180" cooldown="0.4" range="6">Shoot</Behavior>
+				<Behavior numShots="3" angle="10" type="auto" defaultAngle="300" cooldown="0.4" range="6">Shoot</Behavior>
+				<Transition afterTime="2.2">Attack1</Transition>			
+			</State>
+			
+			<Transition noPlayerWithin="11">Wait</Transition>		
+		</State>
+	</Object>
+
+	<Object type="0x0d35" id="Center Tomb Thunder Turret">
+		<DisplayId>Tomb Thunder Turret</DisplayId>
+		<Group>Center Tomb Turrets</Group>
+		<Class>GameObject</Class>
+		<Model>Obelisk</Model>
+		<Enemy/>
+		<Texture><File>lofiEnvironment3</File><Index>0x48</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x49</Index></Texture>
+		</AltTexture>
+		<Projectile>
+			<ObjectId>Thunderbolt</ObjectId>
+			<Speed>200</Speed>
+			<MinDamage>10</MinDamage>
+			<MaxDamage>80</MaxDamage>
+			<LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="1.4">Paralyzed</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+
+		<State id="Attack">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior type="targeted" numShots="4" angle="90" cooldown="0.8" range="20">Shoot</Behavior>
+			<Transition afterTime="2">NoAttack</Transition>		
+		</State>
+		<State id="NoAttack">
+			<Transition afterTime="2" playerWithin="20">Attack</Transition>		
+		</State>
+	</Object>
+
+	<Object type="0x0d36" id="Center Tomb Frost Turret">
+		<DisplayId>Tomb Frost Turret</DisplayId>
+		<Group>Center Tomb Turrets</Group>
+		<Class>GameObject</Class>
+		<Model>Obelisk</Model>
+		<Enemy/>
+		<Texture><File>lofiEnvironment3</File><Index>0x4a</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x4b</Index></Texture>
+		</AltTexture>
+		<Projectile>
+			<ObjectId>Ice Spinner</ObjectId>
+			<Speed>40</Speed>
+			<Damage>60</Damage>
+			<LifetimeMS>1800</LifetimeMS>
+			<ConditionEffect duration="4">Slowed</ConditionEffect>
+			<Size>60</Size>
+		</Projectile>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+
+		<State id="Attack">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior numShots="4" angle="80" type="targeted" cooldown="0.2" range="6">Shoot</Behavior>
+			<Behavior numShots="1" type="targeted" cooldown="0.2" range="6">Shoot</Behavior>
+			<Transition afterTime="2">NoAttack</Transition>		
+		</State>
+		<State id="NoAttack">
+			<Transition afterTime="2" playerWithin="6">Attack</Transition>		
+		</State>
+	</Object>
+	
+
+<!--
+********************************************************************************* 
+
+TOMB GROUND TRAPS
+
+- One hidden tile deactivates the other tiles which deal damage
+
+*********************************************************************************
+-->
+	
+	<Object type="0x0d37" id="Tomb Bomb Trap Switch">
+		<DisplayId>Switch</DisplayId>
+		<Group>Tomb Traps</Group>
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiChar28x8</File><Index>0x90</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiChar28x8</File><Index>0x91</Index></Texture>
+		</AltTexture>
+		<HitSound>monster/traps_hit</HitSound>
+		<DeathSound>monster/traps_death</DeathSound>
+		<StasisImmune/>
+		<Size>100</Size>
+		<DrawOnGround/>
+		<NoMiniMap/>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<Behavior childId="Tomb Bomb Trap" cooldown="36000" range="7" rangeJitter="2" centerObject="true" defaultAngle="0" type="auto">ObjectToss</Behavior>
+		<Behavior childId="Tomb Bomb Trap" cooldown="36000" range="7" rangeJitter="2" centerObject="true" defaultAngle="60" type="auto">ObjectToss</Behavior>
+		<Behavior childId="Tomb Bomb Trap" cooldown="36000" range="7" rangeJitter="2" centerObject="true" defaultAngle="120" type="auto">ObjectToss</Behavior>
+		<Behavior childId="Tomb Bomb Trap" cooldown="36000" range="7" rangeJitter="2" centerObject="true" defaultAngle="180" type="auto">ObjectToss</Behavior>
+		<Behavior childId="Tomb Bomb Trap" cooldown="36000" range="7" rangeJitter="2" centerObject="true" defaultAngle="240" type="auto">ObjectToss</Behavior>
+		<Behavior childId="Tomb Bomb Trap" cooldown="36000" range="7" rangeJitter="2" centerObject="true" defaultAngle="300" type="auto">ObjectToss</Behavior>
+		
+		<State id="WaitAgain">
+			<Transition playerWithin="1" afterTime="0.2">Wait</Transition>		
+		</State>
+        
+		<State id="Wait">
+			<Transition noPlayerWithin="1" afterTime="0.4">WaitAgain</Transition>
+			<Transition playerWithin="1" afterTime="0.6">Tick1</Transition>		
+		</State>
+		
+		<State id="Tick1">
+			<Behavior prob="1" text="1">Say</Behavior>
+			<Transition noPlayerWithin="1">Wait</Transition>		
+			<Transition afterTime="1.2">Tick2</Transition>
+		</State>
+		
+		<State id="Tick2">
+			<Behavior prob="1" text="2">Say</Behavior>
+			<Transition noPlayerWithin="1">Wait</Transition>		
+			<Transition afterTime="1.2">Tick3</Transition>
+		</State>
+		
+		<State id="Tick3">
+			<Behavior prob="1" text="3">Say</Behavior>
+			<Transition noPlayerWithin="1">Wait</Transition>		
+			<Transition afterTime="1.2">Done</Transition>
+		</State>
+		
+		<State id="Done">
+			<Behavior prob="1" text="*click*">Say</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Order targetIds="Tomb Bomb Trap">
+				<Behavior time="0" childId="Deactivated Tomb Bomb Trap">Metamorphose</Behavior>
+			</Order>
+		</State> 
+	</Object>
+	
+	<Object type="0x0d38" id="Tomb Bomb Trap">
+		<Group>Tomb Traps</Group>
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiChar28x8</File><Index>0x92</Index></Texture>
+		<HitSound>monster/traps_hit</HitSound>
+		<DeathSound>monster/traps_death</DeathSound>
+		<Size>100</Size>
+		<DrawOnGround/>
+		<NoMiniMap/>
+		
+		<Behavior listenIds="Tomb Bomb Trap Switch">FollowOrders</Behavior>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<Behavior cooldown="3.0" type="auto" radius="4.2" damage="120" defaultAngle="0" range="0.2">GrenadeToss</Behavior>
+	</Object>
+	
+	<Object type="0x0d39" id="Deactivated Tomb Bomb Trap">
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x93</Index></Texture>
+		<Size>100</Size>
+		<DrawOnGround/>
+		<NoMiniMap/>
+	</Object>	
+
+<!--
+********************************************************************************* 
+
+THREE ENEMY ENCOUNTER
+
+- A smaller version of the three boss encounter
+- Sentry is the tank/dps
+- Archer is dps/enfeebler
+- Priest is heal/buff
+- Since enemies can't actually buff each other, they'll just have stronger version
+  of attacks that the buff will tell them to use
+- Giving Sentry "a" shot preferred to be taken by tanks, which is actually two shots
+  so player defense is calculated twice.
+
+*********************************************************************************
+-->
+
+	
+	
+	<Object type="0x0d3a" id="Eagle Sentry">
+		<Group>Tomb Gang</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>8</Index></AnimatedTexture>
+		<HitSound>monster/elves_hit</HitSound>
+		<DeathSound>monster/elves_death</DeathSound>
+	
+		<MaxHitPoints>4000</MaxHitPoints>
+		<Size>120</Size>
+		<Defense>35</Defense>
+		<XpMult>1.2</XpMult>
+		<God/>
+
+		<Projectile id="0">
+			<ObjectId>Stick</ObjectId>
+			<Damage>70</Damage>
+			<Speed>90</Speed>
+			<LifetimeMS>700</LifetimeMS>
+			<Size>100</Size>
+		</Projectile>			
+
+		<Projectile id="1">
+			<ObjectId>Stick</ObjectId>
+			<Damage>90</Damage>
+			<Speed>90</Speed>
+			<LifetimeMS>700</LifetimeMS>
+			<Size>120</Size>
+		</Projectile>
+
+		<Projectile id="2">
+			<ObjectId>Brown Claw</ObjectId>
+			<Damage>70</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>700</LifetimeMS>
+			<Size>100</Size>
+		</Projectile>
+		
+		<Behavior acquireRange="20" listenIds="Jackal Priest">FollowOrders</Behavior>
+		
+		<State id="Initial">
+			<Behavior bucket="movement" range="2" speed="1.4">Follow</Behavior>
+			<Behavior numShots="5" projectileId="2" type="auto" angle="72" cooldown="5">Shoot</Behavior>
+			<Behavior numShots="2" projectileId="2" cooldown="1.2" type="targeted" angle="1" range="10" offset="1">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="1.2" type="targeted" angle="20" range="10" offset="3">Shoot</Behavior>
+		
+			<Transition hitpointsLessThan="0.80">InForKill</Transition>
+		</State> 
+		
+		<State id="InForKill">
+			<Behavior effect="Armored" duration="3.0">ConditionEffect</Behavior>
+			<Behavior bucket="movement" range="2" speed="1.6">Circle</Behavior>
+			<Behavior numShots="6" projectileId="2" type="auto" angle="60" cooldown="6">Shoot</Behavior>	
+			<Behavior numShots="2" projectileId="2" cooldown="1.2" type="targeted" angle="1" range="10" offset="1">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="1.2" type="targeted" angle="20" range="10" offset="3">Shoot</Behavior>
+			
+			<Transition hitpointsLessThan="0.55">OrderArcher</Transition>
+		</State> 
+		
+		<State id="OrderArcher">
+			<Behavior effect="Armored" duration="4.4">ConditionEffect</Behavior>
+			<Behavior bucket="movement" acquireRange="10" range="1.8" speed="1.4">Follow</Behavior>
+			<Behavior numShots="5" projectileId="2" type="auto" angle="72" cooldown="5">Shoot</Behavior>	
+			<Behavior numShots="2" projectileId="2" cooldown="1.2" type="targeted" angle="1" range="10" offset="1">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="1.2" type="targeted" angle="20" range="10" offset="3">Shoot</Behavior>
+			
+			<Order targetIds="Lion Archer">
+				<Behavior numShots="3" projectileId="0" cooldown="1.1" type="targeted" range="9">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="2" cooldown="3" type="targeted" range="15">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="3" cooldown="4" type="targeted" range="15">Shoot</Behavior>
+			</Order>	
+			
+			<Transition hitpointsLessThan="0.30">InForKill2</Transition>
+		</State> 
+		
+		<State id="InForKill2">
+			<Behavior effect="Armored" duration="3.0">ConditionEffect</Behavior>			
+			<Behavior bucket="movement" acquireRange="10" range="1.6" speed="1.6">Follow</Behavior>
+			<Behavior numShots="6" projectileId="2" type="auto" angle="60" cooldown="6">Shoot</Behavior>	
+			<Behavior numShots="2" projectileId="2" cooldown="1.2" type="targeted" angle="1" range="10" offset="1">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="1.2" type="targeted" angle="20" range="10" offset="3">Shoot</Behavior>
+			
+			<Transition hitpointsLessThan="0.15">OrderArcher2</Transition>
+		</State> 
+		
+		<State id="OrderArcher2">			
+			<Behavior bucket="movement" acquireRange="10" range="1.4" speed="1.6">Follow</Behavior>	
+			<Behavior numShots="7" projectileId="2" type="auto" angle="51" cooldown="6">Shoot</Behavior>
+			<Behavior numShots="2" projectileId="2" cooldown="1.2" type="targeted" angle="1" range="10" offset="1">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="1.2" type="targeted" angle="20" range="10" offset="1">Shoot</Behavior>
+			
+			<Order targetIds="Lion Archer">
+				<Behavior numShots="3" projectileId="0" cooldown="1.1" type="targeted" range="9">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="2" cooldown="3" type="targeted" range="15" blastEffect="1">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="3" cooldown="4" type="targeted" range="15" blastEffect="1">Shoot</Behavior>
+			</Order>  
+		</State> 
+		
+		<SoulboundLoot prob=".5" tier="1">Potion</SoulboundLoot>
+	</Object>
+               
+	<Object type="0x0d3b" id="Jackal Priest">
+		<Group>Tomb Gang</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>9</Index></AnimatedTexture>
+		<HitSound>monster/elves_hit</HitSound>
+		<DeathSound>monster/elves_death</DeathSound>
+	
+		<MaxHitPoints>2500</MaxHitPoints>
+		<Size>120</Size>
+		<Defense>5</Defense>
+		<XpMult>1.2</XpMult>
+		<God/>	
+		
+		<Projectile id="0">
+			<ObjectId>Violet Missile</ObjectId>
+			<Damage>100</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+			<Size>100</Size>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Violet Missile</ObjectId>
+			<Damage>140</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+			<Size>120</Size>
+		</Projectile>	
+		
+		<Behavior listenIds="Lion Archer">FollowOrders</Behavior>
+		
+		<Behavior bucket="movement" cooldown="4" acquireRange="10" range="6" speed="1.2">Follow</Behavior>	
+		<Behavior bucket="movement" acquireRange="10" range="3" speed="1.2">KeepDistance</Behavior>	
+		<Behavior bucket="movement" acquireRange="10" range="5" speed="0.6">KeepDistance</Behavior>
+		<Behavior targetIds="Eagle Sentry" cooldown="1.6" range="12" maxTargets="1" maxHeal="100">Heal</Behavior>	
+		
+		<State id="Initial">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="6">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.2" type="targeted" range="14">Shoot</Behavior>
+			<Transition hitpointsLessThan="0.80">OrderSentry</Transition>
+		</State> 
+				
+		<State id="OrderSentry">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="6">Shoot</Behavior>
+			<Behavior effect="Invulnerable" duration="0.4">ConditionEffect</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.2" type="targeted" range="14">Shoot</Behavior>
+			
+			<Order targetIds="Eagle Sentry">
+				<Behavior effect="Armored" duration="4">ConditionEffect</Behavior>
+				<Behavior numShots="2" projectileId="1" cooldown="1.2" type="targeted" angle="1" range="6">Shoot</Behavior>
+			</Order>	
+			
+			<Transition hitpointsLessThan="0.55">OrderArcher</Transition>
+		</State> 
+				
+		<State id="OrderArcher">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="6">Shoot</Behavior>
+			<Behavior effect="Invulnerable" duration="0.4">ConditionEffect</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="1.0" type="targeted" range="14">Shoot</Behavior>
+			
+			<Order targetIds="Lion Archer">
+				<Behavior effect="Armored" duration="4">ConditionEffect</Behavior>
+				<Behavior numShots="3" projectileId="1" cooldown="1.1" type="targeted" range="9">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="2" cooldown="2.8" type="targeted" range="15" blastEffect="1">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="3" cooldown="3.6" type="targeted" range="15" blastEffect="1">Shoot</Behavior>
+			</Order>	
+			
+			<Transition hitpointsLessThan="0.30">OrderSentry2</Transition>
+		</State> 
+				
+		<State id="OrderSentry2">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+			<Behavior effect="Invulnerable" duration="0.4">ConditionEffect</Behavior>
+			<Behavior numShots="1" projectileId="1" cooldown="1.2" type="targeted" range="14">Shoot</Behavior>
+			
+			<Order targetIds="Eagle Sentry">
+				<Behavior effect="Armored" duration="4">ConditionEffect</Behavior>
+				<Behavior numShots="2" projectileId="1" cooldown="1.0" type="targeted" angle="1" range="6">Shoot</Behavior>
+			</Order>	
+			
+			<Transition hitpointsLessThan="0.15">OrderArcher2</Transition>
+		</State> 
+		
+		<State id="OrderArcher2">
+			<Behavior numShots="6" projectileId="0" type="auto" angle="60" cooldown="4">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" cooldown="1.0" type="targeted" range="14">Shoot</Behavior>
+			
+			<Order targetIds="Lion Archer">
+				<Behavior effect="Armored" duration="4">ConditionEffect</Behavior>
+				<Behavior numShots="3" projectileId="1" cooldown="0.9" type="targeted" range="9">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="2" cooldown="3" type="targeted" range="15" blastEffect="1">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="3" cooldown="4" type="targeted" range="15" blastEffect="1">Shoot</Behavior>
+			</Order>  
+		</State>
+		
+		<SoulboundLoot prob=".5" tier="1">Potion</SoulboundLoot>
+	</Object>
+        
+	<Object type="0x0d3c" id="Lion Archer">
+		<Group>Tomb Gang</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>7</Index></AnimatedTexture>
+		<HitSound>monster/elves_hit</HitSound>
+		<DeathSound>monster/elves_death</DeathSound>
+	
+		<MaxHitPoints>3200</MaxHitPoints>
+		<Size>120</Size>
+		<Defense>20</Defense>
+		<XpMult>1.2</XpMult>
+		<God/>			
+
+		<Projectile id="0">
+			<ObjectId>Indigo Arrow</ObjectId>
+			<Damage>70</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1200</LifetimeMS>
+			<Size>100</Size>
+			<MultiHit/>
+		</Projectile>		
+
+		<Projectile id="1">
+			<ObjectId>Indigo Arrow</ObjectId>
+			<Damage>100</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1200</LifetimeMS>
+			<Size>120</Size>
+			<MultiHit/>
+		</Projectile>	
+
+		<Projectile id="2">
+			<ObjectId>Spring Green Arrow</ObjectId>
+			<Damage>90</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>140</Size>
+			<MultiHit/>
+			<ConditionEffect duration="4">Slowed</ConditionEffect>
+		</Projectile>
+
+		<Projectile id="3">
+			<ObjectId>Black Arrow</ObjectId>
+			<Damage>100</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+			<Size>140</Size>
+			<MultiHit/>
+			<ConditionEffect duration="1.2">Paralyzed</ConditionEffect>
+		</Projectile>	
+		
+		<Behavior listenIds="Jackal Priest, Eagle Sentry">FollowOrders</Behavior>
+		
+		<Behavior bucket="movement" cooldown="2" acquireRange="10" range="4" speed="1.0">Circle</Behavior>	
+		<Behavior bucket="movement" acquireRange="10" range="3" speed="1.0">KeepDistance</Behavior>	
+		
+		<State id="Initial">
+			<Behavior numShots="5" projectileId="3" type="auto" angle="72" cooldown="6">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="1.1" type="targeted" range="9">Shoot</Behavior>
+		
+			<Transition hitpointsLessThan="0.80">OrderPriest</Transition>
+		</State> 
+				
+		<State id="OrderPriest">
+			<Behavior numShots="5" projectileId="3" type="auto" angle="72" cooldown="6">Shoot</Behavior>
+			<Behavior effect="Invulnerable" duration="0.5">ConditionEffect</Behavior>
+		
+			<Behavior numShots="3" projectileId="0" cooldown="1.1" type="targeted" range="9">Shoot</Behavior>
+			<Behavior cooldown="3" type="targeted" radius="2.4" damage="80" range="5">GrenadeToss</Behavior>
+			
+			<Order targetIds="Jackal Priest">
+				<Behavior targetIds="Lion Archer" cooldown="1.2" range="12" maxTargets="1" maxHeal="100">Heal</Behavior>
+			</Order>	
+			
+			<Transition hitpointsLessThan="0.55">BigGrenade</Transition>
+		</State> 
+		
+		<State id="BigGrenade">
+			<Behavior numShots="5" projectileId="3" type="auto" angle="72" cooldown="6">Shoot</Behavior>
+			<Behavior effect="Invulnerable" duration="0.5">ConditionEffect</Behavior>
+		
+			<Behavior numShots="3" projectileId="0" cooldown="1.1" type="targeted" range="9">Shoot</Behavior>
+			<Behavior cooldown="3" type="targeted" radius="4.0" damage="100" range="5">GrenadeToss</Behavior>
+			
+			<Transition hitpointsLessThan="0.30">OrderPriest2</Transition>
+		</State> 
+				
+		<State id="OrderPriest2">
+			<Behavior numShots="5" projectileId="3" type="auto" angle="72" cooldown="6">Shoot</Behavior>
+			<Behavior effect="Invulnerable" duration="0.5">ConditionEffect</Behavior>
+			
+			<Behavior numShots="2" projectileId="0" cooldown="1.2" type="targeted" angle="1" range="6">Shoot</Behavior>
+			
+			<Order targetIds="Jackal Priest">
+				<Behavior targetIds="Lion Archer" cooldown="1.2" range="12" maxTargets="1" maxHeal="100">Heal</Behavior>
+			</Order>	
+			
+			<Transition hitpointsLessThan="0.15">GrenadeSpam</Transition>
+		</State> 
+		
+		<State id="GrenadeSpam">
+			<Behavior numShots="6" projectileId="3" type="auto" angle="60" cooldown="6">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="1.1" type="targeted" range="9">Shoot</Behavior>
+			<Behavior cooldown="0.8" type="targeted" radius="1.8" damage="70" range="6.5">GrenadeToss</Behavior>
+		</State> 
+		
+		<SoulboundLoot prob=".5" tier="1">Potion</SoulboundLoot>
+	</Object>
+</Objects>

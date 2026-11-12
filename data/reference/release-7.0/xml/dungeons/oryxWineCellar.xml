@@ -1,0 +1,328 @@
+<!-- object types: 0x0deX 0x0dfX next: 0x0df3 -->
+<Objects>
+	<Object type="0x0de0" id="Abomination of Oryx">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>21</Index></AnimatedTexture>
+		<HitSound>monster/minion_of_oryx_hit</HitSound>
+		<DeathSound>monster/minion_of_oryx_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>12</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>50</Damage>
+			<Speed>140</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>50</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>50</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>50</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>500</LifetimeMS>
+		</Projectile>
+		<Projectile id="4">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>50</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>500</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="6" numShots="3" cooldown="3" noCooldownJitter="1">Shoot</Behavior>
+		<Behavior projectileId="1" range="6" numShots="5" cooldown="3" noCooldownJitter="1">Shoot</Behavior>
+		<Behavior projectileId="2" range="6" numShots="7" cooldown="3" noCooldownJitter="1">Shoot</Behavior>
+		<Behavior projectileId="3" range="6" numShots="5" cooldown="3" noCooldownJitter="1">Shoot</Behavior>
+		<Behavior projectileId="4" range="6" numShots="3" cooldown="3" noCooldownJitter="1">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Henchman of Oryx" acquireRange="15" protectionRange="12" reprotectRange="2">Protect</Behavior>
+		<Behavior bucket="movement" range="3" speed="1.4">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot tier="3" prob=".01">Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0de1" id="Monstrosity of Oryx">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>22</Index></AnimatedTexture>
+		<HitSound>monster/minion_of_oryx_hit</HitSound>
+		<DeathSound>monster/minion_of_oryx_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>12</Defense>
+		<XpMult>0.1</XpMult>
+		<Behavior range="10" childId="Monstrosity Scarab">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Henchman of Oryx" acquireRange="15" protectionRange="8" reprotectRange="2">Protect</Behavior>
+		<Behavior bucket="movement" range="6" speed="1">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot tier="3" prob=".01">Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0de2" id="Monstrosity Scarab">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0xa0</Index></Texture>
+		<HitSound>monster/minion_of_oryx_hit</HitSound>
+		<DeathSound>monster/minion_of_oryx_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>50</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1400</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" range="0.25" speed="1.8">Follow</Behavior>
+		<Behavior projectileId="0" numShots="12" range="0.5">Explode</Behavior>
+		<Behavior time="5" particleEffect="Nova" color="0xff0000">Decay</Behavior>
+	</Object>
+	
+	<Object type="0x0de3" id="Aberrant of Oryx">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>23</Index></AnimatedTexture>
+		<HitSound>monster/minion_of_oryx_hit</HitSound>
+		<DeathSound>monster/minion_of_oryx_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>12</Defense>
+		<XpMult>0.1</XpMult>
+		<Behavior bucket="movement" protecteeId="Henchman of Oryx" acquireRange="15" protectionRange="8" reprotectRange="2">Protect</Behavior>
+		<Behavior bucket="movement" range="9" acquireRange="12" speed="1.1">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior childId="Aberrant Blaster" range="14" cooldown="1.5">ObjectToss</Behavior>
+		<SoulboundLoot tier="3" prob=".01">Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0de4" id="Aberrant Blaster">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiObj</File><Index>0x97</Index></Texture>
+		<HitSound>monster/minion_of_oryx_hit</HitSound>
+		<DeathSound>monster/minion_of_oryx_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>50</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>500</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="5" arcDegrees="60" numShots="6" initialDelay="0.5">Explode</Behavior>
+		<Behavior time="10" particleEffect="Nova" color="0xff0000">Decay</Behavior>
+	</Object>
+
+	<Object type="0x0de5" id="Wine Barrel">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x76</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x77</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x78</Index></Texture>
+			</RandomTexture>
+		<Static/>
+		<OccupySquare/>
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<StasisImmune/>
+		<Enemy/>
+		<XpMult>0.0</XpMult>
+	</Object>
+	
+	<Object type="0x0de6" id="WineSpill Puddle">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x79</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x7a</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x7b</Index></Texture>
+			</RandomTexture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0de7" id="WineSpill DL">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x7c</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0de8" id="WineSpill DR">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x7d</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0de9" id="WineSpill UR">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x7e</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0dea" id="WineSpill UL">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x7f</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0deb" id="WineSpill L">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x80</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0dec" id="WineSpill R">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x81</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0ded" id="WineSpill U">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x82</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0dee" id="WineSpill D">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x83</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0def" id="WineSpill C">
+		<Class>GameObject</Class>
+		<Texture><File>lofiEnvironment3</File><Index>0x84</Index></Texture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0df0" id="Purple Goo">
+		<Enemy/>
+		<Class>Character</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x85</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x86</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x87</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x88</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x89</Index></Texture>
+			</RandomTexture>
+		
+		<Size>90</Size>
+		<ShadowSize>0</ShadowSize>
+		<DrawUnder/>
+		<NoMiniMap/>
+	
+		<MaxHitPoints>2000</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0</XpMult>
+		<Projectile id="0">
+			<ObjectId>Invisible</ObjectId>
+			<MinDamage>40</MinDamage>
+			<MaxDamage>70</MaxDamage>
+			<Speed>0</Speed>
+			<Size>85</Size>
+			<LifetimeMS>6000</LifetimeMS>
+			<MultiHit/>
+			<ConditionEffect duration="5">Sick</ConditionEffect>
+			<ConditionEffect duration="3.4">Slowed</ConditionEffect>
+		</Projectile>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<State id="Ini">
+			<Behavior time="6">Decay</Behavior>
+			<Behavior minSize="0" rate="-1.2">ChangeSize</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="8" range="0">Shoot</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x0df1" id="Bile of Oryx">
+		<!-- Sommelier of Oryx -->
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>24</Index></AnimatedTexture>
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>90</Size>
+		<ShadowSize>0</ShadowSize>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>80</Defense>
+		<XpMult>0.08</XpMult>
+		
+		<State id="Ini">
+			<Behavior bucket="movement" protecteeId="Henchman of Oryx" acquireRange="15" speed=".5" radius="3.5" speedVariability=".3" radiusVariability="0.3">Orbit</Behavior>
+			<Behavior bucket="movement" range="8" speed="0.5" acquireRange="6" duration="2" cooldown="2">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+			<Behavior cooldown="0.2" childIds="Purple Goo" maxChildren="20" startWithMinions="false">MakeMinions</Behavior>
+		</State>
+		
+		<SoulboundLoot tier="3" prob=".01">Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0df2" id="Vintner of Oryx">
+		<!-- Sommelier of Oryx -->
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>1</Index></AnimatedTexture>
+		<HitSound>monster/minion_of_oryx_hit</HitSound>
+		<DeathSound>monster/minion_of_oryx_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>1500</MaxHitPoints>
+		<Defense>18</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Wine Bomb</ObjectId>
+			<Damage>50</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1400</LifetimeMS>
+			<ConditionEffect duration="4">Drunk</ConditionEffect>
+		</Projectile>
+		<State id="One">
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1.4" range="10" offset="0" angle="8" predictive="1">Shoot</Behavior>
+			<Transition afterTime="0">Two</Transition>
+		</State>
+		<State id="Two">
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1.4" range="10" offset="0" angle="8" predictive=".6">Shoot</Behavior>
+			<Transition afterTime="0">Three</Transition>
+		</State>
+		<State id="Three">
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1.4" range="10" offset="0" angle="8" predictive="1">Shoot</Behavior>
+			<Transition afterTime="0">Wait</Transition>
+		</State>
+		<State id="Wait">
+			<Transition afterTime=".8">One</Transition>
+		</State>
+		
+		<!--
+		<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1.4" range="10" offset="0" angle="8" predictive="1">Shoot</Behavior>
+		<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1.4" range="10" offset=".2" angle="8" predictive=".6">Shoot</Behavior>
+		<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1.4" range="10" offset=".4" angle="8" predictive="1">Shoot</Behavior>
+		-->	
+		
+		<Behavior bucket="movement" protecteeId="Henchman of Oryx" acquireRange="15" protectionRange="8" reprotectRange="2">Protect</Behavior>
+		<Behavior bucket="movement" range="6" speed="1" cooldown=".4" duration="3">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot tier="3" prob=".025">Potion</SoulboundLoot>
+	</Object>
+</Objects>

@@ -1,0 +1,1116 @@
+<!-- object types: 0x0dcX 0x0ddX next: 0x0ddb -->
+<Objects>
+	<Object type="0x0dc0" id="Great Temple Snake">
+		<Class>Character</Class>
+		<Enemy/>
+		<Size>100</Size>
+		<ShadowSize>90</ShadowSize>
+		<MaxHitPoints>50</MaxHitPoints>
+		<Defense>20</Defense>
+		<XpMult>0.1</XpMult>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>20</Index></AnimatedTexture>
+		
+		<Projectile id="0">
+			<ObjectId>Snake Shot Yellow</ObjectId>
+			<Damage>20</Damage>
+			<Speed>55</Speed>
+			<Size>60</Size>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Snake Shot Yellow</ObjectId>
+			<Damage>15</Damage>
+			<Speed>45</Speed>
+			<Size>60</Size>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="0" cooldown=".6" range="6" offset=".2" angle="12" predictive=".6">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="6"  projectileId="1" cooldown="3" range="6" offset=".4" angle="60" predictive="1">Shoot</Behavior>
+			<Behavior acquireRange="8" bucket="movement" range="2.4" speed="0.65" duration="3" cooldown=".8">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.25">Wander</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x0dc1" id="Great Snake Egg">
+		<Class>Character</Class>
+		<Enemy/>
+		<Size>100</Size>
+		<ShadowSize>90</ShadowSize>
+		<MaxHitPoints>50</MaxHitPoints>
+		<Defense>20</Defense>
+		<XpMult>0.0</XpMult>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<Texture><File>lofiEnvironment3</File><Index>0x8a</Index></Texture>
+		<Animation prob="1.0" period="0.0">
+			<Frame time="0.4"><Texture><File>lofiEnvironment3</File><Index>0x2f</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiEnvironment3</File><Index>0x36</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiEnvironment3</File><Index>0x37</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiEnvironment3</File><Index>0x36</Index></Texture></Frame>
+		</Animation>
+		
+		<State id="Ini">
+			<Behavior time="6">Decay</Behavior>
+			<Transition afterTime="5.4" playerWithin="17" random="0.5">Hatch</Transition>
+			<Transition afterTime="5.4" playerWithin="17" random="1">Hatch2</Transition>
+		</State>
+		
+		<State id="Hatch">
+			<Behavior type="auto" defaultAngle="0" numShots="1"  childId="Great Temple Snake" cooldown="1" offset="0" angle="8">Shoot</Behavior>
+			<Behavior time=".2">Decay</Behavior>
+		</State>
+		<State id="Hatch2">
+			<Behavior type="auto" defaultAngle="0" numShots="2"  childId="Great Temple Snake" cooldown="1" offset="0" angle="8">Shoot</Behavior>
+			<Behavior time=".2">Decay</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x0dc2" id="Great Coil Snake">
+		<Class>Character</Class>
+		<Enemy/>
+		<Group>Heros</Group>
+		<Size>100</Size>
+		<ShadowSize>90</ShadowSize>
+		<MaxHitPoints>900</MaxHitPoints>
+		<Defense>15</Defense>
+		<Quest/>
+		<Level>8</Level>
+		<XpMult>3.0</XpMult>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>15</Index></AnimatedTexture>
+		
+		<Projectile id="0">
+			<ObjectId>Snake Shot</ObjectId>
+			<Damage>50</Damage>
+			<Speed>65</Speed>
+			<Size>100</Size>
+			<LifetimeMS>16000</LifetimeMS>
+		</Projectile>
+	
+		<Projectile id="1">
+			<ObjectId>Ghost Shot</ObjectId>
+			<Damage>40</Damage>
+			<Speed>45</Speed>
+			<Size>90</Size>
+			<LifetimeMS>1000</LifetimeMS>
+		</Projectile>
+		
+		
+		<State id="Ini">
+			<Behavior bucket="movement" range="4.5" speed="0.4" duration="1.2" cooldown="1" acquireRange="8">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.25">Wander</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown=".8" range="7.5" offset=".4" angle="8" predictive=".6">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown=".8" range="7.5" offset=".6" angle="8" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="10"  projectileId="1" cooldown="2" range="7.5" offset="0" angle="36" predictive="1">Shoot</Behavior>
+			<Transition afterTime="3.4" playerWithin="12">ThrowEgg</Transition>
+		</State>
+		
+		<State id="ThrowEgg">
+			<Behavior bucket="movement" range="4.5" speed="0.4" duration="1.2" cooldown="1" acquireRange="8">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.25">Wander</Behavior>
+			<State id="Choose">
+				<Transition random="0.5">Choose1</Transition>
+				<Transition random="1">Choose2</Transition>
+			</State>
+			<State id="Choose1">
+				<Transition random="0.5">ThrowUp</Transition>
+				<Transition random="1">ThrowDown</Transition>
+			</State>
+			<State id="Choose2">
+				<Transition random="0.5">ThrowRight</Transition>
+				<Transition random="1">ThrowLeft</Transition>
+			</State>
+			<State id="ThrowUp">
+				<Behavior type="auto" childId="Great Snake Egg" range="4" rangeJitter="1" defaultAngle="270" cooldown="5">ObjectToss</Behavior>
+				<Transition afterTime=".2">Choose</Transition>
+			</State>
+			<State id="ThrowDown">
+				<Behavior type="auto" childId="Great Snake Egg" range="4" rangeJitter="1" defaultAngle="90" cooldown="5">ObjectToss</Behavior>
+				<Transition afterTime=".2">Choose</Transition>
+			</State>
+			<State id="ThrowRight">
+				<Behavior type="auto" childId="Great Snake Egg" range="4" rangeJitter="1" defaultAngle="0" cooldown="5">ObjectToss</Behavior>
+				<Transition afterTime=".2">Choose</Transition>
+			</State>
+			<State id="ThrowLeft">
+				<Behavior type="auto" childId="Great Snake Egg" range="4" rangeJitter="1" defaultAngle="180" cooldown="5">ObjectToss</Behavior>
+				<Transition afterTime=".2">Choose</Transition>
+			</State>
+			<Transition afterTime="2.4">Ini</Transition>
+		</State>
+		
+		<Behavior prob=".4" childId="Forbidden Jungle Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+	<Object type="0x0dc3" id="Mixcoatl the Masked God">
+		<Enemy/>
+		<Class>Character</Class>
+		<Group>Jungle Men</Group>
+		
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>16</Index></AnimatedTexture> <!-- purpleish -->
+		
+		<AltTexture id="1">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>25</Index></AnimatedTexture> <!-- angry 1 -->
+		</AltTexture>
+		<AltTexture id="2">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>26</Index></AnimatedTexture> <!-- angry 2 -->
+		</AltTexture>
+		
+		<AltTexture id="3">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>27</Index></AnimatedTexture> <!-- dance 1 -->
+		</AltTexture>
+		<AltTexture id="4">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>28</Index></AnimatedTexture> <!-- dance 2 -->
+		</AltTexture>
+		
+		<AltTexture id="5">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>29</Index></AnimatedTexture> <!-- dance 3 -->
+		</AltTexture>
+		<AltTexture id="6">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>30</Index></AnimatedTexture> <!-- dance 4 -->
+		</AltTexture>
+		
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>140</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>4200</MaxHitPoints>
+		<Defense>15</Defense>
+		<XpMult>0.85</XpMult>
+		
+		<God/>
+		<StasisImmune/>
+		<Quest/>
+		<Level>1</Level>
+		<NoArticle/>
+		
+		<Projectile id="0">
+			<ObjectId>Mask Powerwave</ObjectId>
+			<Damage>60</Damage>
+			<Speed>30</Speed>
+			<Size>100</Size>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Mask Powershot</ObjectId>
+			<Damage>60</Damage>
+			<Speed>60</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+			
+		<Projectile id="2">
+			<ObjectId>Fireball 2</ObjectId>
+			<MinDamage>45</MinDamage>
+			<MaxDamage>65</MaxDamage>
+			<Speed>60</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+			
+		<State id="Ini">
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			<Behavior speed=".3" range="4">StayCloseToSpawn</Behavior>
+			<Transition hitpointsLessThan="0.995">Summon</Transition>
+		</State>
+		
+		<State id="Stage1">
+			<State id="ChooseAttack">
+				<Transition random="0.5">Shotgun</Transition>
+				<Transition random="0.5">Fireball</Transition>
+				<Transition random="1">Wait</Transition>
+			</State>
+			
+			<State id="Wait">
+				<Transition afterTime="1">ChooseAttack</Transition>
+			</State>
+		
+			<Embed name="fireballs"></Embed>
+			<Embed name="shotgun"></Embed>
+			
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			<Behavior speed=".45" range="10" cooldown="2">StayCloseToSpawn</Behavior>
+			<Transition hitpointsLessThan="0.5">Rage</Transition>
+			<Transition afterTime="10">SummonChoice</Transition>
+		</State>
+		
+		<State id="SummonChoice">
+			<Transition random="0.5">Summon</Transition>
+			<Transition afterTime="4" noTag="stage2">Stage1</Transition>
+			<Transition afterTime="4" hasTag="stage2">Stage2</Transition>
+		</State>
+		
+		<State id="Rage">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<State id="Position">
+				<Behavior speed="1.4" range="0">StayCloseToSpawn</Behavior>
+				<Transition afterTime="0.6">Animate1</Transition>
+			</State>
+			<State id="Animate1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".2">Animate2</Transition>
+			</State>
+			<State id="Animate2">
+				<Order>
+					<Behavior tagName="totem">SetTag</Behavior>
+				</Order>
+				<Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Transition afterTime=".2">Animate1</Transition>
+				<Behavior type="auto" defaultAngle="0" numShots="8" projectileId="0" cooldown=".6" range="0" offset="0" angle="45">Shoot</Behavior>
+			</State>
+			<Transition afterTime="4">Stage2</Transition>
+		</State>
+		
+		<State id="Summon">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<State id="Position">
+				<Behavior speed="1.4" range="0">StayCloseToSpawn</Behavior>
+				<Transition afterTime="0.6">Animate1</Transition>
+			</State>
+			<State id="Animate1">
+				<Behavior altTextureId="3">SetAltTexture</Behavior>
+				<Transition afterTime=".2">Animate2</Transition>
+			</State>
+			<State id="Animate2">
+				<Order>
+					<Behavior tagName="spirit">SetTag</Behavior>
+				</Order>
+				<Behavior altTextureId="4">SetAltTexture</Behavior>
+				<Transition afterTime=".2">Animate3</Transition>
+			</State>
+			<State id="Animate3">
+				<Behavior altTextureId="5">SetAltTexture</Behavior>
+				<Transition afterTime=".2">Animate4</Transition>
+			</State>
+			<State id="Animate4">
+				<Behavior altTextureId="6">SetAltTexture</Behavior>
+				<Transition afterTime=".2">Animate1</Transition>
+			</State>
+			<Transition afterTime="4" noTag="stage2">Stage1</Transition>
+			<Transition afterTime="4" hasTag="stage2">Stage2</Transition>
+		</State>
+		
+		<State id="Stage2">
+			<Behavior tagName="stage2">SetTag</Behavior>
+			<Behavior bucket="dance" protecteeId="Jungle Fire" clockwise="true" acquireRange="3.5" speed="0.5" radius="3" speedVariability=".2" radiusVariability=".15">Orbit</Behavior>
+			
+			<Behavior type="targeted" defaultAngle="0" numShots="8" projectileId="0" cooldown=".5" range="2.6" offset="0" angle="45">Shoot</Behavior>
+			
+			<State id="ChooseAttack">
+				<Transition random="0.5">Shotgun</Transition>
+				<Transition random="1">Wait</Transition>
+			</State>
+			<State id="Wait">
+				<Transition afterTime="3">ChooseAttack</Transition>	
+			</State>
+			
+			<Embed name="shotgun"></Embed>
+			
+			<Behavior bucket="movement" acquireRange="8" range="1" speed="0.62" duration="1.2" cooldown="0.6" predictive="false">Follow</Behavior>
+			<Behavior bucket="movement" acquireRange="4" distance="2.5" speed="0.6">Circle</Behavior>
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			<Behavior speed=".45" range="10" cooldown="2">StayCloseToSpawn</Behavior>
+		</State>
+		
+		<!--
+			<Embed name="throwTrident">
+				<Param name="cooldown">1.6</Param>
+			</Embed>
+		-->
+		
+		<DefineEmbed name="fireballs">
+			<State id="Fireball">
+				<State id="Shoot">
+					<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="2" cooldown="0" range="8" offset="0" angle="8" predictive=".9">Shoot</Behavior>
+					<Transition afterTime="1">Wait</Transition>
+				</State>
+				<State id="Wait">
+					<Transition afterTime=".8">Shoot</Transition>	
+				</State>
+				<Transition afterTime="3">ChooseAttack</Transition>	
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="shotgun">
+			<State id="Shotgun">
+				<Behavior type="auto" defaultAngle="0" numShots="3"  projectileId="1" cooldown="3.2" range="8" offset="0" angle="11" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="45" numShots="3"  projectileId="1" cooldown="3.2" range="8" offset=".2" angle="11" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="90" numShots="3"  projectileId="1" cooldown="3.2" range="8" offset=".4" angle="11" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="135" numShots="3"  projectileId="1" cooldown="3.2" range="8" offset=".6" angle="11" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="180" numShots="3"  projectileId="1" cooldown="3.2" range="8" offset=".8" angle="11" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="225" numShots="3"  projectileId="1" cooldown="3.2" range="8" offset="1" angle="11" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="270" numShots="3"  projectileId="1" cooldown="3.2" range="8" offset="1.2" angle="11" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="315" numShots="3"  projectileId="1" cooldown="3.2" range="8" offset="1.4" angle="11" predictive="0">Shoot</Behavior>
+				<Transition afterTime="3">ChooseAttack</Transition>	
+			</State>
+		</DefineEmbed>
+		
+		<SoulboundLoot prob=".08" threshold=".11">Robe of the Tlatoani</SoulboundLoot>
+		<SoulboundLoot prob=".08" threshold=".17">Staff of the Crystal Serpent</SoulboundLoot>
+		<SoulboundLoot prob=".08" threshold=".14">Cracked Crystal Skull</SoulboundLoot>
+		<SoulboundLoot prob=".08" threshold=".10">Crystal Bone Ring</SoulboundLoot>	
+		<SoulboundLoot tier="5" prob=".07" threshold=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".015" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".07" threshold=".15">Armor</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".015" threshold=".12">Armor</SoulboundLoot>
+		<SoulboundLoot prob=".4" min="1">Pollen Powder</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".18">Wine Cellar Incantation</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0dc4" id="Boss Totem">
+		<Enemy/>
+		<Class>GameObject</Class>
+		
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>31</Index></AnimatedTexture>
+	
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<Size>120</Size>
+		<ShadowSize>80</ShadowSize>
+		<OccupySquare/>
+		
+		<Projectile id="0">
+			<ObjectId>Totem Fire Wall</ObjectId>
+			<Damage>50</Damage>
+			<Speed>40</Speed>
+			<Size>100</Size>
+			<LifetimeMS>1600</LifetimeMS>
+			<PassesCover/>
+		</Projectile>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<Behavior listenIds="Mixcoatl the Masked God">FollowOrders</Behavior>
+		
+		<State id="Ini">
+			<Transition hasTag="spirit">Spirit</Transition>
+			<Transition hasTag="totem">Power</Transition>
+		</State>
+		
+		
+		<State id="Spirit">
+			<Behavior tagName="spirit">ClearTag</Behavior>
+			<Behavior cooldown="3" childIds="Totem Spirit" maxChildren="6" startWithMinions="false">MakeMinions</Behavior>
+			<Transition noneExist="Mixcoatl the Masked God">Done</Transition>
+			<Transition hasTag="totem">Power</Transition>
+			<Transition afterTime="3">Ini</Transition>
+		</State>
+		
+		<State id="Power">
+			<Behavior tagName="totem">ClearTag</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="6"  projectileId="0" cooldown="0.6" range="0" offset="0" angle="60">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="30" numShots="6"  projectileId="0" cooldown="0.6" range="0" offset=".2" angle="60">Shoot</Behavior>
+			<Transition afterTime="2.4">Regular</Transition>
+			<Transition noneExist="Mixcoatl the Masked God">Done</Transition>
+		</State>
+		
+		<State id="Regular">
+			<Behavior type="auto" defaultAngle="0" numShots="6"  projectileId="0" cooldown="3" range="0" offset="0" angle="60" predictive=".5">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="30" numShots="6"  projectileId="0" cooldown="3" range="0" offset=".6" angle="60" predictive=".5">Shoot</Behavior>
+			<Transition noneExist="Mixcoatl the Masked God">Done</Transition>
+		</State>
+		
+		<State id="Done">
+			<Behavior bucket="movement" speed="0">Wander</Behavior>
+		</State>
+		
+		<Behavior cooldown="0" childIds="Jungle Invisible Solid" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+	</Object>
+	
+	<Object type="0x0dc5" id="Jungle Spear">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiObjBig</File><Index>0x00</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x01</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x02</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x03</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x04</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x05</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x06</Index></Texture>
+			</RandomTexture>
+		<Static/>
+		<Size>80</Size>
+		<ShadowSize>60</ShadowSize>
+	</Object>
+	
+	<Object type="0x0dc6" id="Jungle Brazier">
+		<Class>GameObject</Class>
+		<Texture><File>lofiObjBig</File><Index>0x07</Index></Texture>
+		<Animation prob="1.0" period="0.0">
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x07</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x08</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x09</Index></Texture></Frame>
+		</Animation>
+		<Size>100</Size>
+		<Static/>
+		<OccupySquare/>
+		<ShadowSize>80</ShadowSize>
+	</Object>
+	
+	
+	<Object type="0x0dc7" id="Jungle Summoner">
+		<Class>Character</Class>
+		
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+	
+		<Size>0</Size>
+		<ShadowSize>0</ShadowSize>
+		<MaxHitPoints>10</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0</XpMult>
+		<NoMiniMap/>
+		
+		<State id="Make Guys">
+			<State id="FirstTwo">
+				<State id="C">
+					<Transition random="0.5">C1</Transition>
+					<Transition random="1">C2</Transition>
+				</State>
+				<State id="C1">
+					<Transition random="0.5">H</Transition>
+					<Transition random="1">W</Transition>
+				</State>
+				<State id="C2">
+					<Transition random="0.5">S</Transition>
+					<Transition random="1">C</Transition>
+				</State>
+				<State id="H">
+					<Behavior cooldown="0" childIds="Mask Hunter" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Done</Transition>
+				</State>
+				<State id="W">
+					<Behavior cooldown="0" childIds="Mask Warrior" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Done</Transition>
+				</State>
+				<State id="S">
+					<Behavior cooldown="0" childIds="Mask Shaman" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Done</Transition>
+				</State>
+				<State id="Done">
+					<Behavior tagName="one">SetTag</Behavior>
+				</State>
+				
+				<Transition hasTag="one">SeccondTwo</Transition>
+			</State>
+			
+			
+			<State id="SeccondTwo">
+				<State id="C">
+					<Transition random="0.5">C1</Transition>
+					<Transition random="1">C2</Transition>
+				</State>
+				<State id="C1">
+					<Transition random="0.5">H</Transition>
+					<Transition random="1">W</Transition>
+				</State>
+				<State id="C2">
+					<Transition random="0.5">S</Transition>
+					<Transition random="1">C</Transition>
+				</State>
+				<State id="H">
+					<Behavior cooldown="0" childIds="Mask Hunter" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Done</Transition>
+				</State>
+				<State id="W">
+					<Behavior cooldown="0" childIds="Mask Warrior" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Done</Transition>
+				</State>
+				<State id="S">
+					<Behavior cooldown="0" childIds="Mask Shaman" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Done</Transition>
+				</State>
+				<State id="Done">
+					<Behavior tagName="two">SetTag</Behavior>
+				</State>
+				
+				<Transition hasTag="two">ThirdTwo</Transition>
+			</State>
+			
+			
+			<State id="ThirdTwo">
+				<State id="C">
+					<Transition random="0.5">H</Transition>
+					<Transition random="1">W</Transition>
+				</State>
+				<State id="H">
+					<Behavior cooldown="0" childIds="Mask Hunter" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Done</Transition>
+				</State>
+				<State id="W">
+					<Behavior cooldown="0" childIds="Mask Warrior" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Done</Transition>
+				</State>
+				<State id="Done">
+					<Behavior tagName="three">SetTag</Behavior>
+				</State>
+			</State>
+			<Transition hasTag="three">Done</Transition>
+		</State>
+		<State id="Done">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x0dc8" id="Jungle Invisible Solid">
+		<Class>GameObject</Class>
+			<Texture><File>lofiEnvironment3</File><Index>0x38</Index></Texture>
+		<Static/>
+		<OccupySquare/>
+		<NoMiniMap/>
+		<Size>0</Size>
+		<ShadowSize>0</ShadowSize>
+	</Object>
+	
+	<Object type="0x0dc9" id="Jungle Grass Solid">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x63</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x64</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x65</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x66</Index></Texture>
+			</RandomTexture>
+		<Static/>
+		<OccupySquare/>
+	</Object>
+	
+	<Object type="0x0dca" id="Jungle Flowers Solid">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x67</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x68</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x69</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6a</Index></Texture>
+			</RandomTexture>
+		<DrawOnGround/>
+		<OccupySquare/>
+		<NoMiniMap/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0dcb" id="Jungle Plant Unbreakable">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6b</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6c</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6d</Index></Texture>
+			</RandomTexture>
+		<Static/>
+		<OccupySquare/>
+		<HitSound>monster/trees_hit</HitSound>
+		<DeathSound>monster/tress_death</DeathSound>
+	</Object>
+	
+	<Object type="0x0dcc" id="Totem Spirit">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>22</Index></AnimatedTexture>
+		<Flying/>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<Size>80</Size>
+		<ShadowSize>90</ShadowSize>
+		<MaxHitPoints>125</MaxHitPoints>
+		<Defense>25</Defense>
+		<XpMult>0.2</XpMult>
+		<Z>0.26</Z>
+		
+		<Projectile id="0">
+			<ObjectId>Ghost Shot</ObjectId>
+			<Damage>25</Damage>
+			<Speed>45</Speed>
+			<Size>90</Size>
+			<LifetimeMS>1000</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior bucket="movement" protecteeId="Jungle Totem" acquireRange="7" protectionRange="7" reprotectRange="3.8" speed="0.7">Protect</Behavior>
+			<Behavior bucket="movement" range="4.5" speed="0.4" duration="1.2" cooldown="1.4" acquireRange="5">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.25">Wander</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown=".8" range="4.5" offset=".4" angle="8" predictive=".6">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown=".8" range="4.5" offset=".6" angle="8" predictive="1">Shoot</Behavior>
+		</State>
+		
+		<SoulboundLoot prob="0.1">Magic Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0dcd" id="Jungle Totem">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>32</Index></AnimatedTexture>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<Size>130</Size>
+		<ShadowSize>90</ShadowSize>
+		<MaxHitPoints>900</MaxHitPoints>
+		<Defense>10</Defense>
+		
+		<Projectile id="0">
+			<ObjectId>Totem Blast</ObjectId>
+			<Damage>40</Damage>
+			<Speed>50</Speed>
+			<Size>100</Size>
+			<LifetimeMS>1000</LifetimeMS>
+		</Projectile>
+		
+   		<Behavior map="jungle/totem_floor.jm">PlaceMap</Behavior>
+		<State id="Ini">
+		
+			<State id="Shoot1">
+				<Behavior type="targeted" defaultAngle="0" numShots="9"  projectileId="0" cooldown="3.2" range="6" offset="0" angle="20">Shoot</Behavior>
+				<Transition afterTime="1.6">Shoot2</Transition>
+			</State>
+			<State id="Shoot2">
+				<Behavior type="targeted" defaultAngle="180" numShots="9"  projectileId="0" cooldown="3.2" range="6" offset="0" angle="20">Shoot</Behavior>
+				<Transition afterTime="1.6">Shoot1</Transition>
+			</State>
+			
+			<!--
+			<Behavior type="auto" defaultAngle="0" numShots="9"  projectileId="0" cooldown="3.2" range="0" offset="0" angle="20">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="180" numShots="9"  projectileId="0" cooldown="3.2" range="0" offset="1.6" angle="20">Shoot</Behavior>
+			-->
+		</State>
+		
+		<Behavior cooldown="3.6" childIds="Totem Spirit" maxChildren="5" startWithMinions="true">MakeMinions</Behavior>
+		
+		<SoulboundLoot prob="0.04">Heartstealer Skull</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0dce" id="Basilisk Baby">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x8dEncounters</File><Index>1</Index></AnimatedTexture>
+		
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>10</Defense>
+		
+		<Projectile id="0">
+			<ObjectId>Basilisk Acid</ObjectId>
+			<MinDamage>15</MinDamage>
+			<MaxDamage>30</MaxDamage>
+			<Speed>65</Speed>
+			<Size>100</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<Amplitude>0.05</Amplitude>
+			<Frequency>5</Frequency>
+		</Projectile>
+		
+		<State id="Ini">
+		
+			<Behavior bucket="movement" protecteeId="Basilisk" acquireRange="4" protectionRange="4" reprotectRange="3" speed="0.7">Protect</Behavior>
+			
+			<Behavior bucket="chase" acquireRange="5" speed="0.5" distance="2.8">Circle</Behavior>
+			<Behavior bucket="chase" cooldown="2" speed="1.2" range="11">Charge</Behavior>
+			
+			<State id="Shoot1">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="5.5" offset="0" predictive="0">Shoot</Behavior>
+				<Transition afterTime=".2">Shoot2</Transition>
+			</State>
+			<State id="Shoot2">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="5.5" offset=".2" predictive="0">Shoot</Behavior>
+				<Transition afterTime="1">Shoot1</Transition>
+			</State>
+			
+			<Behavior bucket="chase" speed="0.35">Wander</Behavior>
+		</State>
+		
+		<SoulboundLoot prob=".02">Basilisk Hide Armor</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0dcf" id="Basilisk">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>33</Index></AnimatedTexture>
+		
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>370</MaxHitPoints>
+		<Defense>10</Defense>
+		
+		<Projectile id="0">
+			<ObjectId>Basilisk Acid</ObjectId>
+			<MinDamage>15</MinDamage>
+			<MaxDamage>30</MaxDamage>
+			<Speed>65</Speed>
+			<Size>100</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<Amplitude>0.05</Amplitude>
+			<Frequency>5</Frequency>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Basilisk Beam</ObjectId>
+			<MinDamage>15</MinDamage>
+			<MaxDamage>30</MaxDamage>
+			<Speed>38</Speed>
+			<Size>80</Size>
+			<LifetimeMS>800</LifetimeMS>
+			<PassesCover/>
+		</Projectile>
+		
+		<Projectile id="2">
+			<ObjectId>Basilisk Beam</ObjectId>
+			<MinDamage>25</MinDamage>
+			<MaxDamage>35</MaxDamage>
+			<Speed>45</Speed>
+			<Size>130</Size>
+			<LifetimeMS>800</LifetimeMS>
+			<PassesCover/>
+		</Projectile>
+		
+		<Projectile id="3">
+			<ObjectId>Basilisk Beam</ObjectId>
+			<MinDamage>30</MinDamage>
+			<MaxDamage>45</MaxDamage>
+			<Speed>55</Speed>
+			<Size>180</Size>
+			<LifetimeMS>800</LifetimeMS>
+			<PassesCover/>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior bucket="movement" speed="0.35">Wander</Behavior>
+			
+			
+			<State id="Shoot1">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="7.5" offset="0" predictive="0">Shoot</Behavior>
+				<Transition afterTime=".2">Shoot2</Transition>
+			</State>
+			<State id="Shoot2">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="7.5" offset=".2" predictive="0">Shoot</Behavior>
+				<Transition afterTime="1">Shoot3</Transition>
+			</State>
+			
+			<State id="Shoot3">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="1" cooldown="1" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="2" cooldown="1" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="3" cooldown="1" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Transition afterTime=".8">Shoot4</Transition>
+			</State>
+			<State id="Shoot4">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="1" cooldown="3" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="2" cooldown="3" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="3" cooldown="1" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Transition afterTime=".8">Shoot5</Transition>
+			</State>
+			
+			<State id="Shoot5">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="1" cooldown="1" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="2" cooldown="1" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="3" cooldown="1" range="7.5" offset="0" predictive="1">Shoot</Behavior>
+				<Transition afterTime=".8">Wait</Transition>
+			</State>
+			<State id="Wait">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="7.5" offset="0" predictive="0">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="7.5" offset=".2" predictive="0">Shoot</Behavior>
+				<Transition afterTime="2">Shoot1</Transition>
+			</State>
+			
+		</State>
+		
+		<State id="NeverRun">
+			<Behavior cooldown="0" childIds="Basilisk Baby" maxChildren="3" startWithMinions="true">MakeMinions</Behavior>
+		</State>
+		
+		<SoulboundLoot prob=".05">Basilisk Hide Armor</SoulboundLoot>
+		<SoulboundLoot prob=".02">Chimera Hide Armor</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0dd0" id="Mask Shaman">
+		<Enemy/>
+		<Class>Character</Class>
+		<Group>Jungle Men</Group>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>23</Index></AnimatedTexture>
+		
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>250</MaxHitPoints>
+		<Defense>5</Defense>
+		
+		<Projectile id="0">
+			<ObjectId>Shaman Star</ObjectId>
+			<Damage>10</Damage>
+			<Speed>45</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<ConditionEffect duration="4">Hallucinating</ConditionEffect>
+			<ConditionEffect duration="1">Quiet</ConditionEffect>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior targetGroups="Jungle Men" cooldown="1.4" range="4.5" maxHeal="30">Heal</Behavior>
+			<Behavior bucket="movement" protecteeId="Jungle Fire" clockwise="false" acquireRange="3.5" speed="0.35" radius="2" speedVariability=".2" radiusVariability=".15">Orbit</Behavior>
+			
+			<Behavior bucket="movement" acquireRange="10" range="3.5" speed="0.4" duration="0.8" cooldown=".8" predictive="false">Follow</Behavior>
+			<Behavior bucket="movement" type="auto" defaultAngle="0" numShots="8" projectileId="0" cooldown=".6" range="0" offset="0" angle="45">Shoot</Behavior>
+			<Behavior bucket="movement" distance="5" speed="0.5">StayBack</Behavior>
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+		</State>
+		
+		<SoulboundLoot prob=".04">Pollen Powder</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0dd1" id="Mask Warrior">
+		<Enemy/>
+		<Class>Character</Class>
+		<Group>Jungle Men</Group>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>24</Index></AnimatedTexture>
+		
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>300</MaxHitPoints>
+		<Defense>20</Defense>
+		
+		
+		<Projectile id="0">
+			<ObjectId>Mask Blast</ObjectId>
+			<Damage>10</Damage>
+			<Speed>30</Speed>
+			<Size>80</Size>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+			
+		<State id="Ini">
+			<Behavior bucket="dance" protecteeId="Jungle Fire" clockwise="true" acquireRange="3.5" speed="0.5" radius="3" speedVariability=".2" radiusVariability=".15">Orbit</Behavior>
+			
+			<Behavior type="targeted" defaultAngle="0" numShots="8" projectileId="0" cooldown=".5" range="2.6" offset="0" angle="45">Shoot</Behavior>
+			
+			<Behavior bucket="movement" acquireRange="5.5" range="1" speed="0.6" duration="0.8" cooldown="0.8" predictive="false">Follow</Behavior>
+			<Behavior bucket="movement" acquireRange="4" distance="2.5" speed="0.6">Circle</Behavior>
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+		</State>
+		
+		<SoulboundLoot prob=".02">Pollen Powder</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0dd2" id="Mask Hunter">
+		<Enemy/>
+		<Class>Character</Class>
+		<Group>Jungle Men</Group>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>25</Index></AnimatedTexture>
+		
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>300</MaxHitPoints>
+		<Defense>10</Defense>
+		
+		<Projectile id="0">
+			<ObjectId>Hunter Spear</ObjectId>
+			<Damage>25</Damage>
+			<Speed>60</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1000</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Transition afterTime="1.2">Main</Transition>
+		</State>
+		
+		<State id="Main">
+			<Behavior bucket="movement" protecteeId="Jungle Fire" clockwise="false" acquireRange="3.5" speed="0.5" radius="4" speedVariability=".2" radiusVariability=".15">Orbit</Behavior>
+			
+			<State id="Shoot1">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="2" range="4.5" offset="0" predictive="0">Shoot</Behavior>
+				<Transition afterTime=".2">Shoot2</Transition>
+			</State>
+			<State id="Shoot2">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="2" range="4.5" offset="0" predictive=".5">Shoot</Behavior>
+				<Transition afterTime=".8">Shoot1</Transition>
+			</State>
+			
+			<Behavior bucket="movement" cooldown="2" speed=".8" range="8">Charge</Behavior>
+			<Behavior bucket="movement" range="8" speed="0.45" acquireRange="7">Follow</Behavior>
+			<Behavior bucket="movement" speed=".35">Wander</Behavior>
+		</State>
+		<SoulboundLoot prob=".02">Pollen Powder</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0dd3" id="Jungle Fire">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<Texture><File>lofiObjBig</File><Index>0x0a</Index></Texture>
+		<Animation prob="1.0" period="0.0">
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0b</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0c</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0d</Index></Texture></Frame>
+		</Animation>
+		<Animation prob="1.0" period="0.0">
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0e</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0f</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x10</Index></Texture></Frame>
+		</Animation>
+		
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>85</ShadowSize>
+		<ShadowColor>0xFA9632</ShadowColor>
+		<MaxHitPoints>400</MaxHitPoints>
+		<Defense>80</Defense>
+		
+		<Projectile id="0">
+			<ObjectId>Invisible</ObjectId>
+			<MinDamage>10</MinDamage>
+			<MaxDamage>20</MaxDamage>
+			<Speed>0</Speed>
+			<Size>120</Size>
+			<LifetimeMS>5000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Fireball 2</ObjectId>
+			<MinDamage>20</MinDamage>
+			<MaxDamage>30</MaxDamage>
+			<Speed>60</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior bucket="movement" speed="0.0">Wander</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="5" range="0">Shoot</Behavior> <!-- make fire burn you -->
+			
+			<State id="Shoot">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="1" cooldown="0" range="8" offset="0" angle="8" predictive=".9">Shoot</Behavior>
+				<Transition afterTime="1">Wait</Transition>
+			</State>
+			<State id="Wait">
+				<Transition afterTime=".8">Shoot</Transition>	
+			</State>
+		</State>
+		
+		<State id="NeverRun">
+			<Behavior cooldown="0.2" childIds="Mask Hunter" maxChildren="2" startWithMinions="true">MakeMinions</Behavior>
+			<Behavior cooldown="0.2" childIds="Mask Warrior" maxChildren="2" startWithMinions="true">MakeMinions</Behavior>
+			<Behavior cooldown="0.2" childIds="Mask Shaman" maxChildren="3" startWithMinions="true">MakeMinions</Behavior>
+		</State>
+		
+		<SoulboundLoot prob=".02">Fire Sword</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0dd4" id="Jungle Ground Flowers">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x67</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x68</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x69</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6a</Index></Texture>
+			</RandomTexture>
+		<DrawOnGround/>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0dd5" id="Jungle Grass">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x63</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x64</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x65</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x66</Index></Texture>
+			</RandomTexture>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0dd6" id="Jungle Flower Bright">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6e</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6f</Index></Texture>
+			</RandomTexture>
+		<Static/>
+	</Object>
+	
+	
+	<Object type="0x0dd7" id="Jungle Plant">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x70</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x71</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x72</Index></Texture>
+			</RandomTexture>
+		<Static/>
+	</Object>
+	
+	<Object type="0x0dd8" id="Jungle Plant Solid">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6b</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6c</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x6d</Index></Texture>
+			</RandomTexture>
+		<Static/>
+		<OccupySquare/>
+		<MaxHitPoints>500</MaxHitPoints>
+		<StasisImmune/>
+		<Enemy/>
+		<XpMult>0.0</XpMult>
+		<HitSound>monster/trees_hit</HitSound>
+		<DeathSound>monster/tress_death</DeathSound>
+	</Object>
+	
+	<Object type="0x0dd9" id="Jungle Rock">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiEnvironment3</File><Index>0x73</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x38</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x74</Index></Texture>
+				<Texture><File>lofiEnvironment3</File><Index>0x75</Index></Texture>
+			</RandomTexture>
+		<Static/>
+		<OccupySquare/>
+		<HitSound>monster/trees_hit</HitSound>
+		<DeathSound>monster/tress_death</DeathSound>
+	</Object>
+
+	<Object type="0x0dda" id="Jungle Tree Big">
+		<Class>GameObject</Class>
+			<RandomTexture>
+				<Texture><File>lofiObjBig</File><Index>0x11</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x12</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x13</Index></Texture>
+				<Texture><File>lofiObjBig</File><Index>0x14</Index></Texture>
+			</RandomTexture>
+		<Static/>
+		<OccupySquare/>
+		<HitSound>monster/trees_hit</HitSound>
+		<DeathSound>monster/tress_death</DeathSound>
+	</Object>
+</Objects>

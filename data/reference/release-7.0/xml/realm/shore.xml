@@ -1,0 +1,372 @@
+<Objects>
+	<!-- ShoreSand -->
+
+	<Object type="0x600" id="Pirate">
+		<Group>Pirates</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>1</Index></AnimatedTexture>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/pirates_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>ShoreSand</Terrain>
+
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>4</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+
+		<Behavior projectileId="0" range="3" cooldown="2.5">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="0.85">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+		<SoulboundLoot tier="1" prob="0.2">Weapon</SoulboundLoot>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x601" id="Piratess">
+		<Group>Pirates</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>2</Index></AnimatedTexture>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/pirates_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>6</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>ShoreSand</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>4</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+
+		<Behavior projectileId="0" range="3" coodown="2.5">Shoot</Behavior>
+
+		<Behavior bucket="movement" range="1" speed="1.1" cooldown="1.5" duration="3">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+
+		<Behavior childIds="Pirate" maxChildren="6" cooldown="10">MakeMinions</Behavior>
+
+		<SoulboundLoot tier="1" prob="0.2">Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x602" id="Snake">
+		<Group>Snakes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dBeach</File><Index>0</Index></AnimatedTexture>
+		<HitSound>monster/snakes_hit</HitSound>
+		<DeathSound>monster/snakes_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>ShoreSand</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+		<Spawn><Mean>5</Mean><StdDev>1</StdDev><Min>2</Min><Max>7</Max></Spawn>
+
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>4</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+
+		<Behavior projectileId="0" range="10" cooldown="2.0">Shoot</Behavior>
+		<Behavior bucket="movement" speed="0.8">Wander</Behavior>
+
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Magic Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x603" id="Poison Scorpion">
+		<Group>Scorpions</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>4</Index></AnimatedTexture>
+		<HitSound>monster/scorpions_hit</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>10</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>ShoreSand</Terrain>
+
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>7</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+
+		<Behavior projectileId="0" range="8" cooldown="2.0">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Scorpion Queen">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+	</Object>
+	
+	<Object type="0x604" id="Scorpion Queen">
+		<Group>Scorpions</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>5</Index></AnimatedTexture>
+		<HitSound>monster/scorpions_hit</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+		<Size>150</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>ShoreSand</Terrain>
+		<Quest/>
+		<Level>1</Level>
+		<XpMult>2</XpMult>
+		<SpawnProb>0.75</SpawnProb>
+
+		<Behavior bucket="movement" speed="0.2">Wander</Behavior>
+		<Behavior>ChangeSize</Behavior>
+
+		<Behavior childIds="Poison Scorpion" maxChildren="10" cooldown="10">MakeMinions</Behavior>
+
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Magic Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0953" id="Bandit Leader">
+		<Group>Bandits</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>10</Index></AnimatedTexture>
+		<HitSound>monster/elves_hit</HitSound>
+		<DeathSound>monster/elves_death</DeathSound>
+		<Size>150</Size>
+		<MaxHitPoints>280</MaxHitPoints>
+		<Defense>2</Defense>
+		<Terrain>ShoreSand</Terrain>
+		<Quest/>
+		<Level>2</Level>
+		<XpMult>1.6</XpMult>
+		<SpawnProb>0.75</SpawnProb>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>9</Damage>
+			<Speed>60</Speed>
+			<Size>60</Size>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+
+		<Behavior childIds="Bandit Enemy" cooldown="8" maxChildren="4">MakeMinions</Behavior>
+
+		<State id="bold">
+			<State id="warn_about_grenades">
+				<Behavior prob="0.15" text="Catch!">Say</Behavior>
+				<Transition afterTime="0.4">wimpy_grenade1</Transition>
+			</State>
+			<State id="wimpy_grenade1">
+				<Behavior cooldown="100" type="targeted" radius="1.4" damage="12">GrenadeToss</Behavior>
+
+				<Behavior bucket="movement" minAltitude="13">StayAbove</Behavior>
+				<Behavior bucket="movement" speed="0.3">Wander</Behavior>
+
+				<Transition afterTime="2">wimpy_grenade2</Transition>
+			</State>
+			<State id="wimpy_grenade2">
+				<Behavior cooldown="100" type="targeted" radius="1.4" damage="12">GrenadeToss</Behavior>
+
+				<Behavior bucket="movement" minAltitude="13">StayAbove</Behavior>
+				<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+
+				<Transition afterTime="3">slow_follow</Transition>
+			</State>		
+			<State id="slow_follow">
+				<Behavior projectileId="0" numShots="1" range="13" type="targeted" cooldown="1">Shoot</Behavior>
+
+				<Behavior bucket="movement" minAltitude="13">StayAbove</Behavior>
+				<Behavior bucket="movement" acquireRange="9" range="3.5" speed="0.4" duration="4">Follow</Behavior>
+
+				<Transition afterTime="4">warn_about_grenades</Transition>
+			</State>
+			
+			<Transition hitpointsLessThan=".45">meek</Transition>
+		</State>
+		<State id="meek">
+			<Behavior prob="0.5" text="Forget this... run for it!">Say</Behavior>
+			
+			<Order>
+				<Behavior bucket="movement" range="8" speed="0.5" acquireRange="15">KeepDistance</Behavior>	
+			</Order>
+
+			<Behavior bucket="movement" speed="0.5" distance="6">StayBack</Behavior>
+			
+			<Transition afterTime="12">bold</Transition>
+		</State>
+
+		<SoulboundLoot tier="1" prob=".1" threshold=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".06" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".1" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".06" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.12" threshold=".10">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.14" threshold=".10">Magic Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0954" id="Bandit Enemy">
+		<Group>Bandits</Group>
+        <DisplayId>Bandit</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>11</Index></AnimatedTexture>
+		<HitSound>monster/elves_hit</HitSound>
+		<DeathSound>monster/elves_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>50</MaxHitPoints>
+		<Defense>1</Defense>
+		<Terrain>ShoreSand</Terrain>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>9</Damage>
+			<Speed>60</Speed>
+			<Size>60</Size>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Blade</ObjectId>
+			<Damage>8</Damage>
+			<Speed>60</Speed>
+			<Size>60</Size>
+			<LifetimeMS>1000</LifetimeMS>
+		</Projectile>		
+		
+		<Behavior listenIds="Bandit Leader" acquireRange="10">FollowOrders</Behavior>		
+		
+		<State id="fast_follow">
+			<Behavior projectileId="0" range="3">Shoot</Behavior>
+			
+			<Behavior bucket="movement" protecteeId="Bandit Leader" acquireRange="9" speed="0.6" protectionRange="9" reprotectRange="9">Protect</Behavior>
+			<Behavior bucket="movement" range="1" speed="1">Follow</Behavior>
+			
+			<Transition afterTime="3">scatter1</Transition>
+		</State>
+		<State id="scatter1">
+			<Behavior bucket="movement" protecteeId="Bandit Leader" acquireRange="9" speed="0.6" protectionRange="9" reprotectRange="9">Protect</Behavior>
+			<Behavior bucket="movement" speed="1">Wander</Behavior>
+			
+			<Transition afterTime="2">slow_follow</Transition>
+		</State>		
+		<State id="slow_follow">
+			<Behavior projectileId="0" range="4.5">Shoot</Behavior> 
+			
+			<Behavior bucket="movement" protecteeId="Bandit Leader" acquireRange="9" speed="0.6" protectionRange="9" reprotectRange="9">Protect</Behavior>
+			<Behavior bucket="movement" acquireRange="9" range="3.5" speed="0.5" duration="4">Follow</Behavior>
+			
+			<Transition afterTime="3">scatter2</Transition>
+		</State>
+		<State id="scatter2">
+			<Behavior bucket="movement" protecteeId="Bandit Leader" acquireRange="9" speed="0.6" protectionRange="9" reprotectRange="9">Protect</Behavior>
+			<Behavior bucket="movement" speed="1">Wander</Behavior>
+			
+			<Transition afterTime="2">fast_follow</Transition>
+		</State>		
+	</Object>
+
+	<!-- ShorePlains -->
+	
+	<Object type="0x60e" id="Red Gelatinous Cube">
+		<Group>Cubes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xbc</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>70</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>ShorePlains</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+		<Spawn><Mean>5</Mean><StdDev>1</StdDev><Min>2</Min><Max>7</Max></Spawn>
+		<Cube/>
+		<XpMult>0.6</XpMult>
+
+		<Projectile id="0">
+			<ObjectId>Salmon Missile</ObjectId>
+			<Damage>9</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+
+		<Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" predictive="0.2" angle="10">Shoot</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<Behavior prob=".03" childId="Pirate Cave Portal">MetamorphoseAtDeath</Behavior>
+
+		<SoulboundLoot prob="0.04">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.04">Magic Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x60f" id="Purple Gelatinous Cube">
+		<Group>Cubes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xbd</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>70</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>ShorePlains</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+		<Spawn><Mean>5</Mean><StdDev>1</StdDev><Min>2</Min><Max>7</Max></Spawn>
+		<Cube/>
+		<XpMult>0.6</XpMult>
+
+		<Projectile id="0">
+			<ObjectId>Purple Magic</ObjectId>
+			<Damage>12</Damage>
+			<Speed>65</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+
+		<Behavior numShots="1" projectileId="0" cooldown="0.6" type="targeted" predictive="0.2">Shoot</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<Behavior prob=".04" childId="Pirate Cave Portal">MetamorphoseAtDeath</Behavior>
+
+		<SoulboundLoot prob="0.04">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.04">Magic Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x610" id="Green Gelatinous Cube">
+		<Group>Cubes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xbe</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>70</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>ShorePlains</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+		<Spawn><Mean>5</Mean><StdDev>1</StdDev><Min>2</Min><Max>7</Max></Spawn>
+		<Cube/>
+		<XpMult>0.6</XpMult>
+
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>10</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+
+		<Behavior numShots="5" projectileId="0" cooldown="1.8" type="targeted" predictive="0.2" angle="72">Shoot</Behavior>
+
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<Behavior prob=".03" childId="Pirate Cave Portal">MetamorphoseAtDeath</Behavior>
+
+		<SoulboundLoot prob="0.04">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.04">Magic Potion</SoulboundLoot>
+	</Object>
+</Objects>

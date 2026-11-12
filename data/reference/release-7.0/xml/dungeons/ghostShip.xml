@@ -1,0 +1,2484 @@
+<Objects>
+    
+    
+<!-- 
+********************************************************************************* 
+     
+    Beach Party
+     
+*********************************************************************************
+-->
+    <!--
+    <Object type="0x0e57" id="Beach Shark">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x8rEncounters</File><Index>1</Index></AnimatedTexture>
+		
+		<HitSound>monster/default_hit</HitSound>
+		<DeathSound>monster/dark_elves_death</DeathSound>
+		<Size>120</Size>
+		<ShadowSize>0</ShadowSize>
+		<MaxHitPoints>5000</MaxHitPoints>
+		<Defense>100</Defense>
+        
+		<Projectile>
+			<ObjectId>Shark Teethe</ObjectId>
+			<Speed>85</Speed>
+			<Damage>65</Damage>
+            <Size>100</Size>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+        
+        <State id="Fight">
+            <Behavior speed="0.3">Wander</Behavior>
+            <Behavior bucket="movement" range="10" speed="1.4" cooldown="3">Charge</Behavior>
+            <Behavior bucket="movement" range="4" speed="0.4" cooldown="1.4">StayCloseToSpawn</Behavior>
+            <Behavior type="targeted" projectileId="0" numShots="3" cooldown="0.4" range="3" defaultAngle="0" angle="8" predictive="1">Shoot</Behavior>
+        </State>
+	</Object>
+    -->
+    <Object type="0x0e56" id="Masked Party God">
+		<Enemy/>
+		<Class>Character</Class>
+		
+        <Texture><File>lofiObjBig</File><Index>0x40</Index></Texture>
+		
+        <AltTexture id="1">
+            <Texture><File>lofiObjBig</File><Index>0x41</Index></Texture>
+        </AltTexture>
+        <AltTexture id="2">
+            <Texture><File>lofiObjBig</File><Index>0x42</Index></Texture>
+        </AltTexture>
+        <AltTexture id="3">
+            <Texture><File>lofiObjBig</File><Index>0x3f</Index></Texture>
+        </AltTexture>
+        
+		<HitSound>monster/default_hit</HitSound>
+		<DeathSound>monster/dark_elves_death</DeathSound>
+		<Size>140</Size>
+		<ShadowSize>70</ShadowSize>
+		<MaxHitPoints>30000</MaxHitPoints>
+		<Defense>10</Defense>
+        <!--
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+        -->
+		<State id="Base">
+            <State id="One">
+                <Transition afterTime=".8">Two</Transition>
+            </State>
+            <State id="Two">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime=".8">One</Transition>
+            </State>
+            <Transition hitpointsLessThan="1">Say</Transition>
+		</State>
+		<State id="Say">
+            <Behavior text="Oh no, Mixcoatl is my brother. I prefer partying to fighting.;I hope you're having a good time!;EVERYBODY BOOGEY!;Chillin' is the name of the game!;Oh SNAP!;What a beautiful day!;Ho!;Nothing like relaxin' on the beach!;How do you like my shades?;Whoa there!;Lets have a fun-time in the sun-shine!" bubbleTime="2.4" prob="1">Say</Behavior>
+            
+            <State id="One">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">Two</Transition>
+            </State>
+            <State id="Two">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">Three</Transition>
+            </State>
+            <State id="Three">
+                <Transition afterTime="0.2">One</Transition>
+            </State>
+            
+            <Transition afterTime="2.4">Base</Transition>
+		</State>
+		<State id="Wait">
+            <Transition afterTime="1">Base</Transition>
+		</State>
+        <Behavior targetIds="Masked Party God" cooldown="0.2" range="1" maxHeal="3000" hideVisual="true">Heal</Behavior>
+        
+		<SoulboundLoot prob=".15" min="1">Lime Jungle Bay</SoulboundLoot>
+		<SoulboundLoot prob=".15" min="1">Pink Passion Breeze</SoulboundLoot>
+		<SoulboundLoot prob=".15" min="1">Blue Paradise</SoulboundLoot>
+		<SoulboundLoot prob=".15" min="1">Bahama Sunrise</SoulboundLoot>
+	</Object>
+    
+    
+<!-- 
+********************************************************************************* 
+     
+Water Mines
+ 
+*********************************************************************************
+ --> 
+    <Object type="0x0e55" id="Beach Bum">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>37</Index></AnimatedTexture>
+		
+		<HitSound>monster/default_hit</HitSound>
+		<DeathSound>monster/dark_elves_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>15</Defense>
+		
+        <Behavior map="ghost_ship/encounter/beachbum.jm" maxPlace="1" cooldown="1">PlaceMap</Behavior>
+        
+		<Behavior>OryxTaunt</Behavior>
+		<State id="Base">
+            <Behavior speed="0.15">Wander</Behavior>
+            <Behavior range="2" speed="0.3" cooldown="1.4">StayCloseToSpawn</Behavior>
+            <Transition hitpointsLessThan="0.3">Run</Transition>
+		</State>
+        <State id="Run">
+            <Behavior speed="0.5" distance="15">StayBack</Behavior>
+        </State>
+        <SoulboundLoot prob="0.3" threshold="0.37">Davy's Key</SoulboundLoot>
+        <Behavior prob="0.7" posJitter="0" childId="Beachzone Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+    
+    <Object type="0x0e4f" id="Water Mine">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>38</Index></AnimatedTexture>
+		
+		<HitSound>monster/traps_hit</HitSound>
+		<DeathSound>monster/traps_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>30</Defense>
+		<XpMult>0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>LavaBombBlast</ObjectId>
+			<Damage>80</Damage>
+			<Speed>60</Speed>
+			<Size>120</Size>
+			<LifetimeMS>450</LifetimeMS>
+		</Projectile>
+		
+		<State id="Base">
+            <State id="Choose">
+                <Transition afterTime="0">Move1,Move2,Move3</Transition>
+            </State>
+            <State id="Move1">
+                <Behavior speed="0.1">Wander</Behavior>
+                <Behavior acquireRange="30" speed="0.4" radius="5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+                <Behavior bucket="movement" range="1" speed="0.3">Follow</Behavior>
+                <Transition afterTime="2">Choose</Transition>
+            </State>
+            <State id="Move2">
+                <Behavior speed="0.1">Wander</Behavior>
+                <Behavior bucket="movement" speed="0.4" cooldown="0" range="15">Charge</Behavior>
+                <Transition afterTime="2">Choose</Transition>
+            </State>
+            <State id="Move3">
+                <Behavior speed="0.1">Wander</Behavior>
+                <Behavior bucket="movement" range="1" speed="0.34">Follow</Behavior>
+                <Transition afterTime="2">Choose</Transition>
+            </State>
+            <Behavior initialDelay="0.4" range="2.2" numShots="10" projectileId="0">Explode</Behavior>
+            <Transition noneExist="Ghost Ship">Die</Transition>
+            <Transition hitpointsLessThan="0.04">Die</Transition>
+		</State>
+        <State id="Die">
+            <Behavior initialDelay="0" range="30" numShots="10" projectileId="0">Explode</Behavior>
+        </State>
+        <Behavior initialDelay="10" range="0" numShots="10" projectileId="0">Explode</Behavior>
+        <Behavior protecteeId="Ghost Ship Anchor" acquireRange="20" protectionRange="8.2" reprotectRange="5.6" speed="0.5">Protect</Behavior>
+	</Object>
+
+    <Object type="0x0e4e" id="Water Mine Path">
+		<Enemy/>
+		<DisplayId>Water Mine</DisplayId>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>38</Index></AnimatedTexture>
+		
+		<HitSound>monster/traps_hit</HitSound>
+		<DeathSound>monster/traps_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>30</Defense>
+		<XpMult>0</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>LavaBombBlast</ObjectId>
+			<Damage>80</Damage>
+			<Speed>60</Speed>
+			<Size>120</Size>
+			<LifetimeMS>450</LifetimeMS>
+		</Projectile>
+		
+        <State id="Base">
+            <State id="Move">
+                <Behavior listenIds="Ghost Ship" acquireRange="1" cooldown="0">FollowOrders</Behavior>
+                <Transition hasTag="up">Up</Transition>
+                <Transition hasTag="uprt">UpRt</Transition>
+                <Transition hasTag="rt">Rt</Transition>
+                <Transition hasTag="dnrt">DnRt</Transition>
+                <Transition hasTag="dn">Dn</Transition>
+                <Transition hasTag="dnlf">DnLf</Transition>
+                <Transition hasTag="lf">Lf</Transition>
+                <Transition hasTag="uplf">UpLf</Transition>
+            </State>
+            
+            <State id="UpLf">
+                <State id="Going">
+                    <Behavior speed="0.6" distance="10" angle="225" cooldown="15">Move</Behavior>
+                    <Transition afterTime="3.75">Coming</Transition>
+                </State>
+                <State id="Coming">
+                    <Behavior speed="0.5" distance="6" angle="45" cooldown="15">Move</Behavior>
+                </State>
+                <Behavior initialDelay="6" range="0" numShots="10" projectileId="0">Explode</Behavior>
+            </State>
+            
+            <Behavior initialDelay="0.4" range="2.2" numShots="10" projectileId="0">Explode</Behavior>
+            
+            <State id="Up">
+                <State id="Going">
+                    <Behavior speed="0.6" distance="10" angle="270" cooldown="15">Move</Behavior>
+                    <Transition afterTime="3.75">Coming</Transition>
+                </State>
+                <State id="Coming">
+                    <Behavior speed="0.5" distance="6" angle="90" cooldown="15">Move</Behavior>
+                </State>
+                <Behavior initialDelay="6" range="0" numShots="10" projectileId="0">Explode</Behavior>
+            </State>
+            
+            <State id="UpRt">
+                <State id="Going">
+                    <Behavior speed="0.5" distance="10" angle="315" cooldown="15">Move</Behavior>
+                    <Transition afterTime="3.75">Coming</Transition>
+                </State>
+                <State id="Coming">
+                    <Behavior speed="0.5" distance="6" angle="135" cooldown="15">Move</Behavior>
+                </State>
+                <Behavior initialDelay="6" range="0" numShots="10" projectileId="0">Explode</Behavior>
+            </State>
+            
+            <State id="Rt">
+                <State id="Going">
+                    <Behavior speed="0.5" distance="10" angle="0" cooldown="15">Move</Behavior>
+                    <Transition afterTime="3.75">Coming</Transition>
+                </State>
+                <State id="Coming">
+                    <Behavior speed="0.5" distance="6" angle="180" cooldown="15">Move</Behavior>
+                </State>
+                <Behavior initialDelay="6" range="0" numShots="10" projectileId="0">Explode</Behavior>
+            </State>
+            
+            <State id="DnRt">
+                <State id="Going">
+                    <Behavior speed="0.5" distance="10" angle="45" cooldown="15">Move</Behavior>
+                    <Transition afterTime="3.75">Coming</Transition>
+                </State>
+                <State id="Coming">
+                    <Behavior speed="0.5" distance="6" angle="225" cooldown="15">Move</Behavior>
+                </State>
+                <Behavior initialDelay="6" range="0" numShots="10" projectileId="0">Explode</Behavior>
+            </State>
+            
+            <State id="Dn">
+                <State id="Going">
+                    <Behavior speed="0.5" distance="10" angle="90" cooldown="15">Move</Behavior>
+                    <Transition afterTime="3.75">Coming</Transition>
+                </State>
+                <State id="Coming">
+                    <Behavior speed="0.5" distance="6" angle="270" cooldown="15">Move</Behavior>
+                </State>
+                <Behavior initialDelay="6" range="0" numShots="10" projectileId="0">Explode</Behavior>
+            </State>
+            
+            <State id="DnLf">
+                <State id="Going">
+                    <Behavior speed="0.5" distance="10" angle="135" cooldown="15">Move</Behavior>
+                    <Transition afterTime="3.75">Coming</Transition>
+                </State>
+                <State id="Coming">
+                    <Behavior speed="0.5" distance="6" angle="315" cooldown="15">Move</Behavior>
+                </State>
+                <Behavior initialDelay="6" range="0" numShots="10" projectileId="0">Explode</Behavior>
+            </State>
+            
+            <State id="Lf">
+                <State id="Going">
+                    <Behavior speed="0.5" distance="10" angle="180" cooldown="15">Move</Behavior>
+                    <Transition afterTime="3.75">Coming</Transition>
+                </State>
+                <State id="Coming">
+                    <Behavior speed="0.5" distance="6" angle="0" cooldown="15">Move</Behavior>
+                </State>
+                <Behavior initialDelay="6" range="0" numShots="10" projectileId="0">Explode</Behavior>
+            </State>
+            
+            <Transition noneExist="Ghost Ship">Die</Transition>
+            <Transition hitpointsLessThan="0.04">Die</Transition>
+        </State>
+		
+        <State id="Die">
+            <Behavior initialDelay="0" range="30" numShots="10" projectileId="0">Explode</Behavior>
+        </State>
+        <Behavior initialDelay="10" range="0" numShots="10" projectileId="0">Explode</Behavior>
+	</Object>
+    
+    <!-- 
+     ********************************************************************************* 
+     
+     Beach Spectres
+     
+     *********************************************************************************
+     --> 
+    
+    <Object type="0x0e3d" id="Beach Spectre">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>35</Index></AnimatedTexture>
+        
+		<HitSound>monster/dragons_hit</HitSound>
+		<DeathSound>monster/dragons_death</DeathSound>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>800</MaxHitPoints>
+		<Defense>5</Defense>
+		<NoMiniMap/>
+		<Flying/>
+		<Z>0.2</Z>
+		<XpMult>0.0</XpMult>
+		
+		<Projectile>
+			<ObjectId>Ghostly Arrow</ObjectId>
+			<Speed>66</Speed>
+			<Damage>35</Damage>
+            <Size>50</Size>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+		
+        <State id="Invisible">
+            <Behavior minSize="0" rate="-20">ChangeSize</Behavior>
+            <Transition playerWithin="6">Attack</Transition>
+            <Transition noneExist="Ghost Ship">Die</Transition>
+        </State>
+        <State id="Attack">
+            <Behavior maxSize="100" rate="20">ChangeSize</Behavior>
+            
+            <Behavior range="1" speed="0.8" cooldown="3.4">StayCloseToSpawn</Behavior>
+            <Behavior speed="0.3">Wander</Behavior>
+            <Behavior bucket="movement" range="7" speed="0.66" cooldown="2">Charge</Behavior>
+            <Behavior bucket="movement" range="6" speed="0.45">Follow</Behavior>
+            
+            <Behavior type="targeted" projectileId="0" numShots="3" range="5" angle="8" cooldown="1">Shoot</Behavior>
+            
+            <Transition noPlayerWithin="6.5">Invisible</Transition>
+            <Transition noneExist="Ghost Ship">Die</Transition>
+        </State>
+        
+        <State id="Die">
+            <Behavior time="0.2">Decay</Behavior>
+        </State>
+    </Object>
+    
+    <Object type="0x0e3c" id="Beach Spectre Spawner">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>36</Index></AnimatedTexture>
+		
+		<Size>0</Size>
+		<ShadowSize>0</ShadowSize>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>100</Defense>
+		<NoMiniMap/>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+        
+        <State id="Ini">
+            <Behavior listenIds="Ghost Ship" acquireRange="25">FollowOrders</Behavior>
+			<Transition hasTag="ghostmode">Start</Transition>
+        </State>
+        
+        <State id="Start">
+            <Behavior cooldown="3" childIds="Beach Spectre" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Transition noneExist="Ghost Ship">Die</Transition>
+        </State>
+        
+        <State id="Die">
+            <Behavior time="0.2">Decay</Behavior>
+        </State>
+	</Object>
+
+    
+    <!-- 
+     ********************************************************************************* 
+     
+     Clouds
+     
+     *********************************************************************************
+     --> 
+    
+    <Object type="0x0e3b" id="Tempest Cloud">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+        
+        <AltTexture id="1">
+            <Texture><File>lofiObjBig</File><Index>0x33</Index></Texture>
+        </AltTexture>
+        <AltTexture id="2">
+            <Texture><File>lofiObjBig</File><Index>0x33</Index></Texture>
+        </AltTexture>
+        <AltTexture id="3">
+            <Texture><File>lofiObjBig</File><Index>0x34</Index></Texture>
+        </AltTexture>
+        <AltTexture id="4">
+            <Texture><File>lofiObjBig</File><Index>0x35</Index></Texture>
+        </AltTexture>
+        <AltTexture id="5">
+            <Texture><File>lofiObjBig</File><Index>0x36</Index></Texture>
+        </AltTexture>
+        <AltTexture id="6">
+            <Texture><File>lofiObjBig</File><Index>0x37</Index></Texture>
+        </AltTexture>
+        <AltTexture id="7">
+            <Texture><File>lofiObjBig</File><Index>0x38</Index></Texture>
+        </AltTexture>
+        <AltTexture id="8">
+            <Texture><File>lofiObjBig</File><Index>0x39</Index></Texture>
+        </AltTexture>
+        <AltTexture id="9">
+            <Texture><File>lofiObjBig</File><Index>0x3a</Index></Texture>
+        </AltTexture>
+        
+		<HitSound>monster/sprites_hit</HitSound>
+		<DeathSound>monster/sprites_death</DeathSound>
+		<Size>0</Size>
+		<MaxHitPoints>800</MaxHitPoints>
+		<Defense>15</Defense>
+		<Flying/>
+		<Z>0.8</Z>
+
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+        
+		<Projectile id="0">
+			<ObjectId>Lightning Bolt</ObjectId>
+			<Damage>66</Damage>
+			<Speed>40</Speed>
+			<Size>80</Size>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		
+        <Behavior maxSize="120" rate="20">ChangeSize</Behavior>
+		
+        <State id="Animate">
+            <State id="A1">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A6</Transition>
+            </State>
+            <State id="A6">
+                <Behavior altTextureId="6">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A7</Transition>
+            </State>
+            <State id="A7">
+                <Behavior altTextureId="7">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A8</Transition>
+            </State>
+            <State id="A8">
+                <State id="C1">
+                    <Behavior altTextureId="8">SetAltTexture</Behavior>
+                    <Transition afterTime="0.4">C2</Transition>
+                </State>
+                <State id="C2">
+                    <Behavior altTextureId="9">SetAltTexture</Behavior>
+                    <Transition afterTime="0.4">C1</Transition>
+                </State>
+            </State>
+            <Transition afterTime="4">Attack</Transition> 
+        </State>
+		
+        <State id="Attack">
+            <State id="C1">
+                <Behavior altTextureId="8">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">C2</Transition>
+            </State>
+            <State id="C2">
+                <Behavior altTextureId="9">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">C1</Transition>
+            </State>
+            <Behavior type="auto" projectileId="0" numShots="10" range="6" cooldown="0.6" angle="36" offset="0.6">Shoot</Behavior>
+            <Behavior bucket="movement" acquireRange="10" speed="0.2" radius="8.5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+            <Transition noneExist="Ghost Ship">UnAnimate</Transition>
+        </State>
+        
+        <State id="UnAnimate">
+            <State id="A1">
+                <Behavior altTextureId="7">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="6">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A6</Transition>
+            </State>
+            <State id="A6">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime="0.4">A7</Transition>
+            </State>
+            <State id="A7">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+            </State>
+            <Behavior time="2.8">Decay</Behavior> 
+        </State>
+    </Object>
+    
+    
+    <!-- 
+     ********************************************************************************* 
+     
+     Vengefull Spirit
+     
+     *********************************************************************************
+     --> 
+        
+    <Object type="0x0e39" id="Vengeful Spirit"> <!-- vengefull spirit -->
+		<Class>Character</Class>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>39</Index></AnimatedTexture>
+		<HitSound>monster/flaming_skulls_hit</HitSound>
+		<DeathSound>monster/beholder_death</DeathSound>
+		<MaxHitPoints>2000</MaxHitPoints>
+		<XpMult>0</XpMult>
+		<Enemy/>
+		<Size>0</Size>
+		<ShadowSize>80</ShadowSize>
+		<Z>0.3</Z>
+		<Flying/>
+       
+		<Projectile>
+			<ObjectId>Ghostly Blast</ObjectId>
+			<Speed>85</Speed>
+			<Damage>65</Damage>
+            <Size>100</Size>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+        
+        <Behavior maxSize="100" rate="20">ChangeSize</Behavior>
+		<Behavior targetId="Ghost Ship">CopyDamageRecord</Behavior>
+        
+        <State id="Fight">
+            <Behavior speed="0.3">Wander</Behavior>
+            <Behavior bucket="movement" range="10" speed="1.4" cooldown="1">Charge</Behavior>
+            <Behavior bucket="movement" acquireRange="30" speed="0.4" radius="5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+            <Behavior type="targeted" projectileId="0" numShots="3" cooldown="0.4" range="3" defaultAngle="0" angle="8" predictive="1">Shoot</Behavior>
+            <Transition noneExist="Ghost Ship">Die</Transition>
+        </State>
+        
+        <State id="Die">
+            <Behavior time="0.2">Decay</Behavior>
+        </State>
+        
+        <Behavior protecteeId="Ghost Ship Anchor" acquireRange="20" protectionRange="9" reprotectRange="3" speed="1.3">Protect</Behavior>
+	</Object>
+    
+    
+    <!-- 
+     ********************************************************************************* 
+     
+     Encounter
+     
+     *********************************************************************************
+     --> 
+       
+	<Object type="0x0e38" id="Ghost Ship Anchor">
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Ghost Ship Whirlpool</DisplayId>
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>40</Index></AnimatedTexture>
+		<HitSound>monster/sprites_hit</HitSound>
+		<DeathSound>monster/sprites_death</DeathSound>
+		<Size>0</Size>
+		<ShadowSize>0</ShadowSize>
+		<MaxHitPoints>6000</MaxHitPoints>
+		<Defense>2000</Defense>
+		<NoMiniMap/>
+		<PerRealmMax>1</PerRealmMax>
+		<Encounter/>
+		
+		<Projectile id="0">
+			<ObjectId>Invisible</ObjectId>
+			<MinDamage>50</MinDamage>
+			<MaxDamage>100</MaxDamage>
+			<Speed>0</Speed>
+			<Size>100</Size>
+			<LifetimeMS>5000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+        <Behavior map="ghost_ship/encounter/wp_full_lake2.jm" maxPlace="1" cooldown="1">PlaceMap</Behavior>
+        
+        <State id="IniChoose">
+            <Transition afterTime="2" random="0.01">BeachBum</Transition>
+            <Transition afterTime="2">MakeShip</Transition>
+        </State>
+        
+		<State id="BeachBum">
+            <Behavior cooldown="1000" childIds="Beach Bum" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior time="0.2">Decay</Behavior>
+		</State>
+        
+		<State id="MakeShip">
+            <Behavior cooldown="1000" childIds="Ghost Ship" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+			<Transition afterTime="1">IniMid</Transition>
+		</State>
+        
+		<State id="IniMid">
+            
+			<Behavior distance="0.4" speed="1" angle="0" cooldown="1000">Move</Behavior>
+			<Behavior distance="0.4" speed="1" angle="270" cooldown="1000">Move</Behavior>
+            
+            <Behavior listenIds="Ghost Ship" acquireRange="10">FollowOrders</Behavior>
+			<Transition hasTag="ghostmode">Prepare</Transition>
+		</State>
+        
+		<State id="Prepare">
+			<Transition afterTime="1">Battle</Transition>
+		</State>
+        
+		<State id="Battle">
+            <Behavior cooldown="5" childIds="Vengeful Spirit" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior listenIds="Ghost Ship" acquireRange="10">FollowOrders</Behavior>
+            
+			<State id="End">
+				<Transition hasTag="midbattle">MidBattle</Transition>
+			</State>
+            
+            <State id="MidBattle">
+                <Behavior map="ghost_ship/encounter/storm_clouds.jm" maxPlace="2" cooldown="9.5">PlaceMap</Behavior>
+            </State>
+            
+            <!--
+			<State id="Start">
+				<Behavior map="ghost_ship/encounter/wp_none_L.jm" maxPlace="-1" cooldown="10">PlaceMap</Behavior>
+				<Behavior tagName="rev">ClearTag</Behavior>
+				<Behavior tagName="mid">ClearTag</Behavior>
+				<Transition playerWithin="16" afterTime="7">Mid</Transition>
+                <Transition hasTag="midbattle">MidBattle</Transition>
+			</State>
+			<State id="Mid">
+				<Behavior tagName="mid">SetTag</Behavior>
+				<Behavior tagName="end">ClearTag</Behavior>
+				<Behavior tagName="start">ClearTag</Behavior>
+				<Behavior map="ghost_ship/encounter/wp_mid_L.jm" maxPlace="-1" cooldown="10">PlaceMap</Behavior>
+				<Transition afterTime="2" noTag="rev">End</Transition>
+				<Transition afterTime="2" hasTag="rev">Start</Transition>
+			</State>
+			<State id="End">
+				<Behavior tagName="end">SetTag</Behavior>
+				<Behavior tagName="mid">ClearTag</Behavior>
+				<Behavior type="auto" projectileId="0" numShots="1" range="0" cooldown="5">Shoot</Behavior>
+				<Behavior map="ghost_ship/encounter/wp_full_L.jm" maxPlace="-1" cooldown="10">PlaceMap</Behavior>
+				<Behavior tagName="rev">SetTag</Behavior>
+				<Transition afterTime="7">Mid</Transition>
+				<Transition hasTag="midbattle">Mid</Transition>
+			</State>
+            
+            <State id="MidBattle">
+                <State id="Start">
+                    <Behavior map="ghost_ship/encounter/storm_1_L.jm" maxPlace="-1" cooldown="10">PlaceMap</Behavior>
+                    <Transition afterTime="2">Mid</Transition>
+                </State>
+                <State id="Mid">
+                    <Behavior type="auto" projectileId="0" numShots="1" range="0" cooldown="5">Shoot</Behavior>
+                    <Behavior map="ghost_ship/encounter/storm_2_L.jm" maxPlace="-1" cooldown="10">PlaceMap</Behavior>
+                    <Transition afterTime="6">End</Transition>
+                </State>
+                <State id="End">
+                    <Behavior map="ghost_ship/encounter/storm_1_L.jm" maxPlace="-1" cooldown="10">PlaceMap</Behavior>
+                    <Behavior tagName="midbattle">ClearTag</Behavior>
+                </State>
+                <Transition noTag="midbattle" afterTime="10">Start</Transition>
+            </State>
+            -->
+            
+            <Transition noneExist="Ghost Ship">Die</Transition>
+		</State>
+        
+		<State id="Die">
+            <!--
+            <State id="removePool">
+				<Transition hasTag="mid">Calm</Transition>
+				<Transition hasTag="end">Mid</Transition>
+				<Transition afterTime="1">Calm</Transition>
+            </State>
+            <State id="Mid">
+				<Behavior map="ghost_ship/encounter/wp_mid.jm" maxPlace="-1" cooldown="10">PlaceMap</Behavior>
+				<Transition afterTime="2">Calm</Transition>
+            </State>
+            <State id="Calm">
+				<Behavior map="ghost_ship/encounter/wp_none.jm" maxPlace="-1" cooldown="10">PlaceMap</Behavior>
+            </State>
+             -->
+            
+            <State id="Choose">
+				<Transition random="0.25">Island</Transition>
+				<Transition afterTime="0">Die</Transition>
+            </State>
+            <State id="Island">
+                <Behavior map="ghost_ship/encounter/davyisland.jm" maxPlace="1" cooldown="1">PlaceMap</Behavior>
+                <Behavior time="0.2">Decay</Behavior>
+            </State>
+            <State id="Die">
+                <Behavior time="0">Decay</Behavior>
+            </State>
+            <!--
+            <Behavior time="0">Decay</Behavior>
+            <Behavior prob="0.3" posJitter="0" childId="Davy Jones's Locker Portal">MetamorphoseAtDeath</Behavior>
+             -->
+		</State>
+	</Object>
+	
+	<Object type="0x0e37" id="Ghost Ship">
+		<Enemy/>
+		<Class>Character</Class>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>37</Index></AnimatedTexture>
+		<HitSound>monster/stone_walls_death</HitSound>
+		<DeathSound>monster/flaming_skulls_death</DeathSound>
+		<Size>130</Size>
+		<ShadowSize>100</ShadowSize>
+		<MaxHitPoints>42000</MaxHitPoints>
+		<Defense>40</Defense>
+		<Flying/>
+        
+        <Hero/>
+		<Level>20</Level>
+        <Quest/>
+		<God/>
+        <StasisImmune/>
+        
+		<Behavior>OryxTaunt</Behavior>
+        <KeepDamageRecord/>
+        
+        <AltTexture id="1">
+            <AnimatedTexture><File>chars16x16rEncounters</File><Index>36</Index></AnimatedTexture>
+        </AltTexture>
+        <AltTexture id="2">
+            <AnimatedTexture><File>chars16x16rEncounters</File><Index>37</Index></AnimatedTexture>
+            <Effect particle="SwirlingMist" cooldown="0.2">XMLEffect</Effect>
+        </AltTexture>
+		
+		<Projectile id="0">
+			<ObjectId>Cannonball</ObjectId>
+			<Damage>80</Damage>
+			<Speed>60</Speed>
+			<Size>80</Size>
+			<LifetimeMS>4000</LifetimeMS>
+			<!--ParticleTrail/-->
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Giant Cannonball</ObjectId>
+			<Damage>250</Damage>
+			<Speed>40</Speed>
+			<Size>180</Size>
+			<LifetimeMS>4000</LifetimeMS>
+			<!--ParticleTrail/-->
+			<MultiHit/>
+		</Projectile>
+        
+        <State id="Harmless">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <State id="One">
+                <Behavior acquireRange="30" speed="0.25" radius="3" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1">Orbit</Behavior>
+                <Transition afterTime="3" random="0.001">Two</Transition>
+            </State>
+            <State id="Two">
+                <Behavior acquireRange="30" speed="0.25" radius="3" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1" clockwise="true">Orbit</Behavior>
+                <Transition afterTime="3" random="0.001">One</Transition>
+            </State>
+            <Transition hitpointsLessThan="0.96">Change</Transition>
+		</State>
+        
+        <State id="Change">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <State id="ChangeOne">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Behavior range="0" speed="0.8">StayCloseToSpawn</Behavior>
+                <Transition afterTime="2">ChangeTwo</Transition>
+            </State>
+            <State id="ChangeTwo">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Behavior range="0" speed="0.8">StayCloseToSpawn</Behavior>
+                <Order>
+                    <Behavior tagName="ghostmode">SetTag</Behavior>
+                </Order>
+                <Transition afterTime="1">ChangeThree</Transition>
+            </State>
+            <State id="ChangeThree">
+                <Behavior range="0" speed="0.8">StayCloseToSpawn</Behavior>
+            </State>
+            <Transition afterTime="4">FireAtWill</Transition>
+		</State>
+        
+        <State id="Base">
+            <Transition noTag="midbattle" hitpointsLessThan="0.6">MidBattle</Transition>
+            <Transition afterTime="0.4" noTag="minedance">FireAtWill,CannonVolley,PreMineDance</Transition>
+            <Transition afterTime="0.4">FireAtWill,CannonVolley</Transition>
+		</State>
+        
+        <State id="MidBattle">
+			<Behavior tagName="midbattle">SetTag</Behavior>
+            <Order>
+                <Behavior tagName="midbattle">SetTag</Behavior>
+            </Order>
+            <Transition afterTime="0.2">PreMineDance</Transition>
+		</State>
+        
+        
+        <State id="ReleaseSpirits">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            
+            <Behavior acquireRange="30" speed="0.3" radius="1.5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1">Orbit</Behavior>
+            <Transition afterTime="6.0">Base</Transition>
+		</State>
+        
+        <State id="PreMineDance">
+            <Behavior range="0" speed="0.8">StayCloseToSpawn</Behavior>
+            <Transition afterTime="1.2">MineDance</Transition> 
+        </State>
+        
+        <State id="MineDance">
+			<Behavior tagName="minedance">SetTag</Behavior>
+            <Behavior type="auto" projectileId="0" numShots="4" range="0" cooldown="1.4" angle="90" defaultAngle="22.5" offset="0.4">Shoot</Behavior>
+            <Behavior type="auto" projectileId="0" numShots="4" range="0" cooldown="1.4" angle="90" defaultAngle="67.5" offset="1.2">Shoot</Behavior>
+            <Behavior type="targeted" projectileId="1" numShots="1" range="13" cooldown="2" offset="1">Shoot</Behavior>
+            <State id="Up">
+                <Order>
+                    <Behavior tagName="up">SetTag</Behavior>
+                </Order>
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Transition afterTime="1">UpRt</Transition>
+            </State>
+            <State id="UpRt">
+                <Order>
+                    <Behavior tagName="uprt">SetTag</Behavior>
+                </Order>
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Transition afterTime="1">Rt</Transition>
+            </State>
+            <State id="Rt">
+                <Order>
+                    <Behavior tagName="rt">SetTag</Behavior>
+                </Order>
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Transition afterTime="1">DnRt</Transition>
+            </State>
+            <State id="DnRt">
+                <Order>
+                    <Behavior tagName="dnrt">SetTag</Behavior>
+                </Order>
+                <Transition afterTime="1">Dn</Transition>
+            </State>
+            <State id="Dn">
+                <Order>
+                    <Behavior tagName="dn">SetTag</Behavior>
+                </Order>
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Transition afterTime="1">DnLf</Transition>
+            </State>
+            <State id="DnLf">
+                <Order>
+                    <Behavior tagName="dnlf">SetTag</Behavior>
+                </Order>
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Transition afterTime="1">Lf</Transition>
+            </State>
+            <State id="Lf">
+                <Order>
+                    <Behavior tagName="lf">SetTag</Behavior>
+                </Order>
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Transition afterTime="1">UpLf</Transition>
+            </State>
+            <State id="UpLf">
+                <Order>
+                    <Behavior tagName="uplf">SetTag</Behavior>
+                </Order>
+                <Transition afterTime="1">Up</Transition>
+            </State>
+            
+            <Behavior range="0" speed="0.8">StayCloseToSpawn</Behavior>
+            
+            <Behavior cooldown="1" childIds="Water Mine Path" maxChildren="8" startWithMinions="false">MakeMinions</Behavior>
+            <Transition afterTime="12.0">Base</Transition> 
+        </State>
+        
+        <State id="ReleaseMines">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior acquireRange="30" speed="0.3" radius="1.5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1" clockwise="true">Orbit</Behavior>
+            
+            <Behavior cooldown="0.8" childIds="Water Mine" maxChildren="7" startWithMinions="false">MakeMinions</Behavior>
+             
+            <Transition afterTime="6.0">Base</Transition> 
+		</State>
+        
+        <State id="FireAtWill">
+			<Behavior tagName="minedance">ClearTag</Behavior>
+            
+             
+            <State id="Choose">
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Behavior text="Fire at will!!!" bubbleTime="2" prob="0.5">Say</Behavior>
+                <Transition hitpointsLessThan="0.75">Seccond</Transition> 
+                <Transition hitpointsLessThan="0.4">Third</Transition> 
+                <Transition random="1">First</Transition> 
+            </State>
+            <State id="First">
+                <Behavior type="targeted" childId="Water Mine" minRange="3" range="7" rangeJitter="1" defaultAngle="0" cooldown="2">ObjectToss</Behavior>
+                
+				<Behavior bucket="movement" speed="0.55" acquireRange="15" predictive="true" cooldown="1" duration="2.4">Follow</Behavior>
+                <Behavior acquireRange="30" speed="0.3" radius="1.5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1" clockwise="true">Orbit</Behavior>
+            
+                <Behavior projectileId="0" numShots="3" range="10" cooldown="1.6" angle="7" blastEffect="1">Shoot</Behavior>
+                <Behavior projectileId="0" numShots="1" range="10" cooldown="0.4" angle="7" blastEffect="1">Shoot</Behavior>
+                <State id="Hit">
+                    <Transition afterTime="1.6">No</Transition> 
+                </State>
+                <State id="No">
+                    <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                    <Transition afterTime="2">Hit</Transition> 
+                </State>
+            </State>
+            <State id="Seccond">
+                <Behavior type="targeted" childId="Water Mine" minRange="3" range="9" rangeJitter="1" defaultAngle="0" cooldown="2">ObjectToss</Behavior>
+                <Behavior type="targeted" childId="Water Mine" minRange="3" range="9" rangeJitter="1" defaultAngle="0" cooldown="2">ObjectToss</Behavior>
+                
+				<Behavior bucket="movement" speed="0.7" acquireRange="15" predictive="true" cooldown="1" duration="3.4">Follow</Behavior>
+                <Behavior acquireRange="30" speed="0.3" radius="1.5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1">Orbit</Behavior>
+                
+                <Behavior projectileId="0" numShots="2" range="10" cooldown="1.2" angle="10" blastEffect="1" offset="0">Shoot</Behavior>
+                <Behavior projectileId="0" numShots="2" range="10" cooldown="1.2" angle="10" blastEffect="1" offset="0.4">Shoot</Behavior>
+                <Behavior projectileId="0" numShots="3" range="10" cooldown="1.2" angle="10"  blastEffect="1" offset="0.8">Shoot</Behavior>
+                
+                <Behavior projectileId="1" numShots="2" range="10" cooldown="1.6" angle="40" blastEffect="1" offset="1">Shoot</Behavior>
+                <State id="Hit">
+                    <Transition afterTime="1.6">No</Transition> 
+                </State>
+                <State id="No">
+                    <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                    <Transition afterTime="2">Hit</Transition> 
+                </State>
+            </State>
+            <State id="Third">
+                <Behavior type="targeted" childId="Water Mine" minRange="3" range="11" rangeJitter="1" defaultAngle="0" cooldown="2">ObjectToss</Behavior>
+                <Behavior type="targeted" childId="Water Mine" minRange="3" range="11" rangeJitter="1" defaultAngle="0" cooldown="2">ObjectToss</Behavior>
+                <Behavior type="targeted" childId="Water Mine" minRange="3" range="11" rangeJitter="1" defaultAngle="0" cooldown="2">ObjectToss</Behavior>
+                <Behavior type="targeted" childId="Water Mine" minRange="3" range="11" rangeJitter="1" defaultAngle="0" cooldown="2">ObjectToss</Behavior>
+                
+				<Behavior bucket="movement" speed="0.7" acquireRange="15" predictive="true" cooldown="1" duration="3.4">Follow</Behavior>
+                <Behavior acquireRange="30" speed="0.3" radius="1.5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1">Orbit</Behavior>
+                
+                <Behavior projectileId="0" numShots="4" range="10" cooldown="0.8" angle="10"  blastEffect="1" offset="0.2">Shoot</Behavior>
+                <Behavior projectileId="0" numShots="2" range="10" cooldown="0.4" angle="10" blastEffect="1" offset="0">Shoot</Behavior>
+                <Behavior projectileId="1" numShots="4" range="10" cooldown="1.6" angle="50" blastEffect="1" offset="1">Shoot</Behavior>
+                <State id="Hit">
+                    <Transition afterTime="1.6">No</Transition> 
+                </State>
+                <State id="No">
+                    <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                    <Transition afterTime="2">Hit</Transition> 
+                </State>
+            </State>
+            
+            <Transition afterTime="6">Base</Transition> 
+		</State>
+        
+        <State id="CannonVolley">
+			<Behavior tagName="minedance">ClearTag</Behavior>
+            <State id="Ready">
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Behavior text="Ready..." bubbleTime="1.2" prob="1">Say</Behavior>
+                <Transition afterTime="1.6">Aim</Transition> 
+            </State>
+            <State id="Aim">
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Behavior text="Aim..." bubbleTime="1.2" prob="1">Say</Behavior>
+                <Transition afterTime="1.6" hitpointsLessThan="0.5">FireTwo</Transition> 
+                <Transition afterTime="1.6">FireOne</Transition> 
+            </State>
+            <State id="FireOne">
+                <State id="Hit">
+                    <Transition afterTime="1.6">No</Transition> 
+                </State>
+                <State id="No">
+                    <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                    <Transition afterTime="2">Hit</Transition> 
+                </State>
+                <Behavior text="FIRE!" bubbleTime="1" prob="1">Say</Behavior>
+                
+                <Behavior type="auto" projectileId="0" numShots="3" range="0" cooldown="10" defaultAngle="270" angle="30" offset="0">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="3" range="0" cooldown="10" defaultAngle="90" angle="30" offset="0">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="0" numShots="3" range="0" cooldown="10" defaultAngle="0" angle="30" offset="0.6">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="3" range="0" cooldown="10" defaultAngle="180" angle="30" offset="0.6">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="0" numShots="3" range="0" cooldown="10" defaultAngle="270" angle="30" offset="1.2">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="3" range="0" cooldown="10" defaultAngle="90" angle="30" offset="1.2">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="0" numShots="3" range="0" cooldown="10" defaultAngle="0" angle="30" offset="1.8">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="3" range="0" cooldown="10" defaultAngle="180" angle="30" offset="1.8">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="0" numShots="12" range="0" cooldown="10" defaultAngle="285" angle="30" offset="2.4">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="1" numShots="4" range="0" cooldown="10" defaultAngle="0" angle="90" offset="4">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="1" numShots="4" range="0" cooldown="10" defaultAngle="45" angle="90" offset="5">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="1" numShots="4" range="0" cooldown="10" defaultAngle="0" angle="90" offset="6">Shoot</Behavior>
+            </State>
+            <State id="FireTwo">
+                <State id="Hit">
+                    <Transition afterTime="1.6">No</Transition> 
+                </State>
+                <State id="No">
+                    <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                    <Transition afterTime="2">Hit</Transition> 
+                </State>
+                <Behavior text="FIRE!" bubbleTime="1" prob="1">Say</Behavior>
+                
+                
+                <Behavior type="auto" projectileId="0" numShots="8" range="0" cooldown="10" defaultAngle="285" angle="45" offset="0">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="0" numShots="10" range="0" cooldown="10" defaultAngle="285" angle="36" offset="0.6">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="0" numShots="12" range="0" cooldown="10" defaultAngle="285" angle="30" offset="1.2">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="0" numShots="8" range="0" cooldown="10" defaultAngle="285" angle="45" offset="1.8">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="1" numShots="4" range="0" cooldown="10" defaultAngle="22.5" angle="90" offset="2">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="0" angle="50" offset="2.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="90" angle="50" offset="2.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="180" angle="50" offset="2.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="270" angle="50" offset="2.4">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="1" numShots="4" range="0" cooldown="10" defaultAngle="22.5" angle="90" offset="4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="45" angle="50" offset="4.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="135" angle="50" offset="4.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="225" angle="50" offset="4.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="315" angle="50" offset="4.4">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="1" numShots="4" range="0" cooldown="10" defaultAngle="67.5" angle="90" offset="5">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="0" angle="50" offset="5.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="90" angle="50" offset="5.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="180" angle="50" offset="5.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="270" angle="50" offset="5.4">Shoot</Behavior>
+                
+                <Behavior type="auto" projectileId="1" numShots="4" range="0" cooldown="10" defaultAngle="22.5" angle="90" offset="6">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="45" angle="50" offset="6.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="135" angle="50" offset="6.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="225" angle="50" offset="6.4">Shoot</Behavior>
+                <Behavior type="auto" projectileId="0" numShots="2" range="0" cooldown="10" defaultAngle="315" angle="50" offset="6.4">Shoot</Behavior>
+            </State>
+            
+            <State id="Hit">
+                <Transition afterTime="3">No</Transition> 
+            </State>
+            <State id="No">
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Transition afterTime="2">Hit</Transition> 
+            </State>
+            
+            <Behavior bucket="movement" speed="0.55" acquireRange="15" predictive="false" cooldown="0.8" duration="1.4">Follow</Behavior>
+            <Behavior bucket="movement" acquireRange="30" speed="0.45" radius="3.5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1">Orbit</Behavior>
+            <Transition afterTime="9.6">Base</Transition> 
+		</State>
+        
+        <State id="General">
+            <Behavior projectileId="0" numShots="2" range="10" cooldown="3" angle="7" blastEffect="1">Shoot</Behavior>
+            <Behavior projectileId="0" numShots="1" range="10" cooldown="1" angle="7" blastEffect="1">Shoot</Behavior>
+            <Behavior speed="0.4">Wander</Behavior>
+            <Behavior acquireRange="30" speed="0.3" radius="1.5" protecteeId="Ghost Ship Anchor" speedVariability="0" radiusVariability="1">Orbit</Behavior>
+		</State>
+        
+        <Behavior protecteeId="Ghost Ship Anchor" acquireRange="20" protectionRange="12.5" reprotectRange="9" speed="0.9">Protect</Behavior>
+        
+        <SoulboundLoot tier="8" prob=".13">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".07" threshold=".15">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".12">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".09" threshold=".13">Armor</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".20">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".13">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".1" threshold=".1">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".04" threshold=".2">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".06" threshold=".14">Ring</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".005" threshold=".10">Ring</SoulboundLoot>
+		<SoulboundLoot prob=".001">Wine Cellar Incantation</SoulboundLoot>
+		
+		<SoulboundLoot prob=".25" min="1">Potion of Wisdom</SoulboundLoot>
+		<SoulboundLoot prob=".25" min="1">Ghost Pirate Rum</SoulboundLoot>
+	</Object>
+
+    
+<!-- 
+********************************************************************************* 
+
+Davy Jones + Summoner
+
+*********************************************************************************
+-->
+
+	<Object type="0x0e32" id="Davy Jones">
+		<Class>Character</Class>
+		<Enemy/>
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>26</Index></AnimatedTexture>
+		
+		<AltTexture id="1"> <!-- light -->
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>26</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<AltTexture id="2"> <!-- mid -->
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>26</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<AltTexture id="3"> <!-- dark -->
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>27</Index></AnimatedTexture>
+			<Effect particle="SwirlingMist" cooldown="0.2">XMLEffect</Effect>
+		</AltTexture>
+		
+		<AltTexture id="4"> <!-- yell -->
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>28</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<AltTexture id="5"> <!-- hurt1 -->
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>29</Index></AnimatedTexture>
+		</AltTexture>
+		<AltTexture id="6"> <!-- hurt 2 -->
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>30</Index></AnimatedTexture>
+		</AltTexture>
+		
+
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/skull_shrine_death</DeathSound>
+
+   		<Size>0</Size>
+		<MaxHitPoints>8000</MaxHitPoints>
+	    <StasisImmune/>
+		<Defense>35</Defense>
+		<God/>
+		<Quest/>
+		<XpMult>1.75</XpMult>
+        <KeepDamageRecord/>
+		
+		<Projectile id="0">
+			<ObjectId>Ghost Boss Slash</ObjectId>
+			<Speed>65</Speed>
+			<Damage>130</Damage>
+			<LifetimeMS>1700</LifetimeMS>
+   			<Size>100</Size>
+			<ConditionEffect duration="4">Bleeding</ConditionEffect>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Ghost Boss Spinner</ObjectId>
+			<Speed>45</Speed>
+			<Damage>140</Damage>
+   			<Size>110</Size>
+			<LifetimeMS>3600</LifetimeMS>
+			<Boomerang/>
+			<ConditionEffect duration="4">Bleeding</ConditionEffect>
+		</Projectile>
+        
+        <Behavior protecteeId="Captain Summoner" acquireRange="20" protectionRange="13" reprotectRange="9" speed="0.8">Protect</Behavior>
+        
+		<State id="Ini">
+			<Behavior tagName="ini">SetTag</Behavior>
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition playerWithin="8">Wake</Transition>
+		</State>
+		
+		<State id="Wake">
+			<Behavior altTextureId="4">SetAltTexture</Behavior>
+			<Behavior maxSize="120" rate="100">ChangeSize</Behavior>
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			
+			<Transition afterTime="1.2" noneExist="Ghost Lanturn Off">LightsOn</Transition>
+			<Transition afterTime="1.2" noneExist="Ghost Lanturn On">LightsOff</Transition>
+			<Transition afterTime="1.2" exist="Ghost Lanturn On,Ghost Lanturn Off">Middle</Transition>
+		</State>
+		
+		<State id="LightsOff">
+			<Behavior altTextureId="3">SetAltTexture</Behavior>
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior tagName="stayOn">ClearGlobalTag</Behavior> 
+			
+			<State id="Ini">
+				<Transition hasTag="done">Four</Transition>
+				<Transition hasTag="two">Three</Transition>
+				<Transition hasTag="one">Two</Transition>
+				<Transition noTag="one">One</Transition>
+			</State>
+			
+            <Behavior protecteeId="Captain Summoner" acquireRange="20" protectionRange="13" reprotectRange="9" speed="1.2">Protect</Behavior>
+            
+			<State id="One">
+				<Behavior type="targeted" projectileId="0" numShots="3" cooldown="1" cooldownJitter="false" range="5" defaultAngle="0" angle="15">Shoot</Behavior>
+				<Behavior bucket="movement" speed="1" cooldown="0" range="10">Charge</Behavior>
+			</State>
+			<State id="Two">
+				<Behavior type="targeted" projectileId="0" numShots="5" cooldown="1" cooldownJitter="false" range="5" defaultAngle="0" angle="15">Shoot</Behavior>
+				<Behavior bucket="movement" speed="1.15" cooldown="0" range="11">Charge</Behavior>
+			</State>
+			<State id="Three">
+				<Behavior type="targeted" projectileId="0" numShots="7" cooldown="1" cooldownJitter="false" range="5" defaultAngle="0" angle="20">Shoot</Behavior>
+				<Behavior bucket="movement" speed="1.3" cooldown="0" range="12">Charge</Behavior>
+			</State>
+			<State id="Four">
+				<Behavior bucket="movement" speed="1.45" cooldown="0" range="14">Charge</Behavior>
+				<State id="AttOne">
+					<Behavior type="targeted" projectileId="0" numShots="5" cooldown="1" cooldownJitter="false" range="5" defaultAngle="0" angle="12">Shoot</Behavior>
+					<Transition afterTime="0.3">AttTwo</Transition>
+				</State>
+				<State id="AttTwo">
+					<Behavior type="targeted" projectileId="0" numShots="7" cooldown="1" cooldownJitter="false" range="5" defaultAngle="0" angle="20">Shoot</Behavior>
+					<Transition afterTime="0.7">AttOne</Transition>
+				</State>
+			</State>
+			
+			<Transition noneExist="Ghost Lanturn Off">LightsOn</Transition>
+			<Transition exist="Ghost Lanturn On,Ghost Lanturn Off">Middle</Transition>
+		</State>
+		
+		<State id="Middle">
+			<Behavior tagName="stayOn">ClearGlobalTag</Behavior>
+			<Behavior altTextureId="2">SetAltTexture</Behavior>
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			
+			
+			<State id="Prep">
+				<Behavior bucket="movement" range="0" speed=".75">StayCloseToSpawn</Behavior>
+				<Transition afterTime="1.8" hasGlobalTag="partTwo">AttPtTwo</Transition>
+				<Transition afterTime="1" noGlobalTag="partOne">AttFirst</Transition>
+				<Transition afterTime="1" noGlobalTag="partTwo" hasGlobalTag="partOne">AttPtOne</Transition>
+			</State>
+			
+			<State id="AttFirst">
+				<Behavior bucket="movement" speed="0.55" acquireRange="15" predictive="true" cooldown="0.8" duration="1.4">Follow</Behavior>
+				<Behavior bucket="movement" speed="0.35" >Wander</Behavior>
+				<Behavior type="targeted" projectileId="0" numShots="1" cooldown="0.5" range="10" defaultAngle="0" offset="0.2" predictive="0.55">Shoot</Behavior>
+			</State>
+			
+			<State id="AttPtOne">
+				<Behavior bucket="movement" speed="0.55" acquireRange="15" predictive="true" cooldown="1" duration="1.4">Follow</Behavior>
+				<Behavior bucket="movement" speed="0.35" >Wander</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="0" offset="0">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="90" offset="1.2">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="180" offset="2.4">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="270" offset="3.6">Shoot</Behavior>
+				
+				<Behavior type="targeted" projectileId="0" numShots="3" cooldown="1.5" range="11" defaultAngle="0" offset="0.2" predictive="0.95">Shoot</Behavior>
+			</State>
+			
+			<State id="AttPtTwo">
+				<Behavior bucket="movement" range="0" speed="1">StayCloseToSpawn</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="0" offset="0">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="45" offset="0.6">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="90" offset="1.2">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="135" offset="1.8">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="180" offset="2.4">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="225" offset="3">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="270" offset="3.6">Shoot</Behavior>
+				<Behavior type="auto" projectileId="1" numShots="1" cooldown="4.8" range="0" defaultAngle="315" offset="4.2">Shoot</Behavior>
+                
+				<Behavior type="targeted" projectileId="0" numShots="5" cooldown="2" range="11" angle="11" predictive="0.8" offset="0.4">Shoot</Behavior>
+				<Behavior type="targeted" projectileId="0" numShots="5" cooldown="2" range="11" angle="11" predictive="0.8" offset="1">Shoot</Behavior>
+			</State>
+			
+			<Transition noneExist="Ghost Lanturn On">LightsOff</Transition>
+			<Transition noneExist="Ghost Lanturn Off">LightsOn</Transition>
+		</State>
+		
+		<State id="LightsOn">
+			<Behavior tagName="yellready">ClearTag</Behavior>
+			<Behavior tagName="stayOn">SetGlobalTag</Behavior>
+			
+			<State id="Hurt1">
+				<Behavior altTextureId="5">SetAltTexture</Behavior>
+				<Transition afterTime="0.4">Hurt2</Transition>
+			</State>
+			<State id="Hurt2">
+				<Behavior altTextureId="6">SetAltTexture</Behavior>
+				<Transition afterTime="0.4">Hurt1</Transition>
+			</State>  <!-- is ',' an || or && -->
+			<Transition hitpointsLessThan="0.25" hasTag="two" noTag="done">LightsOut</Transition>
+			<Transition hitpointsLessThan="0.50" hasTag="one" noTag="two">LightsOut</Transition>
+			<Transition hitpointsLessThan="0.75" hasTag="ini" noTag="done">LightsOut</Transition>
+			
+			<Transition afterTime="2" noneExist="Ghost Lanturn On">LightsOff</Transition>
+			<Transition afterTime="2" exist="Ghost Lanturn On,Ghost Lanturn Off">Middle</Transition>
+		</State>
+		
+		<State id="LightsOut">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior altTextureId="4">SetAltTexture</Behavior>
+			
+			<State id="Check">
+				<Behavior tagName="ini">ClearTag</Behavior>
+				<Behavior tagName="stayOn">ClearGlobalTag</Behavior>
+				<Transition hasTag="two">Three</Transition>
+				<Transition hasTag="one">Two</Transition>
+				<Transition noTag="one">One</Transition>
+			</State>
+			<State id="One">
+				<Behavior tagName="one">SetTag</Behavior>
+				<Behavior tagName="partOne">SetGlobalTag</Behavior>
+				<Transition hasTag="one">KillLight</Transition>
+			</State>
+			<State id="Two">
+				<Behavior tagName="partTwo">SetGlobalTag</Behavior>
+				<Behavior tagName="two">SetTag</Behavior>
+				<Behavior tagName="one">ClearTag</Behavior>
+				<Transition hasTag="two">KillLight</Transition>
+			</State>
+			<State id="Three">
+                <Behavior prob="1" bubbleTime="4" text="On your knees ye slimy sea slurp!;Avast, ye filthy mongrel!;Be gone with ye!">Say</Behavior>
+				<Behavior tagName="done">SetTag</Behavior>
+				<Transition hasTag="done">KillLight</Transition>
+			</State>
+			<State id="KillLight">
+				<Order>
+					<Behavior tagName="turnoff">SetTag</Behavior>
+				</Order>
+				<Transition afterTime="1.4">Done</Transition>
+			</State>
+			<State id="Done">
+				<Behavior tagName="yellready">SetTag</Behavior>
+			</State>
+			<Transition hasTag="yellready">LightsOff</Transition>
+		</State>
+        
+        
+        <!-- loot once damage # is accurate -->
+		<SoulboundLoot tier="8" prob=".15">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".05">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".15">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".15">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".07">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".02">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".04">Ring</SoulboundLoot>
+		<SoulboundLoot prob=".001">Wine Cellar Incantation</SoulboundLoot>
+		
+		<SoulboundLoot prob=".25" min="1">Potion of Wisdom</SoulboundLoot>
+		<SoulboundLoot prob=".05" >Potion of Attack</SoulboundLoot>
+		<SoulboundLoot prob=".045">Spectral Cloth Armor</SoulboundLoot>
+		<SoulboundLoot prob=".0025">Spirit Dagger</SoulboundLoot>
+		<SoulboundLoot prob=".04">Captain's Ring</SoulboundLoot>
+		<SoulboundLoot prob=".0008">Ghostly Prism</SoulboundLoot>
+		<SoulboundLoot prob=".25">Ghost Pirate Rum</SoulboundLoot>
+        
+        <!--
+		<SoulboundLoot tier="8" prob=".15">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".07" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".15">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".07" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".15">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".1" threshold=".1">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".04" threshold=".2">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".06" threshold=".14">Ring</SoulboundLoot>
+		<SoulboundLoot prob=".001">Wine Cellar Incantation</SoulboundLoot>
+		
+        <SoulboundLoot prob=".25" min="1">Potion of Wisdom</SoulboundLoot>
+        <SoulboundLoot prob=".05" >Potion of Attack</SoulboundLoot>
+		<SoulboundLoot prob=".08" threshold=".15">Spectral Cloth Armor</SoulboundLoot>
+		<SoulboundLoot prob=".0055" threshold=".18">Spirit Dagger</SoulboundLoot>
+		<SoulboundLoot prob=".06" threshold=".10">Captain's Ring</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".22">Ghostly Prism</SoulboundLoot>
+         <SoulboundLoot prob=".25">Ghost Pirate Rum</SoulboundLoot>
+         -->
+	</Object>
+	
+	<Object type="0x0e2d" id="Captain Summoner">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<MaxHitPoints>10</MaxHitPoints>
+   		<Size>0</Size>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+        <State id="Ini">
+			<Transition hasGlobalTag="yellow" playerWithin="30">SummonBoss</Transition>
+        </State>
+		<State id="SummonBoss">
+			<Behavior cooldown="100" childIds="Davy Jones" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Transition afterTime="1">Battle</Transition>
+		</State>
+		<State id="Battle">
+			<State id="IfMany">
+                <Transition playerWithin="23|9">ExtraGhostsTwo</Transition>
+                <Transition playerWithin="23|6">ExtraGhostsOne</Transition>
+			</State>
+            <State id="ExtraGhostsOne">
+				<Behavior cooldown="3" childIds="Ghost Pirate Sr" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="3">Done</Transition>
+            </State>
+            <State id="ExtraGhostsTwo">
+				<Behavior cooldown="3" childIds="Ghost Pirate Sr" maxChildren="3" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="10">Done</Transition>
+            </State>
+            <State id="Done">
+                <!-- -->
+            </State>
+			<Transition noneExist="Davy Jones">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+<!-- 
+********************************************************************************* 
+
+Ghost Pirate Sr
+
+*********************************************************************************
+-->
+	
+	<Object type="0x0e50" id="Ghost Pirate Sr">
+		<Class>Character</Class>
+		<Enemy/>
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>31</Index></AnimatedTexture>
+		 
+		<AltTexture id="1">
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>32</Index></AnimatedTexture>
+			<Effect particle="SwirlingMist" cooldown="0.2">XMLEffect</Effect>
+		</AltTexture>
+			
+		<NoMiniMap/>
+		<XpMult>0</XpMult>
+   		<Size>0</Size>
+		<MaxHitPoints>1700</MaxHitPoints>
+		<Defense>15</Defense>
+		
+		<HitSound>monster/ghosts_death</HitSound>
+		<DeathSound>monster/flaming_skulls_hit</DeathSound>
+		
+   		<Projectile id="0">
+			<ObjectId>Ghost Sr Slash</ObjectId>
+			<Speed>60</Speed>
+			<Damage>80</Damage>
+			<LifetimeMS>1700</LifetimeMS>
+   			<Size>100</Size>
+		</Projectile>
+		
+        <Behavior protecteeId="Captain Summoner" acquireRange="20" protectionRange="13" reprotectRange="9" speed="0.8">Protect</Behavior>
+		<State id="Ini">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition exist="Davy Jones" playerWithin="15">Sleep</Transition>
+		</State>
+		
+		<State id="Sleep">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition afterTime="1" random="0.02">Wake</Transition>
+			<Transition noneExist="Ghost Lanturn Off">DieInv</Transition>
+			<Transition noneExist="Ghost Lanturn On">DieInv</Transition>
+		</State>
+		
+		<State id="Wake">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior maxSize="100" rate="30">ChangeSize</Behavior>
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition afterTime="1.2" noGlobalTag="partTwo">Fight</Transition>
+			<Transition afterTime="1.2" hasGlobalTag="partTwo">FightTwo</Transition>
+			<Transition afterTime="1.2" hasGlobalTag="partOne" noGlobalTag="partTwo">FightOne</Transition>
+			<Transition noneExist="Ghost Lanturn Off">Die</Transition>
+		</State>
+		
+		<State id="Die">
+			<Behavior time="0" particleEffect="Nova" color="000000">Decay</Behavior>
+		</State>
+		
+		<State id="DieInv">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		
+		<State id="Fight">
+			<State id="Mid">
+				<Behavior bucket="movement" speed="0.65" acquireRange="15" predictive="true" cooldown="3" duration="2.75">Follow</Behavior>
+				<Behavior bucket="movement" acquireRange="8" distance="4" speed="0.6">Circle</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Close,Far</Transition>
+				<Transition afterTime="1.4" random="0.02">Close,Far</Transition>
+			</State>
+			<State id="Close">
+				<Behavior bucket="movement" speed="0.85" acquireRange="15" predictive="true" cooldown="2" duration="2">Follow</Behavior>
+				<Behavior bucket="movement" acquireRange="6" distance="2.5" speed="0.5">Circle</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Far,Mid</Transition>
+				<Transition afterTime="1.4" random="0.02">Mid,Far</Transition>
+			</State>
+			<State id="Far">
+				<Behavior bucket="movement" speed="0.45" acquireRange="15" predictive="true" cooldown="4" duration="2">Follow</Behavior>
+				<Behavior bucket="movement" acquireRange="12" distance="7" speed="0.7">Circle</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Close,Mid</Transition>
+				<Transition afterTime="1.4" random="0.02">Close,Mid</Transition>
+			</State>
+			<Behavior type="targeted" projectileId="0" numShots="2" cooldown="1" range="6" defaultAngle="0" angle="20">Shoot</Behavior>
+			<Transition noneExist="Ghost Lanturn Off">Die</Transition>
+		</State>
+		
+		<State id="FightOne">
+			<State id="Mid">
+				<Behavior bucket="movement" protecteeId="Captain Summoner" acquireRange="15" speed="0.6" radius="3.4" radiusVariability="0.1" radiusWobbleDistance="1" radiusWobblePeriod="2">Orbit</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Close,Far</Transition>
+				<Transition afterTime="1.4" random="0.02">Close,Far</Transition>
+			</State>
+			<State id="Close">
+				<Behavior bucket="movement" protecteeId="Captain Summoner" acquireRange="15" speed="0.6" radius="2" radiusVariability="0.05" radiusWobbleDistance="0.5" radiusWobblePeriod="1">Orbit</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Far,Mid</Transition>
+				<Transition afterTime="1.4" random="0.02">Mid,Far</Transition>
+			</State>
+			<State id="Far">
+				<Behavior bucket="movement" protecteeId="Captain Summoner" acquireRange="15" speed="0.6" radius="5" radiusVariability="0.2" radiusWobbleDistance="2" radiusWobblePeriod="4">Orbit</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Close,Mid</Transition>
+				<Transition afterTime="1.4" random="0.02">Close,Mid</Transition>
+			</State>
+			<Behavior type="targeted" projectileId="0" numShots="2" cooldown="1" range="6" defaultAngle="0" angle="20">Shoot</Behavior>
+			<Transition noneExist="Ghost Lanturn Off">Die</Transition>
+		</State>
+		
+		<State id="FightTwo">
+			<State id="Mid">
+				<Behavior bucket="movement" speed="0.65" acquireRange="15" predictive="true" cooldown="3" duration="2.75">Follow</Behavior>
+				<Behavior bucket="movement" acquireRange="8" distance="4" speed="0.6">Circle</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Close,Far</Transition>
+				<Transition afterTime="1.4" random="0.02">Close,Far</Transition>
+			</State>
+			<State id="Close">
+				<Behavior bucket="movement" speed="0.85" acquireRange="15" predictive="true" cooldown="2" duration="2">Follow</Behavior>
+				<Behavior bucket="movement" acquireRange="6" distance="2.5" speed="0.5">Circle</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Far,Mid</Transition>
+				<Transition afterTime="1.4" random="0.02">Mid,Far</Transition>
+			</State>
+			<State id="Far">
+				<Behavior bucket="movement" speed="0.45" acquireRange="15" predictive="true" cooldown="4" duration="2">Follow</Behavior>
+				<Behavior bucket="movement" acquireRange="12" distance="7" speed="0.7">Circle</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="4">Close,Mid</Transition>
+				<Transition afterTime="1.4" random="0.02">Close,Mid</Transition>
+			</State>
+			<Behavior type="targeted" projectileId="0" numShots="3" cooldown="0.8" range="6" defaultAngle="0" angle="20">Shoot</Behavior>
+			<Transition noneExist="Ghost Lanturn Off">Die</Transition>
+		</State>
+		
+		<Behavior prob="1" childId="Ghost Pirate Sr">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+
+<!-- 
+********************************************************************************* 
+
+Boss Lanturns
+  
+*********************************************************************************
+-->
+
+	<Object type="0x0e36" id="Ghost Lanturn On">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+	    <StasisImmune/>
+		<Group>GhostShip Lamps</Group>
+		
+		<Texture><File>lofiObj3</File><Index>0xac</Index></Texture>
+		
+		<HitSound>monster/traps_hit</HitSound>
+		<DeathSound>monster/flaming_skulls_hit</DeathSound>
+
+		<Projectile id="0">
+			<ObjectId>Lanturn Blast</ObjectId>
+			<Speed>40</Speed>
+			<Damage>85</Damage>
+			<LifetimeMS>600</LifetimeMS>
+   			<Size>140</Size>
+			<ConditionEffect duration="2">Paralyzed</ConditionEffect>
+		</Projectile>
+
+		<XpMult>0.0</XpMult>
+   		<Size>120</Size>
+		<ShadowColor>0xfec937a</ShadowColor> <!-- fec937a fe9832 ce635a -->
+		<MaxHitPoints>600</MaxHitPoints>
+		<Defense>5000</Defense>
+
+		<Behavior listenIds="Davy Jones" acquireRange="30">FollowOrders</Behavior>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<Behavior map="ghost_ship/floorlight.jm">PlaceMap</Behavior>
+		
+		<State id="Ini">
+			<Transition hasTag="turnoff">Die</Transition>
+			<Transition hasGlobalTag="stayOn">Wait</Transition>
+			<Transition noneExist="Davy Jones">Done</Transition>
+			<Transition afterTime="11" playerWithin="23|9" exist="Ghost Lanturn Off">DecayDeath</Transition>
+			<Transition afterTime="11" playerWithin="23|5" exist="Ghost Lanturn Off">Hard</Transition>
+			<Transition afterTime="11" playerWithin="23|3" exist="Ghost Lanturn Off">Med</Transition>
+			<Transition afterTime="11" exist="Ghost Lanturn Off">Easy</Transition>
+		</State>
+		<State id="Die">
+			<Behavior tagName="turnoff">ClearTag</Behavior>
+			<Behavior tagName="stayOn">ClearGlobalTag</Behavior>
+			<Behavior type="auto" projectileId="0" numShots="6" cooldown="1" range="0" defaultAngle="0" angle="60">Shoot</Behavior>
+			<Behavior time="0.2" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior> <!-- fe9832 -->
+			<Transition noneExist="Davy Jones">Done</Transition>
+		</State>
+		<State id="Wait">
+			<!-- Behavior time="6">Decay</Behavior -->
+			<Transition hasTag="turnoff">Die</Transition>
+			<Transition afterTime="6">Die</Transition>
+			<Transition noneExist="Davy Jones">Done</Transition>
+		</State>
+		<State id="Done">
+			<Behavior tagName="turnoff">ClearTag</Behavior>
+		</State>
+		<State id="Easy">
+            <!--Behavior prob="1" bubbleTime="4" text="EASY!">Say</Behavior-->
+			<Transition hasGlobalTag="stayOn">Wait</Transition>
+			<Transition noneExist="Ghost Lanturn Off">Wait</Transition>
+			<Transition hasTag="turnoff">Die</Transition>
+			<Transition noneExist="Davy Jones">Done</Transition>
+			<Transition afterTime="11" exist="Ghost Lanturn Off">DecayDeath</Transition>
+		</State>
+		<State id="Med">
+			<Transition hasGlobalTag="stayOn">Wait</Transition>
+			<Transition noneExist="Ghost Lanturn Off">Wait</Transition>
+			<Transition hasTag="turnoff">Die</Transition>
+			<Transition noneExist="Davy Jones">Done</Transition>
+			<Transition afterTime="7" exist="Ghost Lanturn Off">DecayDeath</Transition>
+		</State>
+		<State id="Hard">
+			<Transition hasGlobalTag="stayOn">Wait</Transition>
+			<Transition noneExist="Ghost Lanturn Off">Wait</Transition>
+			<Transition hasTag="turnoff">Die</Transition>
+			<Transition noneExist="Davy Jones">Done</Transition>
+			<Transition afterTime="4" exist="Ghost Lanturn Off">DecayDeath</Transition>
+		</State>
+		<State id="DecayDeath">
+			<Transition hasGlobalTag="stayOn">Wait</Transition>
+			<Transition noneExist="Ghost Lanturn Off">Wait</Transition>
+			<Transition hasTag="turnoff">Die</Transition>
+			<Transition noneExist="Davy Jones">Done</Transition>
+			<Behavior time="1">Decay</Behavior>
+		</State>
+		
+		<Behavior prob="1" posJitter="0" childId="Ghost Lanturn Off">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+	<Object type="0x0e35" id="Ghost Lanturn Off">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+	    <StasisImmune/>
+		<Group>GhostShip Lamps</Group>
+		<!-- 5537001 5484003 5532040 -->
+		<Texture><File>lofiObj3</File><Index>0xad</Index></Texture>
+
+		<HitSound>monster/traps_hit</HitSound>
+		<DeathSound>spell/fire_nova</DeathSound>
+		<Behavior map="ghost_ship/floordark.jm">PlaceMap</Behavior>
+
+		<MaxHitPoints>2000</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+   		<Size>120</Size>
+		<Defense>2</Defense>
+		
+		<Behavior targetId="Davy Jones">CopyDamageRecord</Behavior>
+		<State id="Ini">
+			<Transition noneExist="Ghost Lanturn On" playerWithin="23|9">AllOffHard2</Transition>
+			<Transition noneExist="Ghost Lanturn On" playerWithin="23|5">AllOffHard</Transition>
+			<Transition noneExist="Ghost Lanturn On" playerWithin="23|3">AllOffMed</Transition>
+			<Transition noneExist="Ghost Lanturn On">AllOffEasy</Transition>
+		</State>
+		<State id="AllOffEasy">
+			<Behavior targetIds="Ghost Lanturn Off" cooldown="0.4" range="1" maxHeal="80" hideVisual="true">Heal</Behavior>
+			<Transition afterTime="5">Ini</Transition>
+			<Transition exist="Ghost Lanturn On">Ini</Transition>
+		</State>
+		<State id="AllOffMed">
+			<Behavior targetIds="Ghost Lanturn Off" cooldown="0.4" range="1" maxHeal="120" hideVisual="true">Heal</Behavior>
+			<Transition afterTime="5">Ini</Transition>
+			<Transition exist="Ghost Lanturn On">Ini</Transition>
+		</State>
+		<State id="AllOffHard">
+			<Behavior targetIds="Ghost Lanturn Off" cooldown="0.4" range="1" maxHeal="240" hideVisual="true">Heal</Behavior>
+			<Transition afterTime="5">Ini</Transition>
+			<Transition exist="Ghost Lanturn On">Ini</Transition>
+		</State>
+		<State id="AllOffHard2">
+			<Behavior targetIds="Ghost Lanturn Off" cooldown="0.4" range="1" maxHeal="500" hideVisual="true">Heal</Behavior>
+			<Transition afterTime="5">Ini</Transition>
+			<Transition exist="Ghost Lanturn On">Ini</Transition>
+		</State>
+
+		<Behavior prob="1" posJitter="0" childId="Ghost Lanturn On">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+<!-- 
+********************************************************************************* 
+
+Keys and Doors
+  
+*********************************************************************************
+-->
+	<Object type="0x0e41" id="Yellow Key">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xae</Index></Texture>
+		<Size>80</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<NoMiniMap/>
+		<ShadowSize>80</ShadowSize>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<DeathSound>weapon/obsidian_dagger</DeathSound>
+		
+		<State id="Ini">
+			<Transition playerWithin="1">TakeKey</Transition>
+		</State>
+		<State id="TakeKey">
+			<Behavior tagName="yellow" sendNotification="true">SetGlobalTag</Behavior>
+			<Order>
+				<Behavior tagName="wake">SetTag</Behavior>
+			</Order>
+			<Behavior time="0" particleEffect="Nova" color="eac635">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0e40" id="Red Key">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xaf</Index></Texture>
+		<Size>80</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<NoMiniMap/>
+		<ShadowSize>80</ShadowSize>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<DeathSound>weapon/obsidian_dagger</DeathSound>
+		
+		<State id="Ini">
+			<Transition playerWithin="1">TakeKey</Transition>
+		</State>
+		<State id="TakeKey">
+			<Behavior tagName="red" sendNotification="true">SetGlobalTag</Behavior>
+			<Order>
+				<Behavior tagName="wake">SetTag</Behavior>
+			</Order>
+			<Behavior time="0" particleEffect="Nova" color="e54834">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0e3f" id="Green Key">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xb6</Index></Texture>
+		<Size>80</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<NoMiniMap/>
+		<ShadowSize>80</ShadowSize>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<DeathSound>weapon/obsidian_dagger</DeathSound>
+		
+		<State id="Ini">
+			<Transition playerWithin="1">TakeKey</Transition>
+		</State>
+		<State id="TakeKey">
+			<Behavior tagName="green" sendNotification="true">SetGlobalTag</Behavior>
+			<Order>
+				<Behavior tagName="wake">SetTag</Behavior>
+			</Order>
+			<Behavior time="0" particleEffect="Nova" color="5ccc57">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0e3e" id="Purple Key">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xb7</Index></Texture>
+		<Size>80</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<NoMiniMap/>
+		<ShadowSize>80</ShadowSize>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<DeathSound>weapon/obsidian_dagger</DeathSound>
+		
+		<State id="Ini">
+			<Transition playerWithin="1">TakeKey</Transition>
+		</State>
+		<State id="TakeKey">
+			<Behavior tagName="purple" sendNotification="true">SetGlobalTag</Behavior>
+			<Behavior time="0" particleEffect="Nova" color="675dd8">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0e2e" id="Yellow Opener">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xae</Index></Texture>
+		<Size>0</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<NoMiniMap/>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<State id="Ini">
+			<Transition hasGlobalTag="yellow" playerWithin="3">OpenDoor</Transition>
+		</State>
+		<State id="OpenDoor">
+			<Behavior objectId="GhostShip YellowDoor Lf,GhostShip YellowDoor Rt" radius="3">DeleteObject</Behavior>
+			<Behavior time="0.2">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0e30" id="Red Opener">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xaf</Index></Texture>
+		<Size>0</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<NoMiniMap/>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<State id="Ini">
+			<Transition hasGlobalTag="red" playerWithin="3">OpenDoor</Transition>
+		</State>
+		<State id="OpenDoor">
+			<Behavior objectId="GhostShip RedDoor Lf,GhostShip RedDoor Rt" radius="3">DeleteObject</Behavior>
+			<Behavior time="0.2">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0e33" id="Green Opener">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xb8</Index></Texture>
+		<Size>0</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<NoMiniMap/>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<State id="Ini">
+			<Transition hasGlobalTag="green" playerWithin="3">OpenDoor</Transition>
+		</State>
+		<State id="OpenDoor">
+			<Behavior objectId="GhostShip GreenDoor Lf,GhostShip GreenDoor Rt" radius="3">DeleteObject</Behavior>
+			<Behavior time="0.2">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0e34" id="Purple Opener">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xb9</Index></Texture>
+		<Size>0</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<NoMiniMap/>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<State id="Ini">
+			<Transition hasGlobalTag="purple" playerWithin="3">OpenDoor</Transition>
+		</State>
+		<State id="OpenDoor">
+			<Behavior objectId="GhostShip PurpleDoor Lf,GhostShip PurpleDoor Rt" radius="3">DeleteObject</Behavior>
+			<Behavior time="0.2">Decay</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x0e4a" id="VDoor">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+	    <StasisImmune/>
+		<Texture><File>lofiObj3</File><Index>0xba</Index></Texture>
+
+		<MaxHitPoints>10</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+   		<Size>0</Size>
+   		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+   		<State id="Ini">
+   			<Transition>Purple,Green,Red,Yellow</Transition>
+   		</State>
+   		<State id="Purple">
+   			<Behavior map="ghost_ship/doors/purple_v.jm">PlaceMap</Behavior>
+			<Behavior time="0.4">Decay</Behavior>
+   		</State>
+   		<State id="Green">
+   			<Behavior map="ghost_ship/doors/green_v.jm">PlaceMap</Behavior>
+			<Behavior time="0.4">Decay</Behavior>
+   		</State>
+   		<State id="Red">
+   			<Behavior map="ghost_ship/doors/red_v.jm">PlaceMap</Behavior>
+			<Behavior time="0.4">Decay</Behavior>
+   		</State>
+   		<State id="Yellow">
+   			<Behavior map="ghost_ship/doors/yellow_v.jm">PlaceMap</Behavior>
+			<Behavior time="0.4">Decay</Behavior>
+   		</State>
+	</Object>
+
+	<Object type="0x0e49" id="HDoor">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+	    <StasisImmune/>
+		<Texture><File>lofiObj3</File><Index>0xbb</Index></Texture>
+
+		<MaxHitPoints>10</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+   		<Size>0</Size>
+   		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+   		<State id="Ini">
+   			<Transition>Purple,Green,Red,Yellow</Transition>
+   		</State>
+   		<State id="Purple">
+   			<Behavior map="ghost_ship/doors/purple_h.jm">PlaceMap</Behavior>
+			<Behavior time="0.4">Decay</Behavior>
+   		</State>
+   		<State id="Green">
+   			<Behavior map="ghost_ship/doors/green_h.jm">PlaceMap</Behavior>
+			<Behavior time="0.4">Decay</Behavior>
+   		</State>
+   		<State id="Red">
+   			<Behavior map="ghost_ship/doors/red_h.jm">PlaceMap</Behavior>
+			<Behavior time="0.4">Decay</Behavior>
+   		</State>
+   		<State id="Yellow">
+   			<Behavior map="ghost_ship/doors/yellow_h.jm">PlaceMap</Behavior>
+			<Behavior time="0.4">Decay</Behavior>
+   		</State>
+	</Object>
+	
+<!-- 
+********************************************************************************* 
+
+Enemies
+  
+*********************************************************************************
+-->
+	<Object type="0x0e3a" id="Violent Spirit"> <!-- vengefull spirit -->
+		<Class>Character</Class>
+		<!--RemoteTexture><Instance>production</Instance><Id>82356104</Id><Right/></RemoteTexture-->
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>36</Index></AnimatedTexture>
+		<HitSound>monster/flaming_skulls_hit</HitSound>
+		<DeathSound>monster/beholder_death</DeathSound>
+		<MaxHitPoints>1200</MaxHitPoints>
+		<XpMult>0</XpMult>
+		<Enemy/>
+		<Size>0</Size>
+		<Z>0.3</Z>
+        <!--
+		<BloodProb>0.5</BloodProb>
+		<BloodColor>0x50d71b</BloodColor>
+        -->
+		<Flying/>
+		<Projectile>
+			<ObjectId>Ghostly Arrow</ObjectId>
+			<Speed>80</Speed>
+			<Damage>40</Damage>
+            <Size>50</Size>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+        
+        <State id="Ini">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Transition noPlayerWithin="17" random="0.1" afterTime="5">Wake</Transition>
+		</State>
+		
+		<State id="Wake">
+			<Behavior maxSize="120" rate="80">ChangeSize</Behavior>
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition afterTime="1.1">Fight</Transition>
+		</State>
+        
+        <State id="Fight">
+            <Behavior bucket="movement" range="10" cooldown="1">Charge</Behavior>
+            <Behavior bucket="movement">Wander</Behavior>
+            <Behavior type="targeted" projectileId="0" numShots="3" cooldown="0.4" range="2.4" defaultAngle="0" angle="5" predictive="1">Shoot</Behavior>
+		</State>
+        
+		<SoulboundLoot prob=".01">Ghost Pirate Rum</SoulboundLoot>
+		<SoulboundLoot prob=".02">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".03">Magic Potion</SoulboundLoot>
+        
+		<Behavior prob="1" posJitter="2" childId="Violent Spirit">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+<Object type="0x0e48" id="Lost Soul">
+		<Class>Character</Class>
+		<Group>GhostShip Group</Group>
+		<Enemy/>
+		<Texture><File>lofiObj3</File><Index>0xbc</Index></Texture>
+		<Animation prob="1.0" period="0.0">
+			<Frame time="0.2">
+				<RandomTexture>
+					<Texture><File>lofiObj3</File><Index>0xbc</Index></Texture>
+					<Texture><File>lofiObj3</File><Index>0xbd</Index></Texture>
+					<Texture><File>lofiObj3</File><Index>0xbe</Index></Texture>
+				</RandomTexture>
+			</Frame>
+		</Animation>
+		<XpMult>0</XpMult>
+   		<Size>90</Size>
+		<ShadowSize>80</ShadowSize>
+		<MaxHitPoints>500</MaxHitPoints>
+		<Defense>30</Defense>
+		<Z>0.33</Z>
+		
+		<DeathSound>monster/flaming_skulls_hit</DeathSound>
+		
+		<Projectile id="0">
+			<ObjectId>Spirit Bolt</ObjectId>
+			<Damage>40</Damage>
+			<Speed>35</Speed>
+			<Size>50</Size>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+			
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<!--Behavior bucket="movement" speed="15" cooldown="0.5" acquireRange="5.25">Buzz</Behavior-->
+		<Behavior bucket="movement" speed="1.2" cooldown="0.3" range="4.55">Charge</Behavior>
+		<Behavior bucket="movement" protecteeId="Ghost of Roger" acquireRange="7" speed="0.7" radius="1.4" radiusVariability="0" radiusWobbleDistance="1" radiusWobblePeriod="2">Orbit</Behavior>
+		<Behavior bucket="movement" speed="0.12">Wander</Behavior>
+		<Behavior initialDelay="0" range="1.5" numShots="6" projectileId="0">Explode</Behavior>
+		<Behavior initialDelay="5" range="1.5" numShots="6" projectileId="0">Explode</Behavior>
+	</Object>
+
+<Object type="0x0e45" id="Ghost of Roger">
+		<Class>Character</Class> <!-- names: Jolly Roger, Ghost of Roger, Spirit of Roger, Roger Spirit -->
+		<Group>GhostShip Group</Group>
+		<Enemy/>
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>33</Index></AnimatedTexture>
+
+		<XpMult>1.0</XpMult>
+   		<Size>120</Size>
+		<MaxHitPoints>2300</MaxHitPoints>
+		<Defense>50</Defense>
+		<Z>0.15</Z>
+		<HitSound>monster/ghosts_death</HitSound>
+		<DeathSound>monster/flaming_skulls_hit</DeathSound>
+		
+   		<Projectile id="0">
+			<ObjectId>Roger Blast</ObjectId>
+			<Speed>65</Speed>
+			<Damage>110</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+   			<Size>100</Size>
+		</Projectile>
+        <Projectile id="1">
+            <ObjectId>Skull Bolt</ObjectId>
+            <Speed>70</Speed>
+            <Damage>50</Damage>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+		
+		<State id="Fight">
+			<Behavior bucket="movement" speed="0.15" acquireRange="10" predictive="true" cooldown="2">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.25" acquireRange="8" predictive="true" cooldown="0.2">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.15">Wander</Behavior>
+			<State id="Shoot1">
+				<Behavior type="targeted" projectileId="0" numShots="1" cooldown="1" range="10" defaultAngle="0" angle="0" predictive=".2">Shoot</Behavior>
+				<Behavior type="targeted" projectileId="0" numShots="1" cooldown="1" range="10" defaultAngle="0" angle="0" offset="0.2" predictive="0.5">Shoot</Behavior>
+				<Behavior type="targeted" projectileId="0" numShots="1" cooldown="1" range="10" defaultAngle="0" angle="0" offset="0.4" predictive="0.8">Shoot</Behavior>
+				<Transition afterTime="0.6">Wait</Transition>
+			</State>
+			<State id="Wait">
+				<Transition afterTime="0.8">Shoot1</Transition>
+			</State>
+			<Behavior cooldown="1" childIds="Lost Soul" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+            <Transition hitpointsLessThan="0.4">FightTwo</Transition>
+		</State>
+    
+    <State id="FightTwo">
+        <Behavior cooldown="2" childIds="Violent Spirit" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+        <State id="Shoot1">
+            <Behavior bucket="movement" range="10" cooldown="4" speed="0.5">Charge</Behavior>
+            <Behavior bucket="movement" speed="0.25" acquireRange="8" predictive="true" cooldown="1">Follow</Behavior>
+            <Behavior bucket="movement" speed="0.15">Wander</Behavior>
+            
+            <Behavior type="targeted" projectileId="0" numShots="1" cooldown="1" range="10" defaultAngle="0" angle="0" predictive=".2">Shoot</Behavior>
+            <Behavior type="targeted" projectileId="0" numShots="1" cooldown="1" range="10" defaultAngle="0" angle="0" offset="0.2" predictive="0.5">Shoot</Behavior>
+            <Behavior type="targeted" projectileId="0" numShots="1" cooldown="1" range="10" defaultAngle="0" angle="0" offset="0.4" predictive="0.8">Shoot</Behavior>
+            <Transition afterTime="0.8">Wait</Transition>
+        </State>
+        <State id="Wait">
+            <Transition afterTime="0.2">Charge</Transition>
+        </State>
+        <State id="Charge">
+            <Behavior bucket="movement" range="11" cooldown="3" speed="0.9">Charge</Behavior>
+            <Behavior type="targeted" projectileId="1" numShots="5" cooldown="0.4" range="10" defaultAngle="0" angle="10" predictive=".2" offset="0.4">Shoot</Behavior>
+            <Transition afterTime="1.4">Shoot1</Transition>
+        </State>
+        <Behavior cooldown="1" childIds="Lost Soul" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+    </State>
+		
+		<SoulboundLoot prob=".05">Ghost Pirate Rum</SoulboundLoot>
+		<SoulboundLoot prob=".04">Magic Potion</SoulboundLoot>
+		
+		<SoulboundLoot tier="8" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".007">Ring</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".02">Ring</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".03">ClassSpecial</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0e47" id="Maggot Sack">
+		<Class>Character</Class>
+		<Group>GhostShip Group</Group>
+		<Enemy/>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+
+		<XpMult>0</XpMult>
+   		<Size>0</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+			
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<Behavior cooldown="1000" childIds="Maggot" maxChildren="20" startWithMinions="true">MakeMinions</Behavior>
+		<Behavior time="0.2">Decay</Behavior>
+	</Object>
+	<Object type="0x0e46" id="Maggot">
+		<Class>Character</Class>
+		<Group>GhostShip Group</Group>
+		<Enemy/>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>30</Index></AnimatedTexture>
+
+		<XpMult>1.0</XpMult>
+   		<Size>40</Size>
+		<ShadowSize>85</ShadowSize>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>2</Defense>
+		<HitSound>monster/blobs_hit</HitSound>
+		<DeathSound>monster/blobs_death</DeathSound>
+		
+		<Projectile id="0">
+			<ObjectId>Invisible</ObjectId>
+			<Damage>30</Damage>
+			<Speed>0</Speed>
+			<Size>80</Size>
+			<LifetimeMS>200</LifetimeMS>
+			<ConditionEffect duration="3">Sick</ConditionEffect>
+		</Projectile>
+			
+		<State id="Fight">
+			<Behavior bucket="movement" range="4.6" speed=".2">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" speed="0.12">Wander</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="0.2" range="0">Shoot</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x0e44" id="School of Ghostfish">
+		<Class>Character</Class>
+		<Group>GhostShip Group</Group>
+		<Enemy/>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>31</Index></AnimatedTexture>
+
+		<XpMult>1.0</XpMult>
+   		<Size>110</Size>
+		<MaxHitPoints>1600</MaxHitPoints>
+		<Defense>3</Defense>
+		<Z>0.1</Z>
+		<HitSound>monster/cubes_death</HitSound>
+		<DeathSound>monster/dark_elves_death</DeathSound>
+		
+   		<Projectile id="0">
+			<ObjectId>Fish Shot</ObjectId>
+			<Speed>40</Speed>
+			<Damage>50</Damage>
+			<LifetimeMS>1300</LifetimeMS>
+   			<Size>80</Size>
+		</Projectile>
+		
+		<State id="Fight">
+			<Behavior bucket="movement" speed="0.45" acquireRange="10" predictive="true" cooldown="2">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.30" acquireRange="8" predictive="true" cooldown="0.2">Follow</Behavior>
+			<Behavior bucket="movement">Wander</Behavior>
+			<Behavior type="targeted" projectileId="0" numShots="6" cooldown="1.2" range="6" defaultAngle="0" angle="60">Shoot</Behavior>
+		</State>
+		<State id="Charage">
+			<Behavior effect="Armored">ConditionEffect</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior bucket="movement" speed="0.9" cooldown="0" range="12">Charge</Behavior>
+			<Transition playerWithin="2.5">Fight</Transition>
+		</State>
+
+		<SoulboundLoot prob=".03">Magic Potion</SoulboundLoot>
+		
+		<SoulboundLoot tier="8" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".02">Ring</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".04">Weapon</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0e43" id="Zombie Pirate Sr">
+		<Class>Character</Class>
+		<Group>GhostShip Group</Group>
+		<Enemy/>
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>34</Index></AnimatedTexture>
+		
+		<AltTexture id="1"> <!-- run -->
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>35</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<BloodProb>0.5</BloodProb>
+		<BloodColor>0x50d71b</BloodColor>
+        
+		<XpMult>1.0</XpMult>
+   		<Size>110</Size>
+		<MaxHitPoints>1200</MaxHitPoints>
+		<Defense>17</Defense>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/undead_hobbits_death</DeathSound>
+		
+   		<Projectile id="0">
+			<ObjectId>Zombie Shot</ObjectId>
+			<Speed>55</Speed>
+			<Damage>66</Damage>
+			<LifetimeMS>1700</LifetimeMS>
+   			<Size>110</Size>
+		</Projectile>
+		
+		<State id="Fight">
+			<State id="Normal">
+				<Behavior bucket="movement" speed="0.20" acquireRange="10" predictive="true" cooldown="0.4">Follow</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="0.8" random="0.003">Rush</Transition>
+			</State>
+			<State id="Rush">
+				<Behavior bucket="movement" speed="0.35" acquireRange="8" predictive="true" cooldown="0.6">Follow</Behavior>
+				<Behavior bucket="movement" speed="1.2">Wander</Behavior>
+				<Transition afterTime="0.6" random="0.02">Normal</Transition>
+			</State>
+			<Behavior type="targeted" projectileId="0" numShots="2" cooldown="0.4" range="6" defaultAngle="0" angle="13" predictive="0.8">Shoot</Behavior>
+			<Transition noPlayerWithin="3.5">Charage</Transition>
+		</State>
+		<State id="Charage">
+			<Behavior effect="Armored">ConditionEffect</Behavior>
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior bucket="movement" speed="0.9" cooldown="0" range="12">Charge</Behavior>
+			<Transition playerWithin="2.5">Fight</Transition>
+		</State>
+		
+		<!-- 
+		<Behavior prob="0.4" posJitter="0.5" childId="Maggot Sack">MetamorphoseAtDeath</Behavior>
+		 -->
+		 
+		<SoulboundLoot prob=".03">Ghost Pirate Rum</SoulboundLoot>
+		<SoulboundLoot prob=".03">Magic Potion</SoulboundLoot>
+		
+		<SoulboundLoot tier="8" prob=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".03">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".01">Ring</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".03">Weapon</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0e42" id="Zombie Pirate Jr">
+		<Class>Character</Class>
+		<Group>GhostShip Group</Group>
+		<Enemy/>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>32</Index></AnimatedTexture>5171081
+			
+		<XpMult>1.0</XpMult>
+   		<Size>110</Size>
+		<MaxHitPoints>700</MaxHitPoints>
+		<Defense>11</Defense>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/undead_hobbits_death</DeathSound>
+		
+		<BloodProb>0.5</BloodProb>
+		<BloodColor>0x50d71b</BloodColor>
+        
+   		<Projectile id="0">
+			<ObjectId>Zombie Shot</ObjectId>
+			<Speed>33</Speed>
+			<Damage>50</Damage>
+			<LifetimeMS>1700</LifetimeMS>
+   			<Size>80</Size>
+		</Projectile>
+		
+		<State id="Fight">
+			<State id="Normal">
+				<Behavior bucket="movement" speed="0.30" acquireRange="10" predictive="true" cooldown="0.4">Follow</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="0.8" random="0.003">Rush</Transition>
+			</State>
+			<State id="Rush">
+				<Behavior bucket="movement" speed="0.43" acquireRange="6" predictive="true" cooldown="0.6">Follow</Behavior>
+				<Behavior bucket="movement">Wander</Behavior>
+				<Transition afterTime="0.6" random="0.02">Normal</Transition>
+			</State>
+			<Behavior type="targeted" projectileId="0" numShots="3" cooldown="0.8" range="7" defaultAngle="0" angle="11">Shoot</Behavior>
+		</State>
+
+		<SoulboundLoot prob=".01">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01">Ghost Pirate Rum</SoulboundLoot>
+	</Object>
+
+
+	<Object type="0x0e31" id="Lil' Ghost Pirate">
+		<Class>Character</Class>
+		<Group>GhostShip Group</Group>
+		<Enemy/>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>33</Index></AnimatedTexture>
+		 
+		<AltTexture id="1">
+			<AnimatedTexture><File>chars8x8rEncounters</File><Index>33</Index></AnimatedTexture>
+			<Effect particle="SwirlingMist" cooldown="0.2">XMLEffect</Effect>
+		</AltTexture>
+			
+		<NoMiniMap/>
+		<XpMult>0.005</XpMult>
+   		<Size>0</Size>
+		<MaxHitPoints>700</MaxHitPoints>
+		<Defense>0</Defense>
+		
+		<HitSound>monster/ghosts_death</HitSound>
+		<DeathSound>monster/flaming_skulls_hit</DeathSound>
+		
+   		<Projectile id="0">
+			<ObjectId>Ghost Swipe</ObjectId>
+			<Speed>66</Speed>
+			<Damage>50</Damage>
+			<LifetimeMS>1700</LifetimeMS>
+   			<Size>90</Size>
+		</Projectile>
+		
+		
+		<State id="Ini">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior listenIds="GhostShip Group" acquireRange="6">FollowOrders</Behavior>
+			<Behavior listenIds="Green Key,Red Key,Yellow Key" acquireRange="16"  cooldown="0">FollowOrders</Behavior>
+			<Transition hasTag="wake" random="0.55">Wake</Transition>
+			<Transition hasTag="wake" random="1">RemoveWake</Transition>
+			<Transition playerWithin="4.5" random="0.014">HelpCall</Transition>
+			<!-- Behavior listenIds="Ghost Sensor" acquireRange="7">FollowOrders</Behavior -->
+			<!-- Transition hasTag="awake">Wake</Transition -->
+		</State>
+        
+		<State id="RemoveWake">
+			<Behavior tagName="wake">ClearTag</Behavior>
+			<Transition noTag="wake">Ini</Transition>
+		</State>
+		
+		<State id="HelpCall">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<State id="Ini">
+				<Transition random="1">Call</Transition>
+				<Transition random="1">NoCall</Transition>
+			</State>
+			<State id="Call">
+				<Order>
+					<Behavior tagName="wake">SetTag</Behavior>
+				</Order>
+				<Behavior tagName="called">SetTag</Behavior>
+			</State>
+			<State id="NoCall">
+				<Behavior tagName="called">SetTag</Behavior>
+			</State>
+			<Transition hasTag="called">Wake</Transition>
+		</State>
+		
+		<State id="Wake">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior maxSize="110" rate="100">ChangeSize</Behavior>
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition afterTime="1.1">Fight</Transition>
+		</State>
+		
+		<State id="Fight">
+			<Behavior bucket="movement" speed="0.55" acquireRange="15" predictive="true" cooldown="0.4">Follow</Behavior>
+			<Behavior bucket="movement">Wander</Behavior>
+			<Behavior type="targeted" projectileId="0" numShots="1" cooldown="0.2" cooldownJitter="true" range="2.2" defaultAngle="0" angle="0">Shoot</Behavior>
+		</State>
+
+		<SoulboundLoot prob=".02">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".003">Ghost Pirate Rum</SoulboundLoot>
+		
+		<Behavior prob="1" posJitter="2" childId="Lil' Ghost Pirate">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x0e2f" id="GhostShip Rat">
+		<Class>Character</Class>
+		<Enemy/>
+		<DisplayId>Ghost Ship Rat</DisplayId>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>34</Index></AnimatedTexture>
+
+		<HitSound>monster/bats_hit</HitSound>
+		<DeathSound>monster/flayers_hit</DeathSound>
+
+		<XpMult>1.0</XpMult>
+   		<Size>100</Size>
+		<MaxHitPoints>650</MaxHitPoints>
+		<Defense>5</Defense>
+		
+   		<Projectile id="0">
+			<ObjectId>Rat Tail</ObjectId>
+			<Speed>45</Speed>
+			<Damage>45</Damage>
+			<LifetimeMS>1500</LifetimeMS>
+   			<Size>100</Size>
+			<ConditionEffect duration="1">Stunned</ConditionEffect>
+		</Projectile>
+
+		<State id="Base">
+            <Behavior bucket="movement" speed="0.85" range="7.5">Charge</Behavior>
+            <Behavior bucket="movement" speed="1" range="10.5">Charge</Behavior>
+            <Behavior bucket="movement">Wander</Behavior>
+            <Behavior type="targeted" projectileId="0" numShots="1" cooldown="0.3" range="3" defaultAngle="0" angle="0">Shoot</Behavior>
+			<Transition hitpointsLessThan="0.35">Angry</Transition>
+        </State>
+        
+		<State id="Angry">
+            <Behavior bucket="movement" speed="1" range="10.5">Charge</Behavior>
+            <Behavior speed="0.5">Wander</Behavior>
+            <Behavior type="targeted" projectileId="0" numShots="1" cooldown="0" range="3" defaultAngle="0" angle="0">Shoot</Behavior>
+        </State>
+
+		<SoulboundLoot prob=".01">Health Potion</SoulboundLoot>
+	</Object>
+	
+</Objects>

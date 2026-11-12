@@ -1,5 +1,7 @@
 # Recovered data
 
+Original research materials and the XML scripting documentation are preserved under `reference/`; see its README for provenance and scope.
+
 Selected `objects.xml`/`grounds.xml` and map assets remain third-party material; the backend license does not relicense them. `sfx/music/sorc.mp3` is the selected client's requested track, recovered unchanged from moistosaurus/realm-src `1855c017eab870d13f0b61b1cf0b9e66a01922ff`, `common/resources/web/music/sorc.mp3` (see `REALM-SRC-LICENSE`); The non-music MP3 clips in `sfx/` are unchanged files from that pin's `common/resources/web/sfx/`. No separate audio-rights grant is claimed.
 
 **Map candidates, not authenticated official 123.5.1 layouts:**

@@ -1,0 +1,38 @@
+<Dungeons>
+	<Dungeon id="Tutorial">
+		<Width>256</Width>
+		<Height>256</Height>
+		<CenterStartRoom/>
+		<Visibility>Full</Visibility>
+		<Room id="start">
+			<LocalJM>tutorial.jm</LocalJM>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Nexus Explanation">
+		<Width>256</Width>
+		<Height>256</Height>
+		<CenterStartRoom/>
+		<Visibility>Full</Visibility>
+		<Room id="start">
+			<LocalJM>nexus_tutorial_new/nexusMarket_fullTutorial.jm</LocalJM>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Vault Explanation">
+		<Width>256</Width>
+		<Height>256</Height>
+		<CenterStartRoom/>
+		<Visibility>Full</Visibility>
+		<Room id="start">
+			<LocalJM>nexus_tutorial_new/vault_tutorial.jm</LocalJM>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Guild Explanation">
+		<Width>256</Width>
+		<Height>256</Height>
+		<CenterStartRoom/>
+		<Visibility>Full</Visibility>
+		<Room id="start">
+			<LocalJM>nexus_tutorial_new/guild_tutorial.jm</LocalJM>
+		</Room>
+	</Dungeon>
+</Dungeons>

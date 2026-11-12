@@ -1,0 +1,559 @@
+<Objects>
+	<Object type="0x0e28" id="Snakepit Guard Spawner">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>39</Index></AnimatedTexture>
+
+		<XpMult>0.0</XpMult>
+   		<Size>0</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+	    <StasisImmune/>
+		
+		<State id="Ini">
+			<Transition afterTime="1">MakeSnake</Transition>
+		</State>
+		<State id="MakeSnake">
+			<Behavior cooldown="1000" childIds="Snakepit Guard" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior time="0.2">Decay</Behavior>
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0e27" id="Snakepit Button">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+		<DrawOnGround/>
+	    <StasisImmune/>
+		
+		<Texture><File>lofiObj3</File><Index>0x08</Index></Texture>
+		
+		<AltTexture id="1">
+			<Texture><File>lofiObj3</File><Index>0x09</Index></Texture> <!-- angry 1 -->
+		</AltTexture>
+
+		<MaxHitPoints>10</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+   		<Size>100</Size>
+		<ShadowSize>0</ShadowSize>
+		
+		<State id="Ini">
+			<Transition playerWithin="1">Down</Transition>
+		</State>
+		<State id="Down">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Order>
+				<Behavior tagName="buttondown">SetTag</Behavior>
+			</Order>
+		</State>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+	</Object>
+
+	<Object type="0x0e26" id="Snakepit Guard">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>39</Index></AnimatedTexture>
+
+		<HitSound>monster/greater_pit_snakes_death</HitSound>
+		<DeathSound>monster/scorpions_death</DeathSound>
+
+		<XpMult>1.0</XpMult>
+   		<Size>0</Size>
+		<MaxHitPoints>5500</MaxHitPoints>
+		<Defense>50</Defense>
+		
+   		<Projectile id="0">
+			<ObjectId>Snake Spit</ObjectId>
+			<Speed>45</Speed>
+			<Damage>65</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+   			<Size>100</Size>
+		</Projectile>
+		
+   		<Projectile id="1">
+			<ObjectId>Snake Spinner</ObjectId>
+			<Speed>45</Speed>
+			<Damage>55</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+   			<Size>100</Size>
+			<ConditionEffect duration="2">Dazed</ConditionEffect>
+		</Projectile>
+		
+   		<Projectile id="2">
+			<ObjectId>Snake Ball Spinner</ObjectId>
+			<Speed>30</Speed>
+			<Damage>100</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+   			<Size>150</Size>
+			<ConditionEffect duration="4">Dazed</ConditionEffect>
+		</Projectile>
+		
+   		<Behavior map="snake_pit/snakepit_treasure2.jm">PlaceMap</Behavior>
+		<Behavior listenIds="Snakepit Button" acquireRange="11">FollowOrders</Behavior>
+		
+		<State id="Ini">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Transition hasTag="buttondown">Battle</Transition>
+		</State>
+		
+		<State id="Battle">
+			<Behavior maxSize="100" rate="60">ChangeSize</Behavior>
+			<Behavior type="targeted" projectileId="0" numShots="3" cooldown="1" cooldownJitter="true" range="20" defaultAngle="0" angle="33">Shoot</Behavior>
+			<Behavior type="auto" projectileId="1" numShots="6" cooldown="3" cooldownJitter="true" range="20" defaultAngle="30" angle="60">Shoot</Behavior>
+			<State id="Basic">
+				<Behavior bucket="movement" speed=".35">Wander</Behavior>
+				<Transition hitpointsLessThan="0.6">Adv</Transition>
+			</State>
+			<State id="Adv">
+				<Behavior type="targeted" projectileId="2" numShots="3" cooldown="3" range="20" defaultAngle="0" angle="120">Shoot</Behavior>
+				<Behavior bucket="movement" acquireRange="7" range="3" duration="1.8" cooldown="1.2" speed=".5">Follow</Behavior>
+				<Behavior bucket="movement" speed=".35">Wander</Behavior>
+			</State>
+		</State>
+		
+		
+		<SoulboundLoot tier="7" prob=".2" threshold=".08">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".2" threshold=".08">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".07" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".07" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot min="1" prob=".2" threshold=".18">Potion of Speed</SoulboundLoot>
+		<SoulboundLoot prob=".10" threshold=".10">Snake Eye Ring</SoulboundLoot>
+		<SoulboundLoot prob=".10" threshold=".10">Snake Skin Shield</SoulboundLoot>	
+		<SoulboundLoot prob=".001" threshold=".18">Wine Cellar Incantation</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".15">Wand of the Bulwark</SoulboundLoot>
+	</Object>
+
+
+	<Object type="0x0e25" id="Snakepit Dart Thrower">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+		<Texture><File>lofiObj3</File><Index>0x0a</Index></Texture>
+
+		<MaxHitPoints>10</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+   		<Size>0</Size>
+		<ShadowSize>0</ShadowSize>
+	    <StasisImmune/>
+   		
+   		<Projectile>
+			<ObjectId>Snakepit Dart</ObjectId>
+			<Speed>50</Speed>
+			<Damage>40</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+   			<Size>100</Size>
+			<ConditionEffect duration="4">Bleeding</ConditionEffect>
+		</Projectile>
+		
+		<Behavior listenIds="Snakepit Button" acquireRange="16">FollowOrders</Behavior>
+		
+		<State id="Ini">
+			<Transition hasTag="buttondown">On</Transition>
+		</State>
+		<State id="On">
+			<Behavior type="auto" numShots="2" cooldown="3" cooldownJitter="true" range="20" defaultAngle="0" angle="180">Shoot</Behavior>
+		</State>
+		<State id="Fast">
+			<Behavior type="auto" numShots="2" cooldown="0.8" cooldownJitter="true" range="20" defaultAngle="0" angle="180">Shoot</Behavior>
+		</State>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+	</Object>
+	
+	
+	<!-- 
+********************************************************************************* 
+
+Improved Stheno: ready for controlled testing
+
+*********************************************************************************
+-->
+
+	<Object type="0x0917" id="Stheno the Snake Queen">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x33</Index></Texture>
+		<HitSound>monster/snake_queen_hit</HitSound>
+		<DeathSound>monster/snake_queen_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>7500</MaxHitPoints>
+		<Defense>19</Defense>
+		<Enemy/>
+		<God/>
+		<StasisImmune/>
+		<Quest/>
+		<Level>1</Level>
+		<XpMult>0.7</XpMult>
+		<NoArticle/>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Speed>70</Speed>
+			<Damage>100</Damage>
+			<Size>100</Size>
+			<LifetimeMS>1500</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">					
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>62</Speed>
+			<Damage>60</Damage>
+			<Size>60</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="1.4">Blind</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<SoulboundLoot tier="9" prob=".07" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".015" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".07" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".015" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot prob=".3" min="1">Potion of Speed</SoulboundLoot>
+		<SoulboundLoot prob=".10" threshold=".10">Snake Skin Armor</SoulboundLoot>
+		<SoulboundLoot prob=".10" threshold=".10">Snake Eye Ring</SoulboundLoot>
+		<SoulboundLoot prob=".10" threshold=".10">Snake Skin Shield</SoulboundLoot>	
+		<SoulboundLoot prob=".001" threshold=".18">Wine Cellar Incantation</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".15">Wand of the Bulwark</SoulboundLoot>
+
+
+		<State id="start_the_fun">			
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Transition playerWithin="12">pet_help</Transition>
+			<Transition hitpointsLessThan="0.999">pet_help</Transition>
+		</State>
+		<State id="pet_help">	
+			<Behavior childIds="Stheno Pet" cooldown="1.5" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+
+			<State id="wait_for_pets">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+
+				<Behavior bucket="movement" range="4" speed="0.4">StayCloseToSpawn</Behavior>
+				<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+				<Transition afterTime="3">attack1</Transition>
+			</State>
+			<State id="attack1">
+				<State id="unshielded1">
+					<Behavior numShots="2" projectileId="0" cooldown="0.7" type="targeted" predictive="0.15" angle="80">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="0" cooldown="0.7" type="targeted" predictive="0.15" angle="90">Shoot</Behavior>
+				
+					<Transition afterTime="1">shielded1</Transition>
+				</State>
+				<State id="shielded1">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior numShots="2" projectileId="0" cooldown="0.7" type="targeted" predictive="0.15" angle="80">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="0" cooldown="0.7" type="targeted" predictive="0.15" angle="90">Shoot</Behavior>
+				
+					<Transition afterTime="3">unshielded1</Transition>
+				</State>
+			
+				<Transition afterTime="8">summon_snakes</Transition>
+			</State>		
+			<State id="summon_snakes">
+				<Behavior childIds="Stheno Swarm" cooldown="0.4" maxChildren="6" startWithMinions="false">MakeMinions</Behavior>
+				
+				<Behavior bucket="movement" range="4" speed="0.6">StayCloseToSpawn</Behavior>
+				<Behavior bucket="movement" speed="0.6">Wander</Behavior>				
+
+				<State id="unshielded3">
+					<Behavior numShots="3" projectileId="0" cooldown="0.8" type="targeted" predictive="0.05" offset="0.5" angle="90">Shoot</Behavior>
+				
+					<Transition afterTime="1">shielded3</Transition>
+				</State>
+				<State id="shielded3">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior numShots="3" projectileId="0" cooldown="0.8" type="targeted" predictive="0.05" offset="0.5" angle="90">Shoot</Behavior>
+				
+					<Transition afterTime="3">unshielded3</Transition>
+				</State>
+			
+				<Transition afterTime="12">chance_to_clear_snakes</Transition>
+			</State>
+			<State id="chance_to_clear_snakes">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+
+				<Behavior bucket="movement" range="4" speed="0.4">StayCloseToSpawn</Behavior>
+				<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+				<Transition afterTime="5">attack2</Transition>
+			</State>			
+			<State id="attack2">
+				<State id="unshielded2">
+					<Behavior numShots="6" projectileId="1" cooldown="0.4" type="targeted" angle="60">Shoot</Behavior>
+					<Behavior cooldown="1" type="targeted" radius="2.7" damage="100">GrenadeToss</Behavior>					
+
+					<Transition afterTime="1.5">shielded2</Transition>
+				</State>
+				<State id="shielded2">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+
+					<Behavior numShots="6" projectileId="1" cooldown="0.4" type="targeted" angle="60">Shoot</Behavior>
+					<Behavior cooldown="1" type="targeted" radius="2.7" damage="100">GrenadeToss</Behavior>	
+				
+					<Transition afterTime="2.5">unshielded2</Transition>
+				</State>			
+		
+				<Transition afterTime="8">attack1</Transition>
+			</State>
+		</State>
+	</Object>
+	
+
+<!-- 
+********************************************************************************* 
+
+Stheno's Pet
+
+*********************************************************************************
+-->
+
+	<Object type="0x0918" id="Stheno Pet">
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16dEncounters</File><Index>2</Index></AnimatedTexture>
+		<HitSound>monster/snakes_hit</HitSound>
+		<DeathSound>monster/snakes_death</DeathSound>
+		<Size>70</Size>
+		<MaxHitPoints>5000</MaxHitPoints>
+		<Defense>7</Defense>
+		<Enemy/>
+		<Level>1</Level>
+		<XpMult>0.1</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Aqua Missile</ObjectId>
+			<Speed>60</Speed>
+			<Damage>75</Damage>
+			<Size>100</Size>
+			<LifetimeMS>900</LifetimeMS>
+			<ConditionEffect duration="2">Slowed</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+		<SoulboundLoot prob=".08">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".02">Snake Skin Armor</SoulboundLoot>
+	
+		<State id="Circle">			
+			<Behavior bucket="movement" acquireRange="20" speed="2.2" radius="8" protecteeId="Stheno the Snake Queen" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+			
+			<Transition afterTime="2.2">Jab</Transition>
+		</State>
+		<State id="Jab">			
+			<Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" predictive="0.2" offset="0.7">Shoot</Behavior>
+			
+			<Behavior bucket="movement" acquireRange="5" range="2.5" speed="1.8" predictive="1">Follow</Behavior>
+			<Behavior bucket="movement" acquireRange="20" speed="2.2" radius="8" protecteeId="Stheno the Snake Queen" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			
+			<Transition afterTime="0.8">Circle</Transition>
+		</State>
+		
+		<Behavior time="300">Decay</Behavior>
+	</Object>
+	
+<!-- 
+********************************************************************************* 
+
+Stheno's Swarm
+
+*********************************************************************************
+-->
+
+	<Object type="0x0919" id="Stheno Swarm">
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>3</Index></AnimatedTexture>
+		<HitSound>monster/snakes_hit</HitSound>
+		<DeathSound>monster/snakes_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>4</Defense>
+		<Enemy/>
+		<Level>1</Level>
+		<XpMult>0.1</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Aqua Missile</ObjectId>
+			<Speed>60</Speed>
+			<Damage>40</Damage>
+			<Size>70</Size>
+			<LifetimeMS>1000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+			
+		<Behavior bucket="movement" speed="0.75">Wander</Behavior>
+		<Behavior numShots="1" projectileId="0" cooldown="0.85" type="targeted" predictive="0.05" offset="0.5">Shoot</Behavior>
+		<Behavior time="6">Decay</Behavior>
+
+	</Object>
+	
+<!-- 
+********************************************************************************* 
+
+Snake Pit Enemies
+
+*********************************************************************************
+-->
+
+
+	<Object type="0x0223" id="Pit Snake">
+		<Group>Pit Snakes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xc5</Index></Texture>
+		<HitSound>monster/pit_snakes_hit</HitSound>
+		<DeathSound>monster/pit_snakes_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		<Projectile>
+			<ObjectId>Green Magic</ObjectId>
+			<Speed>60</Speed>
+			<Damage>10</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		<Behavior numShots="1" range="10">Shoot</Behavior>
+		<Behavior speed="0.8">Wander</Behavior>
+	</Object>
+	
+	<Object type="0x0224" id="Pit Viper">
+		<Group>Pit Snakes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xc4</Index></Texture>
+		<HitSound>monster/pit_snakes_hit</HitSound>
+		<DeathSound>monster/pit_snakes_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		<Projectile>
+			<ObjectId>Purple Magic</ObjectId>
+			<Speed>60</Speed>
+			<Damage>20</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		<Behavior numShots="1" range="10">Shoot</Behavior>
+		<Behavior speed="0.9">Wander</Behavior>
+	</Object>
+	
+	<Object type="0x0225" id="Fire Python">
+		<Group>Pythons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xed</Index></Texture>
+		<HitSound>monster/pythons_hit</HitSound>
+		<DeathSound>monster/pythons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>5</Defense>
+		<Projectile>
+			<ObjectId>Red Fire</ObjectId>
+			<Speed>80</Speed>
+			<Damage>25</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		<Behavior numShots="3" range="3" predictive="1">Shoot</Behavior>
+		<Behavior bucket="movement" cooldown="2">Charge</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot prob=".02">Snake Oil</SoulboundLoot>
+		<SoulboundLoot prob=".02">Fire Bow</SoulboundLoot>
+		<SoulboundLoot prob=".02">Fire Nova Spell</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0226" id="Brown Python">
+		<Group>Pythons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xee</Index></Texture>
+		<HitSound>monster/pythons_hit</HitSound>
+		<DeathSound>monster/pythons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>20</Defense>
+		<Projectile>
+			<ObjectId>Blue Magic</ObjectId>
+			<Speed>80</Speed>
+			<Damage>25</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior numShots="1" range="10" predictive="1" cooldown=".3">Shoot</Behavior>
+		<Behavior speed=".5">Wander</Behavior>
+		<SoulboundLoot prob=".02">Snake Oil</SoulboundLoot>
+		<SoulboundLoot prob=".02">Ring of Wisdom</SoulboundLoot>
+		<SoulboundLoot prob=".02">Leather Armor</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0227" id="Yellow Python">
+		<Group>Pythons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xef</Index></Texture>
+		<HitSound>monster/pythons_hit</HitSound>
+		<DeathSound>monster/pythons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>5</Defense>
+		<Projectile>
+			<ObjectId>Green Bolt</ObjectId>
+			<Speed>80</Speed>
+			<Damage>25</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior numShots="1" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="1">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot prob=".02">Snake Oil</SoulboundLoot>
+		<SoulboundLoot prob=".02">Ring of Vitality</SoulboundLoot>
+		<SoulboundLoot prob=".02">Ring of Speed</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0228" id="Greater Pit Snake">
+		<Group>Greater Pit Snakes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar16x8</File><Index>0x7f</Index></Texture>
+		<HitSound>monster/greater_pit_snakes_hit</HitSound>
+		<DeathSound>monster/greater_pit_snakes_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>500</MaxHitPoints>
+		<Defense>10</Defense>
+		<Projectile>
+			<ObjectId>Green Magic</ObjectId>
+			<Speed>80</Speed>
+			<Damage>50</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior numShots="3" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" range="5" speed="1">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot prob=".02">Snake Oil</SoulboundLoot>
+		<SoulboundLoot prob=".02">Glass Sword</SoulboundLoot>
+		<SoulboundLoot prob=".02">Wand of Dark Magic</SoulboundLoot>
+		<SoulboundLoot prob=".02">Avenger Staff</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0229" id="Greater Pit Viper">
+		<Group>Greater Pit Snakes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x8</File><Index>0x58</Index></Texture>
+		<HitSound>monster/greater_pit_snakes_hit</HitSound>
+		<DeathSound>monster/greater_pit_snakes_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>500</MaxHitPoints>
+		<Defense>10</Defense>
+		<Projectile>
+			<ObjectId>Purple Magic</ObjectId>
+			<Speed>60</Speed>
+			<Damage>50</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior numShots="1" range="10" cooldown=".3">Shoot</Behavior>
+		<Behavior bucket="movement" range="5" speed="1">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot prob=".02">Snake Oil</SoulboundLoot>
+		<SoulboundLoot prob=".02">Ring of Greater Health</SoulboundLoot>
+		<SoulboundLoot prob=".02">Ring of Greater Attack</SoulboundLoot>
+	</Object>
+
+</Objects>

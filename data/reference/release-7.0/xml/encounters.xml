@@ -1,0 +1,1595 @@
+<!-- object types: 0x0d5X 0x0d6X next: 0x0d67 -->
+<Objects>
+   <Object type="0x0d50" id="Lord of the Lost Lands">
+        <Group>Knights of the Lost Lands</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        <Hero/>
+        <Quest/>
+		<God/>
+		<Encounter/>
+        <StasisImmune/>
+		<Level>20</Level>
+		<PerRealmMax>1</PerRealmMax>
+         
+        <AnimatedTexture><File>chars16x16dEncounters</File><Index>14</Index></AnimatedTexture> <!--fully armored-->
+        
+		<AltTexture id="1">
+			<AnimatedTexture><File>chars16x16dEncounters</File><Index>15</Index></AnimatedTexture> <!--bubble 1-->
+		</AltTexture>
+        <AltTexture id="2">
+			<AnimatedTexture><File>chars16x16dEncounters</File><Index>16</Index></AnimatedTexture> <!--bubble 1-->
+		</AltTexture>
+        <AltTexture id="3">
+			<AnimatedTexture><File>chars16x16dEncounters</File><Index>17</Index></AnimatedTexture> <!--calling-->
+		</AltTexture>
+        <AltTexture id="4">
+			<AnimatedTexture><File>chars16x16dEncounters</File><Index>18</Index></AnimatedTexture> <!--calling 2-->
+		</AltTexture>
+        
+        
+        <HitSound>monster/golems_hit</HitSound>
+        <DeathSound>monster/beholder_death</DeathSound>
+        
+        <MaxHitPoints>70000</MaxHitPoints>
+        
+        <Projectile id="0">
+            <ObjectId>White Beam</ObjectId>
+            <Speed>83</Speed>
+            <Damage>95</Damage>
+            <Size>80</Size>
+            <LifetimeMS>2000</LifetimeMS>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Vortex</ObjectId>
+            <Speed>35</Speed>
+            <Damage>250</Damage>
+            <Size>300</Size>
+            <LifetimeMS>5000</LifetimeMS>
+            <MultiHit/>
+            <PassesCover/>
+            <Amplitude>0.1</Amplitude>
+            <Frequency>50</Frequency>
+            <ConditionEffect duration="5">Bleeding</ConditionEffect>         
+        </Projectile>
+        
+        <Size>140</Size>
+        <Defense>30</Defense>
+        <XpMult>0.3</XpMult>
+        
+        
+        
+        <DefineEmbed name="AttackOne">
+       		<State id="Part1">
+	       		<Behavior type="auto" defaultAngle="0" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Behavior type="auto" defaultAngle="180" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Transition afterTime="{timeBetweenShots}">Part2</Transition>
+	       	</State>
+	       	<State id="Part2">
+	       		<Behavior type="auto" defaultAngle="45" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Behavior type="auto" defaultAngle="225" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Transition afterTime="{timeBetweenShots}">Part3</Transition>
+	       	</State>
+        	<State id="Part3">
+	       		<Behavior type="auto" defaultAngle="90" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Behavior type="auto" defaultAngle="270" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Transition afterTime="{timeBetweenShots}">Part4</Transition>
+	       	</State>
+	       	<State id="Part4">
+	       		<Behavior type="auto" defaultAngle="135" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Behavior type="auto" defaultAngle="315" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Transition afterTime="{timeBetweenShots}">Part5</Transition>
+	        </State>
+        	<State id="Part5">
+	       		<Behavior type="auto" defaultAngle="180" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Behavior type="auto" defaultAngle="0" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Transition afterTime="{timeBetweenShots}">Part6</Transition>
+	       	</State>
+	       	<State id="Part6">
+	       		<Behavior type="auto" defaultAngle="225" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Behavior type="auto" defaultAngle="45" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Transition afterTime="{timeBetweenShots}">Part7</Transition>
+	        </State>
+        	<State id="Part7">
+	       		<Behavior type="auto" defaultAngle="270" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Behavior type="auto" defaultAngle="90" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Transition afterTime="{timeBetweenShots}">Part8</Transition>
+	       	</State>
+	       	<State id="Part8">
+	       		<Behavior type="auto" defaultAngle="315" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Behavior type="auto" defaultAngle="135" projectileId="0" numShots="7" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+	       		<Transition afterTime="{timeBetweenShots}">Part1</Transition>
+	        </State>
+	        <Transition afterTime="{attackLength}">PrepareForAttack2</Transition>
+		</DefineEmbed>
+        
+        
+        <DefineEmbed name="AttackTwo">
+			<Behavior altTextureId="3">SetAltTexture</Behavior>
+			
+			<State id="Part0">
+        		<Behavior prob="1" bubbleTime="5" text="GATHERING POWER!">Say</Behavior>
+       			<Behavior type="Flash" color="FFFFFF" flashPeriod=".2" flashRepeats="20">ShowEffect</Behavior>
+       			<Transition afterTime="{chargeTime}">Part1</Transition>
+       		</State>
+			<State id="Part1">
+       			<Behavior projectileId="1" numShots="1" type="auto" defaultAngle="0" range="8" cooldown="5">Shoot</Behavior>
+       			<Behavior projectileId="1" numShots="1" type="auto" defaultAngle="90" range="8" cooldown="5">Shoot</Behavior>
+       			<Behavior projectileId="1" numShots="1" type="auto" defaultAngle="180" range="8" cooldown="5">Shoot</Behavior>
+       			<Behavior projectileId="1" numShots="1" type="auto" defaultAngle="270" range="8" cooldown="5">Shoot</Behavior>
+       			<Transition afterTime="1">Part2</Transition>
+       		</State>
+        	<State id="Part2">
+       			<Behavior projectileId="1" numShots="1" type="auto" defaultAngle="45" range="8" cooldown="5">Shoot</Behavior>
+       			<Behavior projectileId="1" numShots="1" type="auto" defaultAngle="135" range="8" cooldown="5">Shoot</Behavior>
+       			<Behavior projectileId="1" numShots="1" type="auto" defaultAngle="225" range="8" cooldown="5">Shoot</Behavior>
+       			<Behavior projectileId="1" numShots="1" type="auto" defaultAngle="315" range="8" cooldown="5">Shoot</Behavior>
+       			<Transition afterTime="1">Part1</Transition>
+       		</State>
+       		
+       		<Transition afterTime="{attackTime}">Rest</Transition>
+		</DefineEmbed>
+        
+        <DefineEmbed name="restAndGuardians">
+        	<State id="Rest">
+        		<Transition afterTime="{restTime}">Attack1</Transition>
+			</State>      	
+			
+        	<State id="Create Guardians">
+        		<Behavior childId="Guardian of the Lost Lands" cooldown="1.2" range="10" rangeJitter="4">ObjectToss</Behavior>
+        		<Transition afterTime="{howLongToMakeGuardians}">Attack1</Transition>
+        	</State>
+        </DefineEmbed>
+        
+        <DefineEmbed name="getReadyForAtk2">
+			<State id="PrepareForAttack2">
+        		<Behavior projectileId="0" numShots="{numShots}" angle="10" range="8" cooldown="1" predictive="true">Shoot</Behavior>
+        		<Behavior bucket="movement" minAltitude="145">StayAbove</Behavior>
+        		<Behavior bucket="movement" speed="1.3" acquireRange="7" range="2" predictive="true">Follow</Behavior>
+        		<Transition noneExist="Guardian of the Lost Lands">Create Guardians</Transition>
+        		<Transition afterTime="3">Attack2</Transition>
+			</State>
+		 </DefineEmbed>
+        
+        <DefineEmbed name="quarter">
+        	<State id="Attack1">
+        		<Behavior bucket="movement" speed=".75">Wander</Behavior>
+        		<Transition noneExist="Guardian of the Lost Lands">Create Guardians</Transition>
+	        	<Embed name="AttackOne"></Embed>
+			</State>
+			
+        	<Embed name="getReadyForAtk2"></Embed>
+			
+			<State id="Attack2">
+				<Embed name="AttackTwo"></Embed>
+			</State>
+			
+        	<Embed name="restAndGuardians"></Embed>
+        </DefineEmbed>
+        
+        <State id="Q1">
+        	<Embed name="quarter">
+				<Param name="timeBetweenShots">1.2</Param>
+				<Param name="attackLength">12</Param>
+				<Param name="numShots">7</Param>
+				<Param name="chargeTime">2</Param>
+				<Param name="attackTime">6</Param>
+				<Param name="restTime">3</Param>
+				<Param name="howLongToMakeGuardians">5</Param>
+			</Embed>
+        	<Transition hitpointsLessThan=".75">SummonIce</Transition>	
+        </State>
+        
+        
+        <State id="Q2">
+        	<Embed name="quarter">
+				<Param name="timeBetweenShots">.8</Param>
+				<Param name="attackLength">9</Param>
+				<Param name="numShots">8</Param>
+				<Param name="chargeTime">1.5</Param>
+				<Param name="attackTime">7.5</Param>
+				<Param name="restTime">2</Param>
+				<Param name="howLongToMakeGuardians">6.5</Param>
+			</Embed>
+        	<Transition hitpointsLessThan=".5">SummonIce</Transition>	
+        </State>
+        
+        <State id="Q3">
+        	<Embed name="quarter">
+				<Param name="timeBetweenShots">.6</Param>
+				<Param name="attackLength">7</Param>
+				<Param name="numShots">9</Param>
+				<Param name="chargeTime">.8</Param>
+				<Param name="attackTime">9</Param>
+				<Param name="restTime">1</Param>
+				<Param name="howLongToMakeGuardians">7.5</Param>
+			</Embed>
+        	<Transition hitpointsLessThan=".25">SummonIce</Transition>	
+        </State>
+        
+        <State id="Q4">
+        	<Embed name="quarter">
+				<Param name="timeBetweenShots">0.4</Param>
+				<Param name="attackLength">5</Param>
+				<Param name="numShots">10</Param>
+				<Param name="chargeTime">.33</Param>
+				<Param name="attackTime">9</Param>
+				<Param name="restTime">.33</Param>
+				<Param name="howLongToMakeGuardians">8</Param>
+			</Embed>
+        	<Transition hitpointsLessThan=".05">Death</Transition>	
+        </State>
+        
+        <State id="Death">
+       		<Behavior altTextureId="3">SetAltTexture</Behavior>
+        	<Behavior prob="1" bubbleTime="10" text="NOOOOO!!!!">Say</Behavior>
+        	<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+        	<Behavior type="Flash" color="FF3300" flashPeriod=".1" flashRepeats="100">ShowEffect</Behavior>
+        	<Behavior projectileId="1" numShots="8" initialDelay="4" range="0" dropLoot="true" giveXP="true">Explode</Behavior>
+        </State>
+        
+        <State id="SummonIce">
+        	<Behavior childId="Protection Crystal" cooldown="25" type="auto" defaultAngle="0" range="4">ObjectToss</Behavior>
+        	<Behavior childId="Protection Crystal" cooldown="25" type="auto" defaultAngle="45" range="4">ObjectToss</Behavior>
+        	<Behavior childId="Protection Crystal" cooldown="25" type="auto" defaultAngle="90" range="4">ObjectToss</Behavior>
+        	<Behavior childId="Protection Crystal" cooldown="25" type="auto" defaultAngle="135" range="4">ObjectToss</Behavior>
+        	<Behavior childId="Protection Crystal" cooldown="25" type="auto" defaultAngle="180" range="4">ObjectToss</Behavior>
+        	<Behavior childId="Protection Crystal" cooldown="25" type="auto" defaultAngle="225" range="4">ObjectToss</Behavior>
+        	<Behavior childId="Protection Crystal" cooldown="25" type="auto" defaultAngle="270" range="4">ObjectToss</Behavior>
+        	<Behavior childId="Protection Crystal" cooldown="25" type="auto" defaultAngle="315" range="4">ObjectToss</Behavior>
+        	<Transition exist="Protection Crystal">PowerDown</Transition>
+        	<Transition hitpointsLessThan=".05">Death</Transition>
+        </State>
+        
+        
+        <State id="PowerDown">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<State id="Bubble1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".75">Bubble2</Transition>
+			</State>
+			<State id="Bubble2">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Transition afterTime=".75">Bubble1</Transition>
+			</State>
+			<Transition noneExist="Protection Crystal">BubbleBroke</Transition>
+		</State>
+        
+        
+        <State id="BubbleBroke">
+        	<Behavior childId="Guardian of the Lost Lands" cooldown="1.2" range="10" rangeJitter="4">ObjectToss</Behavior>
+        	<Behavior childId="Guardian of the Lost Lands" cooldown="1.2" range="10" rangeJitter="4">ObjectToss</Behavior>
+        	<Behavior childId="Guardian of the Lost Lands" cooldown="1.2" range="10" rangeJitter="4">ObjectToss</Behavior>	
+        	
+        	<Transition hitpointsLessThan=".25">Q4</Transition>
+        	<Transition hitpointsLessThan=".5">Q3</Transition>
+      	  	<Transition hitpointsLessThan=".75">Q2</Transition>
+		</State>
+		
+		<Behavior>OryxTaunt</Behavior>
+        
+		<SoulboundLoot tier="8" prob=".10" threshold=".05">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".04" threshold=".05">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".02" threshold=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".08" threshold=".05">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".04" threshold=".05">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".02" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="12" prob=".005" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".04" threshold=".05">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".01" threshold=".10">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".10" threshold=".05">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".02" threshold=".10">Ring</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".005" threshold=".10">Ring</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".25" threshold=".10" min="1">Potion</SoulboundLoot>
+		<SoulboundLoot prob=".002" threshold=".075">Shield of Ogmur</SoulboundLoot>
+    </Object>
+    
+	<Object type="0x0d51" id="Protection Crystal">
+        <Group>Knights of the Lost Lands</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        <StasisImmune/>
+        
+        <AnimatedTexture><File>chars8x8dEncounters</File><Index>13</Index></AnimatedTexture>
+        
+        <HitSound>monster/dragons_hit</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <MaxHitPoints>5000</MaxHitPoints>
+        <Projectile id="0">
+            <ObjectId>Ice Burst</ObjectId>
+            <Speed>60</Speed>
+            <Damage>75</Damage>
+            <Size>80</Size>
+            <LifetimeMS>1200</LifetimeMS>
+        </Projectile>
+
+        <Size>120</Size>
+        <Defense>15</Defense>
+        <XpMult>0.0</XpMult>
+        
+		<State id="regular orbit">
+		<Behavior protecteeId="Lord of the Lost Lands" speedVariability="0" speed='.2' radius='4' radiusVariability="0">Orbit</Behavior>
+		<Behavior projectileId="0" numShots="4" angle="9" range="6.5" cooldown=".3" predictive="true">Shoot</Behavior>
+		</State>
+    </Object> 
+    
+	<Object type="0x0d52" id="Knight of the Lost Lands">
+        <Group>Knights of the Lost Lands</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>10</Index></AnimatedTexture>
+        
+        <HitSound>monster/skeletons_hit</HitSound>
+        <DeathSound>monster/dwarves_death</DeathSound>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Projectile id="0">
+            <ObjectId>Pink Blast</ObjectId>
+            <Speed>75</Speed>
+            <Damage>50</Damage>
+            <Size>80</Size>
+            <LifetimeMS>1500</LifetimeMS>
+        </Projectile>
+        <Size>100</Size>
+        <Defense>0</Defense>
+        <XpMult>0.1</XpMult>
+        
+		<Behavior bucket="movement" listenIds="Guardian of the Lost Lands">FollowOrders</Behavior>
+        
+		<State id="Part0">
+			<Behavior bucket="movement" minAltitude="145">StayAbove</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown=".5" range="3.2">Shoot</Behavior>
+			<Behavior bucket="movement" speed="1" distance='1.5'>Circle</Behavior>
+			<Behavior bucket="movement" speed=".75">Wander</Behavior>
+			<Transition hitpointsLessThan=".93">Part2</Transition>
+			<Transition afterTime="5">Part2</Transition>
+		</State>
+		
+		<State id="Part1">
+			<Behavior bucket="movement" minAltitude="145">StayAbove</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown=".5" range="3.2">Shoot</Behavior>
+			<Behavior bucket="movement" speed="1" distance='1.5'>Circle</Behavior>
+			<Behavior bucket="movement" speed=".75">Wander</Behavior>
+			<Transition afterTime="5">Part2</Transition>
+		</State>
+		
+		<State id="Part2">
+			<Behavior bucket="movement" minAltitude="145">StayAbove</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown=".5" range="6">Shoot</Behavior>
+			<Behavior bucket="movement" speed="1.4" distance='4'>KeepDistance</Behavior>
+			<Behavior bucket="movement" speed=".75">Wander</Behavior>
+			<Transition afterTime="5">Part1</Transition>
+		</State>
+		
+		<SoulboundLoot prob=".02">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".02">Magic Potion</SoulboundLoot>
+    </Object> 
+    
+	<Object type="0x0d53" id="Guardian of the Lost Lands">
+        <Group>Knights of the Lost Lands</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars16x16dEncounters</File><Index>19</Index></AnimatedTexture>
+        
+        <HitSound>monster/dwarves_hit</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        
+        <MaxHitPoints>8000</MaxHitPoints>
+        
+        <Projectile id="0">
+            <ObjectId>Blue Blast</ObjectId>
+            <Speed>60</Speed>
+            <Damage>60</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1800</LifetimeMS>
+            <!-- ConditionEffect duration="3">Slowed</ConditionEffect -->
+        </Projectile>
+        
+        <Projectile id="1">
+            <ObjectId>Ice Triangle</ObjectId>
+            <Speed>60</Speed>
+            <Damage>50</Damage>
+            <Size>100</Size>
+            <LifetimeMS>2000</LifetimeMS>
+            <ConditionEffect duration="3">Slowed</ConditionEffect>
+        </Projectile>
+        
+        <Size>100</Size>
+        <Defense>10</Defense>
+        <XpMult>0.2</XpMult>
+        
+        <Behavior bucket="movement" minAltitude="145">StayAbove</Behavior>
+        
+        <State id="Ini">
+       		<Transition afterTime="1.5">SummonMinions</Transition>
+        </State>
+		
+        <State id="SummonMinions">
+        	<Behavior childIds="Knight of the Lost Lands" cooldown="2" maxChildren="5" startWithMinions="false">MakeMinions</Behavior>
+      		<Transition afterTime="6">Fight</Transition>
+        </State>
+        
+        <State id="Fight">
+      		<Transition noneExist="Knight of the Lost Lands">SummonMinions</Transition>
+      		<State id="Safe">
+      			<Transition hitpointsLessThan="0.4">Danger</Transition>
+        		<Behavior bucket="movement" minAltitude="145">StayAbove</Behavior>
+      			<Behavior bucket="movement" range="3.5" duration="2" cooldown="1.5" speed="1" distance='8'>Follow</Behavior>
+      		</State>
+      		<State id="Danger">
+      			<Order>
+					<Behavior protecteeId="Guardian of the Lost Lands" aquireRange="8" protectionRange="2.75" reprotectRange="1.75" speed="1.4">Protect</Behavior>
+				</Order>
+        		<Behavior bucket="movement" minAltitude="145">StayAbove</Behavior>
+				<Behavior bucket="movement" speed="1.15" distance='4'>StayBack</Behavior>
+      		</State>
+        </State>
+		
+		<!-- Behavior bucket="attacks" numShots="5" projectileId="0" cooldown=".5" angle="72" range="7">Shoot</Behavior -->
+		<Behavior bucket="attacks" offset="0.25" numShots="5" projectileId="0" cooldown=".75" angle="12" range="5">Shoot</Behavior>
+		<Behavior bucket="attacks" offset="3" numShots="8" projectileId="1" cooldown="4.25" angle="45" range="6">Shoot</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		
+		<SoulboundLoot prob=".1">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".1">Magic Potion</SoulboundLoot>
+    </Object>
+    
+	<Object type="0x0d54" id="Grand Sphinx">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>4</Index></AnimatedTexture>
+		<HitSound>monster/ghost_god_hit</HitSound>
+		<DeathSound>monster/ghost_god_death</DeathSound>
+		<Size>160</Size>
+		<MaxHitPoints>55000</MaxHitPoints>
+		<Defense>25</Defense>
+		<God/>
+		<StasisImmune/>
+		<Hero/>
+		<Quest/>
+		<Encounter/>
+		<Level>20</Level>
+		<XpMult>0.3</XpMult>
+		<PerRealmMax>1</PerRealmMax>
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>Fireball</ObjectId>
+			<Speed>80</Speed>
+			<Damage>85</Damage>
+			<Size>110</Size>
+			<LifetimeMS>1350</LifetimeMS>
+			<ConditionEffect duration="7">Weak</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>			
+		</Projectile>						
+		<Projectile id="1">
+			<ObjectId>Zedshot</ObjectId>
+			<Speed>55</Speed>
+			<Damage>150</Damage>
+			<Size>130</Size>
+			<LifetimeMS>1900</LifetimeMS>
+			<ConditionEffect duration="4">Blind</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Hellfire</ObjectId>
+			<Speed>67</Speed>
+			<Damage>115</Damage>
+			<Size>125</Size>
+			<LifetimeMS>1600</LifetimeMS>
+			<MultiHit/>
+			<PassesCover/>			
+		</Projectile>		
+	
+		<!-- LOOT -->	
+		<SoulboundLoot prob=".12" threshold=".02">Potion of Vitality</SoulboundLoot>
+		<SoulboundLoot prob=".2" threshold=".15">Potion of Wisdom</SoulboundLoot>
+		<Behavior prob=".2" childId="Tomb of the Ancients Portal">MetamorphoseAtDeath</Behavior>
+		<SoulboundLoot prob=".002" threshold=".075">Helm of the Juggernaut</SoulboundLoot>
+
+		<Behavior map="encounter_maps/sphinx_map.jm">PlaceMap</Behavior>
+		
+		<!-- STATES -->			
+		<Behavior>OryxTaunt</Behavior>
+
+		<Behavior childIds="Horrid Reaper" cooldown="100000000" maxChildren="4">MakeMinions</Behavior>
+
+		<Behavior bucket="movement" range="12" speed="0.55">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" speed="0.55" >Wander</Behavior>
+
+		<State id="start_the_fun">			
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Transition playerWithin="11">Warning0</Transition>
+		</State>
+		<State id="Warning0">      			
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="10">ShowEffect</Behavior>
+
+			<Transition afterTime="2">flame_on</Transition>
+		</State>		
+		<State id="flame_on">		
+			<Behavior numShots="3" projectileId="0" cooldown="0.6" type="targeted" predictive="0.4" angle="30">Shoot</Behavior>
+			<Behavior numShots="3" projectileId="0" cooldown="0.6" type="targeted" predictive="0.4" angle="120" offset="0.3">Shoot</Behavior>						
+			<Transition afterTime="7">Warning</Transition>
+		</State>		
+		<State id="Warning">
+			<Behavior prob="1" text="You hide like cowards... but you can't hide from this!">Say</Behavior>
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>		
+			<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="15">ShowEffect</Behavior>
+			
+			<Transition afterTime="3">dead_zed</Transition>
+		</State>
+		<State id="dead_zed">
+			<State id="dead_zed1">
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="40">Shoot</Behavior>
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="220">Shoot</Behavior>
+				<Transition afterTime="1">dead_zed2</Transition>
+			</State>
+			<State id="dead_zed2">
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="80">Shoot</Behavior>
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="260">Shoot</Behavior>
+				<Transition afterTime="1">dead_zed3</Transition>
+			</State>
+			<State id="dead_zed3">
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="120">Shoot</Behavior>
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="320">Shoot</Behavior>
+				<Transition afterTime="1">dead_zed4</Transition>
+			</State>
+			<State id="dead_zed4">
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="160">Shoot</Behavior>
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="360">Shoot</Behavior>
+				<Transition afterTime="1">dead_zed5</Transition>
+			</State>
+			<State id="dead_zed5">
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="200">Shoot</Behavior>
+				<Behavior projectileId="1" numShots="11" type="auto" range="10" angle="7" cooldown="1.6" defaultAngle="40">Shoot</Behavior>
+				<Transition afterTime="1">dead_zed1</Transition>
+			</State>			
+			<Transition afterTime="8">Warning2</Transition>
+		</State>		
+		<State id="Warning2">      			
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="15">ShowEffect</Behavior>
+
+			<Transition afterTime="3">burn_baby_burn</Transition>
+		</State>		
+		<State id="burn_baby_burn">
+			<Behavior projectileId="2" numShots="2" type="targeted" range="10" angle="6" cooldown="2" offset="0">Shoot</Behavior>
+			<Behavior projectileId="2" numShots="2" type="targeted" range="10" angle="6" cooldown="2" offset="0.5">Shoot</Behavior>
+			<Behavior projectileId="2" numShots="9" type="auto" range="10" angle="40" cooldown="2" defaultAngle="20" offset="1">Shoot</Behavior>
+			<Behavior projectileId="2" numShots="2" type="targeted" range="10" angle="6" cooldown="2" offset="1.5">Shoot</Behavior>
+			<Behavior projectileId="2" numShots="2" type="targeted" range="10" angle="6" cooldown="2" offset="2">Shoot</Behavior>
+			<Behavior projectileId="2" numShots="8" type="targeted" range="10" angle="6" cooldown="2" offset="2.5">Shoot</Behavior>
+
+  			<Transition afterTime="7.6">Warning0</Transition>
+  			<Transition hitpointsLessThan="0.2">no_more_reaper</Transition>	
+		</State>
+		<State id="no_more_reaper">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="15">ShowEffect</Behavior>
+			<Order>
+				<Behavior time="1">Decay</Behavior>
+				<Behavior prob="0.6" text="OOaoaoAaAoaAAOOAoaaoooaa!!!">Say</Behavior>
+			</Order>
+			<Transition afterTime="3">flame_on</Transition>
+		</State>
+	</Object>
+	
+	<Object type="0x0d55" id="Horrid Reaper">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>8</Index></AnimatedTexture>
+		<HitSound>monster/trees_hit</HitSound>
+		<DeathSound>monster/trees_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>6000</MaxHitPoints>
+		<Defense>15</Defense>
+		<XpMult>0.75</XpMult>
+		
+        <!--
+         <StasisImmune/>
+         -->
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>Black Missile</ObjectId>
+			<Speed>70</Speed>
+			<Damage>80</Damage>
+			<Size>110</Size>
+			<LifetimeMS>1550</LifetimeMS>
+			<MultiHit/>
+		</Projectile>						
+		<Projectile id="1">
+			<ObjectId>Fire Missile</ObjectId>
+			<Speed>90</Speed>
+			<Damage>65</Damage>
+			<Size>80</Size>
+			<LifetimeMS>1400</LifetimeMS>
+			<MultiHit/>
+		</Projectile>		
+
+		<!-- STATES -->	
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<Behavior listenIds="Grand Sphinx">FollowOrders</Behavior>
+
+		<State id="break_time">		
+			<Behavior protecteeId="Grand Sphinx" acquireRange="18" protectionRange="10" reprotectRange="2" speed="1">Protect</Behavior>
+			<Behavior bucket="movement" speed="3">Wander</Behavior>	
+			<Transition afterTime="2">slow_follow</Transition>
+		</State>
+		<State id="slow_follow">
+			<Behavior protecteeId="Grand Sphinx" acquireRange="18" protectionRange="10" reprotectRange="2" speed="1">Protect</Behavior>
+			<Behavior bucket="movement" acquireRange="10" range="2.5" speed="0.5">Follow</Behavior>	
+		
+			<Behavior numShots="1" projectileId="1" cooldown="0.4" type="targeted" predictive="0.4" offset="0.6">Shoot</Behavior>						
+			<Transition afterTime="4.5">fast_follow</Transition>
+		</State>
+		<State id="fast_follow">		
+			<Behavior protecteeId="Grand Sphinx" acquireRange="18" protectionRange="10" reprotectRange="2" speed="1">Protect</Behavior>
+			<Behavior bucket="movement" acquireRange="10" range="2.5" speed="0.8">Follow</Behavior>	
+			
+			<Behavior numShots="1" projectileId="0" cooldown="0.2" type="targeted" predictive="0.4" offset="0.4">Shoot</Behavior>						
+			<Transition afterTime="3">break_time2</Transition>
+		</State>
+		<State id="break_time2">		
+			<Behavior protecteeId="Grand Sphinx" acquireRange="18" protectionRange="10" reprotectRange="2" speed="1">Protect</Behavior>
+			<Behavior bucket="movement" speed="3">Wander</Behavior>	
+			<Transition afterTime="3.5">splash_damage</Transition>
+		</State>
+		<State id="splash_damage">		
+			<Behavior numShots="6" projectileId="0" cooldown="0.6" type="auto" angle="60">Shoot</Behavior>						
+			<Transition afterTime="6.5">slow_follow</Transition>
+       		<Transition noneExist="Grand Sphinx">die</Transition>
+		</State>
+		<State id="die">
+	        <Behavior time="0">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0d56" id="Skull Shrine">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x35</Index></Texture>
+		<HitSound>monster/skull_shrine_hit</HitSound>
+		<DeathSound>monster/skull_shrine_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>10000</MaxHitPoints>
+		<Defense>40</Defense>
+		<Enemy/>
+        <Hero/>
+        <Quest/>
+		<God/>
+		<Encounter/>
+        <StasisImmune/>
+		<Level>20</Level>
+		
+		<Projectile>
+			<ObjectId>Purple Magic</ObjectId>
+			<Speed>100</Speed>
+			<Damage>100</Damage>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		<Behavior map="encounter_maps/skull_shrine_map.jm">PlaceMap</Behavior>
+		<Behavior>OryxTaunt</Behavior>
+		<Behavior numShots="9" range="25" cooldown=".75" angle="10" predictive="1">Shoot</Behavior>
+		<Behavior groupId="Flaming Skulls" cooldown="5" maxChildren="40">MakeMinions</Behavior>
+		<SoulboundLoot tier="8" prob=".10" threshold=".05">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".04" threshold=".05">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".02" threshold=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".08" threshold=".05">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".04" threshold=".05">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".02" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="12" prob=".005" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".05" threshold=".05">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".01" threshold=".10">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".08" threshold=".05">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".02" threshold=".10">Ring</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".005" threshold=".10">Ring</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".25" threshold=".10" min="1">Potion</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".075">Orb of Conflict</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0d57" id="Red Flaming Skull">
+		<Group>Flaming Skulls</Group>
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiChar8x8</File><Index>0x65</Index></Texture>
+		<HitSound>monster/flaming_skulls_hit</HitSound>
+		<DeathSound>monster/flaming_skulls_death</DeathSound>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Size>120</Size>
+		<Flying/>
+		<Z>0.2</Z>
+		<XpMult>0.1</XpMult>
+		<Projectile>
+			<ObjectId>Red Fire</ObjectId>
+			<Speed>100</Speed>
+			<Damage>80</Damage>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		<Behavior>Wander</Behavior>
+		<Behavior protecteeId="Skull Shrine" protectionRange="11.0">Protect</Behavior>
+		<Behavior numShots="2" range="15" cooldown=".75" predictive="1">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0d58" id="Blue Flaming Skull">
+		<Group>Flaming Skulls</Group>
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiChar8x8</File><Index>0x66</Index></Texture>
+		<HitSound>monster/flaming_skulls_hit</HitSound>
+		<DeathSound>monster/flaming_skulls_death</DeathSound>
+		<MaxHitPoints>750</MaxHitPoints>
+		<Size>120</Size>
+		<Flying/>
+		<Z>0.2</Z>
+		<XpMult>0.1</XpMult>
+		<Projectile>
+			<ObjectId>Blue Magic</ObjectId>
+			<Speed>100</Speed>
+			<Damage>60</Damage>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" protecteeId="Skull Shrine" speed="2" radius="15.0">Orbit</Behavior>
+		<Behavior bucket="movement" speed="2">Wander</Behavior>
+		<Behavior numShots="2" range="15" cooldown=".75" predictive="1">Shoot</Behavior>
+	</Object>
+
+	<Object type="0x0d59" id="Cube God">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x37</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>10000</MaxHitPoints>
+		<Hero/>
+        <Quest/>
+		<God/>
+		<Encounter/>
+        <StasisImmune/>
+		<Level>20</Level>
+		<Cube/>
+		<Projectile id="0">
+			<ObjectId>Dark Blue Magic</ObjectId>
+			<Speed>100</Speed>
+			<Damage>100</Damage>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Blue Bolt</ObjectId>
+			<Speed>80</Speed>
+			<Damage>150</Damage>
+			<LifetimeMS>2500</LifetimeMS>
+		</Projectile>
+		<Defense>40</Defense>
+		<Enemy/>
+		<Behavior avoidWater="true">Wander</Behavior>
+		<Behavior projectileId="0" numShots="9" range="25" cooldown=".75" angle="10" predictive="1">Shoot</Behavior>
+		<Behavior projectileId="1" numShots="4" range="25" cooldown="1.5" angle="10" predictive="1">Shoot</Behavior>
+		<Behavior childIds="Cube Overseer" cooldown="15" maxChildren="10">MakeMinions</Behavior>
+		<Behavior minAltitude="150">StayAbove</Behavior>
+		<Behavior>OryxTaunt</Behavior>
+		<SoulboundLoot tier="8" prob=".10" threshold=".05">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".04" threshold=".05">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".02" threshold=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".08" threshold=".05">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".04" threshold=".05">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".02" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="12" prob=".005" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".04" threshold=".05">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".01" threshold=".10">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".10" threshold=".05">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".02" threshold=".10">Ring</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".005" threshold=".10">Ring</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".25" threshold=".10" min="1">Potion</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".075">Dirk of Cronus</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d5a" id="Cube Overseer">
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiChar28x8</File><Index>0x40</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<MaxHitPoints>1500</MaxHitPoints>
+		<Cube/>
+		<Projectile id="0">
+			<ObjectId>Orange Magic</ObjectId>
+			<Speed>100</Speed>
+			<Damage>60</Damage>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Fire Bolt</ObjectId>
+			<Speed>80</Speed>
+			<Damage>100</Damage>
+			<LifetimeMS>2500</LifetimeMS>
+		</Projectile>
+		<Size>130</Size>
+		<XpMult>0.1</XpMult>
+		<Behavior bucket="movement" protecteeId="Cube God" speed=".5" radius="12.0" radiusWobbleDistance="8">Orbit</Behavior>
+		<Behavior bucket="movement" minAltitude="145">StayAbove</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior projectileId="0" numShots="4" range="10" cooldown="1.0" angle="5" predictive="1">Shoot</Behavior>
+		<Behavior projectileId="1" numShots="1" range="10" cooldown="2.0" predictive="1">Shoot</Behavior>
+		<Behavior groupId="Cube Minions" cooldown="5" maxChildren="5">MakeMinions</Behavior>
+	</Object>
+
+	<Object type="0x0d5b" id="Cube Defender">
+		<Group>Cube Minions</Group>
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiChar28x8</File><Index>0x41</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Cube/>
+		<Projectile id="0">
+			<ObjectId>Yellow Magic</ObjectId>
+			<Speed>100</Speed>
+			<Damage>50</Damage>
+			<LifetimeMS>2400</LifetimeMS>
+			<Wavy/>
+		</Projectile>
+		<Size>100</Size>
+		<XpMult>0.1</XpMult>
+		<Behavior bucket="movement" protecteeId="Cube Overseer" speed="1.5" radius="5.0">Orbit</Behavior>
+		<Behavior bucket="movement" minAltitude="140">StayAbove</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior projectileId="0" numShots="1" range="10" cooldown="0.5">Shoot</Behavior>
+	</Object>
+
+	<Object type="0x0d5c" id="Cube Blaster">
+		<Group>Cube Minions</Group>
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiChar28x8</File><Index>0x42</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<MaxHitPoints>500</MaxHitPoints>
+		<Cube/>
+		<Projectile id="0">
+			<ObjectId>Green Star</ObjectId>
+			<Speed>60</Speed>
+			<Damage>10</Damage>
+			<ConditionEffect duration="3">Slowed</ConditionEffect>
+			<LifetimeMS>2700</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Cyan Magic</ObjectId>
+			<Speed>100</Speed>
+			<Damage>40</Damage>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		<Size>80</Size>
+		<XpMult>0.1</XpMult>
+		<Behavior bucket="movement" speed="1.0" acquireRange="15.0" range="3.0" duration="5.0">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Cube Overseer" speed="1.5" radius="5.0">Orbit</Behavior>
+		<Behavior bucket="movement" minAltitude="140">StayAbove</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior projectileId="0" numShots="1" range="6" cooldown="1.5" predictive="1">Shoot</Behavior>
+		<Behavior projectileId="1" numShots="2" range="6" cooldown="1.0" predictive="1">Shoot</Behavior>
+	</Object>
+
+	<Object type="0x0d5d" id="Pentaract Eye">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xb5</Index></Texture>
+		<MaxHitPoints>500</MaxHitPoints>
+		<Size>80</Size>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>White Bolt</ObjectId>
+			<Speed>150</Speed>
+			<Damage>50</Damage>
+			<LifetimeMS>500</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		
+		<Behavior bucket="movement" protecteeId="Pentaract Tower" acquireRange="80" protectionRange="60" reprotectRange="1" speed="5">Protect</Behavior>
+		<Behavior bucket="movement" minAltitude="130">StayAbove</Behavior>
+		<Behavior bucket="movement">Buzz</Behavior>
+		<Behavior bucket="movement">Swirl</Behavior>
+		<Behavior projectileId="0" range="10" arcDegrees="30" cooldown=".2">Shoot</Behavior>
+	</Object>
+
+	<Object type="0x0d5e" id="Pentaract Tower">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x38</Index></Texture>
+		
+		<Animation prob="1.0" period="0.0">
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x00</Index></Texture></Frame>
+			<Frame time="0.4"><Texture><File>lofiChar216x16</File><Index>0x38</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x00</Index></Texture></Frame>
+			<Frame time="0.1"><Texture><File>lofiCharBig</File><Index>0x01</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x02</Index></Texture></Frame>
+			<Frame time="0.4"><Texture><File>lofiCharBig</File><Index>0x03</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x02</Index></Texture></Frame>
+			<Frame time="0.1"><Texture><File>lofiCharBig</File><Index>0x01</Index></Texture></Frame>
+		</Animation>
+		<MaxHitPoints>5000</MaxHitPoints>
+		<Size>120</Size>
+		<Behavior map="encounter_maps/pentaract_map.jm">PlaceMap</Behavior>
+		<Behavior childIds="Pentaract Eye" cooldown="5" maxChildren="5">MakeMinions</Behavior>
+		<Behavior range="8" cooldown="5" damage="100" radius="4">GrenadeToss</Behavior>
+		<XpMult>0.1</XpMult>
+		<God/>
+		<StasisImmune/>
+		<KeepDamageRecord/>
+	</Object>
+
+	<Object type="0x0d5f" id="Pentaract">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar8x8</File><Index>0xb5</Index></Texture>
+		<MaxHitPoints>10000</MaxHitPoints>
+		<Size>0</Size>
+		<Hero/>
+        <Quest/>
+		<God/>
+		<Encounter/>
+		<Level>20</Level>
+		<Behavior>OryxTaunt</Behavior>
+		<Behavior childIds="Pentaract Tower" childCorpseId="Pentaract Tower Corpse" cooldown="15" numChildren="5" distance="15">MaintainProtectors</Behavior>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<!-- <Behavior prob="1" childId="Pentaract Tower Ultra">MetamorphoseAtDeath</Behavior> -->
+	</Object>
+	
+    <Object type="0x0d60" id="Pentaract Tower Corpse">
+        <Enemy/>
+        <Class>Character</Class>
+        <Texture><File>lofiChar216x16</File><Index>0x38</Index></Texture>
+        <MaxHitPoints>5000</MaxHitPoints>
+        <Size>0</Size>
+        <XpMult>0</XpMult>
+        <God/>
+        <Behavior time="0" dropLoot="true">Decay</Behavior>
+        <SoulboundLoot tier="8" prob=".02" threshold=".05">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".008" threshold=".05">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".004" threshold=".10">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".002" threshold=".18">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".016" threshold=".05">Armor</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".008" threshold=".05">Armor</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".004" threshold=".10">Armor</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".002" threshold=".10">Armor</SoulboundLoot>
+        <SoulboundLoot tier="12" prob=".001" threshold=".18">Armor</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".008" threshold=".05">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".002" threshold=".10">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="3" prob=".016" threshold=".05">Ring</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".004" threshold=".10">Ring</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".001" threshold=".18">Ring</SoulboundLoot>
+        <SoulboundLoot tier="2" prob=".25" threshold=".10">Potion</SoulboundLoot>
+       	<SoulboundLoot prob=".001" threshold=".075">Seal of Blasphemous Prayer</SoulboundLoot>
+    </Object>
+    
+    
+	<Object type="0x0e01" id="Pentaract Tower Ultra">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiObjBig</File><Index>0x1c</Index></Texture>
+		
+		<Animation prob=".6" period="0.0"> <!-- look around -->
+			<Frame time="0.4"><Texture><File>lofiObjBig</File><Index>0x1c</Index></Texture></Frame>
+			<Frame time="0.3"><Texture><File>lofiObjBig</File><Index>0x1d</Index></Texture></Frame>
+			<Frame time="0.4"><Texture><File>lofiObjBig</File><Index>0x1e</Index></Texture></Frame>
+			<Frame time="0.3"><Texture><File>lofiObjBig</File><Index>0x1f</Index></Texture></Frame>
+		</Animation>
+		<Animation prob=".4" period="0.0"> <!-- eye close, blink -->
+			<Frame time="0.4"><Texture><File>lofiObjBig</File><Index>0x1c</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x20</Index></Texture></Frame>
+			<Frame time="0.4"><Texture><File>lofiObjBig</File><Index>0x21</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x20</Index></Texture></Frame>
+		</Animation>
+		
+		<XpMult>1</XpMult>
+		<Hero/>
+        <Quest/>
+		<God/>
+		<Level>20</Level>
+		<StasisImmune/>
+		
+		<MaxHitPoints>9000</MaxHitPoints>
+		<Size>130</Size>
+		<Behavior map="encounter_maps/pentaract_ultra_map.jm">PlaceMap</Behavior>
+		<Behavior childIds="Pentaract Eye" cooldown="2.6" maxChildren="6">MakeMinions</Behavior>
+		<Behavior childIds="Pentaract Eye" cooldown="2.6" maxChildren="6" startWithMinions="false">MakeMinions</Behavior>
+		<Behavior range="10" cooldown="2.6" damage="100" radius="4">GrenadeToss</Behavior>
+		
+		
+		<SoulboundLoot tier="8" prob=".02" threshold=".05">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".008" threshold=".05">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".004" threshold=".10">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".002" threshold=".18">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".016" threshold=".05">Armor</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".008" threshold=".05">Armor</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".004" threshold=".10">Armor</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".002" threshold=".10">Armor</SoulboundLoot>
+        <SoulboundLoot tier="12" prob=".001" threshold=".18">Armor</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".008" threshold=".05">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".002" threshold=".10">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="3" prob=".016" threshold=".05">Ring</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".004" threshold=".10">Ring</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".001" threshold=".18">Ring</SoulboundLoot>
+        <SoulboundLoot tier="2" prob=".25" threshold=".10">Potion</SoulboundLoot>
+       	<SoulboundLoot prob=".001" threshold=".075">Seal of Blasphemous Prayer</SoulboundLoot>
+	</Object>
+    
+	<Object type="0x0d61" id="Hermit God">
+		<Group>Hermit God Encounter</Group>
+		<Enemy/>
+	    <Class>Character</Class>
+	    <Hero/>
+	    <Quest/>
+		<God/>
+		<Encounter/>
+	    <StasisImmune/>
+		<Level>20</Level>
+		<PerRealmMax>1</PerRealmMax>
+		<KeepDamageRecord/>
+	
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>11</Index></AnimatedTexture>
+	
+		<Portrait>
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>11</Index></AnimatedTexture> <!--angry-->
+		</Portrait>
+		
+		<AltTexture id="1">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>12</Index></AnimatedTexture> <!--shadow-->
+		</AltTexture>
+		<AltTexture id="2">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>13</Index></AnimatedTexture> <!--rising-->
+		</AltTexture>
+		<AltTexture id="3">
+			<Texture><File>invisible</File><Index>0</Index></Texture> <!--invisible-->
+		</AltTexture>
+		<AltTexture id="4">
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>14</Index></AnimatedTexture> <!--angry-->
+		</AltTexture>
+		       	
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/dwarves_death</DeathSound>
+		       
+		<MaxHitPoints>55000</MaxHitPoints>
+		<XpMult>0.3</XpMult>
+		<Size>140</Size>
+		<Defense>35</Defense>
+	       
+		<Projectile id="0">
+			<ObjectId>InkBubbles</ObjectId>
+		       <Speed>55</Speed>
+		       <Damage>45</Damage>
+		       <Size>90</Size>
+		       <LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="2.6">Blind</ConditionEffect>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>OctoBlast</ObjectId>
+		       <Speed>55</Speed>
+		       <Damage>65</Damage>
+		       <Size>110</Size>
+		       <LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Deep Sea Blast</ObjectId>
+		       <Speed>55</Speed>
+		       <Damage>100</Damage>
+		       <Size>210</Size>
+		       <LifetimeMS>3200</LifetimeMS>
+		       <MultiHit/>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Deep Sea Blast Yellow</ObjectId>
+		       <Speed>55</Speed>
+		       <Damage>100</Damage>
+		       <Size>210</Size>
+		       <LifetimeMS>3200</LifetimeMS>
+		       <MultiHit/>
+		</Projectile>
+		       
+		<Behavior map="ocean/oceanEncounter.jm">PlaceMap</Behavior>
+		
+		<State id="Ini">
+			<Embed name="throwMinions"></Embed>
+			<Transition afterTime=".2">Hybernate</Transition>
+		</State>
+		
+		<State id="Base">
+			<Embed name="OctoShot">
+				<Param name="cooldown">3</Param>
+			</Embed>
+		
+			<Behavior speed=".8" terrain="Dark Water">StayInTerrain</Behavior>
+			<Behavior bucket="movement" speed=".4" range="4.4" cooldown=".6">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			<Transition afterTime="6" noneExist="Whirlpool">Hybernate</Transition>
+			<Transition exist="Whirlpool">AttackPools</Transition>
+			<Transition hitpointsLessThan=".5" random=".06" afterTime="3">DangerShot</Transition>
+		</State>
+		
+		
+		<State id="AttackPools">
+			<Behavior speed=".8" terrain="Dark Water">StayInTerrain</Behavior>
+			<Behavior bucket="movement" speed=".4" range="4.4" cooldown=".6">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			
+			<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="0" range="12" offset="0" angle="10">Shoot</Behavior>
+			
+			<Transition afterTime="2" noneExist="Whirlpool">NoPools</Transition>
+		</State>
+		
+		<State id="NoPools">
+			<State>
+				<Transition afterTime="2">ForceTent</Transition>
+			</State>
+			<State id="ForceTent">
+				<Order>
+					<Behavior tagName="forceMake">SetTag</Behavior>
+				</Order>
+			</State>
+			<Transition afterTime="2.4">Base</Transition>
+		</State>
+		
+		<State id="DangerShot">
+			<Behavior altTextureId="4">SetAltTexture</Behavior>
+			
+			<State id="Chooser">
+				<Transition random="1">Att1,Att2,Att3,Att4</Transition>
+			</State>
+			
+			<State id="Att1">
+				<Embed name="circleMaze">
+					<Param name="angle">0</Param>
+					<Param name="angleminusthirty">180</Param>
+				</Embed>
+			</State>
+			<State id="Att2">
+				<Embed name="circleMaze">
+					<Param name="angle">90</Param>
+					<Param name="angleminusthirty">270</Param>
+				</Embed>
+			</State>
+			<State id="Att3">
+				<Embed name="circleMaze">
+					<Param name="angle">180</Param>
+					<Param name="angleminusthirty">0</Param>
+				</Embed>
+			</State>
+			<State id="Att4">
+				<Embed name="circleMaze">
+					<Param name="angle">270</Param>
+					<Param name="angleminusthirty">90</Param>
+				</Embed>
+			</State>
+			
+			<Transition afterTime="8.2">Base</Transition>
+		</State>
+		
+		
+		<State id="Hybernate">
+			<Behavior speed=".5" range="0" cooldown="0">StayCloseToSpawn</Behavior>
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<State id="Change">
+				<Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Embed name="throwMinions"></Embed>
+				<Transition afterTime=".4">Hybernate</Transition>
+			</State>
+			<State id="Hybernate">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Order>
+					<Behavior tagName="forceMake">SetTag</Behavior>
+					<Behavior tagName="pause">SetTag</Behavior>
+				</Order>
+				<Transition afterTime=".4">Wait</Transition>
+			</State>
+			<State id="Wait">
+				<State id="Order1">
+		       		<Behavior speed="0">Wander</Behavior>
+					<Order>
+						<Behavior tagName="pause">SetTag</Behavior>
+					</Order>
+					<Transition afterTime=".8">Order2</Transition>
+				</State>
+				<State id="Order2">
+					<Order>
+						<Behavior tagName="pause">SetTag</Behavior>
+					</Order>
+					<Transition afterTime=".8">Order1</Transition>
+				</State>
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Behavior minSize="0" rate="-70">ChangeSize</Behavior>
+				<Behavior speed=".8" terrain="Dark Water">StayInTerrain</Behavior>
+				<Transition noneExist="Hermit God Tentacle">UnHybernate</Transition>
+			</State>
+			<State id="UnHybernate">
+			<Behavior maxSize="140" rate="70">ChangeSize</Behavior>
+				<State id="Pt1">
+					<Behavior altTextureId="1">SetAltTexture</Behavior>
+					<Transition afterTime=".4">Pt2</Transition>
+				</State>
+				<State id="Pt2">
+					<Behavior altTextureId="2">SetAltTexture</Behavior>
+					<Embed name="throwMinions"></Embed>
+					<Transition afterTime=".4">Pt3</Transition>
+				</State>
+				<State id="Pt3">
+					<Behavior altTextureId="2">SetAltTexture</Behavior>
+					<Behavior tagName="hybernationDone">SetTag</Behavior>
+				</State>
+			</State>
+			<Transition noneExist="Hermit God Tentacle" hasTag="hybernationDone">ChangeOver</Transition>
+		</State>
+		
+		
+		<State id="ChangeOver">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior altTextureId="2">SetAltTexture</Behavior>
+			<Behavior tagName="hybernationDone">ClearTag</Behavior>
+			<Order>
+				<Behavior tagName="makeWhirlpool">SetTag</Behavior>
+			</Order>
+			<Transition afterTime=".6">AttackPools</Transition>
+		</State>
+		
+		<DefineEmbed name="OctoShot">
+			<Behavior type="auto" defaultAngle="0" numShots="2"  projectileId="1" cooldown="{cooldown}" range="0" offset="0" angle="180" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="90" numShots="2"  projectileId="1" cooldown="{cooldown}" range="0" offset=".4" angle="180" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="45" numShots="2"  projectileId="1" cooldown="{cooldown}" range="0" offset=".8" angle="180" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="135" numShots="2"  projectileId="1" cooldown="{cooldown}" range="0" offset="1.2" angle="180" arcDegrees="300">Shoot</Behavior>
+		</DefineEmbed>
+		
+		<DefineEmbed name="circleMaze">
+			<State id="CircleAttack">
+				<State id="Flash">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior type="Flash" color="FFFF00" flashPeriod=".2" flashRepeats="5">ShowEffect</Behavior>
+					<Transition afterTime="1">WarningShot</Transition>
+				</State>
+				<State id="WarningShot">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior type="auto" defaultAngle="{angle}" numShots="5"  projectileId="3" cooldown="1" range="0" offset="0" angle="12" >Shoot</Behavior>
+					<Transition afterTime="1.2">Glow</Transition>
+				</State>
+				<State id="Glow">
+					<Behavior type="Flash" color="FF2200" flashPeriod="1" flashRepeats="3">ShowEffect</Behavior>
+					<Transition afterTime="3">Attack</Transition>
+				</State>
+				<State id="Attack">
+					<Behavior type="Flash" color="FFFFFF" flashPeriod="1" flashRepeats="3">ShowEffect</Behavior>
+					<Behavior type="auto" defaultAngle="{angleminusthirty}" numShots="25"  projectileId="2" cooldown="1" range="0" offset="0" angle="12" >Shoot</Behavior>
+				</State>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="throwMinions">
+			<Behavior type="auto" childId="Hermit Minion" range="11.5" rangeJitter="1" defaultAngle="0" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Hermit Minion" range="11.5" rangeJitter="1" defaultAngle="90" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Hermit Minion" range="11.5" rangeJitter="1" defaultAngle="180" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Hermit Minion" range="11.5" rangeJitter="1" defaultAngle="270" cooldown="5">ObjectToss</Behavior>
+			
+			<Behavior type="auto" childId="Hermit Minion" range="11.5" rangeJitter="1" defaultAngle="45" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Hermit Minion" range="11.5" rangeJitter="1" defaultAngle="135" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Hermit Minion" range="11.5" rangeJitter="1" defaultAngle="225" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Hermit Minion" range="11.5" rangeJitter="1" defaultAngle="315" cooldown="5">ObjectToss</Behavior>
+		</DefineEmbed>
+		
+		<Behavior>OryxTaunt</Behavior>
+	</Object>
+	
+	 <Object type="0x0d62" id="Hermit Minion">
+		<Class>Character</Class>
+		<Group>Hermit God Encounter</Group>
+		<Enemy/>
+		<Size>100</Size>
+		<ShadowSize>90</ShadowSize>
+		<MaxHitPoints>2200</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.01</XpMult>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>21</Index></AnimatedTexture>
+		
+		<Projectile id="0">
+			<ObjectId>Snake Shot Yellow</ObjectId>
+			<Damage>50</Damage>
+			<Speed>65</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1500</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Yellow Swipe</ObjectId>
+			<Damage>60</Damage>
+			<Speed>45</Speed>
+			<Size>100</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration=".4">Paralyzed</ConditionEffect>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown=".6" range="6.6" offset=".2" angle="12" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="1" cooldown="3" range="6.6" offset=".4" angle="60" predictive="1">Shoot</Behavior>
+			
+			<Behavior bucket="movement" minAltitude="135">StayAbove</Behavior>
+			<Behavior acquireRange="6" bucket="movement" range="2.4" speed="0.65" duration="2.4" cooldown="1">Follow</Behavior>
+			<Behavior bucket="movement" protecteeId="Hermit God" acquireRange="20" speed=".85" radius="11.5" speedVariability="1" radiusVariability=".5" clockwise="true">Orbit</Behavior>
+			<Behavior bucket="movement" speed="0.25">Wander</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0d63" id="Whirlpool">
+		<Group>Hermit God Encounter</Group>
+		<Enemy/>
+	    <Class>Character</Class>
+	    <StasisImmune/>
+		<ShadowSize>0</ShadowSize>
+		<Flying/>
+		
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>15</Index></AnimatedTexture>
+	
+		<HitSound>monster/djinn_hit</HitSound>
+		<DeathSound>monster/blobs_death</DeathSound>
+	        
+		<MaxHitPoints>10000</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Size>110</Size>
+		<Defense>0</Defense>
+	        
+		<Projectile id="0">
+			<ObjectId>Water Shot</ObjectId>
+	        <Speed>35</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		
+		<Behavior bucket="orders" listenIds="Hermit God">FollowOrders</Behavior>
+		
+		<State id="Base">
+			<Behavior bucket="movement" protecteeId="Hermit God" acquireRange="8" speed=".35" radius="5.5" speedVariability="0" radiusVariability="0" clockwise="false">Orbit</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1.6" range="0" offset="0" angle="0" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="45" numShots="1"  projectileId="0" cooldown="1.6" range="0" offset="0.2" angle="0" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="90" numShots="1"  projectileId="0" cooldown="1.6" range="0" offset="0.4" angle="0" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="135" numShots="1"  projectileId="0" cooldown="1.6" range="0" offset="0.6" angle="0" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="180" numShots="1"  projectileId="0" cooldown="1.6" range="0" offset="0.8" angle="0" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="225" numShots="1"  projectileId="0" cooldown="1.6" range="0" offset="1" angle="0" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="270" numShots="1"  projectileId="0" cooldown="1.6" range="0" offset="1.2" angle="0" arcDegrees="300">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="315" numShots="1"  projectileId="0" cooldown="1.6" range="0" offset="1.4" angle="0" arcDegrees="300">Shoot</Behavior>
+			
+			<Transition noneExist="Hermit God">Die</Transition>
+			<Transition hasTag="Phase2">Die</Transition>
+			<Transition afterTime="9">Die</Transition>
+		</State>
+		
+		<State id="Die">
+			<State id="Explode">
+				<Behavior initialDelay="0" numShots="10" projectileId="0" range="0">Explode</Behavior>
+			</State>
+			<State id="Gone">
+				<Behavior time="0">Decay</Behavior>
+			</State>
+		</State>
+	</Object>
+	
+	<Object type="0x0d64" id="Hermit God Tentacle">
+		<Group>Hermit God Encounter</Group>
+		<Enemy/>
+	    <Class>Character</Class>
+		<ShadowSize>100</ShadowSize>
+	
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>11</Index></AnimatedTexture>
+	
+		<AltTexture id="1">
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>12</Index></AnimatedTexture> <!--start-->
+		</AltTexture>
+	        	
+		<HitSound>monster/dwarves_death</HitSound>
+		<DeathSound>monster/flayers_hit</DeathSound>
+	        
+		<MaxHitPoints>7500</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Size>110</Size>
+		<Defense>15</Defense>
+	        
+		<Projectile id="0">
+			<ObjectId>Tentacle Wall</ObjectId>
+	        <Speed>35</Speed>
+	        <Damage>45</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Tentacle Ball</ObjectId>
+	        <Speed>40</Speed>
+	        <Damage>40</Damage>
+	        <Size>80</Size>
+	        <LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		
+		<Behavior bucket="orders" listenIds="Hermit God">FollowOrders</Behavior>
+	        
+		<State id="Ini">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Transition afterTime=".4">Base</Transition>
+		</State>
+		
+		<State id="Base">
+			<Behavior speed=".8" terrain="Dark Water, Shallow Water">StayInTerrain</Behavior>
+			
+			<State id="Normal">
+				<Behavior bucket="movement" cooldown=".8" speed=".8" range="3.5">Charge</Behavior>
+				<Behavior bucket="movement" speed=".4" range="3" cooldown=".6">StayCloseToSpawn</Behavior>
+				<Behavior bucket="movement" speed=".4">Wander</Behavior>
+				<Transition afterTime="4" random="0.5">CircleRt</Transition>
+				<Transition afterTime="4">CircleLf</Transition>
+			</State>
+			<State id="CircleRt">
+				<Behavior bucket="movement" cooldown=".8" speed=".8" range="3.5">Charge</Behavior>
+				<Behavior bucket="movement" protecteeId="Hermit God" acquireRange="8" speed=".4" radius="5" speedVariability="0" radiusVariability="0" clockwise="false">Orbit</Behavior>
+				<Transition afterTime="2">Normal</Transition>
+			</State>
+			<State id="CircleLf">
+				<Behavior bucket="movement" cooldown=".8" speed=".8" range="3.5">Charge</Behavior>
+				<Behavior bucket="movement" protecteeId="Hermit God" acquireRange="8" speed=".4" radius="5" speedVariability="0" radiusVariability="0" clockwise="true">Orbit</Behavior>
+				<Transition afterTime="2">Normal</Transition>
+			</State>
+			
+			<Behavior type="targeted" defaultAngle="0" numShots="8"  projectileId="0" cooldown=".4" range="3.5" offset="0" angle="45" predictive="1" >Shoot</Behavior>
+			<Transition noneExist="Hermit God">Leave</Transition>
+			<Transition hasTag="pause">HybCircle</Transition>
+			<Transition hasTag="Phase2">Leave</Transition>
+		</State>
+		
+		
+		<State id="HybCircle">
+			<Behavior tagName="pause">ClearTag</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="8"  projectileId="0" cooldown=".4" range="3.5" offset="0" angle="45" predictive="1" >Shoot</Behavior>
+			<Behavior bucket="movement" cooldown=".8" speed=".8" range="3.5">Charge</Behavior>
+			<Behavior bucket="movement" protecteeId="Hermit God" acquireRange="8" speed=".4" radius="5" speedVariability="0" radiusVariability="0" clockwise="false">Orbit</Behavior>
+			<Transition hasTag="makeWhirlpool">Base</Transition>
+			<Transition hasTag="Phase2">Leave</Transition>
+		</State>
+		
+		<State id="Leave">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<State id="Animate">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".2">Explode</Transition>
+			</State>
+			<State id="Explode">
+				<Behavior initialDelay="0" numShots="10" projectileId="1" range="0">Explode</Behavior>
+			</State>
+			<State id="Gone">
+				<Behavior time="0">Decay</Behavior>
+			</State>
+		</State>
+	</Object>
+	
+	<Object type="0x0d65" id="Hermit God Tentacle Spawner">
+		<Group>Hermit God Encounter</Group>
+	    <Class>Character</Class>
+	    <StasisImmune/>
+		<ShadowSize>0</ShadowSize>
+		<Size>0</Size>
+		<Enemy/>
+		<NoMiniMap/>
+		
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+	        	
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/dwarves_death</DeathSound>
+	        
+		<MaxHitPoints>10000</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Size>110</Size>
+		<Defense>50</Defense>
+	        
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<Behavior bucket="orders" listenIds="Hermit God">FollowOrders</Behavior>
+		<Behavior targetId="Hermit God">CopyDamageRecord</Behavior>
+	
+		<State id="Cooldown">
+			<Transition noneExist="Hermit God">Gone</Transition>
+			<Transition afterTime="20">MakeTentacle</Transition>
+			<Transition hasTag="forceMake">MakeTentacle</Transition>
+		</State>
+		
+		<State id="CooldownShort">
+			<Transition noneExist="Hermit God">Gone</Transition>
+			<Transition afterTime="10">MakeTentacle</Transition>
+			<Transition hasTag="forceMake">MakeTentacle</Transition>
+		</State>
+		
+		<State id="CooldownWhirlpool">
+			<Transition noneExist="Hermit God">Gone</Transition>
+			<Behavior tagName="makeWhirlpool">ClearTag</Behavior>
+			<Behavior tagName="pause">ClearTag</Behavior>
+			<Transition afterTime="2">MakeWhirlpool</Transition>
+			<Transition hasTag="forceMake">MakeTentacle</Transition>
+		</State>
+		
+		<State id="Pause">
+			<Transition noneExist="Hermit God">Gone</Transition>
+			<Behavior tagName="pause">ClearTag</Behavior>
+			<Transition hasTag="pauseOver">CooldownShort</Transition>
+			<Transition hasTag="makeWhirlpool">CooldownWhirlpool</Transition>
+		</State>
+		
+		<State id="MakeTentacle">
+			<Transition noneExist="Hermit God">Gone</Transition>
+			<Behavior tagName="pauseOver">ClearTag</Behavior>
+			<Behavior tagName="forceMake">ClearTag</Behavior>
+			<Behavior tagName="makeTentacle">ClearTag</Behavior>
+			
+			<Behavior cooldown="4" childIds="Hermit God Tentacle" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+			<Transition afterTime="2" hasTag="pause">Pause</Transition>
+			<Transition afterTime="3">Cooldown</Transition>
+		</State>
+		
+		<State id="MakeWhirlpool">
+			<Transition noneExist="Hermit God">Gone</Transition>
+			<Behavior tagName="pauseOver">ClearTag</Behavior>
+			<Behavior tagName="forceMake">ClearTag</Behavior>
+			<Behavior tagName="makeTentacle">ClearTag</Behavior>
+			<Behavior tagName="makeWhirlpool">ClearTag</Behavior>
+			
+			<Behavior cooldown="6" childIds="Whirlpool" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+			<Transition afterTime="4">WhirlpoolsWait</Transition>
+		</State>
+		
+		
+		<State id="WhirlpoolsWait">
+			<Transition noneExist="Hermit God">Gone</Transition>
+			<Transition noneExist="Whirlpool" afterTime="6">WhirlpoolsDead</Transition>
+		</State>
+		
+		<State id="WhirlpoolsDead">
+			<Transition noneExist="Hermit God">Gone</Transition>
+			<Transition afterTime="3">CooldownShort</Transition>
+		</State>
+		
+		<State id="Gone">
+			<Behavior time="0" dropLoot="true">Decay</Behavior>
+		</State>
+		
+		<SoulboundLoot prob="0.016">Potion of Vitality</SoulboundLoot>
+		<SoulboundLoot prob="0.03">Potion of Dexterity</SoulboundLoot>
+		<SoulboundLoot prob="0.00026">Helm of the Juggernaut</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0d66" id="Hermit God Drop">
+		<Group>Hermit God Encounter</Group>
+		<Class>Character</Class>
+		<StasisImmune/>
+		<NoMiniMap/>
+		
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		     
+		<HitSound>monster/hobbits_death</HitSound>
+		<DeathSound>monster/minion_of_oryx_death</DeathSound>
+		        
+		<MaxHitPoints>100</MaxHitPoints>   
+		<Size>0</Size>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		
+		<State id="Ini">
+			<Transition noneExist="Hermit God">CreatePortal</Transition>
+		</State>
+		<State id="CreatePortal">
+			<Behavior groundId="Grey Open">ChangeGround</Behavior>
+			<Behavior time="0.0" childId="Ocean Trench Portal">Metamorphose</Behavior>
+		</State>
+	</Object>
+</Objects>

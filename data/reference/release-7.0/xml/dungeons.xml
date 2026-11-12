@@ -1,0 +1,1804 @@
+<Dungeons>
+
+    <Dungeon id="Nightmare Labrynth">
+        <Level>
+            <Width>64</Width>
+            <Height>64</Height>
+            <MainBranchLen>0</MainBranchLen>
+            <NumSubBranches>0</NumSubBranches>
+
+            <CharMap><Char>c</Char><Ground>Composite</Ground><Object>Tomb Wall</Object></CharMap>
+            <CharMap><Char>p</Char><Ground>LabrynthTile</Ground><Object>Portal of Cowardice</Object></CharMap>
+            <CharMap><Char>a</Char><Ground>LabrynthTile</Ground><Object>Altar of Nightmares</Object></CharMap>
+            <CharMap><Char>1</Char><Ground>LabrynthTile</Ground><Object>Corner1</Object></CharMap>
+            <CharMap><Char>2</Char><Ground>LabrynthTile</Ground><Object>Corner2</Object></CharMap>
+            <CharMap><Char>1</Char><Ground>LabrynthTile</Ground><Object>Corner3</Object></CharMap>
+            <CharMap><Char>2</Char><Ground>LabrynthTile</Ground><Object>Corner4</Object></CharMap>
+
+            <!-- <NoLineOfSight/> -->
+
+            <Room id="start">
+                <X>0</X><Y>0</Y>
+                <FloorTile>Grass</FloorTile>
+                <Pattern>
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ..cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc..
+                    ..c__________________________________________________________c..
+                    ..c___a______________________________________________________c..
+                    ..c___4__________________________________________________3___c..
+                    ..c___p______________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..c_____________cccccccccccccccccccccccccccccccc_____________c..
+                    ..c____________c................................c____________c..
+                    ..c___________c..................................c___________c..
+                    ..c__________c....................................c__________c..
+                    ..c_________c......................................c_________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c________c........................................c________c..
+                    ..c_________c......................................c_________c..
+                    ..c__________c....................................c__________c..
+                    ..c___________c..................................c___________c..
+                    ..c____________c................................c____________c..
+                    ..c_____________cccccccccccccccccccccccccccccccc_____________c..
+                    ..c__________________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..c___1__________________________________________________2___c..
+                    ..c__________________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..c__________________________________________________________c..
+                    ..cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc..
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                    ................................................................
+                </Pattern>
+            </Room>
+        </Level>
+    </Dungeon>
+
+    <Dungeon id="Candyland Hunting Grounds">
+		<Width>256</Width>
+		<Height>256</Height>
+		<Visibility>Path</Visibility>
+		<MainBranchLen>1</MainBranchLen>
+		<NumSubBranches>5</NumSubBranches>
+        <PlayerLimit>6</PlayerLimit>
+		
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		
+        <MinHallwayWidth>4</MinHallwayWidth>
+        <MaxHallwayWidth>8</MaxHallwayWidth>
+        
+		<MinHallwayLen>1</MinHallwayLen>
+		<MaxHallwayLen>2</MaxHallwayLen>
+		<HallwayTile>Candy Grass</HallwayTile>
+		<CenterMap/>
+		<!--DefaultTile>Dirt</DefaultTile-->
+		
+        <Difficulty>3</Difficulty>
+        
+		<DefaultTile>Candy Grass Dark 2</DefaultTile>
+        <DefaultObj>
+        	<Obj prob=".60">Candy Peppermint Tree Big</Obj>
+        	<Obj prob=".40">Jungle Invisible Solid</Obj>
+        </DefaultObj>
+        <WallTile>Candy Grass Dark</WallTile>
+        <WallObj>
+        	<Obj prob="1">Candy Peppermint Tree</Obj>
+        </WallObj>
+		
+		<!--GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.20">Dirt Hole</GlobalReplaceTile-->
+		<!--GlobalReplaceTile func="perlinProb" dx=".06" dy=".06" mult="0.70" groundRestrict="Dirt">Bright Grass 2</GlobalReplaceTile-->
+		<!--GlobalReplaceTile func="perlinProb" dx=".06" dy=".06" mult="0.45" groundRestrict="Candy Grass">Candy Cobble</GlobalReplaceTile-->
+        
+		<Room id="start">
+            <LocalJM>candyland/start.jm</LocalJM>
+            <LocalJM>candyland/start2.jm</LocalJM>
+            <LocalJM>candyland/start3.jm</LocalJM>
+        </Room>
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>candyland/default_01.jm</LocalJM>
+            <LocalJM>candyland/default_02.jm</LocalJM>
+            <LocalJM>candyland/default_03.jm</LocalJM>
+            <LocalJM>candyland/default_16.jm</LocalJM>
+        </Room>
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>candyland/default_04.jm</LocalJM>
+            <LocalJM>candyland/default_05.jm</LocalJM>
+            <LocalJM>candyland/default_06.jm</LocalJM>
+        </Room>
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>candyland/default_07.jm</LocalJM>
+            <LocalJM>candyland/default_08.jm</LocalJM>
+            <LocalJM>candyland/default_09.jm</LocalJM>
+        </Room>
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>candyland/default_10.jm</LocalJM>
+            <LocalJM>candyland/default_11.jm</LocalJM>
+            <LocalJM>candyland/default_12.jm</LocalJM>
+        </Room>
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>candyland/default_13.jm</LocalJM>
+            <LocalJM>candyland/default_14.jm</LocalJM>
+            <LocalJM>candyland/default_15.jm</LocalJM>
+        </Room>
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>candyland/boss.jm</LocalJM>
+        </Room>
+        <Room id="default">
+			<Type>Circle</Type>
+			<MinCircleRadius>5.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Candy Grass</FloorTile>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="2" position="center">Candyland Spawner</Enemy>
+            </Enemies>
+			<Enemies>
+				<Enemy prob="0.2" minNum="3" maxNum="9">Candy Happy Flower 2</Enemy>
+				<Enemy prob="0.2" minNum="3" maxNum="9">Candy Happy Flower 1</Enemy>
+				<Enemy prob="0.2" minNum="2" maxNum="7">Candy Small Tree</Enemy>
+				<Enemy prob="0.2" minNum="3" maxNum="9">Candy Ground Flowers</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="1" minNum="0" maxNum="6">Butterfly</Enemy>
+			</Enemies>
+        </Room>
+	</Dungeon>
+
+    
+    <!--<Dungeon id="Dance Dungeon">-->
+
+    <!--<Width>256</Width>-->
+    <!--<Height>256</Height>-->
+
+    <!--<MainBranchLen>1</MainBranchLen>-->
+    <!--<NumSubBranches>2</NumSubBranches>-->
+
+    <!--<MinSubBranchLen>2</MinSubBranchLen>-->
+    <!--<MaxSubBranchLen>2</MaxSubBranchLen>-->
+
+    <!--<MinHallwayWidth>3</MinHallwayWidth>-->
+    <!--<MaxHallwayWidth>3</MaxHallwayWidth>-->
+
+    <!--<MinHallwayLen>2</MinHallwayLen>-->
+    <!--<MaxHallwayLen>3</MaxHallwayLen>-->
+
+    <!--<HallwayTile>Brown Lines</HallwayTile>-->
+    <!--<WallObj><Obj>Brown Wall</Obj></WallObj>-->
+
+    <!--<Difficulty>5</Difficulty>-->
+    <!--&lt;!&ndash;<AltWallType>Lab Wall Moss</AltWallType>-->
+         <!--<AltWallType a="5" b="8">Lab Wall Toch</AltWallType>-->
+         <!--<AltWallType a="4" b="6">Lab Window Wall</AltWallType>-->
+         <!--<AltWallType a="5" b="4">Lab Equipment Wall Side</AltWallType>&ndash;&gt;-->
+
+    <!--<Room id="start">-->
+        <!--<LocalJM>dance_dungeon/start.jm</LocalJM>-->
+        <!--<Enemies>-->
+            <!--<Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>-->
+        <!--</Enemies>-->
+    <!--</Room>-->
+    <!--<Room id="end">-->
+        <!--<LocalJM>dance_dungeon/northWing.jm</LocalJM>-->
+
+    <!--</Room>-->
+
+    <!--<Room id="branchEnd"> &lt;!&ndash; Blue &ndash;&gt;-->
+        <!--<MaxCount>1</MaxCount>-->
+        <!--<MinPadding>0</MinPadding>-->
+        <!--<MaxHallwayLen>0</MaxHallwayLen>-->
+        <!--<MinHallwayLen>0</MinHallwayLen>-->
+        <!--<LocalJM>dance_dungeon/leftWing.jm</LocalJM>-->
+     <!--</Room>-->
+
+    <!--<Room id="branchEnd"> &lt;!&ndash; LightBlueGreen &ndash;&gt;-->
+        <!--<MaxCount>1</MaxCount>-->
+        <!--<MinPadding>0</MinPadding>-->
+        <!--<MaxHallwayLen>0</MaxHallwayLen>-->
+        <!--<MinHallwayLen>0</MinHallwayLen>-->
+        <!--<LocalJM>dance_dungeon/rightWing.jm</LocalJM>-->
+    <!--</Room>-->
+    <!--</Dungeon>-->
+
+    <Dungeon id="Haunted Cemetery">
+        <Width>256</Width>
+        <Height>256</Height>
+        <CenterStartRoom/>
+        <Difficulty>3</Difficulty>
+        <PlayerLimit>6</PlayerLimit>
+        <Visibility>Full</Visibility>
+        <Room id="start">
+            <LocalJM>Halloween/area1.jm</LocalJM>
+        </Room>
+    </Dungeon>
+
+    <Dungeon id="Haunted Cemetery Gates">
+        <Width>256</Width>
+        <Height>256</Height>
+        <CenterStartRoom/>
+        <Difficulty>3</Difficulty>
+        <Visibility>Full</Visibility>
+        <Room id="start">
+            <LocalJM>Halloween/area2.jm</LocalJM>
+        </Room>
+    </Dungeon>
+
+    <Dungeon id="Haunted Cemetery Graves">
+        <Width>256</Width>
+        <Height>256</Height>
+        <CenterStartRoom/>
+        <Visibility>Full</Visibility>
+        <Difficulty>4</Difficulty>
+        <Room id="start">
+            <LocalJM>Halloween/area3.jm</LocalJM>
+        </Room>
+    </Dungeon>
+
+    <Dungeon id="Haunted Cemetery Final Battle">
+        <Width>256</Width>
+        <Height>256</Height>
+        <CenterStartRoom/>
+        <Visibility>Full</Visibility>
+        <Difficulty>5</Difficulty>
+        <Room id="start">
+            <LocalJM>Halloween/final_arena.jm</LocalJM>
+        </Room>
+    </Dungeon>
+
+    <Dungeon id="Cave of A Thousand Treasures">
+        <Width>256</Width>
+        <Height>256</Height>
+        <MainBranchLen>7</MainBranchLen>
+        <NumSubBranches>0</NumSubBranches>
+        <MinSubBranchLen>0</MinSubBranchLen>
+        <MaxSubBranchLen>0</MaxSubBranchLen>
+        <MinHallwayWidth>4</MinHallwayWidth>
+        <MaxHallwayWidth>4</MaxHallwayWidth>
+        <MinHallwayLen>1</MinHallwayLen>
+        <MaxHallwayLen>3</MaxHallwayLen>
+        <PlayerLimit>5</PlayerLimit>
+        <Visibility>Path</Visibility>
+
+        <Difficulty>3</Difficulty>
+
+        <HallwayTile>SpiderDirt</HallwayTile>
+        <WallObj><Obj>Spider Dirt Wall</Obj></WallObj>
+        <Room id="start">
+            <LocalJM>treasure/start.jm</LocalJM>
+            <Enemies>
+                <Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+            </Enemies>
+        </Room>
+        <Room id="end">
+            <LocalJM>treasure/treasuremine_boss.jm</LocalJM>
+            <Enemies>
+                <Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+            </Enemies>
+        </Room>
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>treasure/path1.jm</LocalJM>
+            <Enemies>
+                <Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="3">Treasure Rat</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="1">Treasure Enemy</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob=".1" minNum="1" maxNum="1">Treasure Thief</Enemy>
+            </Enemies>
+        </Room>
+
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>treasure/path2.jm</LocalJM>
+            <Enemies>
+                <Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="3">Treasure Rat</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="1">Treasure Enemy</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="1">Treasure Robber</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob=".5" minNum="1" maxNum="2">Treasure Plunderer</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob=".1" minNum="1" maxNum="1">Treasure Thief</Enemy>
+            </Enemies>
+        </Room>
+
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>treasure/path6.jm</LocalJM>
+            <Enemies>
+                <Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+            </Enemies>
+        </Room>
+
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>treasure/path3.jm</LocalJM>
+            <Enemies>
+                <Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="2">Treasure Robber</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="2">Treasure Plunderer</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob=".05" minNum="1" maxNum="1">Treasure Thief</Enemy>
+            </Enemies>
+        </Room>
+
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>treasure/path4.jm</LocalJM>
+            <Enemies>
+                <Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="2" maxNum="3">Treasure Rat</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="1">Treasure Plunderer</Enemy>
+            </Enemies>
+            <Enemies>
+                <Enemy prob="1" minNum="1" maxNum="1">Treasure Robber</Enemy>
+            </Enemies>
+        </Room>
+
+        <Room id="default">
+            <Prob>1</Prob>
+            <MaxCount>1</MaxCount>
+            <LocalJM>treasure/path5.jm</LocalJM>
+            <Enemies>
+                <Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+            </Enemies>
+        </Room>
+    </Dungeon>
+
+
+    <Dungeon id="Mad Lab">
+		<Width>256</Width>
+		<Height>256</Height>
+		<Visibility>Path</Visibility>
+        <!--<Visibility>LineOfSight</Visibility>-->
+        
+		<MainBranchLen>11</MainBranchLen>
+		<NumSubBranches>4</NumSubBranches>
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>1</MaxSubBranchLen>
+		<MinHallwayWidth>4</MinHallwayWidth>
+		<MaxHallwayWidth>4</MaxHallwayWidth>
+		<MinHallwayLen>5</MinHallwayLen>
+		<MaxHallwayLen>8</MaxHallwayLen>
+		<HallwayTile>Lab Floor</HallwayTile>
+		<WallObj><Obj>Lab Wall</Obj></WallObj>
+        <Difficulty>5</Difficulty>
+		<!--<AltWallType>Lab Wall Moss</AltWallType>
+		<AltWallType a="5" b="8">Lab Wall Toch</AltWallType>
+		<AltWallType a="4" b="6">Lab Window Wall</AltWallType>
+		<AltWallType a="5" b="4">Lab Equipment Wall Side</AltWallType>-->
+		
+		<Room id="start">
+			<LocalJM>mad_lab/start.jm</LocalJM>
+			<Enemies>
+				<Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<LocalJM>mad_lab/boss_main.jm</LocalJM>
+			<Enemies>
+				<Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+			</Enemies>
+		</Room>
+		
+		<Room id="default">
+			<Prob>.3</Prob>
+			<MaxCount>1</MaxCount>
+			<LocalJM>mad_lab/frogger.jm</LocalJM>
+			<LocalJM>mad_lab/frogger1.jm</LocalJM>
+			<LocalJM>mad_lab/frogger2.jm</LocalJM>
+			<LocalJM>mad_lab/frogger3.jm</LocalJM>
+			<LocalJM>mad_lab/frogger4.jm</LocalJM>
+			<Enemies>
+				<Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+			</Enemies>
+		</Room>
+		
+        
+		<Room id="default">
+			<Prob>.12</Prob>
+			<MaxCount>1</MaxCount>
+            <LocalJM>mad_lab/main9.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="1" minNum="1" maxNum="4" position="edge">Spider Web</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="1" minNum="2" maxNum="3">Mini Bot</Enemy>
+			</Enemies>
+			<Enemies>
+                <Enemy prob=".5" minNum="2" maxNum="4">Rampage Cyborg</Enemy>
+	   			<Enemy prob=".5" minNum="1" maxNum="1">Escaped Experiment</Enemy>
+			</Enemies>
+			<Enemies>
+	   			<Enemy prob=".5" minNum="1" maxNum="1">Enforcer Bot 3000</Enemy>
+			</Enemies>
+		</Room>
+        
+		<Room id="default">  <!-- Walled Rooms -->
+			<Prob>.3</Prob>
+			<MaxCount>5</MaxCount>
+			<LocalJM>mad_lab/main1.jm</LocalJM>
+			<LocalJM>mad_lab/main2.jm</LocalJM>
+			<LocalJM>mad_lab/main3.jm</LocalJM>
+            <LocalJM>mad_lab/main6.jm</LocalJM>
+            <LocalJM>mad_lab/main12.jm</LocalJM>
+            <LocalJM>mad_lab/main15.jm</LocalJM>
+            <LocalJM>mad_lab/main16.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="1" minNum="1" maxNum="4" position="edge">Spider Web</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="1" minNum="2" maxNum="3">Mini Bot</Enemy>
+			</Enemies>
+			<Enemies>
+                <Enemy prob=".5" minNum="2" maxNum="4">Rampage Cyborg</Enemy>
+	   			<Enemy prob=".5" minNum="1" maxNum="2">Escaped Experiment</Enemy>
+			</Enemies>
+			<Enemies>
+	   			<Enemy prob=".5" minNum="1" maxNum="2">Enforcer Bot 3000</Enemy>
+	    		<Enemy prob=".5" minNum="1" maxNum="2">Crusher Abomination</Enemy>
+			</Enemies>
+            <Enemies>
+                <Enemy prob=".07" minNum="1" maxNum="2">Enforcer Bot 3000</Enemy>
+                <Enemy prob=".1" minNum="1" maxNum="1">Crusher Abomination</Enemy>
+            </Enemies>
+		</Room>
+        
+		<Room id="default">
+			<Prob>.15</Prob>
+			<MaxCount>1</MaxCount>
+            <LocalJM>mad_lab/main19_L_rd.jm</LocalJM>
+            <LocalJM>mad_lab/main19_T_rdu.jm</LocalJM>
+            <LocalJM>mad_lab/main19_X.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="1" minNum="3" maxNum="3">Mini Bot</Enemy>
+			</Enemies>
+			<Enemies>
+                <Enemy prob=".7" minNum="1" maxNum="4">Rampage Cyborg</Enemy>
+                <Enemy prob=".2" minNum="1" maxNum="3">Escaped Experiment</Enemy>
+			</Enemies>
+			<Enemies>
+	   			<Enemy prob=".7" minNum="1" maxNum="2">Enforcer Bot 3000</Enemy>
+			</Enemies>
+		</Room>
+        
+		<Room id="default">
+			<LocalJM>mad_lab/main4.jm</LocalJM>
+			<LocalJM>mad_lab/main5.jm</LocalJM>
+			<LocalJM>mad_lab/main7.jm</LocalJM>
+			<LocalJM>mad_lab/main8.jm</LocalJM>
+            <LocalJM>mad_lab/main10.jm</LocalJM>
+            <LocalJM>mad_lab/main11.jm</LocalJM>
+            <LocalJM>mad_lab/main13.jm</LocalJM>
+            <LocalJM>mad_lab/main14.jm</LocalJM>
+            <LocalJM>mad_lab/main17.jm</LocalJM>
+            <LocalJM>mad_lab/main18.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="1" minNum="1" maxNum="4" position="edge">Spider Web</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="1" minNum="1" maxNum="3">Mini Bot</Enemy>
+			</Enemies>
+			<Enemies>
+                <Enemy prob=".3" minNum="2" maxNum="3">Rampage Cyborg</Enemy>
+	   			<Enemy prob=".7" minNum="1" maxNum="2">Escaped Experiment</Enemy>
+			</Enemies>
+			<Enemies>
+	   			<Enemy prob=".3" minNum="1" maxNum="2">Enforcer Bot 3000</Enemy>
+	    		<Enemy prob=".7" minNum="1" maxNum="2">Crusher Abomination</Enemy>
+			</Enemies>
+            <Enemies>
+                <Enemy prob=".07" minNum="1" maxNum="2">Enforcer Bot 3000</Enemy>
+                <Enemy prob=".1" minNum="1" maxNum="1">Crusher Abomination</Enemy>
+            </Enemies>
+		</Room>
+        
+		<Room id="branchEnd">
+			<LocalJM>mad_lab/main4.jm</LocalJM>
+			<LocalJM>mad_lab/main5.jm</LocalJM>
+			<LocalJM>mad_lab/main7.jm</LocalJM>
+			<LocalJM>mad_lab/main8.jm</LocalJM>
+            <LocalJM>mad_lab/main10.jm</LocalJM>
+            <LocalJM>mad_lab/main11.jm</LocalJM>
+            <LocalJM>mad_lab/main13.jm</LocalJM>
+            <LocalJM>mad_lab/main14.jm</LocalJM>
+            <LocalJM>mad_lab/main17.jm</LocalJM>
+            <LocalJM>mad_lab/main18.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="1" minNum="1" maxNum="4" position="edge">Spider Web</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="1" minNum="1" maxNum="4">Mini Bot</Enemy>
+			</Enemies>
+			<Enemies>
+                <Enemy prob=".5" minNum="1" maxNum="4">Rampage Cyborg</Enemy>
+	   			<Enemy prob=".5" minNum="1" maxNum="2">Escaped Experiment</Enemy>
+			</Enemies>
+			<Enemies>
+	   			<Enemy prob=".5" minNum="1" maxNum="2">Enforcer Bot 3000</Enemy>
+	    		<Enemy prob=".5" minNum="1" maxNum="2">Crusher Abomination</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+    
+	<Dungeon id="Davy Jones's Locker">
+		<Width>256</Width>
+		<Height>256</Height>
+		<Visibility>Path</Visibility>
+		
+		<MainBranchLen>4</MainBranchLen>
+		<NumSubBranches>16</NumSubBranches>
+		
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		
+        <MinHallwayWidth>4</MinHallwayWidth>
+        <MaxHallwayWidth>4</MaxHallwayWidth>
+        
+		<MinHallwayLen>1</MinHallwayLen>
+		<MaxHallwayLen>1</MaxHallwayLen>
+		<CenterMap/>
+        
+        <Difficulty>4</Difficulty>
+        
+		<HallwayTile>GhostGround Dark</HallwayTile>
+		<HallwayEndTile>GhostGround Dark</HallwayEndTile>
+		
+		<WallObj><Obj>GhostShip Wall</Obj></WallObj>
+
+		<HelloNotification>showKeyUI</HelloNotification>
+
+		<!--
+		<RemoveHallwayEndObjects/>
+		 
+		<EndCapObj><Obj>Gothic Pillar</Obj></EndCapObj>
+		<WallObj><Obj>Gothic Bricks</Obj></WallObj>
+		 -->
+		
+		<Room id="start">
+			<MinPadding>0</MinPadding>
+			<MaxHallwayLen>0</MaxHallwayLen>
+			<MinHallwayLen>0</MinHallwayLen>
+			<LocalJM>ghost_ship/start_v.jm</LocalJM>
+			<LocalJM>ghost_ship/start_h.jm</LocalJM>
+		</Room>
+		<Room id="end">
+			<MinPadding>0</MinPadding>
+			<MaxHallwayLen>0</MaxHallwayLen>
+			<MinHallwayLen>0</MinHallwayLen>
+			<LocalJM>ghost_ship/boss.jm</LocalJM>
+		</Room>
+		
+		<Room id="branchEnd"> <!-- GREEN -->
+			<MaxCount>1</MaxCount>
+			<MinPadding>0</MinPadding>
+			<MaxHallwayLen>0</MaxHallwayLen>
+			<MinHallwayLen>0</MinHallwayLen>
+			<LocalJM>ghost_ship/green_h.jm</LocalJM>
+			<LocalJM>ghost_ship/green_h2.jm</LocalJM>
+			<LocalJM>ghost_ship/green_v.jm</LocalJM>
+			<LocalJM>ghost_ship/green_v2.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="0.45" minNum="1" maxNum="2" position="center">Ghost of Roger</Enemy>
+				<Enemy prob="0.45" minNum="2" maxNum="3" position="center">Zombie Pirate Sr</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.2" minNum="2" maxNum="6" position="center">GhostShip Rat</Enemy>
+				<Enemy prob="0.2" minNum="2" maxNum="4" position="center">Zombie Pirate Jr</Enemy>
+				<Enemy prob="0.2" minNum="2" maxNum="3" position="center">School of Ghostfish</Enemy>
+				<Enemy prob="0.2" minNum="3" maxNum="5" position="center">Violent Spirit</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="branchEnd"> <!-- RED -->
+			<MaxCount>1</MaxCount>
+			<MinPadding>0</MinPadding>
+			<MaxHallwayLen>0</MaxHallwayLen>
+			<MinHallwayLen>0</MinHallwayLen>
+			<LocalJM>ghost_ship/red_h.jm</LocalJM>
+			<LocalJM>ghost_ship/red_h2.jm</LocalJM>
+			<LocalJM>ghost_ship/red_v.jm</LocalJM>
+			<LocalJM>ghost_ship/red_v2.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="0.45" minNum="1" maxNum="2" position="center">Ghost of Roger</Enemy>
+				<Enemy prob="0.45" minNum="2" maxNum="3" position="center">Zombie Pirate Sr</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.2" minNum="2" maxNum="6" position="center">GhostShip Rat</Enemy>
+				<Enemy prob="0.2" minNum="2" maxNum="4" position="center">Zombie Pirate Jr</Enemy>
+				<Enemy prob="0.2" minNum="2" maxNum="3" position="center">School of Ghostfish</Enemy>
+				<Enemy prob="0.2" minNum="3" maxNum="5" position="center">Violent Spirit</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="branchEnd"> <!-- YELLOW -->
+			<MaxCount>1</MaxCount>
+			<MinPadding>0</MinPadding>
+			<MaxHallwayLen>0</MaxHallwayLen>
+			<MinHallwayLen>0</MinHallwayLen>
+			<LocalJM>ghost_ship/yellow_h.jm</LocalJM>
+			<LocalJM>ghost_ship/yellow_h2.jm</LocalJM>
+			<LocalJM>ghost_ship/yellow_v.jm</LocalJM>
+			<LocalJM>ghost_ship/yellow_v2.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="0.45" minNum="1" maxNum="2" position="center">Ghost of Roger</Enemy>
+				<Enemy prob="0.45" minNum="2" maxNum="3" position="center">Zombie Pirate Sr</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.2" minNum="2" maxNum="6" position="center">GhostShip Rat</Enemy>
+				<Enemy prob="0.2" minNum="2" maxNum="4" position="center">Zombie Pirate Jr</Enemy>
+				<Enemy prob="0.2" minNum="2" maxNum="3" position="center">School of Ghostfish</Enemy>
+				<Enemy prob="0.2" minNum="3" maxNum="5" position="center">Violent Spirit</Enemy>
+			</Enemies>
+		</Room>
+		
+		<Room id="branchEnd"> <!-- COMMON ROOMS -->
+			<MinPadding>0</MinPadding>
+			<MaxHallwayLen>0</MaxHallwayLen>
+			<MinHallwayLen>0</MinHallwayLen>
+			
+			<LocalJM>ghost_ship/room_h_1.jm</LocalJM>
+			<LocalJM>ghost_ship/room_h_2.jm</LocalJM>
+			<LocalJM>ghost_ship/room_h_3.jm</LocalJM>
+			<LocalJM>ghost_ship/room_h_4.jm</LocalJM>
+			<LocalJM>ghost_ship/room_h_5.jm</LocalJM>
+			<LocalJM>ghost_ship/room_h_6.jm</LocalJM>
+			<LocalJM>ghost_ship/room_h_7.jm</LocalJM>
+			
+			<LocalJM>ghost_ship/room_v_1.jm</LocalJM>
+			<LocalJM>ghost_ship/room_v_2.jm</LocalJM>
+			<LocalJM>ghost_ship/room_v_3.jm</LocalJM>
+			<LocalJM>ghost_ship/room_v_4.jm</LocalJM>
+			<LocalJM>ghost_ship/room_v_5.jm</LocalJM>
+			<LocalJM>ghost_ship/room_v_6.jm</LocalJM>
+			<LocalJM>ghost_ship/room_v_7.jm</LocalJM>
+			<LocalJM>ghost_ship/room_v_8.jm</LocalJM>
+			
+			<Enemies>
+				<Enemy prob="0.33" minNum="1" maxNum="2" position="center">Ghost of Roger</Enemy>
+				<Enemy prob="0.33" minNum="2" maxNum="3" position="center">Zombie Pirate Sr</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.25" minNum="2" maxNum="6" position="center">GhostShip Rat</Enemy>
+				<Enemy prob="0.25" minNum="2" maxNum="4" position="center">Zombie Pirate Jr</Enemy>
+				<Enemy prob="0.25" minNum="2" maxNum="3" position="center">School of Ghostfish</Enemy>
+				<Enemy prob="0.25" minNum="3" maxNum="5" position="center">Violent Spirit</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0" minNum="2" maxNum="5" position="center">Lil' Ghost Pirate</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="branchEnd"> <!-- COMMON ROOMS -->
+			<MinPadding>0</MinPadding>
+			<MaxHallwayLen>0</MaxHallwayLen>
+			<MinHallwayLen>0</MinHallwayLen>
+			<Prob>.25</Prob>
+			<MaxCount>4</MaxCount>
+			<LocalJM>ghost_ship/room_back_1.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="0.33" minNum="1" maxNum="2" position="center">Ghost of Roger</Enemy>
+				<Enemy prob="0.33" minNum="2" maxNum="3" position="center">Zombie Pirate Sr</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.25" minNum="2" maxNum="6" position="center">GhostShip Rat</Enemy>
+				<Enemy prob="0.25" minNum="2" maxNum="4" position="center">Zombie Pirate Jr</Enemy>
+				<Enemy prob="0.25" minNum="2" maxNum="3" position="center">School of Ghostfish</Enemy>
+				<Enemy prob="0.25" minNum="3" maxNum="5" position="center">Violent Spirit</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0" minNum="2" maxNum="5" position="center">Lil' Ghost Pirate</Enemy>
+			</Enemies>
+		</Room>
+		
+			
+		
+		<Room id="default"> <!-- 2room HALLS -->		
+			<Prob>.2</Prob>
+			<MaxCount>1</MaxCount>
+			<MinPadding>0</MinPadding>
+			<LocalJM>ghost_ship/hall_h2a.jm</LocalJM>
+			<LocalJM>ghost_ship/hall_v2a.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="0.3" minNum="4" maxNum="10">GhostShip Rat</Enemy>
+				<Enemy prob="0.25" minNum="4" maxNum="8">Zombie Pirate Jr</Enemy>
+				<Enemy prob="0.2" minNum="3" maxNum="4">School of Ghostfish</Enemy>
+				<Enemy prob="0.25" minNum="1" maxNum="2" position="center">Ghost of Roger</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="1" minNum="3" maxNum="12">Lil' Ghost Pirate</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.25" minNum="2" maxNum="3">Violent Spirit</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.25" minNum="2" maxNum="3">Violent Spirit</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="default"> <!-- 4room HALLS -->	
+			<Prob>.3</Prob>
+			<MaxCount>2</MaxCount>
+			<MinPadding>0</MinPadding>
+			<LocalJM>ghost_ship/hall_h4a.jm</LocalJM>
+			<LocalJM>ghost_ship/hall_v4a.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="0.3" minNum="4" maxNum="10">GhostShip Rat</Enemy>
+				<Enemy prob="0.25" minNum="4" maxNum="8">Zombie Pirate Jr</Enemy>
+				<Enemy prob="0.2" minNum="3" maxNum="4">School of Ghostfish</Enemy>
+				<Enemy prob="0.25" minNum="1" maxNum="2" position="center">Ghost of Roger</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="1" minNum="6" maxNum="25">Lil' Ghost Pirate</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.25" minNum="2" maxNum="3">Violent Spirit</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.25" minNum="2" maxNum="3">Violent Spirit</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="default"> <!-- 3room HALLS -->	
+			<MaxCount>3</MaxCount>
+			<MinPadding>0</MinPadding>
+			<LocalJM>ghost_ship/hall_h3a.jm</LocalJM>
+			<LocalJM>ghost_ship/hall_v3a.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="0.3" minNum="4" maxNum="10">GhostShip Rat</Enemy>
+				<Enemy prob="0.25" minNum="4" maxNum="8">Zombie Pirate Jr</Enemy>
+				<Enemy prob="0.2" minNum="3" maxNum="4">School of Ghostfish</Enemy>
+				<Enemy prob="0.25" minNum="1" maxNum="2" position="center">Ghost of Roger</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="1" minNum="5" maxNum="17">Lil' Ghost Pirate</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.25" minNum="2" maxNum="3">Violent Spirit</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob="0.25" minNum="2" maxNum="3">Violent Spirit</Enemy>
+			</Enemies>
+			<!-- 
+			<Enemies>
+				<Enemy prob=".20" minNum="2" maxNum="4" position="center">Hellhound</Enemy>
+				<Enemy prob=".20" minNum="10" maxNum="20">Vampire Bat Swarmer</Enemy>
+				<Enemy prob=".20" minNum="2" maxNum="3">Armor Guard</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="2" position="centerPlusSalt">Nosferatu</Enemy>
+				<Enemy prob=".20" minNum="4" maxNum="7" position="center">Lesser Bald Vampire</Enemy>
+			</Enemies>
+			-->
+		</Room>
+	</Dungeon>
+
+
+	<Dungeon id="Manor of the Immortals">
+		<Width>256</Width>
+		<Height>256</Height>
+		<Visibility>LineOfSight</Visibility>
+		
+		<MainBranchLen>10</MainBranchLen>
+		<NumSubBranches>4</NumSubBranches>
+		
+		<MinSubBranchLen>3</MinSubBranchLen>
+		<MaxSubBranchLen>5</MaxSubBranchLen>
+		
+        <MinHallwayWidth>4</MinHallwayWidth>
+        <MaxHallwayWidth>4</MaxHallwayWidth>
+        
+		<MinHallwayLen>1</MinHallwayLen>
+		<MaxHallwayLen>9</MaxHallwayLen>
+		<CenterMap/>
+        
+        <Difficulty>4</Difficulty>
+
+		<HallwayTile>Gothic Floor Slabs 2</HallwayTile>
+		<HallwayEndTile>Gothic Big Tile</HallwayEndTile>
+		<RemoveHallwayEndObjects/>
+		
+		<EndCapObj><Obj>Gothic Pillar</Obj></EndCapObj>
+		<WallObj><Obj>Gothic Bricks</Obj></WallObj>
+		
+		<Room id="start">
+			<LocalJM>gothic/start1.jm</LocalJM>
+			<LocalJM>gothic/start2.jm</LocalJM>
+			<LocalJM>gothic/start3.jm</LocalJM>
+		</Room>
+		<Room id="end">
+			<LocalJM>gothic/bossroom.jm</LocalJM>
+		</Room>
+		<Room id="branchEnd">
+			<LocalJM>gothic/002.jm</LocalJM>
+			<LocalJM>gothic/003.jm</LocalJM>
+			<LocalJM>gothic/006.jm</LocalJM>
+			<LocalJM>gothic/008.jm</LocalJM>
+			<LocalJM>gothic/009.jm</LocalJM>
+			<LocalJM>gothic/011.jm</LocalJM>
+			<LocalJM>gothic/014.jm</LocalJM>
+			<LocalJM>gothic/017.jm</LocalJM>
+			<LocalJM>gothic/018.jm</LocalJM>
+			<LocalJM>gothic/019.jm</LocalJM>
+			<LocalJM>gothic/021.jm</LocalJM>
+			<LocalJM>gothic/024.jm</LocalJM>
+			<LocalJM>gothic/026.jm</LocalJM>
+			<LocalJM>gothic/029.jm</LocalJM>
+			<LocalJM>gothic/030.jm</LocalJM>
+			<Enemies>
+				<Enemy prob=".30" minNum="2" maxNum="4" position="center">Hellhound</Enemy>
+				<Enemy prob=".30" minNum="2" maxNum="3">Armor Guard</Enemy>
+				<Enemy prob=".30" minNum="2" maxNum="3" position="centerPlusSalt">Nosferatu</Enemy>
+				<Enemy prob=".10" minNum="1" maxNum="2" position="centerPlusSalt">Coffin</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="default">
+			<LocalJM>gothic/001.jm</LocalJM>
+			<LocalJM>gothic/002.jm</LocalJM>
+			<LocalJM>gothic/003.jm</LocalJM>
+			<LocalJM>gothic/004.jm</LocalJM>
+			<LocalJM>gothic/005.jm</LocalJM>
+			<LocalJM>gothic/006.jm</LocalJM>
+			<LocalJM>gothic/007.jm</LocalJM>
+			<LocalJM>gothic/008.jm</LocalJM>
+			<LocalJM>gothic/009.jm</LocalJM>
+			<LocalJM>gothic/010.jm</LocalJM>
+			<LocalJM>gothic/011.jm</LocalJM>
+			<LocalJM>gothic/012.jm</LocalJM>
+			<LocalJM>gothic/013.jm</LocalJM>
+			<LocalJM>gothic/014.jm</LocalJM>
+			<LocalJM>gothic/015.jm</LocalJM>
+			<LocalJM>gothic/016.jm</LocalJM>
+			<LocalJM>gothic/016_secret.jm</LocalJM>
+			<LocalJM>gothic/017.jm</LocalJM>
+			<LocalJM>gothic/018.jm</LocalJM>
+			<LocalJM>gothic/018_secret.jm</LocalJM>
+			<LocalJM>gothic/019.jm</LocalJM>
+			<LocalJM>gothic/020.jm</LocalJM>
+			<LocalJM>gothic/021.jm</LocalJM>
+			<LocalJM>gothic/022.jm</LocalJM>
+			<LocalJM>gothic/023.jm</LocalJM>
+			<LocalJM>gothic/024.jm</LocalJM>
+			<LocalJM>gothic/025.jm</LocalJM>
+			<LocalJM>gothic/026.jm</LocalJM>
+			<LocalJM>gothic/027.jm</LocalJM>
+			<LocalJM>gothic/028.jm</LocalJM>
+			<LocalJM>gothic/029.jm</LocalJM>
+			
+			<Enemies>
+				<Enemy prob=".20" minNum="2" maxNum="4" position="center">Hellhound</Enemy>
+				<Enemy prob=".20" minNum="10" maxNum="20">Vampire Bat Swarmer</Enemy>
+				<Enemy prob=".20" minNum="2" maxNum="3">Armor Guard</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="2" position="centerPlusSalt">Nosferatu</Enemy>
+				<Enemy prob=".20" minNum="4" maxNum="7" position="center">Lesser Bald Vampire</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".20" minNum="1" maxNum="2" position="center">Hellhound</Enemy>
+				<Enemy prob=".20" minNum="8" maxNum="15">Vampire Bat Swarmer</Enemy>
+				<Enemy prob=".20" minNum="2" maxNum="4" position="center">Lesser Bald Vampire</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="2">Armor Guard</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".20" minNum="1" maxNum="2" position="center">Hellhound</Enemy>
+				<Enemy prob=".20" minNum="5" maxNum="10">Vampire Bat Swarmer</Enemy>
+				<Enemy prob=".20" minNum="2" maxNum="5" position="center">Lesser Bald Vampire</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="2">Armor Guard</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="2" position="centerPlusSalt">Nosferatu</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".50" minNum="5" maxNum="12">Vampire Bat Swarmer</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+
+
+	<Dungeon id="Forbidden Jungle">
+		<Width>256</Width>
+		<Height>256</Height>
+		<MainBranchLen>11</MainBranchLen>
+		<NumSubBranches>3</NumSubBranches>
+		
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		
+        <MinHallwayWidth>3</MinHallwayWidth>
+        <MaxHallwayWidth>5</MaxHallwayWidth>
+        
+		<MinHallwayLen>1</MinHallwayLen>
+		<MaxHallwayLen>2</MaxHallwayLen>
+		<HallwayTile>Dirt</HallwayTile>
+		<CenterMap/>
+		<!--DefaultTile>Dirt</DefaultTile-->
+		
+        <Difficulty>2</Difficulty>
+        
+		<DefaultTile>SpiderDirt</DefaultTile>
+        <DefaultObj>
+        	<Obj prob=".30">Jungle Tree Big</Obj>
+        	<Obj prob=".20">Jungle Plant Unbreakable</Obj>
+        	<Obj prob=".20">Jungle Flowers Solid</Obj>
+        	<Obj prob=".15">Jungle Grass Solid</Obj>
+        	<Obj prob=".15">Jungle Invisible Solid</Obj>
+        </DefaultObj>
+        <WallTile>Spider Dirt Hole</WallTile>
+        <WallObj>
+        	<Obj prob=".75">Jungle Tree Big</Obj>
+        	<Obj prob=".25">Jungle Plant Unbreakable</Obj>
+        </WallObj>
+		
+		<!--GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.20">Dirt Hole</GlobalReplaceTile-->
+		<GlobalReplaceTile func="perlinProb" dx=".06" dy=".06" mult="0.70" groundRestrict="Dirt">Undergrowth</GlobalReplaceTile>
+		<Room id="start">
+			<Type>Circle</Type>
+			<MinCircleRadius>5.0</MinCircleRadius>
+			<MaxCircleRadius>7.0</MaxCircleRadius>
+			<FloorTile>Dirt</FloorTile>
+			<Enemies>
+				<Enemy minNum="2" maxNum="8" position="edge">Jungle Plant</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="2">Jungle Flower Bright</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="5">Jungle Grass</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="2" maxNum="12">Jungle Ground Flowers</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="4">Jungle Rock</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy position="centerPlusSalt">Portal of Cowardice</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<LocalJM>jungle/jungle_boss.jm</LocalJM>
+			<!--LocalJM>jungle/jungle_boss.jm</LocalJM-->
+		</Room>
+		<Room id="default">
+			<Type>Circle</Type>
+			<MinCircleRadius>5.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Dirt</FloorTile>
+			<Enemies>
+				<Enemy prob=".20" minNum="1" maxNum="1" position="center">Jungle Fire</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="2">Basilisk</Enemy>
+				<Enemy prob=".20" minNum="2" maxNum="6">Basilisk Baby</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="1" position="centerPlusSalt">Jungle Totem</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="1" position="center">Jungle Summoner</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="4" position="edge">Jungle Plant Solid</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="2" maxNum="7" position="edge">Jungle Tree Big</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="5">Jungle Flower Bright</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="5">Jungle Grass</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="5">Jungle Ground Flowers</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="5">Jungle Rock</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="3">Jungle Plant</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="2">Jungle Plant Solid</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+
+
+	<Dungeon id="Ocean Trench">
+		<Width>128</Width>
+		<Height>128</Height>
+		<MainBranchLen>12</MainBranchLen>
+		<NumSubBranches>4</NumSubBranches>
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		<MinHallwayWidth>3</MinHallwayWidth>
+		<MaxHallwayWidth>3</MaxHallwayWidth>
+		<MinHallwayLen>3</MinHallwayLen>
+		<MaxHallwayLen>6</MaxHallwayLen>
+		<HallwayTile>OceanFloor</HallwayTile>
+		<WallObj><Obj>Ocean Wall</Obj></WallObj>
+		<UsesBreath>7.25</UsesBreath>
+        
+        <Difficulty>5</Difficulty>
+        
+		<Room id="start">
+			<LocalJM>ocean/oceanStart.jm</LocalJM>
+		</Room>
+		<Room id="end">
+			<LocalJM>ocean/oceanBoss.jm</LocalJM>
+		</Room>
+		<Room id="default">
+			<Type>Circle</Type>
+			<MinCircleRadius>6.0</MinCircleRadius>
+			<MaxCircleRadius>13.0</MaxCircleRadius>
+			<FloorTile>OceanFloor</FloorTile>
+			<Enemies>
+				<Enemy prob=".15" minNum="1" maxNum="1">Sea Slurp Home</Enemy>
+				<Enemy prob=".15" minNum="2" maxNum="2">Giant Squid</Enemy>
+				<Enemy prob=".15" minNum="1" maxNum="2">Sea Mare</Enemy>
+				<Enemy prob=".15" minNum="3" maxNum="13">Sea Horse</Enemy>
+				<Enemy prob=".15" minNum="3" maxNum="6">Fishman</Enemy>
+				<Enemy prob=".2" minNum="1" maxNum="2">Fishman Warrior</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".15" minNum="1" maxNum="1">Sea Slurp Home</Enemy>
+				<Enemy prob=".15" minNum="1" maxNum="3">Giant Squid</Enemy>
+				<Enemy prob=".15" minNum="1" maxNum="2">Sea Mare</Enemy>
+				<Enemy prob=".15" minNum="3" maxNum="13">Sea Horse</Enemy>
+				<Enemy prob=".15" minNum="3" maxNum="6">Fishman</Enemy>
+				<Enemy prob=".2" minNum="1" maxNum="2">Fishman Warrior</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="3" maxNum="9">Coral</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="4">Seaweed</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="3">Ocean Vent</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+
+
+	<Dungeon id="Pirate Cave">
+		<Width>128</Width>
+		<Height>128</Height>
+		<MainBranchLen>5</MainBranchLen>
+		<NumSubBranches>8</NumSubBranches>
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		<MinHallwayWidth>2</MinHallwayWidth>
+		<MaxHallwayWidth>2</MaxHallwayWidth>
+		<MinHallwayLen>4</MinHallwayLen>
+		<MaxHallwayLen>6</MaxHallwayLen>
+		<HallwayTile>Brown Lines</HallwayTile>
+		<WallObj><Obj>Cave Wall</Obj></WallObj>
+		<WallTile>Composite</WallTile>
+		<SurroundWith>Shallow Water</SurroundWith>
+		<Visibility>Full</Visibility>
+
+        <Difficulty>0</Difficulty>
+        
+		<Room id="start">
+			<Type>Circle</Type>
+			<MinCircleRadius>10.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Light Sand</FloorTile>
+			<Enemies>
+				<Enemy position="centerPlusSalt">Portal of Cowardice</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="9" maxNum="9">Palm Tree</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<Type>Circle</Type>
+			<MinCircleRadius>10.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Brown Lines</FloorTile>
+			<Enemies>
+				<Enemy position="centerPlusSalt">Dreadstump the Pirate King</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="5" maxNum="5">Cave Pirate Bosses</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="6" maxNum="6">Cave Pirates</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="default">
+			<Type>Rectangle</Type>
+			<MinRectLen>6</MinRectLen>
+			<MaxRectLen>12</MaxRectLen>
+			<FloorTile>Brown Lines</FloorTile>
+               <Enemies>
+                   <Enemy>Cave Pirate Bosses</Enemy>
+               </Enemies>
+               <Enemies>
+                   <Enemy minNum="4" maxNum="7">Cave Pirates</Enemy>
+               </Enemies>
+               <Enemies>
+                   <Enemy>Cave Pirate Pets</Enemy>
+               </Enemies>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Spider Den">
+		<Width>128</Width>
+		<Height>128</Height>
+		<MainBranchLen>10</MainBranchLen>
+		<NumSubBranches>0</NumSubBranches>
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		<MinHallwayWidth>6</MinHallwayWidth>
+		<MaxHallwayWidth>6</MaxHallwayWidth>
+		<MinHallwayLen>1</MinHallwayLen>
+		<MaxHallwayLen>2</MaxHallwayLen>
+        
+        <Difficulty>1</Difficulty>
+        
+		<HallwayTile>SpiderDirt</HallwayTile>
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.20">Spider Dirt Hole</GlobalReplaceTile>
+		<WallObj><Obj>Spider Dirt Wall</Obj></WallObj>
+		<Room id="start">
+			<Type>Circle</Type>
+			<MinCircleRadius>5.0</MinCircleRadius>
+			<MaxCircleRadius>7.0</MaxCircleRadius>
+			<FloorTile>SpiderDirt</FloorTile>
+			<Enemies>
+				<Enemy minNum="2" maxNum="4" position="edge">Spider Web</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy position="centerPlusSalt">Portal of Cowardice</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<LocalJM>spider_den/spiderden_boss.jm</LocalJM>
+		</Room>
+		<Room id="default">
+			<Type>Circle</Type>
+			<MinCircleRadius>5.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>SpiderDirt</FloorTile>
+			<Enemies>
+				<Enemy minNum="2" maxNum="6" position="edge">Spider Web</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".15" minNum="1" maxNum="2">Black Den Spider</Enemy>
+				<Enemy prob=".15" minNum="2" maxNum="4">Red Spotted Den Spider</Enemy>
+				<Enemy prob=".15" minNum="2" maxNum="4">Black Spotted Den Spider</Enemy>
+				<Enemy prob=".15" minNum="4" maxNum="10">Brown Den Spider</Enemy>
+				<Enemy prob=".40" minNum="8" maxNum="12">Spider Egg Sac</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".15" minNum="1" maxNum="2">Black Den Spider</Enemy>
+				<Enemy prob=".15" minNum="2" maxNum="4">Red Spotted Den Spider</Enemy>
+				<Enemy prob=".15" minNum="2" maxNum="4">Black Spotted Den Spider</Enemy>
+				<Enemy prob=".15" minNum="4" maxNum="10">Brown Den Spider</Enemy>
+				<Enemy prob=".40" minNum="8" maxNum="12">Spider Egg Sac</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="5">Spider Egg Prop</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="1">Spider Silk</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="20">Spider Ground Rocks</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Undead Lair">
+		<Width>256</Width>
+		<Height>256</Height>
+		<MainBranchLen>10</MainBranchLen>
+		<NumSubBranches>8</NumSubBranches>
+		<MinSubBranchLen>2</MinSubBranchLen>
+		<MaxSubBranchLen>4</MaxSubBranchLen>
+		<MinHallwayWidth>3</MinHallwayWidth>
+		<MaxHallwayWidth>3</MaxHallwayWidth>
+		<MinHallwayLen>1</MinHallwayLen>
+		<MaxHallwayLen>7</MaxHallwayLen>
+        
+        <Difficulty>3</Difficulty>
+        
+		<HallwayTile>Grey Closed</HallwayTile>
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.20">Grey Quad</GlobalReplaceTile>
+		<WallObj><Obj>Grey Wall</Obj></WallObj>
+		<AltWallType>Grey Wall Candle</AltWallType>
+		<AltWallType a="6" b="7">Grey Wall Arch</AltWallType>
+		<AltWallType a="4" b="6">Grey Wall Crack</AltWallType>
+		<AltWallType a="5" b="4">Grey Wall Candle</AltWallType>
+		
+		<Room id="start">
+			<LocalJM>undead_lair/undead_lair_start.jm</LocalJM>
+		</Room>
+		<Room id="end">
+			<LocalJM>undead_lair/undead_lair_boss.jm</LocalJM>
+		</Room>
+		<Room id="default">
+			<Type prob="0.8">Rectangle</Type>
+			<Type prob="0.2">Circle</Type>
+			<MinRectLen>6</MinRectLen>
+			<MaxRectLen>20</MaxRectLen>
+			<MinCircleRadius>4.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Grey Closed</FloorTile>
+               <Enemies>
+                   <Enemy minNum="8" maxNum="12" prob=".2">Lair Skeletons</Enemy>
+                   <Enemy minNum="8" maxNum="12" prob=".2">Lair Mummies</Enemy>
+                   <Enemy minNum="8" maxNum="10" prob=".1">Lair Bats</Enemy>
+                   <Enemy minNum="5" maxNum="6" prob=".1">Lair Vampires</Enemy>
+                   <Enemy minNum="3" maxNum="6" prob=".1">Lair Slimes</Enemy>
+                   <Enemy minNum="5" maxNum="7" prob=".1">Lair Spectres</Enemy>
+                   <Enemy minNum="2" maxNum="4" prob=".1">Lair Constructs</Enemy>
+                   <Enemy minNum="4" maxNum="6" prob=".1">Lair Reapers</Enemy>
+               </Enemies>
+
+
+			<Enemies>
+				<Enemy minNum="0" maxNum="2">Big Candle</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="3">Small Candle</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="4">Pool of Blood</Enemy>
+			</Enemies>
+
+			<Enemies>
+				<Enemy prob=".5">Lair Burst Trap</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".5">Lair Blast Trap</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Abyss of Demons">
+		<Width>256</Width>
+		<Height>256</Height>
+		<MainBranchLen>24</MainBranchLen>
+		<NumSubBranches>10</NumSubBranches>
+		<MinSubBranchLen>2</MinSubBranchLen>
+		<MaxSubBranchLen>4</MaxSubBranchLen>
+		<MinHallwayWidth>3</MinHallwayWidth>
+		<MaxHallwayWidth>3</MaxHallwayWidth>
+		<MinHallwayLen>2</MinHallwayLen>
+		<MaxHallwayLen>3</MaxHallwayLen>
+		<HallwayTile>Red Small Checks</HallwayTile>
+		<GlobalReplaceTile func="aroundSpawn" dx="3" dy="3">Red Small Checks</GlobalReplaceTile>
+		<GlobalReplaceTile func="perlinMod" dx=".001" dy=".001" mod="3">Lava</GlobalReplaceTile>
+		<GlobalPlaceObject func="perlinProb" dx=".01" dy=".01" mult=".25" groundRestrict="Lava">Partial Red Floor</GlobalPlaceObject>
+		<WallObj><Obj>Red Wall</Obj></WallObj>
+		<AltWallType>Red Torch Wall</AltWallType>
+        
+        <Difficulty>4</Difficulty>
+        
+		<InsurePath>Partial Red Floor</InsurePath>
+		<Room id="start">
+			<Type>Rectangle</Type>
+			<MinRectLen>16</MinRectLen>
+			<MaxRectLen>16</MaxRectLen>
+			<FloorTile>Red Small Checks</FloorTile>
+			<Enemies>
+				<Enemy position="randomFocus">Portal of Cowardice</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<LocalJM>abyss/abyss_boss.jm</LocalJM>
+		</Room>
+		<Room id="default">
+			<Type>Rectangle</Type>
+			<MinRectLen>8</MinRectLen>
+			<MaxRectLen>8</MaxRectLen>
+			<FloorTile>Red Small Checks</FloorTile>
+			<Enemies>
+				<Enemy prob=".6" minNum="3" maxNum="6">Abyss Demons</Enemy>
+				<Enemy prob=".4" minNum="3" maxNum="6">Abyss Brutes</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="3">Abyss Bones</Enemy>
+			</Enemies>
+		</Room>
+		
+		<Room id="branchEnd">
+			<LocalJM>abyss/abyss_treasure.jm</LocalJM>
+			
+			<LocalJM>abyss/abyss_branchend.jm</LocalJM>
+			<LocalJM>abyss/abyss_branchend.jm</LocalJM>
+			<LocalJM>abyss/abyss_branchend.jm</LocalJM>
+			<LocalJM>abyss/abyss_branchend.jm</LocalJM>
+			<LocalJM>abyss/abyss_branchend.jm</LocalJM>
+			<LocalJM>abyss/abyss_branchend.jm</LocalJM>
+			<LocalJM>abyss/abyss_branchend.jm</LocalJM>
+			<LocalJM>abyss/abyss_branchend.jm</LocalJM>
+			<Enemies>
+				<Enemy prob=".6" minNum="3" maxNum="6">Abyss Demons</Enemy>
+				<Enemy prob=".4" minNum="3" maxNum="6">Abyss Brutes</Enemy>
+			</Enemies>
+		</Room>
+		
+	</Dungeon>
+	<Dungeon id="Snake Pit">
+		<Width>128</Width>
+		<Height>128</Height>
+		<MainBranchLen>6</MainBranchLen>
+		<NumSubBranches>10</NumSubBranches>
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		<MinHallwayWidth>4</MinHallwayWidth>
+		<MaxHallwayWidth>4</MaxHallwayWidth>
+		<MinHallwayLen>3</MinHallwayLen>
+		<MaxHallwayLen>6</MaxHallwayLen>
+		<HallwayTile>Brown Closed</HallwayTile>
+		<HallwayObj><Obj prob=".95">Destructible Brown Wall</Obj></HallwayObj>
+		<WallObj><Obj>Brown Wall Drawing</Obj></WallObj>
+		<AltWallType>Brown Wall Candles Light</AltWallType>
+		<AltWallType a="6" b="4">Brown Wall Candles Light</AltWallType>
+		<AltWallType a="4" b="3">Brown Wall Holes</AltWallType>
+		<RandomizeGlobalReplaceTiles/>
+		<Visibility>Path</Visibility>
+        
+        <Difficulty>1</Difficulty>
+        
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.16">Brown Closed Broken 1</GlobalReplaceTile>
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.16">Brown Closed Broken 2</GlobalReplaceTile>
+		<Room id="start">
+			<LocalJM>snake_pit/snakepit_start.jm</LocalJM>
+		</Room>
+		<Room id="end">
+			<LocalJM>snake_pit/snakepit_boss.jm</LocalJM>
+		</Room>
+		<Room id="default">
+			<Type>Circle</Type>
+			<MinCircleRadius>6.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Brown Closed</FloorTile>
+			<Enemies>
+				<Enemy prob=".4" minNum="2" maxNum="4">Snake Grate</Enemy>
+				<Enemy prob=".3" minNum="5" maxNum="8">Pythons</Enemy>
+				<Enemy prob=".3" minNum="5" maxNum="8">Greater Pit Snakes</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".3" minNum="2" maxNum="4">Snake Grate</Enemy>
+				<Enemy prob=".4" minNum="5" maxNum="8">Pythons</Enemy>
+				<Enemy prob=".3" minNum="5" maxNum="8">Greater Pit Snakes</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="8">Rags</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="0" maxNum="3">Dark Brown Tile</Enemy>
+			</Enemies>
+		</Room>
+		
+		<Room id="branchEnd">
+			<LocalJM>snake_pit/snakepit_treasure.jm</LocalJM>
+			
+			<LocalJM>snake_pit/snakepit_branchend1.jm</LocalJM>
+			<LocalJM>snake_pit/snakepit_branchend1.jm</LocalJM>
+			<LocalJM>snake_pit/snakepit_branchend2.jm</LocalJM>
+			<LocalJM>snake_pit/snakepit_branchend2.jm</LocalJM>
+		</Room>
+		
+	</Dungeon>
+	<Dungeon id="Sprite World">
+		<Width>128</Width>
+		<Height>128</Height>
+		<Background>1</Background>
+		<MainBranchLen>6</MainBranchLen>
+		<NumSubBranches>10</NumSubBranches>
+		<MinSubBranchLen>1</MinSubBranchLen> 
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		<MinHallwayWidth>2</MinHallwayWidth>
+		<MaxHallwayWidth>2</MaxHallwayWidth>
+		<MinHallwayLen>3</MinHallwayLen>
+		<MaxHallwayLen>6</MaxHallwayLen>
+		<DefaultTile>Space</DefaultTile>
+        
+        <Difficulty>2</Difficulty>
+        
+		<HallwayTile>White Alpha Square</HallwayTile>
+		<RandomizeGlobalReplaceTiles/>
+		<GlobalReplaceTile func="randomLinesY" dx=".01" dy=".01" mod="6" val="0">Purple Alpha Square</GlobalReplaceTile>
+		<GlobalReplaceTile func="randomLinesY" dx=".01" dy=".01" mod="6" val="1">Red Alpha Square</GlobalReplaceTile>
+		<GlobalReplaceTile func="randomLinesX" dx=".01" dy=".01" mod="6" val="0">Blue Alpha Square</GlobalReplaceTile>
+		<GlobalReplaceTile func="randomLinesX" dx=".01" dy=".01" mod="6" val="1">Green Alpha Square</GlobalReplaceTile>
+		<GlobalPlaceObject func="perlinProb" dx=".01" dy=".01" mult=".10" groundRestrict="White Alpha Square">Purple Sprite Tree</GlobalPlaceObject>
+		<GlobalPlaceObject func="perlinProb" dx=".01" dy=".01" mult=".10" groundRestrict="White Alpha Square">Red Sprite Tree</GlobalPlaceObject>
+		<GlobalPlaceObject func="perlinProb" dx=".01" dy=".01" mult=".10" groundRestrict="White Alpha Square">Blue Sprite Tree</GlobalPlaceObject>
+		<GlobalPlaceObject func="perlinProb" dx=".01" dy=".01" mult=".10" groundRestrict="White Alpha Square">Green Sprite Tree</GlobalPlaceObject>
+		<GlobalPlaceObject func="perlinProb" dx=".01" dy=".01" mult=".10" groundRestrict="White Alpha Square">Yellow Sprite Tree</GlobalPlaceObject>
+		<Room id="start">
+			<Type>Rectangle</Type>
+			<MinRectLen>16</MinRectLen>
+			<MaxRectLen>16</MaxRectLen>
+			<FloorTile>White Alpha Square</FloorTile>
+			<Enemies>
+				<Enemy position="centerPlusSalt">Glowing Portal of Cowardice</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<Type>Rectangle</Type>
+			<MinRectLen>30</MinRectLen>
+			<MaxRectLen>30</MaxRectLen>
+			<FloorTile>White Alpha Square</FloorTile>
+			<Enemies>
+				<Enemy minNum="1" maxNum="1" position="center">Limon the Sprite God</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="default">
+			<Type>Rectangle</Type>
+			<MinRectLen>6</MinRectLen>
+			<MaxRectLen>12</MaxRectLen>
+			<FloorTile>White Alpha Square</FloorTile>
+			<Enemies>
+				<Enemy minNum="2" maxNum="4">Native Sprites</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".1" minNum="1" maxNum="1">Native Sprite God</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Tomb of the Ancients">
+		<Width>256</Width>
+		<Height>256</Height>
+		<MainBranchLen>7</MainBranchLen>
+		<NumSubBranches>4</NumSubBranches>
+		<MinSubBranchLen>3</MinSubBranchLen>
+		<MaxSubBranchLen>5</MaxSubBranchLen>
+		<MinHallwayWidth>2</MinHallwayWidth>
+		<MaxHallwayWidth>2</MaxHallwayWidth>
+		<MinHallwayLen>10</MinHallwayLen>
+		<MaxHallwayLen>10</MaxHallwayLen>
+		<HallwayTile>Sandstone Tile</HallwayTile>
+		<RandomizeGlobalReplaceTiles/>
+		<GlobalReplaceTile func="cgNoise">Quicksand</GlobalReplaceTile>
+		<GlobalReplaceTile func="perlinMod" dx=".001" dy=".001" mod="9" groundRestrict="Sandstone Tile">Missing Tile</GlobalReplaceTile>
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.01" groundRestrict="Sandstone Tile">Sand Covered Tile</GlobalReplaceTile>
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.05" groundRestrict="Sandstone Tile">Cracked Sandstone Tile</GlobalReplaceTile>
+		<WallObj><Obj>Tomb Wall</Obj></WallObj>
+        
+        <Difficulty>5</Difficulty>
+        
+		<Room id="start">
+			<LocalJM>tombOfTheAncientsBoss.jm</LocalJM>
+		</Room>		
+		<Room id="default">
+			<Type>Rectangle</Type>
+			<MinRectLen>20</MinRectLen>
+			<MaxRectLen>28</MaxRectLen>
+			<FloorTile>Sandstone Tile</FloorTile>
+				<Enemies>
+				<Enemy minNum="1" maxNum="1" prob=".7" position="center" ground="Sandstone Tile">Tomb Bomb Trap Switch</Enemy>
+				<Enemy minNum="1" maxNum="1" prob=".1">Tomb Mummies</Enemy>
+				<Enemy minNum="1" maxNum="1" prob=".2" position="center">Center Tomb Turrets</Enemy>
+			</Enemies>
+				<Enemies>
+				<Enemy minNum="1" maxNum="1" prob=".4">Jackal Lord</Enemy>
+				<Enemy minNum="3" maxNum="4" prob=".2">Tomb Gang</Enemy>
+				<Enemy minNum="1" maxNum="1" prob=".4">Tomb Turrets</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="2" maxNum="2" prob=".4">Tomb Mummies</Enemy>
+				<Enemy minNum="2" maxNum="3" prob=".2">Tomb Gang</Enemy>
+				<Enemy minNum="1" maxNum="1" prob=".2">Tomb Turrets</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="3" maxNum="3" prob=".2">Tomb Swarms</Enemy>
+				<Enemy minNum="4" maxNum="4" prob=".4">Tomb Gang</Enemy>
+				<Enemy minNum="2" maxNum="2" prob="1">Tomb Jackals</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="branchEnd">			
+			<Prob>.15</Prob>
+			<Type>Circle</Type>
+			<MinCircleRadius>12.0</MinCircleRadius>
+			<MaxCircleRadius>12.0</MaxCircleRadius>
+			<FloorTile>Gold Tile</FloorTile>
+			<Enemies>
+				<Enemy position="center">Inactive Sarcophagus</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="branchEnd">			
+			<Prob>.85</Prob>
+			<Type>Rectangle</Type>
+			<MinRectLen>24</MinRectLen>
+			<MaxRectLen>28</MaxRectLen>
+			<FloorTile>Missing Tile</FloorTile>
+			<Enemies>
+				<Enemy position="center">Active Sarcophagus</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<Type>Rectangle</Type>
+			<MinRectLen>28</MinRectLen>
+			<MaxRectLen>32</MaxRectLen>
+			<FloorTile>Sandstone Tile</FloorTile>
+			<Enemies>
+				<Enemy minNum="1" maxNum="1" position="center">Active Sarcophagus</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Dreamscape Labyrinth">
+		<Width>128</Width>
+		<Height>128</Height>
+		<Background>2</Background>
+		<MainBranchLen>18</MainBranchLen>
+		<NumSubBranches>4</NumSubBranches>
+		<MinSubBranchLen>18</MinSubBranchLen>
+		<MaxSubBranchLen>18</MaxSubBranchLen>
+		<MinHallwayWidth>8</MinHallwayWidth>
+		<MaxHallwayWidth>8</MaxHallwayWidth>
+		<MinHallwayLen>8</MinHallwayLen>
+		<MaxHallwayLen>8</MaxHallwayLen>
+		<DefaultTile>Empty</DefaultTile>
+		<HallwayTile>Dream Tile</HallwayTile>
+		<SurroundWith>Shallow Water</SurroundWith>
+		<Room id="start">
+			<Type>Rectangle</Type>
+			<MinRectLen>8</MinRectLen>
+			<MaxRectLen>8</MaxRectLen>
+			<FloorTile>Dream Tile</FloorTile>
+			<Enemies>
+				<Enemy position="centerPlusSalt">Glowing Portal of Cowardice</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<Type>Rectangle</Type>
+			<MinRectLen>8</MinRectLen>
+			<MaxRectLen>8</MaxRectLen>
+			<FloorTile>Dream Tile</FloorTile>
+			<Enemies>
+				<Enemy>Glowing Realm Portal</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy minNum="1" maxNum="1" position="center">Limon the Sprite God</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="branchEnd">
+			<Type>Rectangle</Type>
+			<MinRectLen>8</MinRectLen>
+			<MaxRectLen>8</MaxRectLen>
+			<FloorTile>Dream Tile</FloorTile>
+			<Enemies>
+				<Enemy prob=".1" minNum="1" maxNum="1">Sprite God</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="default">
+			<Type>Rectangle</Type>
+			<MinRectLen>8</MinRectLen>
+			<MaxRectLen>8</MaxRectLen>
+			<FloorTile>Dream Tile</FloorTile>			
+			<Enemies>
+				<Enemy minNum="2" maxNum="4">Sprites</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Empty Room">
+		<Width>32</Width>
+		<Height>32</Height>
+		<MainBranchLen>0</MainBranchLen>
+		<NumSubBranches>0</NumSubBranches>
+		<Visibility>Full</Visibility>
+
+		<CharMap><Char>c</Char><Ground>Composite</Ground><Object>Tomb Wall</Object></CharMap>
+		<CharMap><Char>p</Char><Ground>Grass</Ground><Object>Portal of Cowardice</Object></CharMap>
+		<CharMap><Char>t</Char><Ground>Grass</Ground><Object>Tree A</Object></CharMap>
+		<CharMap><Char>n</Char><Ground>Grass</Ground><Object>New Money Changer</Object></CharMap>
+		<CharMap><Char>q</Char><Ground>Quicksand</Ground></CharMap>
+		<CharMap><Char>w</Char><Ground>Deep Pool</Ground></CharMap>
+		
+
+		<Room id="start">
+			<X>0</X><Y>0</Y>
+			<FloorTile>Grass</FloorTile>
+			<Pattern>
+................................
+................................
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+.._____________*______________..
+..____________*_______________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+..____________________________..
+................................
+................................
+			</Pattern>
+		</Room>
+	</Dungeon>
+    
+    <Dungeon id="Beachzone">
+        <Width>256</Width>
+        <Height>256</Height>
+        <CenterStartRoom/>
+        <Difficulty>0</Difficulty>
+        <Room id="start">
+            <LocalJM>beachzone.jm</LocalJM>
+        </Room>
+    </Dungeon>
+    
+    <Dungeon id="Ice Cave">
+		<Width>256</Width>
+		<Height>256</Height>
+		<MainBranchLen>5</MainBranchLen>
+		<NumSubBranches>8</NumSubBranches>
+		<MinSubBranchLen>1</MinSubBranchLen>
+		<MaxSubBranchLen>2</MaxSubBranchLen>
+		<MinHallwayWidth>2</MinHallwayWidth>
+		<MaxHallwayWidth>2</MaxHallwayWidth>
+		<MinHallwayLen>4</MinHallwayLen>
+		<MaxHallwayLen>6</MaxHallwayLen>
+		<HallwayTile>Snow</HallwayTile>
+		<WallObj><Obj>Ice Cave Wall</Obj></WallObj>
+		<!--WallTile>Snow Dark</WallTile-->
+		<WallTile>Composite</WallTile>
+		<SurroundWith>Snow</SurroundWith>
+		<Visibility>Full</Visibility>
+		<CenterMap/>
+        
+		<GlobalReplaceTile func="perlinProb" dx=".06" dy=".06" mult="2" groundRestrict="Snow">Ice Slide</GlobalReplaceTile>
+		<!--GlobalReplaceTile func="perlinProb" dx=".05" dy=".05" mult="0.2" groundRestrict="Snow">Snow Dark</GlobalReplaceTile-->
+		<!--GlobalReplaceTile func="aroundSpawn" dx="1" dy="1">Snow Dark</GlobalReplaceTile-->
+        
+		<GlobalPlaceObject func="perlinProb" dx="2" dy="2" mult="0.8">Ice Cave Wall</GlobalPlaceObject>
+        
+        <Difficulty>3</Difficulty>
+        
+        <!--
+         <DefaultObj>
+         <Obj prob=".20">Ice Cave Wall</Obj>
+         <Obj prob=".20">Ice Flower</Obj>
+         <Obj prob=".10">Ice Crystal Tree</Obj>
+         <Obj prob=".10">Ice Crystal Rock</Obj>
+         </DefaultObj>
+         -->
+        
+		<Room id="start">
+			<Type>Circle</Type>
+			<MinPadding>2</MinPadding>
+			<MinCircleRadius>5.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Snow</FloorTile>
+			<Enemies>
+				<Enemy position="centerPlusSalt">Portal of Cowardice</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".40" minNum="1" maxNum="12">Ice Cave Wall</Enemy>
+				<Enemy prob=".25" minNum="1" maxNum="8">Ice Crystal Tree</Enemy>
+				<Enemy prob=".25" minNum="1" maxNum="8">Ice Crystal Rock</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="end">
+			<Type>Circle</Type>
+			<MinPadding>2</MinPadding>
+			<MinCircleRadius>5.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Snow</FloorTile>
+		</Room>
+        <!--
+         <Room id="default">	
+         <Prob>.05</Prob>
+         <Type>Circle</Type>
+         <MinPadding>2</MinPadding>
+         <MinCircleRadius>5.0</MinCircleRadius>
+         <MaxCircleRadius>6.0</MaxCircleRadius>
+         <FloorTile>Snow</FloorTile>
+         <Enemies>
+         <Enemy prob="1" minNum="1" maxNum="1" position="center">SnowCircle</Enemy>
+         </Enemies>
+         <Enemies>
+         <Enemy prob="1" minNum="10" maxNum="30">Ice Flower</Enemy>
+         </Enemies>
+         </Room>
+         -->
+		<Room id="branchEnd">
+			<Prob>.05</Prob>
+			<MinPadding>2</MinPadding>
+			<MaxCount>1</MaxCount>
+			<LocalJM>ice_cave/snowcircle.jm</LocalJM>
+			<Enemies>
+				<Enemy prob="1" minNum="10" maxNum="30">Ice Flower</Enemy>
+			</Enemies>
+		</Room>
+		<Room id="default">
+			<Type>Circle</Type>
+			<MinPadding>2</MinPadding>
+			<MinCircleRadius>5.0</MinCircleRadius>
+			<MaxCircleRadius>10.0</MaxCircleRadius>
+			<FloorTile>Snow</FloorTile>
+			<Enemies>
+				<Enemy prob=".20" minNum="5" maxNum="18">Snow Bat</Enemy>
+				<Enemy prob=".20" minNum="1" maxNum="2">Snow Bat Mama</Enemy>
+				<Enemy prob=".30" minNum="1" maxNum="5">Mini Yeti</Enemy>
+				<Enemy prob=".30" minNum="1" maxNum="3">Big Yeti</Enemy>
+			</Enemies>
+			<Enemies>
+				<Enemy prob=".40" minNum="1" maxNum="12">Ice Cave Wall</Enemy>
+				<Enemy prob=".25" minNum="1" maxNum="8">Ice Crystal Tree</Enemy>
+				<Enemy prob=".25" minNum="1" maxNum="8">Ice Crystal Rock</Enemy>
+			</Enemies>
+		</Room>
+	</Dungeon>
+</Dungeons>

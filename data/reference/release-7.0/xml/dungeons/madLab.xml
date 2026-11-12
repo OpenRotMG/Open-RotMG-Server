@@ -1,0 +1,2114 @@
+<Objects>
+    <Object type="0x0975" id="Mad Scientist Summoner">
+        <Class>Character</Class>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <Size>0</Size>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <StasisImmune/>
+        <State id="Ini">
+            <State id="Move">
+                <Behavior speed="1" distance="2" angle="90" cooldown="20">Move</Behavior>
+                <Transition afterTime="6">Wait</Transition>
+            </State>
+            <State id="Wait">
+            </State>
+            <Transition noneExist="Dr Terrible">Die</Transition>
+        </State>
+        <State id="Die">
+            <Behavior time="0">Decay</Behavior>
+        </State>
+        <State id="NeverUsed">
+            <Behavior cooldown="0" childIds="Dr Terrible" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+            <Behavior cooldown="0" childIds="Dr Terrible Bubble" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+        </State>
+        <Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+    </Object>
+
+    <!--
+*********************************************************************************
+
+Dr Terrible - 1st Boss
+
+*********************************************************************************
+-->
+    <Object type="0x0976" id="Dr Terrible">
+        <Enemy/>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>40</Index></AnimatedTexture>
+
+        <God/>
+		<Quest/>
+		<NoArticle/>
+        
+        <AltTexture id="1">
+            <Texture><File>invisible</File><Index>0</Index></Texture>
+        </AltTexture>
+
+
+        <HitSound>monster/dark_elves_hit</HitSound>
+        <DeathSound>monster/dark_elves_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>55000</MaxHitPoints>
+        <Defense>25</Defense>
+        <XpMult>0.7</XpMult>
+        <StasisImmune/>
+
+        <Projectile id="0">
+            <ObjectId>Blade</ObjectId>
+            <Damage>150</Damage>
+            <Speed>50</Speed>
+            <Size>100</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="1" cooldown="1" range="3">StayCloseToSpawn</Behavior>
+            <Transition playerWithin="10">Phase1</Transition>
+        </State>
+
+        <State id="Phase1">
+            <Behavior tagName="ProtectionOn">ClearGlobalTag</Behavior>
+            <Behavior tagName="StopGasSpawnNow">ClearGlobalTag</Behavior>
+            <Behavior tagName="ProtectionOff">SetGlobalTag</Behavior>
+            <Behavior tagName="SpawnGasNow">SetGlobalTag</Behavior>
+
+            <State id="GreenPotion">
+                <Behavior bucket="movement" speed="1" cooldown="2" range="3">StayCloseToSpawn</Behavior>
+                <Behavior bucket="movement" acquireRange="8" range="4" duration="3" speed=".9" cooldown="4">Follow</Behavior>
+                <Behavior bucket="movement" speed=".6">Wander</Behavior>
+                <Behavior prob=".25" bubbleTime="3" text="Have a deadly potion!;Try my latest concoction.;For Science!">Say</Behavior>
+                <Behavior type="targeted" childId="Green Potion" range="5" rangeJitter="1" cooldown="2">ObjectToss</Behavior>
+                <Transition afterTime="10">AutomatedTurret</Transition>
+            </State>
+
+            <State id="AutomatedTurret">
+                <Behavior bucket="movement" speed="1" cooldown="2" range="3">StayCloseToSpawn</Behavior>
+                <Behavior bucket="movement" acquireRange="8" range="4" duration="3" speed=".9" cooldown="4">Follow</Behavior>
+                <Behavior bucket="movement" speed=".6">Wander</Behavior>
+                <Behavior prob=".25" bubbleTime="3" text="My automatic turret will destroy you!;If my calculations are correct, this will hurt you.;Side effects may include your death!">Say</Behavior>
+                <Behavior type="targeted" childId="Turret Attack" range="5" rangeJitter="1" cooldown="3">ObjectToss</Behavior>
+                <Transition afterTime="10">GreenPotion</Transition>
+            </State>
+            <Transition hitpointsLessThan=".2">FinalState</Transition>
+            <Transition afterTime="20">Phase2</Transition>
+        </State>
+
+        <State id="Phase2">
+            <Behavior tagName="ProtectionOff">ClearGlobalTag</Behavior>
+            <Behavior tagName="StopGasSpawnNow">SetGlobalTag</Behavior>
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+
+            <State id="SummonMonster">
+                <!--<Behavior prob="1" bubbleTime="1" text="Summoning Monster">Say</Behavior>-->
+                <Order>
+                    <Behavior tagName="SpawnMonster">SetTag</Behavior>
+                </Order>
+                <Behavior bucket="movement" speed="1" cooldown="3" range="0">StayCloseToSpawn</Behavior>
+                <Behavior prob=".25" bubbleTime="3" text="Time to feed my pets!;You'll make a nice snack for my creations.;Don't worry, your death will be documented closely.">Say</Behavior>
+                <Transition afterTime="1">HideInBubble</Transition>
+                <!--<Transition afterTime="10">GreenPotion</Transition>-->
+            </State>
+            <State id="HideInBubble">
+                <Behavior prob=".5" bubbleTime="2" text="Great Scott! I must retreat.; You've beaten me back.;Time to delegate your death to my minions.">Say</Behavior>
+                <Behavior tagName="ProtectionOn">SetGlobalTag</Behavior>
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime="18">StopMonsterSpawn</Transition>
+            </State>
+
+            <State id="StopMonsterSpawn">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Order>
+                    <Behavior tagName="SpawnMonster">ClearTag</Behavior>
+                    <Behavior tagName="StopSpawning">SetTag</Behavior>
+                </Order>
+            </State>
+            <Transition hitpointsLessThan=".1">FinalState</Transition>
+            <Transition afterTime="20">Phase1</Transition>
+
+        </State>
+
+
+        <State id="FinalState">
+            <Behavior bucket="movement" speed="1" cooldown="2" range="3">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" acquireRange="8" range="4" duration="3" speed=".9" cooldown="4">Follow</Behavior>
+            <Behavior bucket="movement" speed=".8">Wander</Behavior>
+            <Behavior tagName="SpawnGasNow">ClearGlobalTag</Behavior>
+            <Behavior tagName="StopGasSpawnNow">SetGlobalTag</Behavior>
+            <Order>
+                <Behavior tagName="SpawnMonster">ClearTag</Behavior>
+                <Behavior tagName="StopSpawning">SetTag</Behavior>
+            </Order>
+            <Behavior prob=".25" bubbleTime="3" text="At least my final creation is safe.;This isn't going to plan at all!;What a terrible situation.;You must have eaten your apple today.">Say</Behavior>
+            <Behavior type="targeted" childId="Green Potion" range="5" rangeJitter="1" cooldown="3">ObjectToss</Behavior>
+        </State>
+
+
+        <SoulboundLoot tier="8" prob=".08">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".15" threshold=".01">Armor</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".1" threshold=".03">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".08" threshold=".02">Armor</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".05" threshold=".05">Armor</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".02" threshold=".15">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".03" threshold=".05">Armor</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".01" threshold=".15">Weapon</SoulboundLoot>
+        <SoulboundLoot prob="0.1" min="1">Potion of Wisdom</SoulboundLoot>
+
+        <SoulboundLoot tier="4" prob=".1">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".06" threshold=".18">ClassSpecial</SoulboundLoot>
+ 
+        <!-- <SoulboundLoot prob=".1" threshold=".10">Conducting Wand</SoulboundLoot>-->
+        <SoulboundLoot prob=".002" threshold=".11">Robe of the Mad Scientist</SoulboundLoot>
+        <SoulboundLoot prob=".001" threshold=".14">Scepter of Fulmination</SoulboundLoot>
+        <SoulboundLoot prob=".005" threshold=".15">Experimental Ring</SoulboundLoot>
+        
+		<SoulboundLoot prob="0.01">Wine Cellar Incantation</SoulboundLoot>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Monster Cages -   1st Boss fight
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x0892" id="Monster Cage">
+        <Class>GameObject</Class>
+        <OccupySquare/>
+        <ShadowSize>0</ShadowSize>
+        <Z>-0.40</Z>
+        <Texture><File>lofiObjBig</File><Index>0x57</Index></Texture>
+        <AltTexture id="1">
+            <Texture><File>lofiObjBig</File><Index>0x57</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <Texture><File>lofiObjBig</File><Index>0x58</Index></Texture>
+        </AltTexture>
+
+        <Behavior listenIds="Dr Terrible" cooldown="0" acquireRange="20">FollowOrders</Behavior>
+        <StasisImmune/>
+
+        <State id="Ini">
+            <Transition exist="Dr Terrible">Listening</Transition>
+        </State>
+
+        <State id="Listening">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Transition hasTag="SpawnMonster">PreSummon</Transition>
+            <Transition hasTag="StopSpawning">NoSpawn</Transition>
+        </State>
+
+        <State id="PreSummon">
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.2" flashRepeats="10">ShowEffect</Behavior>
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Transition afterTime="2">Summoning</Transition>
+        </State>
+
+        <State id="Summoning">
+            <Behavior cooldown="4" childIds="Dr Terrible Escaped Experiment,Dr Terrible Mini Bot,Dr Terrible Rampage Cyborg" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Transition afterTime="20">Listening</Transition>
+        </State>
+
+        <State id="NoSpawn">
+            <Transition hasTag="SpawnMonster">PreSummon</Transition>
+
+        </State>
+
+
+
+    </Object>
+
+    <!--
+*********************************************************************************
+
+Dr Terrible Gas Controller -   1st Boss fight
+
+*********************************************************************************
+-->
+    <Object type="0x0997" id="Mad Gas Controller">
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>0</Size>
+        <!--		<Behavior listenIds="Mad Scientist" cooldown="1" acquireRange="20">FollowOrders</Behavior>-->
+
+        <State id="Ini">
+            <!--			<Behavior tagName="test">SetGlobalTag</Behavior>-->
+            <Transition hasGlobalTag="SpawnGasNow">Normal</Transition>
+        </State>
+        <StasisImmune/>
+
+        <State id="Normal">
+            <State id="Chooser">
+                <Order>
+                    <Behavior tagName="redGasActiveUR">ClearTag</Behavior>
+                    <Behavior tagName="redGasActiveLL">ClearTag</Behavior>
+                    <Behavior tagName="redGasActiveUL">ClearTag</Behavior>
+                    <Behavior tagName="redGasActiveLR">ClearTag</Behavior>
+                </Order>
+                <Transition noneExist="Dr Terrible">StopSpawn</Transition>
+                <Transition>UL,UR,LL,LR</Transition>
+            </State>
+            <State id="UL">
+                <!--<Behavior prob="1" bubbleTime="1" text="UL should be safe">Say</Behavior>-->
+                <Order>
+                    <Behavior tagName="redGasActiveUL">SetTag</Behavior>
+                </Order>
+                <Transition afterTime="5">StopSpawn</Transition>
+            </State>
+            <State id="UR">
+                <!--<Behavior prob="1" bubbleTime="1" text="UR should be safe">Say</Behavior>-->
+                <Order>
+                    <Behavior tagName="redGasActiveUR">SetTag</Behavior>
+                </Order>
+                <Transition afterTime="5">StopSpawn</Transition>
+            </State>
+            <State id="LL">
+                <!--<Behavior prob="1" bubbleTime="1" text="LL should be safe">Say</Behavior>-->
+                <Order>
+                    <Behavior tagName="redGasActiveLL">SetTag</Behavior>
+                </Order>
+                <Transition afterTime="5">StopSpawn</Transition>
+            </State>
+            <State id="LR">
+                <!--<Behavior prob="1" bubbleTime="1" text="LR should be safe">Say</Behavior>-->
+                <Order>
+                    <Behavior tagName="redGasActiveLR">SetTag</Behavior>
+                </Order>
+                <Transition afterTime="5">StopSpawn</Transition>
+            </State>
+            <State id="StopSpawn">
+                <Order>
+                    <Behavior tagName="redGasActiveUR">ClearTag</Behavior>
+                    <Behavior tagName="redGasActiveLL">ClearTag</Behavior>
+                    <Behavior tagName="redGasActiveUL">ClearTag</Behavior>
+                    <Behavior tagName="redGasActiveLR">ClearTag</Behavior>
+                </Order>
+                <Behavior tagName="SpawnGasNow">ClearGlobalTag</Behavior>
+                <Transition afterTime="20">Wait</Transition>
+            </State>
+
+            <State id="Wait">
+                <Transition hasGlobalTag="SpawnGasNow">Chooser</Transition>
+            </State>
+        </State>
+
+    </Object>
+
+    <Object type="0x0993" id="Red Gas Spawner UL">
+        <Class>Character</Class>
+        <Enemy/>
+        <!--<Texture><File>lofiObj3</File><Index>0x1a7</Index></Texture>-->
+        <Model>GasEmitter</Model>
+        <Texture><File>lofiObjBig</File><Index>0x3e</Index></Texture>
+        <NoMiniMap/>
+        <OccupySquare/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>100</Size>
+        <Behavior listenIds="Mad Gas Controller" cooldown="0" acquireRange="20">FollowOrders</Behavior>
+        <StasisImmune/>
+
+        <Projectile id="0">
+            <ObjectId>Red Gas</ObjectId>
+            <Damage>150</Damage>
+            <Speed>10</Speed>
+            <Size>100</Size>
+            <LifetimeMS>6000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <!--			<Transition hasGlobalTag="test">Test</Transition>-->
+            <Transition hasTag="redGasActiveUR">PreSpawn</Transition>
+            <Transition hasTag="redGasActiveLL">PreSpawn</Transition>
+            <Transition hasTag="redGasActiveLR">PreSpawn</Transition>
+            <Transition hasTag="redGasNotActive">StopSpawn</Transition>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+        </State>
+
+        <State id="PreSpawn">
+            <!--<Behavior prob="1" bubbleTime="3" text="About to spawn gas">Say</Behavior>-->
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.5" flashRepeats="10">ShowEffect</Behavior>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <Transition afterTime="5">SpawnGas</Transition>
+        </State>
+
+        <State id="SpawnGas">
+            <!--<Effect color="0xFF0000" rate="4" speed="2" spread="10" life="3" lifeVariance="2" speedVariance="1">Gas</Effect>-->
+            <!--<Behavior prob="1" bubbleTime="3" text="Gas releasing...">Say</Behavior>-->
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.5" flashRepeats="40">ShowEffect</Behavior>
+            <Behavior type="auto" range="7" numShots="18" cooldown="2" projectileId="0" angle="20">Shoot</Behavior>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <!--<Transition afterTime="20">StopSpawn</Transition>-->
+            <Transition hasGlobalTag="StopGasSpawnNow">StopSpawn</Transition>
+        </State>
+
+        <State id="StopSpawn">
+            <!--<Behavior prob="1" bubbleTime="3" text="Stop Releasing...">Say</Behavior>-->
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <Transition afterTime="5">Ini</Transition>
+        </State>
+
+        <State id="FightOver">
+
+        </State>
+
+    </Object>
+
+    <Object type="0x0994" id="Red Gas Spawner UR">
+        <Class>Character</Class>
+        <Enemy/>
+        <!--<Texture><File>lofiObj3</File><Index>0x1a7</Index></Texture>-->
+        <Model>GasEmitter</Model>
+        <Texture><File>lofiObjBig</File><Index>0x3e</Index></Texture>
+        <NoMiniMap/>
+        <OccupySquare/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>100</Size>
+        <Behavior listenIds="Mad Gas Controller" cooldown="0" acquireRange="20">FollowOrders</Behavior>
+        <StasisImmune/>
+
+        <Projectile id="0">
+            <ObjectId>Red Gas</ObjectId>
+            <Damage>150</Damage>
+            <Speed>10</Speed>
+            <Size>100</Size>
+            <LifetimeMS>5000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Transition hasTag="redGasActiveLR">PreSpawn</Transition>
+            <Transition hasTag="redGasActiveUL">PreSpawn</Transition>
+            <Transition hasTag="redGasActiveLL">PreSpawn</Transition>
+            <Transition hasTag="redGasNotActive">StopSpawn</Transition>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+        </State>
+
+        <State id="PreSpawn">
+            <!--<Behavior prob="1" bubbleTime="3" text="About to spawn gas">Say</Behavior>-->
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.5" flashRepeats="10">ShowEffect</Behavior>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <Transition afterTime="5">SpawnGas</Transition>
+        </State>
+
+        <State id="SpawnGas">
+            <!--<Effect color="0xFF0000" rate="4" speed="2" spread="10" life="3" lifeVariance="2" speedVariance="1">Gas</Effect>-->
+            <!--<Behavior prob="1" bubbleTime="3" text="Gas releasing...">Say</Behavior>-->
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.5" flashRepeats="40">ShowEffect</Behavior>
+            <Behavior type="auto" range="6" numShots="18" cooldown="2" projectileId="0" angle="20">Shoot</Behavior>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <!--<Transition afterTime="20">StopSpawn</Transition>-->
+            <Transition hasGlobalTag="StopGasSpawnNow">StopSpawn</Transition>
+        </State>
+
+        <State id="StopSpawn">
+            <!--<Behavior prob="1" bubbleTime="3" text="Stop Releasing...">Say</Behavior>-->
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <Transition afterTime="5">Ini</Transition>
+        </State>
+
+        <State id="FightOver">
+
+        </State>
+
+    </Object>
+
+    <Object type="0x0995" id="Red Gas Spawner LL">
+        <Class>Character</Class>
+        <Enemy/>
+        <!--<Texture><File>lofiObj3</File><Index>0x1a7</Index></Texture>-->
+        <Model>GasEmitter</Model>
+        <Texture><File>lofiObjBig</File><Index>0x3e</Index></Texture>
+        <NoMiniMap/>
+        <OccupySquare/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>100</Size>
+        <Behavior listenIds="Mad Gas Controller" cooldown="0" acquireRange="20">FollowOrders</Behavior>
+        <StasisImmune/>
+
+        <Projectile id="0">
+            <ObjectId>Red Gas</ObjectId>
+            <Damage>150</Damage>
+            <Speed>10</Speed>
+            <Size>100</Size>
+            <LifetimeMS>5000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Transition hasTag="redGasActiveUR">PreSpawn</Transition>
+            <Transition hasTag="redGasActiveUL">PreSpawn</Transition>
+            <Transition hasTag="redGasActiveLR">PreSpawn</Transition>
+            <Transition hasTag="redGasNotActive">StopSpawn</Transition>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+        </State>
+
+        <State id="PreSpawn">
+            <!--<Behavior prob="1" bubbleTime="3" text="About to spawn gas">Say</Behavior>-->
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.5" flashRepeats="10">ShowEffect</Behavior>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <Transition afterTime="5">SpawnGas</Transition>
+        </State>
+
+        <State id="SpawnGas">
+            <!--<Effect color="0xFF0000" rate="4" speed="2" spread="10" life="3" lifeVariance="2" speedVariance="1">Gas</Effect>-->
+            <!--<Behavior prob="1" bubbleTime="3" text="Gas releasing...">Say</Behavior>-->
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.5" flashRepeats="40">ShowEffect</Behavior>
+            <Behavior type="auto" range="6" numShots="18" cooldown="2" projectileId="0" angle="20">Shoot</Behavior>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <!--<Transition afterTime="20">StopSpawn</Transition>-->
+            <Transition hasGlobalTag="StopGasSpawnNow">StopSpawn</Transition>
+        </State>
+
+        <State id="StopSpawn">
+            <!--<Behavior prob="1" bubbleTime="3" text="Stop Releasing...">Say</Behavior>-->
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <Transition afterTime="5">Ini</Transition>
+        </State>
+
+        <State id="FightOver">
+
+        </State>
+
+    </Object>
+
+    <Object type="0x0996" id="Red Gas Spawner LR">
+        <Class>Character</Class>
+        <Enemy/>
+        <!--<Texture><File>lofiObj3</File><Index>0x1a7</Index></Texture>-->
+        <Model>GasEmitter</Model>
+        <Texture><File>lofiObjBig</File><Index>0x3e</Index></Texture>
+        <NoMiniMap/>
+        <OccupySquare/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>100</Size>
+        <Behavior listenIds="Mad Gas Controller" cooldown="0" acquireRange="20">FollowOrders</Behavior>
+        <StasisImmune/>
+
+        <Projectile id="0">
+            <ObjectId>Red Gas</ObjectId>
+            <Damage>150</Damage>
+            <Speed>10</Speed>
+            <Size>100</Size>
+            <LifetimeMS>5000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Transition hasTag="redGasActiveUR">PreSpawn</Transition>
+            <Transition hasTag="redGasActiveUL">PreSpawn</Transition>
+            <Transition hasTag="redGasActiveLL">PreSpawn</Transition>
+            <Transition hasTag="redGasNotActive">StopSpawn</Transition>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+        </State>
+
+        <State id="PreSpawn">
+            <!--<Behavior prob="1" bubbleTime="3" text="About to spawn gas">Say</Behavior>-->
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.5" flashRepeats="10">ShowEffect</Behavior>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <Transition afterTime="5">SpawnGas</Transition>
+        </State>
+
+        <State id="SpawnGas">
+            <!--<Effect color="0xFF0000" rate="4" speed="2" spread="10" life="3" lifeVariance="2" speedVariance="1">Gas</Effect>-->
+            <!--<Behavior prob="1" bubbleTime="3" text="Gas releasing...">Say</Behavior>-->
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.5" flashRepeats="40">ShowEffect</Behavior>
+            <Behavior type="auto" range="6" numShots="18" cooldown="2" projectileId="0" angle="20">Shoot</Behavior>
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <!--<Transition afterTime="20">StopSpawn</Transition>-->
+            <Transition hasGlobalTag="StopGasSpawnNow">StopSpawn</Transition>
+        </State>
+
+        <State id="StopSpawn">
+            <!--<Behavior prob="1" bubbleTime="3" text="Stop Releasing...">Say</Behavior>-->
+            <Transition noneExist="Dr Terrible">FightOver</Transition>
+            <Transition afterTime="5">Ini</Transition>
+        </State>
+
+        <State id="FightOver">
+
+        </State>
+
+    </Object>
+
+
+
+    <Object type="0x0978" id="Green Potion">
+        <Enemy/>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <Texture><File>lofiObj3</File><Index>0x1a8</Index></Texture>
+
+        <HitSound>monster/cubes_hit</HitSound>
+        <DeathSound>monster/cubes_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Defense>10</Defense>
+        <XpMult>0.0</XpMult>
+
+        <Projectile id="0">
+            <ObjectId>Green Gas</ObjectId>
+            <Damage>200</Damage>
+            <Speed>25</Speed>
+            <Size>75</Size>
+            <LifetimeMS>4000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior initialDelay="1" range="0" numShots="6" projectileId="0">Explode</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x12aa" id="Turret Attack">
+        <Enemy/>
+        <Model>Tower</Model>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <Texture><File>lofiObj3</File><Index>0x1a9</Index></Texture>
+
+        <HitSound>monster/eggs_hit</HitSound>
+        <DeathSound>monster/eggs_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>2000</MaxHitPoints>
+        <Defense>10</Defense>
+        <StasisImmune/>
+        <XpMult>0.1</XpMult>
+
+        <Projectile id="0">
+            <ObjectId>Science Fire Ball</ObjectId>
+            <Damage>150</Damage>
+            <Speed>50</Speed>
+            <Size>75</Size>
+            <LifetimeMS>2000</LifetimeMS>
+            <!--<ConditionEffect duration="1">Confused</ConditionEffect>-->
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior type="targeted" range="8" numShots="2" angle="60" cooldown="1" projectileId="0">Shoot</Behavior>
+            <Transition noneExist="Dr Terrible">Die</Transition>
+        </State>
+
+        <State id="Die">
+            <Behavior time=".5">Decay</Behavior>
+        </State>
+    </Object>
+
+
+    <!--
+*********************************************************************************
+
+Mini Bot -
+
+*********************************************************************************
+-->
+
+    <Object type="0x0979" id="Mini Bot">
+    <Enemy/>
+    <Class>Character</Class>
+    <Group>Mad Lab</Group>
+    <AnimatedTexture><File>chars8x8rEncounters</File><Index>38</Index></AnimatedTexture>
+
+    <HitSound>monster/cubes_hit</HitSound>
+    <DeathSound>monster/cubes_death</DeathSound>
+    <Size>100</Size>
+    <ShadowSize>50</ShadowSize>
+    <MaxHitPoints>1500</MaxHitPoints>
+    <Defense>15</Defense>
+
+    <Projectile id="0">
+        <ObjectId>Purple Energy Shot</ObjectId>
+        <Damage>80</Damage>
+        <Speed>50</Speed>
+        <Size>100</Size>
+        <LifetimeMS>2000</LifetimeMS>
+        <ConditionEffect duration=".5">Confused</ConditionEffect>
+    </Projectile>
+
+    <State id="Ini">
+        <Behavior bucket="movement" speed=".4" cooldown="4" range="5">StayCloseToSpawn</Behavior>
+        <Behavior type="targeted" range="6" numShots="2" cooldown="1.5" projectileId="0" angle="30">Shoot</Behavior>
+        <Behavior bucket="movement" speed=".9" acquireRange="8" range="5" duration="2" cooldown="2.6">Follow</Behavior>
+        <Behavior bucket="movement" speed="0.6">Wander</Behavior>
+    </State>
+
+
+    <SoulboundLoot prob=".01">Health Potion</SoulboundLoot>
+    <SoulboundLoot prob=".02">Magic Potion</SoulboundLoot>
+
+    </Object>
+
+    <Object type="0x1e25" id="Dr Terrible Mini Bot">
+        <Enemy/>
+        <DisplayId>Mini Bot</DisplayId>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>38</Index></AnimatedTexture>
+
+        <HitSound>monster/cubes_hit</HitSound>
+        <DeathSound>monster/cubes_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>1500</MaxHitPoints>
+        <Defense>15</Defense>
+        <XpMult>0.1</XpMult>
+
+        <Projectile id="0">
+            <ObjectId>Purple Energy Shot</ObjectId>
+            <Damage>80</Damage>
+            <Speed>50</Speed>
+            <Size>100</Size>
+            <LifetimeMS>2000</LifetimeMS>
+            <ConditionEffect duration=".5">Confused</ConditionEffect>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed=".4" cooldown="5" range="10">StayCloseToSpawn</Behavior>
+            <Behavior type="targeted" range="6" numShots="2" cooldown="1.5" projectileId="0" angle="30">Shoot</Behavior>
+            <Behavior bucket="movement" speed=".9" acquireRange="8" range="5" duration="2" cooldown="2.6">Follow</Behavior>
+            <Behavior bucket="movement" speed="0.6">Wander</Behavior>
+        </State>
+
+
+        <SoulboundLoot prob=".01">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob=".02">Magic Potion</SoulboundLoot>
+
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Rampage Cyborg - Robot Monster 1
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x0980" id="Rampage Cyborg">
+        <Enemy/>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>39</Index></AnimatedTexture>
+
+        <HitSound>monster/ghosts_hit</HitSound>
+        <DeathSound>monster/ghosts_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>2000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Yellow Energy Shot</ObjectId>
+            <Damage>80</Damage>
+            <Speed>50</Speed>
+            <Size>75</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Yellow Energy Shot</ObjectId>
+            <Damage>100</Damage>
+            <Speed>60</Speed>
+            <Size>150</Size>
+            <!--<Parametric/>-->
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+
+        <Projectile id="2">
+            <ObjectId>Directed Explosion</ObjectId>
+            <Damage>150</Damage>
+            <Speed>100</Speed>
+            <Size>100</Size>
+            <!--<Parametric/>-->
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+            <Transition playerWithin="15">Engaged</Transition>
+        </State>
+
+        <State id="Engaged">
+            <Behavior projectileId="0" range="4.5" cooldown="0.75">Shoot</Behavior>
+            <!--<Behavior bucket="movement" speed=".6" cooldown="5" range="4">StayCloseToSpawn</Behavior>-->
+            <Behavior bucket="movement" speed="1.4" cooldown="2.6" range="12">Charge</Behavior>
+            <Behavior bucket="movement" speed="0.5" acquireRange="7" range="2" predictive="true">Follow</Behavior>
+            <Transition hitpointsLessThan=".3">Explode</Transition>
+            <Transition afterTime="15">Enrage</Transition>
+        </State>
+
+        <State id="Enrage">
+            <Behavior type="Flash" color="d8d822" flashPeriod="0.1" flashRepeats="15">ShowEffect</Behavior>
+            <!--<Behavior bucket="movement" speed=".7" cooldown="5" range="5">StayCloseToSpawn</Behavior>-->
+            <Behavior bucket="movement" speed="2" cooldown="2.6" range="12">Charge</Behavior>
+            <Behavior rate=".5" maxSize="150">ChangeSize</Behavior>
+            <Behavior projectileId="1" range="5" cooldown="0.9">Shoot</Behavior>
+            <Behavior bucket="movement" speed="0.8" acquireRange="8" range="1" predictive="true">Follow</Behavior>
+            <Transition hitpointsLessThan=".3">Explode</Transition>
+        </State>
+
+        <State id="Explode">
+            <Behavior type="Flash" color="FF0000" flashPeriod="0.1" flashRepeats="10">ShowEffect</Behavior>
+            <Behavior projectileId="2" numShots="8" initialDelay="1" range="0" dropLoot="true" giveXP="true">Explode</Behavior>
+        </State>
+
+        <SoulboundLoot prob=".03">Magic Potion</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".005">Ring</SoulboundLoot>
+        <SoulboundLoot tier="3" prob=".025">ClassSpecial</SoulboundLoot>
+    </Object>
+
+    <Object type="0x1e24" id="Dr Terrible Rampage Cyborg">
+        <Enemy/>
+        <DisplayId>Rampage Cyborg</DisplayId>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>39</Index></AnimatedTexture>
+
+        <HitSound>monster/ghosts_hit</HitSound>
+        <DeathSound>monster/ghosts_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>2000</MaxHitPoints>
+        <Defense>20</Defense>
+        <XpMult>0.1</XpMult>
+
+        <Projectile id="0">
+            <ObjectId>Yellow Energy Shot</ObjectId>
+            <Damage>80</Damage>
+            <Speed>50</Speed>
+            <Size>75</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Yellow Energy Shot</ObjectId>
+            <Damage>100</Damage>
+            <Speed>60</Speed>
+            <Size>150</Size>
+            <!--<Parametric/>-->
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+
+        <Projectile id="2">
+            <ObjectId>Directed Explosion</ObjectId>
+            <Damage>150</Damage>
+            <Speed>100</Speed>
+            <Size>100</Size>
+            <!--<Parametric/>-->
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+            <Transition playerWithin="15">Engaged</Transition>
+        </State>
+
+        <State id="Engaged">
+            <Behavior projectileId="0" range="4.5" cooldown="0.75">Shoot</Behavior>
+            <!--<Behavior bucket="movement" speed=".6" cooldown="5" range="4">StayCloseToSpawn</Behavior>-->
+            <Behavior bucket="movement" speed="1.4" cooldown="2.6" range="12">Charge</Behavior>
+            <Behavior bucket="movement" speed="0.5" acquireRange="7" range="2" predictive="true">Follow</Behavior>
+            <Transition hitpointsLessThan=".3">Explode</Transition>
+            <Transition afterTime="15">Enrage</Transition>
+        </State>
+
+        <State id="Enrage">
+            <Behavior type="Flash" color="d8d822" flashPeriod="0.1" flashRepeats="15">ShowEffect</Behavior>
+            <!--<Behavior bucket="movement" speed=".7" cooldown="5" range="5">StayCloseToSpawn</Behavior>-->
+            <Behavior bucket="movement" speed="2" cooldown="2.6" range="12">Charge</Behavior>
+            <Behavior rate=".5" maxSize="150">ChangeSize</Behavior>
+            <Behavior projectileId="1" range="5" cooldown="0.9">Shoot</Behavior>
+            <Behavior bucket="movement" speed="0.8" acquireRange="8" range="1" predictive="true">Follow</Behavior>
+            <Transition hitpointsLessThan=".3">Explode</Transition>
+        </State>
+
+        <State id="Explode">
+            <Behavior type="Flash" color="FF0000" flashPeriod="0.1" flashRepeats="10">ShowEffect</Behavior>
+            <Behavior projectileId="2" numShots="8" initialDelay="1" range="0" dropLoot="true" giveXP="true">Explode</Behavior>
+        </State>
+
+        <SoulboundLoot prob=".03">Magic Potion</SoulboundLoot>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Escaped Experiment - Abomination Monster 1
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x0981" id="Escaped Experiment">
+        <Enemy/>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>41</Index></AnimatedTexture>
+
+        <HitSound>monster/medusa_death</HitSound>
+        <DeathSound>monster/medusa_hit</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>2750</MaxHitPoints>
+        <Defense>25</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Robot Attack</ObjectId>
+            <Damage>100</Damage>
+            <Speed>50</Speed>
+            <Size>100</Size>
+            <LifetimeMS>2000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="0.9">Wander</Behavior>
+            <Transition playerWithin="10">Engaged</Transition>
+        </State>
+
+        <State id="Engaged">
+            <Behavior bucket="movement" speed=".5" cooldown="3" range="5">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" protecteeId="Crusher Abomination" acquireRange="8" protectionRange="5" speed="1" reprotectRange="2">Protect</Behavior>
+            <Behavior bucket="movement" speed="1">Wander</Behavior>
+            <Behavior targetIds="Crusher Abomination" cooldown="3" range="8" maxHeal="300">Heal</Behavior>
+            <Behavior projectileId="0" range="7" cooldown="0.5">Shoot</Behavior>
+        </State>
+
+        <SoulboundLoot prob=".02">Health Potion</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".02">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="7" prob=".04">Armor</SoulboundLoot>
+    </Object>
+
+    <Object type="0x1e23" id="Dr Terrible Escaped Experiment">
+        <Enemy/>
+        <DisplayId>Escaped Experiment</DisplayId>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>41</Index></AnimatedTexture>
+
+        <HitSound>monster/medusa_death</HitSound>
+        <DeathSound>monster/medusa_hit</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>2750</MaxHitPoints>
+        <Defense>25</Defense>
+        <XpMult>0.1</XpMult>
+
+        <Projectile id="0">
+            <ObjectId>Robot Attack</ObjectId>
+            <Damage>100</Damage>
+            <Speed>50</Speed>
+            <Size>100</Size>
+            <LifetimeMS>2000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="0.9">Wander</Behavior>
+            <Transition playerWithin="10">Engaged</Transition>
+        </State>
+
+        <State id="Engaged">
+            <Behavior bucket="movement" protecteeId="Dr Terrible" acquireRange="9" protectionRange="5" speed="1" reprotectRange="2">Protect</Behavior>
+            <Behavior bucket="movement" speed="1">Wander</Behavior>
+            <!--<Behavior targetIds="Dr Terrible" cooldown="6" range="8" maxHeal="100">Heal</Behavior>-->
+            <Behavior projectileId="0" range="7" cooldown="0.5">Shoot</Behavior>
+        </State>
+
+        <SoulboundLoot prob=".02">Health Potion</SoulboundLoot>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Enforcer Bot 3000 - Robot Monster 2
+
+    *********************************************************************************
+    -->
+    <Object type="0x0982" id="Enforcer Bot 3000">
+        <Enemy/>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>42</Index></AnimatedTexture>
+
+        <HitSound>monster/flaming_skulls_hit</HitSound>
+        <DeathSound>monster/flaming_skulls_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>3500</MaxHitPoints>
+        <Defense>30</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Lightning Spiral</ObjectId>
+            <Damage>150</Damage>
+            <Speed>50</Speed>
+            <Size>75</Size>
+            <LifetimeMS>1600</LifetimeMS>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Lightning Blast</ObjectId>
+            <Damage>80</Damage>
+            <Speed>20</Speed>
+            <Size>100</Size>
+            <LifetimeMS>1200</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="0.6">Wander</Behavior>
+            <Behavior bucket="movement" acquireRange="7" range="4" speed=".8" duration="6" cooldown="3" predictive="1">Follow</Behavior>
+            <Behavior type="targeted" range="8.5" numShots="3" cooldown="1.5" projectileId="0" angle="30">Shoot</Behavior>
+            <Transition playerWithin="4">PlayerClose</Transition>
+        </State>
+
+        <State id="PlayerClose">
+            <Behavior type="targeted" range="5" numShots="2" cooldown="5" projectileId="1" angle="60">Shoot</Behavior>
+            <Behavior type="targeted" range="5" numShots="2" cooldown="5" projectileId="1" angle="15">Shoot</Behavior>
+            <Behavior bucket="movement" distance="5" speed=".8">StayBack</Behavior>
+            <Transition noPlayerWithin="4">Ini</Transition>
+        </State>
+
+        <Behavior min="1" max="3" childId="Mini Bot">ReleaseSpawnAtDeath</Behavior>
+
+        <SoulboundLoot prob=".02">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob=".03">Magic Potion</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".002">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".02">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="7" prob=".04">Armor</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".005">Ring</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".025">ClassSpecial</SoulboundLoot>
+    </Object>
+
+
+    <!--
+    *********************************************************************************
+
+    Crusher Abomination - Abomination Monster 2
+
+    *********************************************************************************
+    -->
+    <Object type="0x0983" id="Crusher Abomination">
+        <Enemy/>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>43</Index></AnimatedTexture>
+
+        <HitSound>monster/dwarf_god_hit</HitSound>
+        <DeathSound>monster/dwarf_god_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>4000</MaxHitPoints>
+        <Defense>40</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Shockwave Blast</ObjectId>
+            <Damage>80</Damage>
+            <Speed>75</Speed>
+            <Size>100</Size>
+            <LifetimeMS>2000</LifetimeMS>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Shockwave Blast</ObjectId>
+            <Damage>100</Damage>
+            <Speed>80</Speed>
+            <Size>100</Size>
+            <LifetimeMS>2000</LifetimeMS>
+        </Projectile>
+
+        <Projectile id="2">
+            <ObjectId>Shockwave Blast</ObjectId>
+            <Damage>150</Damage>
+            <Speed>90</Speed>
+            <Size>150</Size>
+            <LifetimeMS>2000</LifetimeMS>
+        </Projectile>
+
+        <Projectile id="3">
+            <ObjectId>Shockwave Blast</ObjectId>
+            <Damage>180</Damage>
+            <Speed>100</Speed>
+            <Size>175</Size>
+            <LifetimeMS>2000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+            <Transition playerWithin="10">Engaged</Transition>
+        </State>
+
+        <State id="Engaged">
+            <Behavior bucket="movement" cooldown="2" speed="1" range="7">Charge</Behavior>
+            <Behavior bucket="movement" speed=".6">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="4" range="6">StayCloseToSpawn</Behavior>
+            <Behavior type="targeted" range="9" numShots="3" cooldown="1" projectileId="0" angle="30">Shoot</Behavior>
+            <Transition hitpointsLessThan=".75">EngagedOne</Transition>
+        </State>
+
+        <State id="EngagedOne">
+            <!--<Behavior prob="1" bubbleTime="5" text="Rage Mode 1">Say</Behavior>-->
+            <Behavior type="Flash" color="b50000" flashPeriod="0.1" flashRepeats="15">ShowEffect</Behavior>
+            <Behavior bucket="movement" cooldown="2" speed="1" range="7">Charge</Behavior>
+            <Behavior bucket="movement" speed=".6">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="4" range="6">StayCloseToSpawn</Behavior>
+            <Behavior rate="1.2" maxSize="200">ChangeSize</Behavior>
+            <Behavior type="targeted" range="9" numShots="3" cooldown="1.2" projectileId="1" angle="30">Shoot</Behavior>
+            <Transition hitpointsLessThan=".5">EngagedTwo</Transition>
+        </State>
+
+        <State id="EngagedTwo">
+            <!--<Behavior prob="1" bubbleTime="5" text="Rage Mode 2">Say</Behavior>-->
+            <Behavior type="Flash" color="b50000" flashPeriod="0.1" flashRepeats="15">ShowEffect</Behavior>
+            <Behavior bucket="movement" cooldown="2" speed="1" range="7">Charge</Behavior>
+            <Behavior bucket="movement" speed=".6">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="4" range="6">StayCloseToSpawn</Behavior>
+            <Behavior rate="1.2" maxSize="235">ChangeSize</Behavior>
+            <Behavior type="targeted" range="9" numShots="3" cooldown="1.1" projectileId="2" angle="30">Shoot</Behavior>
+            <Transition hitpointsLessThan=".25">EngagedThree</Transition>
+        </State>
+
+        <State id="EngagedThree">
+            <!--<Behavior prob="1" bubbleTime="5" text="Rage Mode 3. SMASH!!!">Say</Behavior>-->
+            <Behavior type="Flash" color="b50000" flashPeriod="0.1" flashRepeats="15">ShowEffect</Behavior>
+            <Behavior bucket="movement" cooldown="2" speed="1" range="7">Charge</Behavior>
+            <Behavior bucket="movement" speed=".6">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="4" range="6">StayCloseToSpawn</Behavior>
+            <Behavior rate="1.2" maxSize="265">ChangeSize</Behavior>
+            <Behavior type="targeted" range="9" numShots="3" cooldown="1" projectileId="3" angle="30">Shoot</Behavior>
+        </State>
+
+        <SoulboundLoot prob=".02">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob=".03">Magic Potion</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".02">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="7" prob=".04">Armor</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".005">Ring</SoulboundLoot>
+        <SoulboundLoot tier="3" prob=".025">ClassSpecial</SoulboundLoot>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Defense Turrets
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x0990" id="West Automated Defense Turret">
+        <Class>GameObject</Class>
+        <Enemy/>
+        <Model>Tower</Model>
+        <Texture><File>lofiObj3</File><Index>0x1aa</Index></Texture>
+        <StasisImmune/>
+
+        <Projectile>
+            <ObjectId>Green Star</ObjectId>
+            <Speed>40</Speed>
+            <Damage>0</Damage>
+            <LifetimeMS>5000</LifetimeMS>
+            <ConditionEffect duration=".5">Confused</ConditionEffect>
+        </Projectile>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Behavior type="auto" cooldown="4" cooldownJitter="2" range="20" defaultAngle="0">Shoot</Behavior>
+    </Object>
+
+    <Object type="0x0991" id="East Automated Defense Turret">
+        <Class>GameObject</Class>
+        <Enemy/>
+        <Model>Tower</Model>
+        <Texture><File>lofiObj3</File><Index>0x1aa</Index></Texture>
+        <StasisImmune/>
+
+        <Projectile>
+            <ObjectId>Green Star</ObjectId>
+            <Speed>40</Speed>
+            <Damage>0</Damage>
+            <LifetimeMS>5000</LifetimeMS>
+            <ConditionEffect duration=".5">Confused</ConditionEffect>
+        </Projectile>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Behavior type="auto" cooldown="4" cooldownJitter="2" range="25" defaultAngle="180">Shoot</Behavior>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Opening Wall to 2nd Boss
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x0992" id="Mad Lab Open Wall">
+        <DisplayId>Horrific Creation</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <Size>0</Size>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <StasisImmune/>
+        <!--		<Behavior effect="Invulnerable">ConditionEffect</Behavior>-->
+        <State id="Ini">
+            <Transition afterTime="2">ListeningBoss</Transition>
+        </State>
+
+        <State id="ListeningBoss">
+            <!--<Behavior text="Listening for Boss Death" broadcast="true" prob="1">Say</Behavior>-->
+            <Transition noneExist="Dr Terrible">ListeningTesla</Transition>
+        </State>
+
+        <State id="ListeningTesla">
+            <!--<Behavior text="Listening for Tesla Coil Death" broadcast="true" prob="1">Say</Behavior>-->
+            <Transition noneExist="Tesla Coil">DestroyWall</Transition>
+        </State>
+
+        <State id="DestroyWall">
+            <Behavior text="Me door is open. Come let me crush you!" broadcast="true" bubbleTime="0" prob="1">Say</Behavior>
+            <Behavior objectId="Blue Torch Wall" radius="4">DeleteObject</Behavior>
+        </State>
+    </Object>
+
+
+    <!--
+    *********************************************************************************
+
+    Horrific Creation - 2nd Boss
+
+    *********************************************************************************
+    -->
+
+
+    <Object type="0x1e19" id="Horrific Creation Summoner">
+        <Class>Character</Class>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Size>0</Size>
+        <StasisImmune/>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <State id="Ini">
+            <Transition afterTime="10">BossCheck</Transition>
+            <!--<Transition noneExist="Horrific Creation">Die</Transition>-->
+        </State>
+        <State id="Die">
+            <Behavior time="0">Decay</Behavior>
+        </State>
+        <State id="AfterSpawn">
+            <Transition noneExist="Horrific Creation">Die</Transition>
+        </State>
+        <State id="BossCheck">
+            <Transition noneExist="Dr Terrible">SpawnBoss</Transition>
+        </State>
+        <State id="SpawnBoss">
+            <Behavior cooldown="0" childIds="Horrific Creation" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Transition exist="Horrific Creation">AfterSpawn</Transition>
+        </State>
+        <!--<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>-->
+    </Object>
+
+    <Object type="0x5e1c" id="Horrific Creation">
+        <Enemy/>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        
+        <God/>
+        
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>44</Index></AnimatedTexture>
+        
+        <AltTexture id="1"> <!-- flashing attack -->
+            <AnimatedTexture><File>chars16x16rEncounters</File><Index>45</Index></AnimatedTexture>
+        </AltTexture>
+        
+        <AltTexture id="2">
+            <AnimatedTexture><File>chars8x8rPets1</File><Index>0x00</Index></AnimatedTexture>
+        </AltTexture>
+        
+        <AltTexture id="3">
+            <AnimatedTexture><File>chars8x8rPets1</File><Index>0x02</Index></AnimatedTexture>
+        </AltTexture>
+        
+        <AltTexture id="4">
+            <AnimatedTexture><File>chars8x8rPets1</File><Index>0x04</Index></AnimatedTexture>
+        </AltTexture>
+        
+        <AltTexture id="5">
+            <AnimatedTexture><File>chars8x8rPets1</File><Index>0x09</Index></AnimatedTexture>
+        </AltTexture>
+        
+        <AltTexture id="6">
+            <AnimatedTexture><File>chars8x8rPets1</File><Index>0x03</Index></AnimatedTexture>
+        </AltTexture>
+        
+        <AltTexture id="7">
+            <AnimatedTexture><File>chars8x8rPets1</File><Index>0x08</Index></AnimatedTexture>
+        </AltTexture>
+        
+        
+        <HitSound>monster/demons_hit</HitSound>
+        <DeathSound>monster/demons_death</DeathSound>
+        <Size>200</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>60000</MaxHitPoints>
+        <Defense>30</Defense>
+        <XpMult>0.8</XpMult>
+        <StasisImmune/>
+
+        <Projectile id="1">
+            <ObjectId>H Creation Wave</ObjectId>
+            <Speed>75</Speed>
+            <Damage>150</Damage>
+            <LifetimeMS>1500</LifetimeMS>
+            <Size>160</Size>
+        </Projectile>
+        
+        <Projectile id="2">
+            <ObjectId>White Ball</ObjectId>
+            <Speed>50</Speed>
+            <Damage>100</Damage>
+            <LifetimeMS>20000</LifetimeMS>
+            <Size>200</Size>
+        </Projectile>
+        
+        <Projectile id="3">
+            <ObjectId>Invisible</ObjectId>
+            <Size>0</Size>
+            <Speed>100</Speed>
+            <Damage>0</Damage>
+            <LifetimeMS>1000</LifetimeMS>
+            <ConditionEffect duration="2">Slowed</ConditionEffect>
+        </Projectile>
+        
+        <Projectile id="4">
+            <ObjectId>H Creation Energy</ObjectId>
+            <Size>280</Size>
+            <Speed>55</Speed>
+            <Damage>200</Damage>
+            <LifetimeMS>3000</LifetimeMS>
+        </Projectile>
+        
+        <Projectile id="5">
+            <ObjectId>H Creation Shockwave</ObjectId>
+            <Size>180</Size>
+            <Speed>50</Speed>
+            <Damage>85</Damage>
+            <LifetimeMS>400</LifetimeMS>
+            <ConditionEffect duration="3.5">Slowed</ConditionEffect>
+        </Projectile>
+        
+        <Projectile id="6">
+            <ObjectId>H Creation Blast</ObjectId>
+            <Size>280</Size>
+            <Speed>85</Speed>
+            <Damage>200</Damage>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        
+        
+        <Behavior speed="3" cooldown="0.2" range="12.5">StayCloseToSpawn</Behavior>
+        
+        <State id="Ini">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+            <Behavior bucket="movement" speed=".7" cooldown="3" range="8">StayCloseToSpawn</Behavior>
+            <Behavior prob="1" broadcast="true" bubbleTime="2" text="WHO KILL MASTER? RAHHHH!">Say</Behavior>
+            <Transition playerWithin="10">FirstNormal</Transition>
+        </State>
+        
+        <State id="FirstNormal">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior bucket="movement" speed=".7" cooldown="0.2" range="3.85">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed="0.45">Wander</Behavior>
+			<Behavior bucket="movement" acquireRange="6" range="0" speed="0.45" duration="3.6" cooldown="0.4" predictive="true">Follow</Behavior>
+            <Behavior type="targeted" range="6" numShots="3" cooldown=".65" projectileId="1" angle="25">Shoot</Behavior>
+            <Transition noPlayerWithin="6">Charge</Transition>
+            <Transition onTile="Lab Bad Vat Rug">RandomTexture</Transition>
+        </State>
+        
+        
+        <State id="Normal">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior bucket="movement" speed=".7" cooldown="0.2" range="3.85">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed="0.45">Wander</Behavior>
+			<Behavior bucket="movement" acquireRange="6" range="0" speed="0.45" duration="3.6" cooldown="0.4" predictive="true">Follow</Behavior>
+            <Behavior type="targeted" range="6" numShots="3" cooldown=".65" projectileId="1" angle="25">Shoot</Behavior>
+            <Transition noPlayerWithin="6" afterTime="4" hitpointsLessThan="0.6">ShootBlast</Transition>
+            <Transition noPlayerWithin="6" afterTime="4">Charge</Transition>
+            <Transition onTile="Lab Bad Vat Rug">RandomTexture</Transition>
+        </State>
+        
+        <State id="ShootBlast">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <State id="GetCentered">
+                <Behavior bucket="movement" speed="1.2" cooldown="3" range="1">StayCloseToSpawn</Behavior>
+                <Transition afterTime="1.2">ChargeUp</Transition>
+            </State>
+            <State id="ChargeUp">
+                <Behavior type="Flash" color="f7c0c1" flashPeriod="0.1" flashRepeats="20">ShowEffect</Behavior>
+                <Transition afterTime="2">Shoot</Transition>
+            </State>
+            <State id="Shoot">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Behavior type="targeted" range="13" numShots="1" cooldown=".4" projectileId="6">Shoot</Behavior>
+                <Behavior prob="0.5" bubbleTime="2" text="What, you scared???">Say</Behavior>
+                <Transition afterTime="6">Taunt</Transition>
+            </State>
+            <State id="Taunt">
+                <Behavior prob="0.85" bubbleTime="2" text="Me can do this all day!;You stay still!">Say</Behavior>
+            </State>
+            
+            <Transition playerWithin="7" afterTime="9">Charge</Transition>
+            <Transition noPlayerWithin="7" afterTime="12">ShootBlast</Transition>
+        </State>
+        
+        <State id="CloseAttack">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior bucket="movement" speed=".7" cooldown="0.2" range="3.85">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" acquireRange="6" range="0" speed="0.45" duration="3.6" cooldown="0.4" predictive="true">Follow</Behavior>
+            <Behavior type="auto" range="2" numShots="8" cooldown="1" projectileId="5" angle="45">Shoot</Behavior>
+            <Transition afterTime="4">Normal</Transition>
+        </State>
+        
+        <State id="Charge">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior bucket="movement" speed=".7" cooldown="3" range="11">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" cooldown=".8" speed="3" range="10">Charge</Behavior>
+            <Transition playerWithin="1.6">Charge Slow</Transition>
+            <Transition onTile="Lab Bad Vat Rug">RandomTexture</Transition>
+        </State>
+        
+        <State id="Charge Slow">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior type="auto" range="0" numShots="8" cooldown="0.8" projectileId="5" angle="45">Shoot</Behavior>
+            <Transition playerWithin="3" afterTime="0.2">Charge Up1</Transition>
+            <Transition noPlayerWithin="3" afterTime="1.8">Normal</Transition>
+            <Transition onTile="Lab Bad Vat Rug">RandomTexture</Transition>
+        </State>
+        
+        <State id="Charge Up1">
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior prob=".85" bubbleTime="2" text="You hurt master!;You no hurt me.;Attacks no hurt me!!!">Say</Behavior>
+            <Behavior type="Flash" color="f7c0c1" flashPeriod="0.1" flashRepeats="20">ShowEffect</Behavior>
+            <Behavior rate="2" maxSize="300">ChangeSize</Behavior>
+            <Transition afterTime="2">Charge Up1 Explode</Transition>
+            <Transition onTile="Lab Bad Vat Rug">RandomTexture</Transition>
+        </State>
+        
+        
+        <State id="Charge Up1 Explode">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <State id="First">
+                <Behavior type="auto" range="20" numShots="8" angle="45" cooldown="2" projectileId="4" defaultAngle="22.5">Shoot</Behavior>
+                <Transition afterTime=".4" hitpointsLessThan="0.7">Seccond</Transition>
+            </State>
+            <State id="Seccond">
+                <Behavior type="auto" range="20" numShots="8" angle="45" cooldown="2" projectileId="4" defaultAngle="0">Shoot</Behavior>
+                <Transition afterTime=".4" hitpointsLessThan="0.4">Third</Transition>
+            </State>
+            <State id="Third">
+                <Behavior type="auto" range="20" numShots="10" angle="36" cooldown="2" projectileId="4" defaultAngle="18">Shoot</Behavior>
+            </State>
+            <Transition afterTime="1">Charge Up2</Transition>
+        </State>
+        
+        <State id="Charge Up2">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior prob=".25" bubbleTime="3" text="RAHHHHHHHHH">Say</Behavior>
+            <Behavior prob=".25" bubbleTime="3" text="Little people's attacks tickle.">Say</Behavior>
+            <Behavior type="Flash" color="f7c0c1" flashPeriod="0.1" flashRepeats="10">ShowEffect</Behavior>
+            <Behavior rate="2" maxSize="300">ChangeSize</Behavior>
+            <Transition afterTime="1">Charge Up2 Explode</Transition>
+            
+        </State>
+        
+        <State id="Charge Up2 Explode">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            
+            <State id="Choose">
+                <Transition hitpointsLessThan="0.4">Third</Transition>
+                <Transition hitpointsLessThan="0.7">Seccond</Transition>
+                <Transition afterTime="0">First</Transition>
+            </State>
+            
+            <State id="First">
+                <Behavior type="auto" range="20" numShots="8" angle="45" cooldown="1" projectileId="4" defaultAngle="0">Shoot</Behavior>
+            </State>
+            <State id="Seccond">
+                <Behavior type="auto" range="20" numShots="8" angle="45" cooldown="2" projectileId="4" defaultAngle="22.5">Shoot</Behavior>
+                <Behavior type="auto" range="20" numShots="8" angle="45" cooldown="2" projectileId="6" defaultAngle="0" offset="0.6">Shoot</Behavior>
+            </State>
+            <State id="Third">
+                <Behavior type="auto" range="20" numShots="10" angle="36" cooldown="2" projectileId="4" defaultAngle="18">Shoot</Behavior>
+                <Behavior type="auto" range="20" numShots="10" angle="36" cooldown="2" projectileId="6" defaultAngle="0" offset="0.6">Shoot</Behavior>
+            </State>
+            
+            <Transition afterTime=".75">Normal</Transition>
+        </State>
+        
+        <DefineEmbed name="inVat">
+            <State id="Animal">
+                <State id="Scale">
+                    <Transition playerWithin="12|14">Tons</Transition>
+                    <Transition playerWithin="12|9">Many</Transition>
+                </State>
+                <State id="Many">
+                    <Behavior targetIds="Horrific Creation" cooldown="0.4" range="1" maxHeal="250" hideVisual="true">Heal</Behavior>
+                </State>
+                <State id="Tons">
+                    <Behavior targetIds="Horrific Creation" cooldown="0.4" range="1" maxHeal="500" hideVisual="true">Heal</Behavior>
+                </State>
+                <Behavior bucket="movement" speed="1" radius="1">BackAndForth</Behavior>
+                <Transition afterTime="5">Leave</Transition>
+            </State>
+            <State id="Leave">
+                <Behavior bucket="movement" speed="2" distance="11.7">Move</Behavior>
+            </State>
+            <Transition afterTime="6.6" playerWithin="6">Normal</Transition>
+            <Transition afterTime="6.6" noPlayerWithin="6">CloseAttack</Transition>
+        </DefineEmbed>
+        
+        
+        <State id="RandomTexture">
+            <Transition afterTime=".1">AltTex2,AltTex3,AltTex4,AltTex5,AltTex6,AltTex7</Transition>
+        </State>
+        
+        <State id="AltTex2">
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Embed name="inVat"></Embed>
+        </State>
+        
+        <State id="AltTex3">
+            <Behavior altTextureId="3">SetAltTexture</Behavior>
+            <Embed name="inVat"></Embed>
+        </State>
+        
+        <State id="AltTex4">
+            <Behavior altTextureId="4">SetAltTexture</Behavior>
+            <Embed name="inVat"></Embed>
+        </State>
+        
+        <State id="AltTex5">
+            <Behavior altTextureId="5">SetAltTexture</Behavior>
+            <Embed name="inVat"></Embed>
+        </State>
+        
+        <State id="AltTex6">
+            <Behavior altTextureId="6">SetAltTexture</Behavior>
+            <Embed name="inVat"></Embed>
+        </State>
+        
+        <State id="AltTex7">
+            <Behavior altTextureId="7">SetAltTexture</Behavior>
+            <Embed name="inVat"></Embed>
+        </State>
+        
+        
+
+        <SoulboundLoot tier="8" prob=".2">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".15" threshold=".04">Armor</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".1" threshold=".05">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".08" threshold=".07">Armor</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".04" threshold=".11">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".025" threshold=".15">Weapon</SoulboundLoot>
+        <SoulboundLoot prob=".05">Potion of Wisdom</SoulboundLoot>
+        <SoulboundLoot prob=".2" min="1">Potion of Defense</SoulboundLoot>
+        
+        <SoulboundLoot tier="4" prob=".1">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".06" threshold=".18">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".06" threshold=".10">Ring</SoulboundLoot>
+
+        <SoulboundLoot prob=".003" threshold=".15">Conducting Wand</SoulboundLoot>
+        <!--<SoulboundLoot prob=".08" threshold=".11">Robe of the Mad Scientist</SoulboundLoot>-->
+        <!--<SoulboundLoot prob=".05" threshold=".14">Scepter of Fulmination</SoulboundLoot>-->
+        <SoulboundLoot prob=".006" threshold=".10">Experimental Ring</SoulboundLoot>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Mad Lab Realm Encounter - FEAL
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x099a" id="F.E.R.A.L.">
+        <Enemy/>
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>46</Index></AnimatedTexture>
+
+        <AltTexture id="1">
+            <Texture><File>invisible</File><Index>0</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <AnimatedTexture><File>chars16x16rEncounters</File><Index>46</Index></AnimatedTexture>
+        </AltTexture>
+
+        <AltTexture id="3">
+            <Texture><File>lofiObjBig</File><Index>0x59</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="4">
+            <Texture><File>lofiObjBig</File><Index>0x5a</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="5">
+            <Texture><File>lofiObjBig</File><Index>0x5b</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="6">
+            <Texture><File>lofiObjBig</File><Index>0x5c</Index></Texture>
+        </AltTexture>
+
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>8000</MaxHitPoints>
+        <Defense>30</Defense>
+        <Flying/>
+        <Z>1</Z>
+
+        <Projectile id="1">
+            <ObjectId>Goo Attack</ObjectId>
+            <Speed>50</Speed>
+            <Damage>1</Damage>
+            <LifetimeMS>1500</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <Projectile id="2">
+            <ObjectId>Psychic Attack</ObjectId>
+            <Speed>50</Speed>
+            <Damage>1</Damage>
+            <LifetimeMS>1500</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+        <Behavior prob="1" childId="FERAL Death">MetamorphoseAtDeath</Behavior>
+        <State id="Ini">
+            <!--<Behavior altTextureId="1">SetAltTexture</Behavior>-->
+            <!--<Behavior bucket="movement" speed="2" distance="7" angle="142">Move</Behavior>-->
+            <Transition playerWithin="8">Rising</Transition>
+        </State>
+
+        <State id="Rising">
+            <State id="A1">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="6">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <Transition afterTime="1.2">Walk</Transition>
+        </State>
+
+        <State id="Sink">
+            <State id="Sinking">
+                <State id="A1">
+                    <Behavior altTextureId="6">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A2</Transition>
+                </State>
+                <State id="A2">
+                    <Behavior altTextureId="5">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A3</Transition>
+                </State>
+                <State id="A3">
+                    <Behavior altTextureId="4">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A4</Transition>
+                </State>
+                <State id="A4">
+                    <Behavior altTextureId="3">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A5</Transition>
+                </State>
+                <State id="A5">
+                    <Behavior altTextureId="1">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A5</Transition>
+                </State>
+            </State>
+            <Transition afterTime="1.5">Walk</Transition>
+        </State>
+
+        <State id="Sink2">
+            <State id="Sinking">
+                <State id="A1">
+                    <Behavior altTextureId="6">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A2</Transition>
+                </State>
+                <State id="A2">
+                    <Behavior altTextureId="5">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A3</Transition>
+                </State>
+                <State id="A3">
+                    <Behavior altTextureId="4">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A4</Transition>
+                </State>
+                <State id="A4">
+                    <Behavior altTextureId="3">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A5</Transition>
+                </State>
+                <State id="A5">
+                    <Behavior altTextureId="1">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A5</Transition>
+                </State>
+            </State>
+            <Transition afterTime="1.5">Walk2</Transition>
+        </State>
+
+        <State id="Sink3">
+            <State id="Sinking">
+                <State id="A1">
+                    <Behavior altTextureId="6">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A2</Transition>
+                </State>
+                <State id="A2">
+                    <Behavior altTextureId="5">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A3</Transition>
+                </State>
+                <State id="A3">
+                    <Behavior altTextureId="4">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A4</Transition>
+                </State>
+                <State id="A4">
+                    <Behavior altTextureId="3">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A5</Transition>
+                </State>
+                <State id="A5">
+                    <Behavior altTextureId="1">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A5</Transition>
+                </State>
+            </State>
+            <Transition afterTime="1.5">Walk3</Transition>
+        </State>
+
+        <State id="Sink4">
+            <State id="Sinking">
+                <State id="A1">
+                    <Behavior altTextureId="6">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A2</Transition>
+                </State>
+                <State id="A2">
+                    <Behavior altTextureId="5">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A3</Transition>
+                </State>
+                <State id="A3">
+                    <Behavior altTextureId="4">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A4</Transition>
+                </State>
+                <State id="A4">
+                    <Behavior altTextureId="3">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A5</Transition>
+                </State>
+                <State id="A5">
+                    <Behavior altTextureId="1">SetAltTexture</Behavior>
+                    <Transition afterTime="0.2">A5</Transition>
+                </State>
+            </State>
+            <Transition afterTime="1.5">Walk4</Transition>
+        </State>
+
+        <State id="Walk">
+            <!--<Behavior bubbleTime="2" text="Walk 1" prob="1">Say</Behavior>-->
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior bucket="movement" distance="10" speed="2" angle="270">Move</Behavior>
+            <Transition afterTime="5">UR Fight</Transition>
+        </State>
+
+
+        <State id="Walk2">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <!--<Behavior bubbleTime="2" text="Walk 2" prob="1">Say</Behavior>-->
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior bucket="movement" distance="13" speed="2" angle="0">Move</Behavior>
+            <Transition afterTime="5">LR Fight</Transition>
+        </State>
+
+        <State id="Walk3">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <!--<Behavior bubbleTime="2" text="Walk 3" prob="1">Say</Behavior>-->
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior bucket="movement" distance="10" speed="2" angle="90">Move</Behavior>
+            <Transition afterTime="5">LL Fight1</Transition>
+        </State>
+
+        <State id="Walk4">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <!--<Behavior bubbleTime="2" text="Walk 4" prob="1">Say</Behavior>-->
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior bucket="movement" distance="13" speed="2" angle="180">Move</Behavior>
+            <Transition afterTime="5">UL Fight</Transition>
+        </State>
+
+        <State id="UL Fight">
+            <State id="A1">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="6">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="0" offset="0.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="10" offset="0.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="20" offset="0.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="30" offset="0.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="40" offset="0.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="50" offset="1.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="60" offset="1.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="70" offset="1.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="80" offset="1.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="1.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="8" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="2.0" angle="45">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="2.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="0" offset="2.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="10" offset="2.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="20" offset="2.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="30" offset="3.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="40" offset="3.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="50" offset="3.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="60" offset="3.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="70" offset="3.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="80" offset="4.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="4.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="8" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="4.4" angle="45">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="0" offset="4.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="10" offset="4.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="20" offset="5.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="30" offset="5.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="40" offset="5.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="50" offset="5.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="60" offset="5.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="70" offset="6.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="80" offset="6.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="6.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="8" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="6.6" angle="45">Shoot</Behavior>
+            <Transition afterTime="7">Sink</Transition>
+        </State>
+
+        <State id="UR Fight">
+            <State id="A1">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="6">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Quiet" duration="1" defaultAngle="0" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Weak" duration="1" defaultAngle="180" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Sick" duration="1" defaultAngle="45" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Blind" duration="1" defaultAngle="225" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Drunk" duration="1" defaultAngle="90" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Confused" duration="1" defaultAngle="270" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Bleeding" duration="1" defaultAngle="135" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Armor Broken" duration="1" defaultAngle="315" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" effect="Slowed" duration="1" defaultAngle="360" >GrenadeToss</Behavior>
+            <Transition afterTime="6">Sink2</Transition>
+        </State>
+
+        <State id="LR Fight">
+            <State id="A1">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="6">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="0.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="0.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="80" offset="0.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="70" offset="0.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="60" offset="0.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="50" offset="1.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="40" offset="1.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="30" offset="1.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="20" offset="1.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="10" offset="1.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="8" projectileId="1" cooldown="10" type="auto" defaultAngle="0" offset="2.0" angle="45">Shoot</Behavior>
+            <Behavior type="Flash" color="0000FF" flashPeriod="0.1" flashRepeats="4">ShowEffect</Behavior>
+            <Behavior numShots="8" projectileId="1" cooldown="10" type="auto" defaultAngle="0" offset="2.2" angle="45">Shoot</Behavior>
+            <Behavior numShots="8" projectileId="1" cooldown="10" type="auto" defaultAngle="0" offset="2.4" angle="45">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="0" offset="2.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="10" offset="2.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="20" offset="3.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="30" offset="3.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="40" offset="3.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="50" offset="3.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="60" offset="3.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="70" offset="4.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="80" offset="4.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="4.4" angle="90">Shoot</Behavior>
+            <Behavior type="Flash" color="0000FF" flashPeriod="0.1" flashRepeats="4">ShowEffect</Behavior>
+            <Behavior numShots="8" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="4.6" angle="45">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="4.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="5.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="90" offset="5.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="80" offset="5.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="70" offset="5.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="60" offset="5.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="50" offset="6.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="40" offset="6.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="30" offset="6.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="20" offset="6.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="1" cooldown="10" type="auto" defaultAngle="10" offset="6.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="8" projectileId="1" cooldown="10" type="auto" defaultAngle="0" offset="7.0" angle="45">Shoot</Behavior>
+            <Transition afterTime="7.5">Sink3</Transition>
+        </State>
+
+        <State id="LL Fight1">
+            <State id="A1">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="6">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime="0.2">A5</Transition>
+            </State>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" duration="1" defaultAngle="0" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" duration="1" defaultAngle="180" >GrenadeToss</Behavior>
+            <Transition afterTime="1">LL Fight2</Transition>
+        </State>
+
+        <State id="LL Fight2">
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" duration="1" defaultAngle="45" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" duration="1" defaultAngle="225" >GrenadeToss</Behavior>
+            <Transition afterTime="1">LL Fight3</Transition>
+        </State>
+
+        <State id="LL Fight3">
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" duration="1" defaultAngle="90" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" duration="1" defaultAngle="270" >GrenadeToss</Behavior>
+            <Transition afterTime="1">LL Fight4</Transition>
+        </State>
+
+        <State id="LL Fight4">
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" duration="1" defaultAngle="135" >GrenadeToss</Behavior>
+            <Behavior type="auto" range="5" radius="2" cooldown="10" damage="5" minRange="1" duration="1" defaultAngle="315" >GrenadeToss</Behavior>
+            <Transition afterTime="2">Sink4</Transition>
+        </State>
+
+    </Object>
+
+    <Object type="0x0890" id="Mad Lab Portal">
+        <Class>Portal</Class>
+        <IntergamePortal/>
+        <DungeonName>Mad Lab</DungeonName>
+        <Texture><File>lofiObj3</File><Index>0x1ab</Index></Texture>
+        <Animation prob="1" period="1">
+            <Frame time="0.25"><Texture><File>lofiObj3</File><Index>0x1ac</Index></Texture></Frame>
+            <Frame time="0.25"><Texture><File>lofiObj3</File><Index>0x1ad</Index></Texture></Frame>
+            <Frame time="0.25"><Texture><File>lofiObj3</File><Index>0x1ae</Index></Texture></Frame>
+            <Frame time="0.25"><Texture><File>lofiObj3</File><Index>0x1ad</Index></Texture></Frame>
+        </Animation>
+        <Behavior time="30">Decay</Behavior>
+    </Object>
+
+
+    <Object type="0x0891" id="FERAL Controller">
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Behavior map="courtyard_maps/map1.jm">PlaceMap</Behavior>
+        <Behavior listenIds="FERAL Death" acquireRange="20" cooldown=".2">FollowOrders</Behavior>
+
+        <State id="Ini">
+            <Transition playerWithin="10">StartFeral</Transition>
+        </State>
+
+        <State id="StartFeral">
+            <!--<Behavior bubbleTime="2" text="StartFeral State FEAL Controller" broadcast="true">Say</Behavior>-->
+            <Transition afterTime="3">WaitForDeath</Transition>
+        </State>
+
+        <State id="WaitForDeath">
+            <Transition hasTag="feraldeath">Die</Transition>
+        </State>
+
+        <State id="Die">
+            <!--<Behavior bubbleTime="2" text="Death State FEAL Controller" broadcast="true">Say</Behavior>-->
+            <!--<Behavior time="1" dropLoot="true">Decay</Behavior>-->
+            <Behavior time="0.0" childId="Mad Lab Portal">Metamorphose</Behavior>
+        </State>
+
+    </Object>
+
+
+    <Object type="0x1e20" id="FERAL Death">
+        <Class>Character</Class>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <Size>0</Size>
+        <ShadowSize>0</ShadowSize>
+        <NoMiniMap/>
+
+        <State id="Ini">
+            <!--<Behavior bubbleTime="2" text="FERAL Death Happened" broadcast="true">Say</Behavior>-->
+            <Transition afterTime="1">wait1</Transition>
+        </State>
+
+        <State id="wait1">
+            <Order>
+                <Behavior tagName="feraldeath">SetTag</Behavior>
+            </Order>
+            <Transition afterTime=".5">wait2</Transition>
+        </State>
+
+        <State id="wait2">
+            <Order>
+                <Behavior tagName="feraldeath">SetTag</Behavior>
+            </Order>
+            <Transition afterTime=".5">wait1</Transition>
+        </State>
+
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Vat Polymorpher
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x1e15" id="Hexxer">
+        <Class>Character</Class>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <Size>0</Size>
+        <ShadowSize>0</ShadowSize>
+        <NoMiniMap/>
+        <StasisImmune/>
+        <Effect color="0x00c631" rate="20" life=".45" lifeVariance=".1" speed="0" speedVariance=".5" size="5" rise="1" riseVariance=".1" rangeX="1.9" rangeY="1.9">CustomParticles</Effect>
+        <Behavior effect="Invisible" cooldown=".2" range="2" ignoreInvisible="false">ClearConditionEffectAura</Behavior>
+        <Behavior effect="Stunned,Speedy,Hexed" cooldown=".2" range="2">ConditionEffectAura</Behavior>
+    </Object>
+
+    <Object type="0x1e16" id="DeHexxer">
+        <Class>Character</Class>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <Size>0</Size>
+        <ShadowSize>0</ShadowSize>
+        <StasisImmune/>
+        <Effect color="0x0079eb" rate="20" life=".45" lifeVariance=".1" speed="0" speedVariance=".5" size="5" rise="1" riseVariance=".1" rangeX="1.9" rangeY="1.9">CustomParticles</Effect>
+        <Behavior effect="Stunned,Speedy,Hexed" cooldown=".2" range="2" ignoreInvisible="false">ClearConditionEffectAura</Behavior>
+    </Object>
+
+    <Object type="0x1e22" id="Dr Terrible Bubble">
+        <Class>GameObject</Class>
+        <Enemy/>
+        <Size>125</Size>
+        <HitSound>monster/djinn_hit</HitSound>
+        <Texture><File>lofiObjBig</File><Index>0x54</Index></Texture>
+
+        <AltTexture id="1">
+            <Texture><File>lofiObjBig</File><Index>0x55</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <Texture><File>lofiObjBig</File><Index>0x56</Index></Texture>
+        </AltTexture>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <StasisImmune/>
+
+        <State id="Ini">
+            <Transition hasGlobalTag="ProtectionOn">BubbleActive</Transition>
+        </State>
+
+        <State id="BubbleActive">
+            <State id="1">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime=".5">2</Transition>
+            </State>
+            <State id="2">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".5">1</Transition>
+            </State>
+           <Transition hasGlobalTag="ProtectionOff">Ini</Transition>
+        </State>
+
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Bubble Creators
+
+    *********************************************************************************
+    -->
+
+
+</Objects>

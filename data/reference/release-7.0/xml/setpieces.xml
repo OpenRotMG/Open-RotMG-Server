@@ -1,0 +1,127 @@
+<SetPieces>
+	<SetPiece name="Graveyard">
+		<Pattern>graveyard</Pattern>
+		<Terrain>MidPlains</Terrain>
+		<Defender>Deathmage</Defender>
+		<Loot tier="5" prob=".15">Weapon</Loot>
+		<Loot tier="5" prob=".15">Armor</Loot>
+		<Loot tier="1" prob=".5">Ring</Loot>
+		<Loot tier="2" prob=".05">Ring</Loot>
+		<Loot tier="1" prob=".6">ClassSpecial</Loot>
+		<Loot tier="2" prob=".25">ClassSpecial</Loot>
+		<Loot tier="1">Potion</Loot>
+		<Loot tier="1">Potion</Loot>
+	</SetPiece>
+	<SetPiece name="House">
+		<Pattern>house</Pattern>
+		<Terrain>LowForest</Terrain>
+	</SetPiece>
+	<SetPiece name="Grove">
+		<Pattern>grove</Pattern>
+		<Terrain>MidForest</Terrain>
+		<Defender>Ent Ancient</Defender>
+	</SetPiece>
+	<SetPiece name="Temple">
+		<Pattern>temple</Pattern>
+		<Terrain>MidPlains</Terrain>
+		<Defender>Lich</Defender>
+	</SetPiece>
+	<SetPiece name="Castle">
+		<Pattern>castle</Pattern>
+		<Terrain>HighPlains</Terrain>
+		<Defender>Cyclops God</Defender>
+		<Loot tier="4" prob="0.025">ClassSpecial</Loot>
+		<Loot tier="3" prob="0.05">Ring</Loot>
+		<Loot tier="8" prob="0.1">Weapon</Loot>
+		<Loot tier="8" prob="0.1">Armor</Loot>
+		<Loot tier="3" prob="0.1">ClassSpecial</Loot>
+		<Loot tier="2" prob="0.2">Ring</Loot>
+		<Loot tier="7" prob="0.2">Weapon</Loot>
+		<Loot tier="7" prob="0.2">Armor</Loot>
+		<Loot tier="2" prob="0.4">ClassSpecial</Loot>
+		<Loot tier="6" prob="0.5">Weapon</Loot>
+		<Loot tier="6" prob="0.5">Armor</Loot>
+		<Loot tier="1">Potion</Loot>
+		<Loot tier="1">Potion</Loot>
+	</SetPiece>
+	<SetPiece name="Tower">
+		<Pattern>tower</Pattern>
+		<Terrain>HighForest</Terrain>
+		<Defender>Ghost King</Defender>
+	</SetPiece>
+    <SetPiece name="Oasis">
+        <Pattern>oasis</Pattern>
+        <Terrain>MidSand,HighSand</Terrain>
+        <Defender>Oasis Giant</Defender>
+        <Loot tier="3" prob="0.075">ClassSpecial</Loot>
+        <Loot tier="2" prob="0.15">Ring</Loot>
+        <Loot tier="7" prob="0.167">Weapon</Loot>
+        <Loot tier="7" prob="0.167">Armor</Loot>
+        <Loot tier="2" prob="0.3">ClassSpecial</Loot>
+        <Loot tier="6" prob="0.375">Weapon</Loot>
+        <Loot tier="6" prob="0.375">Armor</Loot>
+        <Loot tier="1" prob="0.6">Ring</Loot>
+        <Loot tier="5" prob="0.75">Weapon</Loot>
+        <Loot tier="5" prob="0.75">Armor</Loot>
+        <Loot tier="1">Potion</Loot>
+        <Loot tier="1">Potion</Loot>
+    </SetPiece>
+    <SetPiece name="Pyre">
+        <Pattern>pyre</Pattern>
+        <Terrain>MidSand,HighSand</Terrain>
+        <Defender>Phoenix Lord</Defender>
+        <Loot tier="3" prob="0.075">ClassSpecial</Loot>
+        <Loot tier="2" prob="0.15">Ring</Loot>
+        <Loot tier="7" prob="0.167">Weapon</Loot>
+        <Loot tier="7" prob="0.167">Armor</Loot>
+        <Loot tier="2" prob="0.3">ClassSpecial</Loot>
+        <Loot tier="6" prob="0.375">Weapon</Loot>
+        <Loot tier="6" prob="0.375">Armor</Loot>
+        <Loot tier="1" prob="0.6">Ring</Loot>
+        <Loot tier="5" prob="0.75">Weapon</Loot>
+        <Loot tier="5" prob="0.75">Armor</Loot>
+        <Loot tier="1">Potion</Loot>
+        <Loot tier="1">Potion</Loot>
+    </SetPiece>
+	<SetPiece name="Lava Fissure">
+		<Pattern>lavafissure</Pattern>
+		<Terrain>Mountains</Terrain>
+		<Defender>Red Demon</Defender>
+		<Loot tier="4" prob="0.05">ClassSpecial</Loot>
+		<Loot tier="3" prob="0.1">Ring</Loot>
+		<Loot tier="9" prob="0.05">Weapon</Loot>
+		<Loot tier="9" prob="0.05">Armor</Loot>
+		<Loot tier="3" prob="0.2">ClassSpecial</Loot>
+		<Loot tier="8" prob="0.2">Weapon</Loot>
+		<Loot tier="8" prob="0.2">Armor</Loot>
+		<Loot tier="2" prob="0.4">Ring</Loot>
+		<Loot tier="7" prob="0.4">Weapon</Loot>
+		<Loot tier="7" prob="0.4">Armor</Loot>
+		<Loot tier="2" prob="0.8">ClassSpecial</Loot>
+		<Loot tier="1">Potion</Loot>
+		<Loot tier="1">Potion</Loot>
+	</SetPiece>
+	<SetPiece name="Jungle Temple">
+		<Pattern>jungle_temple</Pattern>
+		<Terrain>MidForest</Terrain>
+		<Defender>Great Coil Snake</Defender>
+		<Loot tier="5" prob=".15">Weapon</Loot>
+		<Loot tier="5" prob=".15">Armor</Loot>
+		<Loot tier="2" prob=".5">Ring</Loot>
+		<Loot tier="3" prob=".05">Ring</Loot>
+		<Loot tier="1" prob=".6">ClassSpecial</Loot>
+		<Loot tier="2" prob=".25">ClassSpecial</Loot>
+		<Loot tier="1">Potion</Loot>
+		<Loot tier="1">Potion</Loot>
+	</SetPiece>
+	<SetPiece name="Dead Forest">
+		<Pattern>deadforest</Pattern>
+		<Terrain>HighForest</Terrain>
+		<Defender>Kage Kami</Defender>
+	</SetPiece>
+    <!--<SetPiece name="Courtyard">-->
+        <!--<Pattern>courtyard</Pattern>-->
+        <!--<Terrain>HighForest</Terrain>-->
+        <!--<Defender>FERAL Controller</Defender>-->
+    <!--</SetPiece>-->
+</SetPieces>

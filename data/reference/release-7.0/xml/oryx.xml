@@ -1,0 +1,51 @@
+<Dungeons>
+	<Dungeon id="Oryx's Castle">
+		<Width>256</Width>
+		<Height>256</Height>
+		<CenterStartRoom/>
+		<NoPlayerTeleport/>
+		<Visibility>Path</Visibility>
+        <Difficulty>4</Difficulty>
+
+		<Room id="start">
+			<LocalJM>oryxCastle.jm</LocalJM>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Oryx's Chamber">
+		<Width>256</Width>
+		<Height>256</Height>
+		<CenterStartRoom/>
+		<NoPlayerTeleport/>
+        <Difficulty>5</Difficulty>
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.40">Blue Quad</GlobalReplaceTile>
+
+		<Room id="start">
+			<LocalJM>chamber.jm</LocalJM>
+			<AltLocalJM>chicken_chamber.jm</AltLocalJM>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Wine Cellar">
+		<Width>128</Width>
+		<Height>128</Height>
+		<CenterStartRoom/>
+		<NoPlayerTeleport/>
+        <Difficulty>5</Difficulty>
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.50">Cracked Purple Stone</GlobalReplaceTile>
+
+		<Room id="start">
+			<LocalJM>wineCellar.jm</LocalJM>
+		</Room>
+	</Dungeon>
+	<Dungeon id="Chicken Chamber">
+		<Width>256</Width>
+		<Height>256</Height>
+		<CenterStartRoom/>
+		<NoPlayerTeleport/>
+        <Difficulty>5</Difficulty>
+		<GlobalReplaceTile func="perlinProb" dx=".01" dy=".01" mult="0.40">Blue Quad</GlobalReplaceTile>
+		
+		<Room id="start">
+			<LocalJM>chicken_chamber.jm</LocalJM>
+		</Room>
+	</Dungeon>
+</Dungeons>

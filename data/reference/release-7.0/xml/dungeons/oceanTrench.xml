@@ -1,0 +1,1340 @@
+<!-- object types: 0x170X 0x171X next: 0x1714 -->
+<Objects>
+	<Object type="0x1700" id="Fishman Warrior">
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<!-- 4217057 -->
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>10</Index></AnimatedTexture>  
+	     
+		<HitSound>monster/elves_death</HitSound>
+		<DeathSound>monster/flaming_skulls_death</DeathSound>
+	        
+		<MaxHitPoints>10000</MaxHitPoints>
+	        
+		<Projectile id="0">
+			<ObjectId>FishWarrior Spear</ObjectId>
+	        <Speed>50</Speed>
+	        <Damage>65</Damage>
+	        <Size>120</Size>
+	        <LifetimeMS>1600</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Fishman Boomerang</ObjectId>
+	        <Speed>50</Speed>
+	        <Damage>80</Damage>
+	        <Size>130</Size>
+	        <LifetimeMS>2200</LifetimeMS>
+			<ConditionEffect duration="3.4">Confused</ConditionEffect>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Coral Shot</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>45</Damage>
+	        <Size>110</Size>
+	        <LifetimeMS>1600</LifetimeMS>
+		</Projectile>
+		
+		<Size>100</Size>
+		<Defense>52</Defense>
+	        
+		<State id="Ini">
+			<Transition afterTime=".5">Regular</Transition>
+		</State>
+		
+		<State id="Regular">
+			<State id="Close">
+				<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="1.4" range="10" offset=".2" angle="8" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="1.4" range="10" offset=".6" angle="8" predictive=".65">Shoot</Behavior>
+				<Transition noPlayerWithin="5.5">Far</Transition>
+			</State>
+			<State id="Far">
+				<Behavior type="targeted" numShots="1"  projectileId="1" cooldown="2" range="12" offset="0" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" numShots="1"  projectileId="1" cooldown="2" range="12" offset="0.8" predictive=".6">Shoot</Behavior>
+				<Behavior bucket="movement" cooldown=".8" speed=".8" range="10">Charge</Behavior>
+				<Transition afterTime="1.6">Close</Transition>
+			</State>
+			<Order>
+				<Behavior bucket="movement" protecteeId="Fishman Warrior" acquireRange="8" protectionRange="4" reprotectRange="2" speed="1.2">Protect</Behavior>
+			</Order>
+			
+			<Behavior type="targeted" numShots="6" projectileId="2" cooldown="3" range="4" offset="0.8" angle="60" predictive="1">Shoot</Behavior>
+			
+			<Behavior bucket="movement" acquireRange="4.5" distance="3" speed=".65">Circle</Behavior>
+			<Behavior bucket="movement" speed=".43">Wander</Behavior>
+		</State>
+	        
+		<DefineEmbed name="randombBubbles">
+			<Behavior bucket="movement" speed=".55">Wander</Behavior>
+		</DefineEmbed>
+			
+		<SoulboundLoot tier="1" prob=".002">Potion</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".002">Potion</SoulboundLoot>
+	</Object> 
+	
+	<Object type="0x1701" id="Deep Sea Beast Spawner">
+		<Group>Ocean Trench</Group>
+	    <Class>Character</Class>
+	    <StasisImmune/>
+		<ShadowSize>0</ShadowSize>
+		<Size>0</Size>
+		<Enemy/>
+		<NoMiniMap/>
+		
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+	        	
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/dwarves_death</DeathSound>
+	        
+		<MaxHitPoints>8000</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Size>110</Size>
+		<Defense>50</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<Behavior bucket="orders" listenIds="Thessal the Mermaid Goddess">FollowOrders</Behavior>
+	
+		<State id="Ini">
+			<State id="Make">
+				<Behavior cooldown="10" childIds="Deep Sea Beast" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+				<Transition afterTime="1">Wait</Transition>
+			</State>
+			<State id="Wait">
+				<Transition afterTime="20">Make</Transition>
+			</State>
+			<Transition noneExist="Thessal the Mermaid Goddess">Gone</Transition>
+		</State>
+		
+		<State id="Gone">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x1702" id="Coral Bomb Big">
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>15</Index></AnimatedTexture>
+	        	
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/dark_elves_death</DeathSound>
+	        
+		<MaxHitPoints>1000</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Size>120</Size>
+		<Defense>200</Defense>
+	        
+		<Projectile id="0">
+			<ObjectId>Coral Spike</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>40</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>800</LifetimeMS>
+		</Projectile>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+	        
+		<State id="Ini">
+			<Behavior type="auto" childId="Coral Bomb Small" range="1.5" defaultAngle="0" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Small" range="1.5" defaultAngle="60" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Small" range="1.5" defaultAngle="120" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Small" range="1.5" defaultAngle="180" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Small" range="1.5" defaultAngle="240" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Small" range="1.5" defaultAngle="300" cooldown="5">ObjectToss</Behavior>
+			<Behavior type="auto" initialDelay=".8" range="0" numShots="5" projectileId="0">Explode</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x1703" id="Coral Bomb Small">
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>17</Index></AnimatedTexture>
+	        	
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/dark_elves_death</DeathSound>
+	        
+		<MaxHitPoints>1000</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Size>60</Size>
+		<Defense>200</Defense>
+	        
+		<Projectile id="0">
+			<ObjectId>Coral Spike</ObjectId>
+	        <Speed>45</Speed>
+	        <Damage>40</Damage>
+	        <Size>80</Size>
+	        <LifetimeMS>800</LifetimeMS>
+		</Projectile>
+	        
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Ini">
+			<Behavior type="auto" initialDelay=".4" range="0" numShots="5" projectileId="0">Explode</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x1704" id="Thessal the Mermaid Goddess Wounded">
+		<DisplayId>Thessal the Mermaid Goddess</DisplayId>
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<StasisImmune/>
+		
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>18</Index></AnimatedTexture>
+		
+		<AltTexture id="1">
+				<AnimatedTexture><File>chars16x16dEncounters2</File><Index>19</Index></AnimatedTexture>
+		</AltTexture>
+	        	
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>
+	        
+		<MaxHitPoints>10000</MaxHitPoints>
+		<ShadowSize>0</ShadowSize>
+		<God/>
+		<Quest/>
+		<PerRealmMax>1</PerRealmMax>
+		<Level>20</Level>
+		<XpMult>0.0</XpMult>
+		<Size>140</Size>
+		<Defense>60</Defense>
+		<NoArticle/>
+	        
+		<Projectile id="0">
+			<ObjectId>Thunder Swirl</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>100</Damage>
+	        <Size>110</Size>
+	        <LifetimeMS>1600</LifetimeMS>
+	       <ConditionEffect duration="2.4">Armor Broken</ConditionEffect>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Trident</ObjectId>
+	        <Speed>70</Speed>
+	        <Damage>65</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Super Trident</ObjectId>
+	        <Speed>60</Speed>
+	        <Damage>100</Damage>
+	        <Size>110</Size>
+	        <LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Yellow Wall</ObjectId>
+	        <Speed>60</Speed>
+	        <Damage>120</Damage>
+	        <Size>160</Size>
+	        <LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+	
+	
+		<State id="Ini">
+			<Transition afterTime="1.2">Question</Transition>
+		</State>
+	
+		<State id="Question">
+			<Behavior prob="1" bubbleTime="6.4" text="Is King Alexander alive?">Say</Behavior>
+			
+			<State id="Animate1">
+				<Transition afterTime=".8">Animate2</Transition>
+			</State>
+			<State id="Animate2">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime=".8">Animate1</Transition>
+			</State>
+			
+			<Transition afterTime="15">Rage</Transition>
+			<Transition playerSays="He lives and reigns and conquers the world">Correct</Transition>
+		</State>
+		
+		<State id="Correct">
+			<State id="Wait">
+				<Transition afterTime=".4">Wait2</Transition>
+			</State>
+			<State id="Wait2">
+				<Behavior prob="1" bubbleTime="4" text="Thank you kind sailor.">Say</Behavior>
+				<Transition afterTime=".4">Toss</Transition>
+			</State>
+			<State id="Toss">
+				<Behavior type="auto" childId="Coral Gift" rangeJitter="1" range="6" defaultAngle="90" cooldown="7">ObjectToss</Behavior>
+				<Behavior type="auto" childId="Coral Gift" rangeJitter="1" range="6" defaultAngle="210" cooldown="7">ObjectToss</Behavior>
+				<Behavior type="auto" childId="Coral Gift" rangeJitter="1" range="6" defaultAngle="330" cooldown="7">ObjectToss</Behavior>
+			</State>
+			
+			<Transition afterTime="4.4">Die</Transition>
+		</State>
+		
+		<State id="Rage">
+			<Behavior prob="1" bubbleTime="4" text="You speak LIES!!!">Say</Behavior>
+			<Transition afterTime="0.4">SuperAttack</Transition>
+		</State>
+		
+		<State id="Die">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		
+		<State id="SuperAttack">
+			<Behavior type="auto" defaultAngle="0" numShots="15"  projectileId="3" cooldown="1.6" range="15" offset="0" angle="24" >Shoot</Behavior>
+			
+			<Behavior type="auto" defaultAngle="12" numShots="15"  projectileId="0" cooldown="1.6" range="15" offset=".8" angle="24" >Shoot</Behavior>
+			
+			<Behavior type="auto" defaultAngle="55" numShots="4"  projectileId="2" cooldown="1.2" range="15" offset="0" angle="90" >Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="35" numShots="4"  projectileId="2" cooldown="1.2" range="15" offset="0" angle="90" >Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="10" numShots="4"  projectileId="2" cooldown="1.2" range="15" offset=".6" angle="90">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="350" numShots="4"  projectileId="2" cooldown="1.2" range="15" offset=".6" angle="90">Shoot</Behavior>
+			
+			
+			<Behavior type="targeted" childId="Coral Bomb Big" rangeJitter="2" range="18" cooldown="1.6">ObjectToss</Behavior>
+			
+			
+			<Behavior type="auto" childId="Coral Bomb Big" rangeJitter="1" range="15" defaultAngle="45" cooldown="1">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Big" rangeJitter="1" range="15" defaultAngle="135" cooldown="1">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Big" rangeJitter="1" range="15" defaultAngle="225" cooldown="1">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Big" rangeJitter="1" range="15" defaultAngle="315" cooldown="1">ObjectToss</Behavior>
+			
+			<Transition afterTime="6">Die</Transition>
+		</State>
+	</Object>
+	
+	<Object type="0x1705" id="Coral Gift">
+		<Group>Ocean Trench</Group>
+	    <Class>Character</Class>
+	    <StasisImmune/>
+		<Enemy/>
+		<NoMiniMap/>
+		
+		<MaxHitPoints>1200</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Size>90</Size>
+		<Defense>5</Defense>
+		
+		<Texture><File>lofiEnvironment3</File><Index>0x22</Index></Texture>
+		<AltTexture id="1">
+			<Texture><File>lofiEnvironment3</File><Index>0x23</Index></Texture>
+		</AltTexture>
+		<AltTexture id="2">
+			<Texture><File>lofiEnvironment3</File><Index>0x24</Index></Texture>
+		</AltTexture>
+	        	
+		<HitSound>monster/djinn_hit</HitSound>
+		<DeathSound>monster/flaming_skulls_death</DeathSound>
+		
+		<State id="Ini">
+			<State id="Shrink">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime="0.4">Grow</Transition>
+			</State>
+			<State id="Grow">
+				<Transition afterTime="0.4">Shrink</Transition>
+			</State>
+		</State>
+		
+		<SoulboundLoot prob="0.75" threshold=".1">Coral Juice</SoulboundLoot>
+		<SoulboundLoot prob="0.1" threshold=".45">Coral Bow</SoulboundLoot>
+		<SoulboundLoot prob="0.05" threshold=".45">Coral Ring</SoulboundLoot>
+		<SoulboundLoot prob="0.05" threshold=".45">Coral Silk Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.05" threshold=".45">Coral Venom Trap</SoulboundLoot>
+		<SoulboundLoot prob="0.08" threshold=".9">Potion of Mana</SoulboundLoot>
+	</Object>
+
+	<Object type="0x1706" id="Thessal the Mermaid Goddess">
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>16</Index></AnimatedTexture>
+	        	
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>
+	        
+		<MaxHitPoints>69000</MaxHitPoints>
+		<ShadowSize>0</ShadowSize>
+		<God/>
+		<StasisImmune/>
+		<Quest/>
+		<PerRealmMax>1</PerRealmMax>
+		<Level>20</Level>
+		<XpMult>0.22</XpMult>
+		<Size>140</Size>
+		<Defense>60</Defense>
+		<NoArticle/>
+	        
+		<Projectile id="0">
+			<ObjectId>Thunder Swirl</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>100</Damage>
+	        <Size>110</Size>
+	        <LifetimeMS>1600</LifetimeMS>
+	       <ConditionEffect duration="2.4">Armor Broken</ConditionEffect>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Trident</ObjectId>
+	        <Speed>70</Speed>
+	        <Damage>65</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Super Trident</ObjectId>
+	        <Speed>60</Speed>
+	        <Damage>100</Damage>
+	        <Size>110</Size>
+	        <LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Yellow Wall</ObjectId>
+	        <Speed>60</Speed>
+	        <Damage>120</Damage>
+	        <Size>160</Size>
+	        <LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior tagName="pt1">SetTag</Behavior>
+			<Transition hasTag="pt1">Part1</Transition>
+		</State>
+	        
+		<State id="Part1">
+			<State id="Base">
+				<!--Transition noneExist="Deep Sea Beast">ThrowCreature</Transition-->
+				<Transition hasTag="pt1">ThrowTrident</Transition>
+				<Transition hasTag="pt2">ThrowThunder</Transition>
+			</State>
+			
+			<Embed name="throwCreature"></Embed>
+			<Embed name="throwTrident">
+				<Param name="cooldown">1.6</Param>
+			</Embed>
+			<Embed name="throwThunder">
+				<Param name="numShots">8</Param>
+				<Param name="cooldown">2</Param>
+				<Param name="angle">45</Param>
+			</Embed>
+			
+			<Embed name="cornerBomb">
+				<Param name="cooldown">8</Param>
+			</Embed>
+			<Behavior type="targeted" childId="Coral Bomb Big" range="18" cooldown="2.6">ObjectToss</Behavior>
+			
+			<Behavior bucket="movement" speed=".4" range="4" cooldown=".6">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			
+			<State id="BigWait">
+				<Behavior tagName="ini">SetTag</Behavior>
+				<Transition afterTime="4" playerWithin="15">Base</Transition>
+				<Transition afterTime="12.0">Base</Transition>
+			</State>
+			<Transition hitpointsLessThan=".5">Part2</Transition>
+		</State>
+		
+		<State id="Part2">
+			 <State id="Ini">
+				<Behavior tagName="pt1">ClearTag</Behavior>
+				<Behavior tagName="pt2">ClearTag</Behavior>
+				<Behavior tagName="pt3">SetTag</Behavior>
+				<Transition hasTag="pt3">Base</Transition>
+			</State>
+			 	
+			<State id="Base">
+				<!--Transition noneExist="Deep Sea Beast">ThrowCreature</Transition-->
+				<Transition hasTag="pt3">BigAttack</Transition>
+				<Transition hasTag="pt1">ThrowTrident</Transition>
+				<Transition hasTag="pt2">ThrowThunder</Transition>
+			</State>
+			
+			<Embed name="throwCreature"></Embed>
+			<Embed name="throwTrident">
+				<Param name="cooldown">1</Param>
+			</Embed>
+			<Embed name="throwThunder">
+				<Param name="numShots">16</Param>
+				<Param name="cooldown">1.6</Param>
+				<Param name="angle">22.5</Param>
+			</Embed>
+			<Embed name="bigAttack">
+				<Param name="cooldown">1.4</Param>
+			</Embed>
+			
+			<Embed name="cornerBomb">
+				<Param name="cooldown">6</Param>
+			</Embed>
+			<Behavior type="targeted" childId="Coral Bomb Big" rangeJitter="2" range="18" cooldown="1.6">ObjectToss</Behavior>
+			
+			<Behavior bucket="movement" speed=".4" range="4" cooldown=".6">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			<Transition hitpointsLessThan=".2">Part3</Transition>
+		</State>
+		
+		
+		<State id="Part3">
+			 <State id="Ini">
+				<Behavior tagName="pt1">ClearTag</Behavior>
+				<Behavior tagName="pt2">ClearTag</Behavior>
+				<Behavior tagName="pt3">SetTag</Behavior>
+				<Transition hasTag="pt3">Base</Transition>
+			</State>
+			 	
+			<State id="Base">
+				<!--Transition noneExist="Deep Sea Beast">ThrowCreature</Transition-->
+				<Transition hasTag="pt3">BigAttack</Transition>
+				<Transition hasTag="pt1">ThrowTrident</Transition>
+				<Transition hasTag="pt2">ThrowThunder</Transition>
+			</State>
+			
+			<Embed name="throwCreature"></Embed>
+			<Embed name="throwTrident">
+				<Param name="cooldown">.8</Param>
+			</Embed>
+			<Embed name="throwThunder">
+				<Param name="numShots">16</Param>
+				<Param name="cooldown">1.2</Param>
+				<Param name="angle">22.5</Param>
+			</Embed>
+			<Embed name="bigAttack">
+				<Param name="cooldown">1.4</Param>
+			</Embed>
+			
+			<Embed name="cornerBomb">
+				<Param name="cooldown">4</Param>
+			</Embed>
+			<Behavior type="targeted" childId="Coral Bomb Big" rangeJitter="2" range="18" cooldown="1">ObjectToss</Behavior>
+			
+			<Behavior bucket="movement" speed=".4" range="4" cooldown=".6">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+		</State>
+		
+		<DefineEmbed name="cornerBomb">
+			<Behavior type="auto" childId="Coral Bomb Big" rangeJitter="1" range="15" defaultAngle="45" cooldown="{cooldown}">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Big" rangeJitter="1" range="15" defaultAngle="135" cooldown="{cooldown}">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Big" rangeJitter="1" range="15" defaultAngle="225" cooldown="{cooldown}">ObjectToss</Behavior>
+			<Behavior type="auto" childId="Coral Bomb Big" rangeJitter="1" range="15" defaultAngle="315" cooldown="{cooldown}">ObjectToss</Behavior>
+		</DefineEmbed>
+	        
+		<DefineEmbed name="throwCreature">
+			<State id="ThrowCreature">
+				<Behavior tagName="pt1">SetTag</Behavior>
+				<Behavior tagName="pt2">ClearTag</Behavior>
+				<Behavior tagName="pt3">ClearTag</Behavior>
+				<State id="Position">
+					<Behavior bucket="movement" range="0" speed="2" cooldown="0">StayCloseToSpawn</Behavior>
+					<Transition afterTime="1">Throw</Transition>
+				</State>
+				<State id="Throw">
+					<Behavior type="auto" childId="Deep Sea Beast" range="12" defaultAngle="0" cooldown="2">ObjectToss</Behavior>
+					<Behavior type="auto" childId="Deep Sea Beast" range="12" defaultAngle="90" cooldown="2">ObjectToss</Behavior>
+					<Behavior type="auto" childId="Deep Sea Beast" range="12" defaultAngle="180" cooldown="2">ObjectToss</Behavior>
+					<Behavior type="auto" childId="Deep Sea Beast" range="12" defaultAngle="270" cooldown="2">ObjectToss</Behavior>
+					<Transition afterTime="1">Done</Transition>
+				</State>
+				<State id="Done">
+					<Behavior range="0" speed="2" cooldown="0">StayCloseToSpawn</Behavior>
+					<Behavior type="auto" defaultAngle="45" numShots="4"  projectileId="1" cooldown="2" range="15" offset=".2" angle="90" >Shoot</Behavior>
+					<Behavior type="auto" defaultAngle="0" numShots="4"  projectileId="1" cooldown="2" range="15" offset=".2" angle="90">Shoot</Behavior>
+				</State>
+				<Transition afterTime="2.0" noTag="ini">BigWait</Transition>
+				<Transition afterTime="4.0">Base</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="throwTrident">
+			<State id="ThrowTrident">
+				<Behavior tagName="pt1">ClearTag</Behavior>
+				<Behavior tagName="pt2">SetTag</Behavior>
+				<Behavior type="auto" defaultAngle="55" numShots="4"  projectileId="2" cooldown="{cooldown}" range="15" offset="0" angle="90" >Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="35" numShots="4"  projectileId="2" cooldown="{cooldown}" range="15" offset="0" angle="90" >Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="10" numShots="4"  projectileId="2" cooldown="{cooldown}" range="15" offset=".6" angle="90">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="350" numShots="4"  projectileId="2" cooldown="{cooldown}" range="15" offset=".6" angle="90">Shoot</Behavior>
+				<Transition afterTime="5.2">Base</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="throwThunder">
+			<State id="ThrowThunder">
+				<Behavior tagName="pt2">ClearTag</Behavior>
+				<Behavior tagName="pt1">SetTag</Behavior>
+				<Behavior tagName="pt3">SetTag</Behavior>
+				<Behavior type="auto" defaultAngle="55" numShots="{numShots}"  projectileId="0" cooldown="{cooldown}" range="15" offset="0" angle="{angle}" >Shoot</Behavior>
+				<Transition afterTime="5.4">Base</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="bigAttack">
+			<State id="BigAttack">
+				<Behavior tagName="pt3">ClearTag</Behavior>
+				<Behavior tagName="pt1">SetTag</Behavior>
+				<State id="Pt1">
+					<Behavior type="Flash" color="888800" flashPeriod=".2" flashRepeats="10">ShowEffect</Behavior>
+					<Behavior bucket="movement" range="0" speed="2" cooldown="0">StayCloseToSpawn</Behavior>
+					<Transition afterTime="2">Pt2</Transition>
+				</State>
+				<State id="Pt2">
+					<Behavior type="auto" defaultAngle="55" numShots="30"  projectileId="3" cooldown="{cooldown}" range="15" offset="0" angle="12" >Shoot</Behavior>
+				</State>
+				<Transition afterTime="5.4">Base</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<Behavior prob="0.04" childId="Thessal the Mermaid Goddess Wounded">MetamorphoseAtDeath</Behavior>
+			
+		<SoulboundLoot prob=".0045" threshold=".15">Coral Bow</SoulboundLoot>
+		<SoulboundLoot prob="0.041" threshold=".045">Coral Ring</SoulboundLoot>
+		<SoulboundLoot prob="0.040" threshold=".08">Coral Silk Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.040" threshold=".1">Coral Venom Trap</SoulboundLoot>
+		<SoulboundLoot prob="0.18" min="2">Potion of Mana</SoulboundLoot>
+		<SoulboundLoot prob="0.015">Wine Cellar Incantation</SoulboundLoot>
+		
+		<Behavior prob="1" childId="Ocean Vent">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+	<Object type="0x1707" id="Deep Sea Beast">
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>10</Index></AnimatedTexture>
+	        	
+		<HitSound>monster/abyss_demons_hit</HitSound>
+		<DeathSound>monster/abyss_brutes_death</DeathSound>
+	        
+		<MaxHitPoints>15000</MaxHitPoints>
+		<ShadowSize>0</ShadowSize>
+		<StasisImmune/>
+		<PerRealmMax>1</PerRealmMax>
+		<XpMult>0.3</XpMult>
+		<Size>60</Size>
+		<Defense>60</Defense>
+	        
+		<Projectile id="0">
+			<ObjectId>Deep Sea Blast</ObjectId>
+	        <Speed>30</Speed>
+	        <Damage>12</Damage>
+	        <Size>60</Size>
+	        <LifetimeMS>600</LifetimeMS>
+	        <MultiHit/>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Deep Sea Blast</ObjectId>
+	        <Speed>42</Speed>
+	        <Damage>21</Damage>
+	        <Size>88</Size>
+	        <LifetimeMS>600</LifetimeMS>
+	        <MultiHit/>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Deep Sea Blast</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>37</Damage>
+	        <Size>154</Size>
+	        <LifetimeMS>600</LifetimeMS>
+	        <MultiHit/>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Deep Sea Blast</ObjectId>
+	        <Speed>70</Speed>
+	        <Damage>64</Damage>
+	        <Size>270</Size>
+	        <LifetimeMS>600</LifetimeMS>
+	        <MultiHit/>
+		</Projectile>
+	    
+		<Behavior maxSize="120" rate="60">ChangeSize</Behavior>
+	        
+		<State id="Ini">
+			<Behavior bucket="movement" acquireRange="6" range="2.25" duration="1.6" cooldown="1.5" speed=".65">Follow</Behavior>
+			<Behavior bucket="movement" range="2.25" speed=".65" cooldown="0">StayCloseToSpawn</Behavior>
+			
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown=".8" range="10" offset="0" angle="0" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="1" cooldown=".8" range="10" offset="0" angle="0" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="2" cooldown=".8" range="10" offset="0" angle="0" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="3" cooldown=".8" range="10" offset="0" angle="0" predictive="1">Shoot</Behavior>
+			
+			<Transition noneExist="Thessal the Mermaid Goddess">Chase</Transition>
+			<Transition hitpointsLessThan=".05">Death</Transition>
+		</State>
+		
+		<State id="Chase">
+			<Behavior bucket="movement" acquireRange="10" range="2.25" duration="1.6" cooldown="0.8" speed=".65">Follow</Behavior>
+			
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown=".6" range="10" offset="0" angle="0" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="1" cooldown=".6" range="10" offset="0" angle="0" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="2" cooldown=".6" range="10" offset="0" angle="0" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="3" cooldown=".6" range="10" offset="0" angle="0" predictive="1">Shoot</Behavior>
+			
+			<Transition hitpointsLessThan=".05">Death</Transition>
+		</State>
+		
+		<State id="Death">
+			<Behavior initialDelay="0" range="0" numShots="8"  projectileId="2" dropLoot="true" giveXP="true">Explode</Behavior>
+		</State>
+		
+	        
+		<DefineEmbed name="randombBubbles">
+		</DefineEmbed>
+			
+		<SoulboundLoot tier="1" prob=".002">Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x1708" id="Fishman">
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>13</Index></AnimatedTexture>
+	        	
+		<HitSound>monster/dragons_hit</HitSound>
+		<DeathSound>monster/flaming_skulls_death</DeathSound>
+	        
+		<MaxHitPoints>2500</MaxHitPoints>
+	        
+		<Projectile id="0">
+			<ObjectId>Fishman Spear</ObjectId>
+	        <Speed>55</Speed>
+	        <Damage>50</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Fishman Boomerang</ObjectId>
+	        <Speed>70</Speed>
+	        <Damage>65</Damage>
+	        <Size>100</Size>
+	        <LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="1.8">Confused</ConditionEffect>
+		</Projectile>
+		
+		<Size>100</Size>
+		<Defense>40</Defense>
+	    
+		<Behavior bucket="movement" listenIds="Fishman Warrior">FollowOrders</Behavior>
+	        
+		<State id="Ini">
+			<Transition afterTime=".5">Regular</Transition>
+		</State>
+		
+		
+		<State id="Regular">
+			<State id="Close">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown=".8" range="10" offset=".2" angle="12" predictive="1">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown=".8" range="10" offset=".6" angle="12" predictive=".65">Shoot</Behavior>
+				<Transition noPlayerWithin="5.5">Far</Transition>
+			</State>
+			<State id="Far">
+				<Behavior type="targeted" numShots="1"  projectileId="1" cooldown="1.2" range="12" offset="0.4" predictive="1">Shoot</Behavior>
+				<Behavior bucket="movement" cooldown=".8" speed="1.2" range="10">Charge</Behavior>
+				<Transition afterTime="1.6">Close</Transition>
+			</State>
+			<Behavior bucket="movement" acquireRange="4.5" distance="2.4" speed=".8">Circle</Behavior>
+			<Behavior bucket="movement" speed=".55">Wander</Behavior>
+		</State>
+	        
+		<DefineEmbed name="randombBubbles">
+			<Behavior bucket="movement" speed=".55">Wander</Behavior>
+		</DefineEmbed>
+			
+		<SoulboundLoot tier="1" prob=".002">Potion</SoulboundLoot>
+	</Object> 
+	
+	<Object type="0x1709" id="Sea Horse">
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>18</Index></AnimatedTexture>
+	        	
+		<HitSound>monster/elves_death</HitSound>
+		<DeathSound>monster/night_elves_death</DeathSound>
+	        
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Flying/>
+		<Z>0.26</Z>
+		<ShadowSize>80</ShadowSize>
+	        
+		<Projectile id="0">
+			<ObjectId>Bubble</ObjectId>
+	        <Speed>35</Speed>
+	        <Damage>40</Damage>
+	        <Size>60</Size>
+	        <LifetimeMS>1000</LifetimeMS>
+		</Projectile>
+	        
+		<Size>60</Size>
+		<Defense>20</Defense>
+	        
+		<Behavior bucket="movement" listenIds="Sea Mare">FollowOrders</Behavior>
+	        
+		<State id="Ini">
+			<Embed name="randombBubbles"></Embed>
+			<Behavior bucket="movement" protecteeId="Sea Mare" acquireRange="8" protectionRange="3.2" reprotectRange="2.35" speed=".8">Protect</Behavior>
+			<Behavior bucket="movement" acquireRange="4" distance="3.5" speed=".5">KeepDistance</Behavior>
+			<Behavior bucket="movement" speed=".5" cooldown="2" range="1.2">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" acquireRange="4.5" distance="2" speed="1">Circle</Behavior>
+			<Behavior bucket="movement" speed=".25">Wander</Behavior>
+		</State>
+	        
+		<DefineEmbed name="randombBubbles">
+			<State id="RandomBubbles">
+				<State id="Chooser">
+					<Transition random=".5">Chooser1</Transition>
+					<Transition random="1">Chooser2</Transition>
+				</State>
+				<State id="Chooser1">
+					<Transition random=".5">Bubbles1</Transition>
+					<Transition random="1">Bubbles2</Transition>
+				</State>
+				<State id="Chooser2">
+					<Transition random=".5">Bubbles3</Transition>
+					<Transition random="1">Bubbles4</Transition>
+				</State>
+				
+				<State id="Bubbles1">
+					<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="10" offset="0" angle="0">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Bubbles2">
+					<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="0" cooldown="1" range="10" offset="0" angle="5">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Bubbles3">
+					<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="0" cooldown="1" range="10" offset="0" angle="10">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Bubbles4">
+					<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="1" range="10" offset="0" angle="10">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+			</State>
+		</DefineEmbed>
+			
+		<SoulboundLoot tier="1" prob=".002">Potion</SoulboundLoot>
+	</Object> 
+	
+	<Object type="0x170a" id="Sea Mare">
+		<Group>Ocean Trench</Group>
+		<Enemy/>
+		<Class>Character</Class>
+	        
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>13</Index></AnimatedTexture>
+	        	
+		<HitSound>monster/ogres_hit</HitSound>
+		<DeathSound>monster/medusa_death</DeathSound>
+	        
+		<MaxHitPoints>6000</MaxHitPoints>
+		 
+		<Projectile id="0">
+			<ObjectId>Squid Shot</ObjectId>
+	   		<Speed>50</Speed>
+			<Damage>40</Damage>
+			<Size>100</Size>
+			<LifetimeMS>1400</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Sea Horse Spinner</ObjectId>
+	        <Speed>35</Speed>
+	        <Damage>100</Damage>
+	        <Size>120</Size>
+	        <LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="1.6">Paralyzed</ConditionEffect>
+		</Projectile>
+		
+		<Size>100</Size>
+		<Defense>60</Defense>
+	        
+		<State id="Part1">
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="0" cooldown=".6" range="10" offset="0" angle="40">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="0" cooldown=".6" range="10" offset="0" angle="60">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="0" cooldown=".6" range="10" offset="0" angle="80">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="0" cooldown=".6" range="10" offset="0" angle="100">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="1" cooldown="2.4" range="10" offset="2.4" angle="10">Shoot</Behavior>
+			<Behavior bucket="movement" acquireRange="2.5" distance="3" speed=".4">KeepDistance</Behavior>
+			<Behavior bucket="movement" speed=".4" cooldown="2.6" range="1">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" speed=".25">Wander</Behavior>
+			<Behavior bucket="movement" acquireRange="8" range="3" speed=".2" duration="3" cooldown=".4">Follow</Behavior>
+			<Embed name="horseOrders"></Embed>
+			<Transition afterTime="5.4">Part2</Transition>
+			<Transition noPlayerWithin="7.4">Part3</Transition>
+		</State>
+		
+		<State id="Part2">
+			<Behavior bucket="movement" speed=".25">Wander</Behavior>
+			<Behavior cooldown="1.8" childIds="Sea Horse" maxChildren="8" startWithMinions="true">MakeMinions</Behavior>
+			
+			<Embed name="shooter"></Embed>
+			<Transition afterTime="4">Part1</Transition>
+			<Transition noPlayerWithin="7">Part3</Transition>
+		</State>
+		
+		<State id="Part3">
+			<Behavior acquireRange="10" duration="1.6" cooldown=".6" speed="1.4" range="2.5" predictive="true">Follow</Behavior>
+			
+			<Transition playerWithin="3.5">Part2</Transition>
+			<Transition afterTime="1.8">Part2</Transition>
+		</State>
+	
+		<DefineEmbed name="horseOrders">
+			<State id="HorseOrders">
+				<State id="Chooser">
+					<Transition random=".4">CircleRt</Transition>
+					<Transition random=".5">CircleLf</Transition>
+					<Transition random=".5">CircleRtWide</Transition>
+					<Transition random="1">CircleLfWide</Transition>
+				</State>
+				<State id="CircleRt">
+					<Order>
+						<Behavior protecteeId="Sea Mare" aquireRange="5" speed="0.4" radius="2" radiusVariability="0">Orbit</Behavior>
+					</Order>
+					<Transition afterTime="2" random=".2">Chooser</Transition>
+				</State>
+				<State id="CircleLf">
+					<Order>
+						<Behavior protecteeId="Sea Mare" aquireRange="5" speed="0.4" radius="2" clockwise="true" radiusVariability="0">Orbit</Behavior>
+					</Order>
+					<Transition afterTime="2" random=".2">Chooser</Transition>
+				</State>
+				<State id="CircleRtWide">
+					<Order>
+						<Behavior protecteeId="Sea Mare" aquireRange="5" speed="0.6" radius="3" radiusVariability="0">Orbit</Behavior>
+					</Order>
+					<Transition afterTime="2" random=".2">Chooser</Transition>
+				</State>
+				<State id="CircleLfWide">
+					<Order>
+						<Behavior protecteeId="Sea Mare" aquireRange="5" speed="0.6" radius="3" clockwise="true" radiusVariability="0">Orbit</Behavior>
+					</Order>
+					<Transition afterTime="2" random=".2">Chooser</Transition>
+				</State>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="shooter">
+			<State id="Shooter">
+				<Behavior type="auto" defaultAngle="0" numShots="3"  projectileId="1" cooldown="2.8" range="10" offset="0" angle="120" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="60" numShots="3"  projectileId="1" cooldown="2.8" range="10" offset=".4" angle="120" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="120" numShots="3"  projectileId="1" cooldown="2.8" range="10" offset=".8" angle="120" predictive="0">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="1" cooldown="2.8" range="10" offset="2" angle="0" predictive=".8">Shoot</Behavior>
+			</State>
+		</DefineEmbed>
+		
+		<SoulboundLoot tier="1" prob=".001">Potion</SoulboundLoot>
+	</Object> 
+	
+	<Object type="0x170b" id="Ink Bubble">
+        <Group>Ocean Trench</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars8x8dEncounters</File><Index>19</Index></AnimatedTexture>
+        
+        <HitSound>monster/slimes_hit</HitSound>
+        <DeathSound>monster/slimes_death</DeathSound>
+        
+        <MaxHitPoints>2000</MaxHitPoints>
+		<Flying/>
+        
+        <Projectile id="0">
+            <ObjectId>Ink Blot</ObjectId>
+            <Speed>10</Speed>
+            <Damage>50</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1200</LifetimeMS>
+            <MultiHit/>
+			<ConditionEffect duration="3">Blind</ConditionEffect>
+        </Projectile>
+        
+        <Size>120</Size>
+        <Defense>40</Defense>
+        <XpMult>0</XpMult>
+        
+        <State id="Ini">
+        	<Embed name="inkBlot"></Embed>
+        </State>
+       
+		<DefineEmbed name="inkBlot">
+			<State id="InkBlots">
+				<State id="Chooser">
+					<Transition random=".5">Chooser1</Transition>
+					<Transition random="1">Chooser2</Transition>
+				</State>
+				
+				<State id="Chooser1">
+					<Transition random=".5">Chooser3</Transition>
+					<Transition random="1">Chooser4</Transition>
+				</State>
+				<State id="Chooser2">
+					<Transition random=".5">Chooser5</Transition>
+					<Transition random="1">Chooser6</Transition>
+				</State>
+				
+				
+				<State id="Chooser3">
+					<Transition random=".5">Ink1</Transition>
+					<Transition random="1">Ink2</Transition>
+				</State>
+				<State id="Chooser4">
+					<Transition random=".5">Ink3</Transition>
+					<Transition random="1">Ink4</Transition>
+				</State>
+				<State id="Chooser5">
+					<Transition random=".5">Ink5</Transition>
+					<Transition random="1">Ink6</Transition>
+				</State>
+				<State id="Chooser6">
+					<Transition random=".5">Ink7</Transition>
+					<Transition random="1">Ink1</Transition>
+				</State>
+				
+				<State id="Ink1">
+					<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="10" offset="0" angle="0">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Ink2">
+					<Behavior type="auto" defaultAngle="45" numShots="1"  projectileId="0" cooldown="1" range="10" offset="0" angle="0">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Ink3">
+					<Behavior type="auto" defaultAngle="90" numShots="1"  projectileId="0" cooldown="1" range="10" offset="0" angle="0">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Ink4">
+					<Behavior type="auto" defaultAngle="135" numShots="1"  projectileId="0" cooldown="1" range="10" offset="0" angle="0">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Ink5">
+					<Behavior type="auto" defaultAngle="180" numShots="1"  projectileId="0" cooldown="1" range="10" offset="0" angle="0">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Ink6">
+					<Behavior type="auto" defaultAngle="225" numShots="1"  projectileId="0" cooldown="1" range="10" offset="0" angle="0">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+				<State id="Ink7">
+					<Behavior type="auto" defaultAngle="315" numShots="1"  projectileId="0" cooldown="1" range="10" offset="0" angle="0">Shoot</Behavior>
+					<Transition afterTime="0">Chooser</Transition>
+				</State>
+			</State>
+		</DefineEmbed>
+        
+    </Object> 
+
+	<Object type="0x170c" id="Giant Squid">
+        <Group>Ocean Trench</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars16x16dEncounters2</File><Index>17</Index></AnimatedTexture>
+        	
+        <HitSound>monster/spider_queen_hit</HitSound>
+        <DeathSound>monster/scorpions_death</DeathSound>
+        
+        <MaxHitPoints>6000</MaxHitPoints>
+        
+        <Projectile id="0">
+            <ObjectId>Squid Sucker</ObjectId>
+            <Speed>0</Speed>
+            <Damage>85</Damage>
+            <Size>80</Size>
+            <LifetimeMS>3000</LifetimeMS>
+            <MultiHit/>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Squid Shot</ObjectId>
+            <Speed>55</Speed>
+            <Damage>50</Damage>
+            <Size>80</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        
+        <Size>120</Size>
+        <Defense>40</Defense>
+        
+        <State id="Ini">
+       		<Transition afterTime=".5">Part1</Transition>
+        </State>
+        
+        <State id="Part1">
+			<State id="Chooser">
+				<Transition random=".5">ChargeAttack</Transition>
+				<Transition random=".6">ShotAttack</Transition>
+				<Transition random=".6">InkAttack</Transition>
+				<Transition random="1">Chooser</Transition>
+			</State>
+        	<Embed name="chargeAttack"></Embed>
+        	<Embed name="squidShotAttack"></Embed>
+        	<Embed name="inkAttack"></Embed>
+        </State>
+		
+		<DefineEmbed name="chargeAttack">
+			<State id="ChargeAttack">
+				<Behavior cooldown="0" speed="1.25" range="10">Charge</Behavior>
+				<Behavior numShots="1"  projectileId="0" cooldown="0" range="10" offset="0">Shoot</Behavior>
+				<Transition afterTime="3">Chooser</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="inkAttack">
+			<State id="InkAttack">
+				<Behavior speed=".7">Wander</Behavior>
+				<Behavior childId="Ink Bubble" cooldown=".4" range="6" rangeJitter="4">ObjectToss</Behavior>
+				<Transition afterTime="1.8">Chooser</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="squidShotAttack">
+			<State id="ShotAttack">
+				<State id="Shoot">
+					<Behavior numShots="4"  projectileId="1" cooldown=".2" range="10" offset="0" predictive="1">Shoot</Behavior>
+					<Transition afterTime=".8">Rest</Transition>
+				</State>
+				<State id="Rest">
+					<Transition afterTime=".8">Shoot</Transition>
+				</State>
+				<Behavior bucket="movement" acquireRange="8" range="2.6" speed="1.1" duration=".8" cooldown=".8">Follow</Behavior>
+				<Behavior bucket="movement" speed=".7">Wander</Behavior>
+				<Transition afterTime="3.2">Chooser</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<SoulboundLoot tier="1" prob=".001">Potion</SoulboundLoot>
+    </Object> 
+
+	<Object type="0x170d" id="Sea Slurp Home">
+        <Group>Ocean Trench</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        <Texture><File>lofiChar216x16</File><Index>0x0b</Index></Texture>
+        	
+        <AltTexture id="1">
+			<Texture><File>lofiEnvironment2</File><Index>0x6d</Index></Texture> <!-- small version -->
+		</AltTexture>
+        	
+        <HitSound>monster/trees_hit</HitSound>
+        <DeathSound>monster/stone_walls_hit</DeathSound>
+        
+        <MaxHitPoints>5000</MaxHitPoints>
+        
+        <Projectile id="0">
+            <ObjectId>Oryx Insect Sting</ObjectId>
+            <Speed>65</Speed>
+            <Damage>55</Damage>
+            <Size>100</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Oryx Insect Sting Status</ObjectId>
+            <Speed>50</Speed>
+            <Damage>60</Damage>
+            <Size>120</Size>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+        
+        <Size>120</Size>
+        <Defense>40</Defense>
+        
+        
+        <State id="Ini">
+			<Transition random=".55">LargeHome</Transition>
+			<Transition random="1">SmallHome</Transition>
+		</State>
+        
+        <State id="LargeHome">
+	        <State id="Safe">
+	       		<Order>
+	       			<Behavior tagName="homeAttack">ClearTag</Behavior>
+	       		</Order>
+	       		<Transition afterTime=".5">Check</Transition>
+	        </State>
+	        
+	        <State id="Danger">
+	       		<Order>
+	       			<Behavior tagName="homeAttack">SetTag</Behavior>
+	       		</Order>
+	       		<Transition afterTime=".5">Check</Transition>
+	        </State>
+	        
+	        <State id="Attack">
+	       		<Order>
+	       			<Behavior tagName="charge">SetTag</Behavior>
+	       		</Order>
+	       		<Transition afterTime=".5">Check</Transition>
+	        </State>
+	        
+	        <State id="Check">
+	       		<Transition hitpointsLessThan=".33">Attack</Transition>
+	       		<Transition playerWithin="5">Danger</Transition>
+	       		<Transition noPlayerWithin="5">Safe</Transition>
+	        </State>
+	        <Behavior cooldown=".75" childIds="Grey Sea Slurp" maxChildren="9" startWithMinions="false">MakeMinions</Behavior>
+        </State>
+        
+        
+        <State id="SmallHome">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+	        <State id="Safe">
+	       		<Order>
+	       			<Behavior tagName="homeAttack">ClearTag</Behavior>
+	       		</Order>
+	       		<Transition afterTime=".5">Check</Transition>
+	        </State>
+	        
+	        <State id="Danger">
+	       		<Order>
+	       			<Behavior tagName="homeAttack">SetTag</Behavior>
+	       		</Order>
+	       		<Transition afterTime=".5">Check</Transition>
+	        </State>
+	        
+	        <State id="Attack">
+	       		<Order>
+	       			<Behavior tagName="charge">SetTag</Behavior>
+	       		</Order>
+	       		<Transition afterTime=".5">Check</Transition>
+	        </State>
+	        
+	        <State id="Check">
+	       		<Transition hitpointsLessThan=".33">Attack</Transition>
+	       		<Transition playerWithin="5">Danger</Transition>
+	       		<Transition noPlayerWithin="5">Safe</Transition>
+	        </State>
+	        <Behavior cooldown=".75" childIds="Grey Sea Slurp" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+        </State>
+		
+		<SoulboundLoot tier="1" prob=".001">Potion</SoulboundLoot>
+    </Object> 
+	
+	<Object type="0x170e" id="Grey Sea Slurp">
+        <Group>Ocean Trench</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>19</Index></AnimatedTexture>
+        	
+        <HitSound>monster/cubes_hit</HitSound>
+        <DeathSound>monster/blobs_death</DeathSound>
+        
+        <MaxHitPoints>1000</MaxHitPoints>
+        
+        <Projectile id="0">
+            <ObjectId>Purple Spit</ObjectId>
+            <Speed>60</Speed>
+            <Damage>40</Damage>
+            <Size>80</Size>
+            <LifetimeMS>1400</LifetimeMS>
+        </Projectile>
+        <Projectile id="1">
+            <ObjectId>Yellow Wave</ObjectId>
+            <Speed>60</Speed>
+            <Damage>40</Damage>
+            <Size>100</Size>
+            <LifetimeMS>800</LifetimeMS>
+        </Projectile>
+        
+        <Size>100</Size>
+        <Defense>20</Defense>
+        <XpMult>0.05</XpMult>
+        
+		<Behavior bucket="movement" listenIds="Sea Slurp Home">FollowOrders</Behavior>
+        
+        <State id="Ini">
+        	<State id="Spread">
+        		<Behavior protecteeId="Sea Slurp Home" aquireRange="2" speed=".8" radius="3">Orbit</Behavior>
+        	</State>
+        	<Behavior bucket="movement" speed=".2">Wander</Behavior>
+        	<Transition afterTime=".5">Regular</Transition>
+        </State>
+        
+        <State id="Regular">
+        
+			<Behavior bucket="movement" acquireRange="20" range="2" speed="0" duration=".4" cooldown="1.2">Follow</Behavior>
+			<Behavior bucket="movement" acquireRange="7" range="2" speed=".5" duration=".8" cooldown=".6" predictive="true">Follow</Behavior>
+			<Behavior bucket="attack" angle="0" numShots="1"  projectileId="0" cooldown="2" range="7.5" offset="0"  predictive=".6">Shoot</Behavior>
+			<Behavior bucket="attack" angle="0" numShots="1"  projectileId="0" cooldown="2" range="7.5" offset=".4" predictive=".6">Shoot</Behavior>
+			<Behavior bucket="movement" speed=".2">Wander</Behavior>
+			
+			<Transition hasTag="homeAttack">DefendHome</Transition>
+			<Transition hasTag="charge">Aggressive</Transition>
+        </State>
+        
+		<State id="DefendHome">
+			<Behavior type="auto" defaultAngle="0" bucket="attack" angle="60" numShots="6"  projectileId="1" cooldown="2" range="7">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="30" bucket="attack" angle="60" numShots="6"  projectileId="1" cooldown="2" range="7" offset=".4">Shoot</Behavior>
+			
+			<Transition noTag="homeAttack">Regular</Transition>
+			<Transition hasTag="charge">Aggressive</Transition>
+		</State>
+        
+		<State id="Aggressive">
+			<Behavior bucket="movement" acquireRange="5.5" range="2" speed=".5" duration=".8" cooldown="1" predictive="true">Follow</Behavior>
+			<Behavior bucket="movement" range="6" speed=".8" cooldown="1">Charge</Behavior>
+			<Behavior bucket="attack" angle="0" numShots="1"  projectileId="0" cooldown="2" range="7.5" offset="0"  predictive=".6">Shoot</Behavior>
+			<Behavior bucket="attack" angle="0" numShots="1"  projectileId="0" cooldown="2" range="7.5" offset=".4" predictive=".6">Shoot</Behavior>
+		</State>
+		
+		<SoulboundLoot tier="1" prob=".001">Potion</SoulboundLoot>
+    </Object> 
+	
+	<Object type="0x170f" id="OceanRock">
+		<Class>GameObject</Class>
+		<RandomTexture>
+			<Texture><File>lofiEnvironment2</File><Index>0x6e</Index></Texture>
+			<Texture><File>lofiEnvironment2</File><Index>0x6f</Index></Texture>
+			<Texture><File>lofiEnvironment2</File><Index>0x74</Index></Texture>
+		</RandomTexture>
+		<Size>80</Size>
+		<Static/>
+	</Object>
+	
+	<Object type="0x1710" id="Seaweed">
+		<Class>GameObject</Class>
+		<RandomTexture>
+			<Texture><File>lofiEnvironment2</File><Index>0x75</Index></Texture>
+			<Texture><File>lofiEnvironment2</File><Index>0x76</Index></Texture>
+		</RandomTexture>
+		<Size>80</Size>
+		<Static/>
+	</Object>
+	
+	<Object type="0x1711" id="Coral">
+		<Class>GameObject</Class>
+		<RandomTexture>
+			<Texture><File>lofiEnvironment2</File><Index>0x77</Index></Texture>
+			<Texture><File>lofiEnvironment2</File><Index>0x78</Index></Texture>
+			<Texture><File>lofiEnvironment2</File><Index>0x79</Index></Texture>
+			<Texture><File>lofiEnvironment2</File><Index>0x7a</Index></Texture>
+		</RandomTexture>
+		<Size>80</Size>
+		<Static/>
+	</Object>
+
+	<Object type="0x1712" id="Ocean Wall2">
+		<Class>Wall</Class>
+		<Texture><File>lofiEnvironment2</File><Index>0x7b</Index></Texture>
+		<Top><Texture><File>lofiEnvironment2</File><Index>0x7c</Index></Texture></Top>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/wooden_walls_death</DeathSound>
+		<Static/>
+		<FullOccupy/>
+		<OccupySquare/>
+		<EnemyOccupySquare/>
+		<BlocksSight/>
+	</Object>
+	
+	<Object type="0x1713" id="Ocean Wall">
+		<Class>Wall</Class>
+		<Texture><File>lofiEnvironment2</File><Index>0x7d</Index></Texture>
+		<Top><Texture><File>lofiEnvironment2</File><Index>0x7c</Index></Texture></Top>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/wooden_walls_death</DeathSound>
+		<Static/>
+		<FullOccupy/>
+		<OccupySquare/>
+		<EnemyOccupySquare/>
+		<BlocksSight/>
+	</Object>
+</Objects>

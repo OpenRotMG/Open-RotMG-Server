@@ -1,0 +1,291 @@
+﻿Dungeon Template
+
+
+Ground Rules
+
+
+* No profane or obscene imagery or suggestions.
+* No repeat entries for the same dungeon.
+* All art must have a specific tag associated and listed in this document.
+* Assume this dungeon will be ENDGAME. Designers will be applying health and defense values.
+* This dungeon should be built in mind for multiple players; Your limit is 10+ People; If you wish to cap the number of players to 10, please address this in the section below.
+* All areas of this document must be filled out unless otherwise noted. Not doing so could be detrimental to your dungeon being considered.
+* Draw Tool should be used, Sprite Sheets are also accepted. 
+* Follow all of the instructions for each section.
+* No projectiles will currently be accepted; sorry!
+* No new condition effects or behaviors: Use only examples from currently created content.
+* By submission of this form you agree to the above tenants.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+DUNGEON NAME
+Author Name (In Game Name only, if credit desired)
+
+
+
+
+
+
+
+
+Layout
+How your dungeon is laid out is important. In this section we’ll be asking you to inform us of how you’d like it to be laid out, as well as requiring you to create some basic template rooms for us to utilize as examples or possible additions.
+
+
+Mandatory: Random Vs Whole
+Is your dungeon randomized (Ocean Trench, etc) or whole (Shatters, Oryx, etc)?
+
+
+Mandatory:If Whole
+If Whole, please provide a basic drawing or graph of layout. The MAX square-space is 256x256.
+
+
+
+
+
+
+Group Dynamics
+In this section, you will provide pertinent information on how this dungeon will operate cooperatively. 
+
+
+Max Number of Players:
+Minimum required is 10 people; can be anywhere between a cap of 10 to limitless.
+
+
+Explain how your dungeon promotes cooperative play:
+This may be switches that only specific classes can reach, specific immunities on key monsters, damage caps in order to enter rooms, etc.
+
+
+
+
+
+
+Mandatory: Rooms
+You are required to give examples of 3 or more room types. These rooms may or may not be used. Use layouts and examples from previous dungeons. 
+
+
+(IF RANDOM) Pathways: 
+How many rooms prior to the boss room?
+
+
+Skill Challenges: 
+Draw or diagram a skill challenge room in your dungeon
+
+
+ex: Confuse dodge room in Mad Lab
+
+
+Basic Rooms: 
+Draw or diagram 3-5 basic rooms in your dungeon
+
+
+Difficult Rooms: 
+Draw or diagram 2-3 difficult rooms in your dungeon; these rooms constitute a situation that may cause death if not paying attention!
+
+
+
+
+
+
+Mandatory: Boss Room(s)
+This section should be highly detailed, diagramed, and explained. This should not be used to explain the boss, but the perils of the room, it’s shape, how players might interact with it, theming, and difficulty. Some boss information may be necessary to explain any of the aforementioned. Make a section for EACH boss room.
+
+
+Diagram: 
+A drawn or created diagram of the boss room -- entrance(s), where the boss is placed, any 3D objects such as walls, etc
+
+
+Perils: 
+What makes this room dangerous for players? What should we be attempting to recreate?
+
+
+Interaction:
+Can players interact with the room? How? What should be their primary concerns aside from the boss?
+
+
+
+
+
+
+
+
+Monster List
+Explanations of basic monsters within your dungeon. Limit of 5 groups / types of monsters. A limit of ~5-7 total enemies are allowed per group. Please seperate each monster into a bulleted list using the below information. All monsters must have a tag associated in the Draw Tool and associated with each monster in your list - should coincide with the aesthetics section.
+
+
+
+
+
+
+* What do we need to know about a monster?
+   * Monster Name
+   * 1 - 2 sentences of lore
+   * Basic image and Draw Tool tag reference
+   * Behaviors and actions - (Each behavior and attack should reference other enemies in the game)
+      * Use examples of other monsters in the game to describe how your monsters acts.
+      * Use examples of other monsters in the game to describe how your monsters shoots / attacks.
+      * Explain any condition effects (Slowed, etc) that your monster would apply and why.
+   * Movement and Aggression level
+      * How quickly do they move? How far do they chase?
+      * How aggressive are they? Do they keep their distance, rush the player?
+   * Master vs Slave
+      * Does this monster create slaves? Is this monster a slave? is it neither?
+
+
+
+
+
+
+Boss List
+Explanation of Bosses within your dungeon. 1 - 3 bosses are permitted. Please separate each Boss into a bulleted list using the below information. All Bosses must have a tag associated in the Draw Tool and associated with each monster in your list.
+
+
+
+
+
+
+* Boss 1
+   * Refer to which boss room this boss utilizes.
+   * What do we need to know about a monster?
+      * Boss Name
+      * 1 - 2 sentences of lore
+      * Basic image and Draw Tool tag reference
+      * Behaviors and actions - (Each behavior and attack should reference other enemies in the game)
+         * Use examples of other monsters in the game to describe how your monsters acts.
+         * Use examples of other monsters in the game to describe how your monsters shoots / attacks.
+         * Explain any condition effects (Slowed, etc) that your monster would apply and why.
+      * Movement and Aggression level
+         * How quickly do they move? How far do they chase?
+         * How aggressive are they? Do they keep their distance, rush the player?
+      * Minions
+         * Does this monster create Minions?
+      * Phases / Room changes
+         * How does the boss change to different phases? Is it based on health or external room factors (i.e. Davy Jones). 
+         * Does the room augment in anyway? How? 
+
+
+
+
+
+
+
+
+
+
+
+
+Aesthetics
+Aesthetics cover the story and look of your dungeon. This section will be used by designers to access all art material made by you or your contributors. All applicable sections must be filled out.
+
+
+Mandatory: Theme and Story
+Explain in under 3 paragraphs what the story / theme of your dungeon is. Consider this the pitch.
+
+
+
+
+
+
+
+
+Mandatory: Ground Tiles and Walls
+In this section, give the DRAW TOOL tags specific to your dungeon’s wall and tiles. No explanation as to where they are used is needed, this will be covered later.
+
+
+ex: WALLS: dwallsrichter2014    GROUND: dgroundrichter2014
+
+
+
+
+
+
+Mandatory: Inanimate Objects
+A MINIMUM of 3 Inanimate thematic objects are required to qualify. Examples of these are pillars, statues, etc. DRAW TOOL tags to their location is necessary.
+
+
+ex: Statues: dstatuesrichter2014
+
+
+Mandatory: Minion Art
+All basic monster art. These are the primary minions / monsters in your dungeon. These should be CHARACTERS(8x8) if using the Draw Tool; each minion should contain a 1 standing frame, 2 frame movement animation, and 2 frame attack animation. DRAW TOOL tags to their location is necessary.
+
+
+ex: Fire Mage: dfiremagerichter2014; Ice Mae: dicemagerichter2014
+
+
+
+
+Mandatory: Boss Art
+All Boss art. These should be CHARACTERS (16x16) if using the Draw Tool; each boss should contain a 1 standing frame, 2 frame movement animation, and 2 frame attack animation. DRAW TOOL tags to their location is necessary.
+
+
+ex: Boss 1: dbossmageguyrichter2014
+
+
+
+
+Optional: Complex Animations and Frames
+You may want some monsters or bosses to have more complex animations or forms. If this is something you would like, we will need all of the frames, objects, and animations necessary. Instruction on when / how to use them can be explained below in their sections. Each of these sections will REQUIRE Draw Tool Tags OR Sprite Sheet.
+
+
+
+
+For Special Animations: We will need EACH single frame of what you are trying to accomplish. Examples of these are special attacks that you would want to have happen that require more than the traditional 2 frame attack.
+
+
+For Special Forms: If one of your minions / bosses simply changes color, or into a new sprite all together, we will need to know the object or sprite.
+
+
+
+
+ex: Boss  form 1: dbossmageguyiceformrichter2014
+
+
+
+
+
+
+Item Suggestions
+Designers will be populating the items for these dungeons, however we do seriously love the item ideas that users come up with. In this section, make suggestions! This can range from just an image, bullet, or full blown item. PLEASE REMEMBER THAT THESE ITEMS ARE SUBJECT TO OMISSION BY THE DESIGN TEAM. 
+
+
+Items

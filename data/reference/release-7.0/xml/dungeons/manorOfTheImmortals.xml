@@ -1,0 +1,1040 @@
+<!-- object types: 0x172X 0x173X next: 0x1738 -->
+<Objects>
+	<Object type="0x1720" id="Lord Ruthven">
+		<Enemy/>
+		<Class>Character</Class>
+		<Group>Vampires</Group>
+		
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>34</Index></AnimatedTexture>
+		
+		<AltTexture id="1">
+			<Texture><File>invisible</File><Index>0</Index></Texture>
+		</AltTexture>
+		<AltTexture id="2"> <!-- blast -->
+			<AnimatedTexture><File>chars16x16dEncounters2</File><Index>35</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<HitSound>monster/slimes_death</HitSound>
+		<DeathSound>monster/flying_brain_death</DeathSound>
+		<Size>120</Size>
+		<ShadowSize>40</ShadowSize>
+		<Z>0.2</Z>
+		<Flying/>
+		<MaxHitPoints>12000</MaxHitPoints>
+		<Defense>30</Defense>
+		<XpMult>0.9</XpMult>
+		<LeachHealth/>
+		
+		<God/>
+		<StasisImmune/>
+		<Quest/>
+		<Level>1</Level>
+		
+		<Projectile id="0">
+			<ObjectId>Dagger</ObjectId>
+			<Damage>100</Damage>
+			<Speed>50</Speed>
+			<Size>100</Size>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Ruthven Shot</ObjectId>
+			<Damage>90</Damage>
+			<Speed>65</Speed>
+			<Size>100</Size>
+			<LifetimeMS>3400</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		
+			
+		<State id="Ini">
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			<Behavior speed=".3" range="4">StayCloseToSpawn</Behavior>
+			<Transition hitpointsLessThan="0.995">Regular</Transition>
+			<Transition playerWithin="9">Regular</Transition>
+		</State>
+		
+		<State id="TurnIntoBats">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior minSize="0" rate="-100">ChangeSize</Behavior>
+			
+			<Behavior cooldown="0" childIds="Vampire Bat" maxChildren="15" startWithMinions="false">MakeMinions</Behavior>
+			
+			<Behavior bucket="movement" speed="1.85" cooldown="0" range="10">Charge</Behavior>
+			<Transition afterTime="10">TurnBack</Transition>
+		</State>
+		
+		<State id="TurnBack">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior tagName="attackOver">ClearTag</Behavior>
+			<Behavior maxSize="120" rate="100">ChangeSize</Behavior>
+			<Order>
+				<Behavior time="0" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+			</Order>
+			<Transition afterTime="1">Regular</Transition>
+		</State>
+		
+		
+		<State id="DualSwarms">
+			<State id="Position">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Behavior speed="1.25" range="0">StayCloseToSpawn</Behavior>
+				<Transition afterTime="1.6">BatForms</Transition>
+			</State>
+			<State id="BatForms">
+				<Behavior effect="Invincible">ConditionEffect</Behavior>
+				<State id="Split">
+					<Behavior minSize="0" rate="-100">ChangeSize</Behavior>
+					<Behavior cooldown="0" childIds="Bat Swarm 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+					<Behavior cooldown="0" childIds="Bat Swarm 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+					<Transition afterTime="0.6">Part</Transition>
+				</State>
+				<State id="Part">
+					<Behavior speed="2" distance="4" angle="180" cooldown="1">Move</Behavior>
+					<Transition afterTime="1">Attack</Transition>
+				</State>
+				<State id="Attack">
+					<Behavior bucket="movement" speed="2.4" range="15">StayCloseToSpawn</Behavior>
+					<Behavior bucket="movement" speed="2" cooldown="0" range="12">Charge</Behavior>
+					<Transition afterTime="10">Regroup</Transition>
+				</State>
+				<State id="Regroup">
+					<Behavior speed="2" range="0">StayCloseToSpawn</Behavior>
+					<Transition afterTime="1">Done</Transition>
+				</State>
+				<State id="Done">
+					<Behavior speed="1.5" range="0">StayCloseToSpawn</Behavior>
+					<Behavior tagName="attackOver">SetTag</Behavior>
+				</State>
+				<Behavior cooldown="0" childIds="Vampire Bat" maxChildren="10" startWithMinions="false">MakeMinions</Behavior>
+			</State>
+			
+			<Transition afterTime="14" hasTag="attackOver">TurnBack</Transition>
+		</State>
+		
+		<State id="Regular">
+			<Behavior bucket="movement" speed=".3">Wander</Behavior>
+			<Behavior speed=".3" range="4">StayCloseToSpawn</Behavior>
+			
+			<!--Embed name="healthCheck"></Embed-->
+			
+			<State id="Choose">
+				<Transition hitpointsLessThan="0.25">Daggers4</Transition>
+				<Transition hitpointsLessThan="0.50">Daggers3</Transition>
+				<Transition hitpointsLessThan="0.75">Daggers2</Transition>
+				<Transition random="1">Daggers1</Transition>
+			</State>
+			<State id="Daggers1">
+				<Embed name="daggers">
+					<Param name="numShots">3</Param>
+					<Param name="angle">12</Param>
+				</Embed>
+			</State>
+			<State id="Daggers2">
+				<Embed name="daggers">
+					<Param name="numShots">5</Param>
+					<Param name="angle">15</Param>
+				</Embed>
+			</State>
+			<State id="Daggers3">
+				<Embed name="daggers">
+					<Param name="numShots">9</Param>
+					<Param name="angle">22</Param>
+				</Embed>
+			</State>
+			<State id="Daggers4">
+				<Embed name="daggers">
+					<Param name="numShots">18</Param>
+					<Param name="angle">20</Param>
+				</Embed>
+			</State>
+			
+			<Transition noTag="p1done" hitpointsLessThan=".65">ThrowOff</Transition>	
+			<Transition noTag="p2done" hitpointsLessThan=".35">ThrowOff</Transition>	
+			<Transition noTag="p3done" hitpointsLessThan=".08">ThrowOff</Transition>
+			
+			<Transition afterTime="3" noneExist="Coffin Creature">ThrowCoffins</Transition>
+			<Transition afterTime="7" hitpointsLessThan="0.8">DualSwarms</Transition>
+			<Transition afterTime="7">TurnIntoBats</Transition>
+		</State>
+		
+		<State id="ThrowOff">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Behavior altTextureId="2">SetAltTexture</Behavior>
+			<State id='Counter'>
+				<Transition noTag="p1done">P1</Transition>	
+				<Transition noTag="p2done">P2</Transition>	
+				<Transition noTag="p3done">P3</Transition>
+				<!--Transition hasTag="p1">P1</Transition-->	
+				<!--Transition hasTag="p2">P2</Transition-->
+				<!--Transition hasTag="p3">P3</Transition-->
+			</State>
+			<State id='P1'>
+				<Behavior tagName="p1done">SetTag</Behavior>
+				<Behavior type="auto" defaultAngle="0" numShots="24"  projectileId="1" cooldown="6" range="0" offset="1" angle="15" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="8" numShots="24"  projectileId="1" cooldown="6" range="0" offset="1.8" angle="15" predictive="0">Shoot</Behavior>
+			</State>
+			<State id='P2'>
+				<Behavior tagName="p2done">SetTag</Behavior>
+				<Behavior type="auto" defaultAngle="0" numShots="24"  projectileId="1" cooldown="6" range="0" offset="1" angle="15" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="8" numShots="24"  projectileId="1" cooldown="6" range="0" offset="1.4" angle="15" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="0" numShots="24"  projectileId="1" cooldown="6" range="0" offset="1.8" angle="15" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="8" numShots="24"  projectileId="1" cooldown="6" range="0" offset="2.2" angle="15" predictive="0">Shoot</Behavior>	
+			</State>
+			<State id='P3'>
+				<Behavior tagName="p3done">SetTag</Behavior>
+				<Behavior type="auto" defaultAngle="0" numShots="24"  projectileId="1" cooldown="6" range="0" offset="0.6" angle="15" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="8" numShots="12"  projectileId="1" cooldown="6" range="0" offset="1" angle="30" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="0" numShots="24"  projectileId="1" cooldown="6" range="0" offset="1.4" angle="15" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="8" numShots="12"  projectileId="1" cooldown="6" range="0" offset="1.8" angle="30" predictive="0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="0" numShots="24"  projectileId="1" cooldown="6" range="0" offset="2.2" angle="15" predictive="0">Shoot</Behavior>	
+			</State>
+			
+			<Transition afterTime="3" hasTag="p3done">ThrowCoffins</Transition>
+			<Transition afterTime="2" noneExist="Coffin Creature" noTag="p3done">ThrowCoffins</Transition>
+			<Transition afterTime="2" noTag="p3done">DualSwarms</Transition>
+		</State>
+		
+		<Embed name="throwCoffins"></Embed>
+		
+		<DefineEmbed name="healthCheck"> <!-- unused -->
+			<State id="HealthCheck1">
+				<!-- Behavior effect="Invincible">ConditionEffect</Behavior -->
+				<Behavior tagName="p1">ClearTag</Behavior>
+				<Behavior tagName="p2">ClearTag</Behavior>
+				<Behavior tagName="p3">ClearTag</Behavior>
+				<Behavior tagName="checking">SetTag</Behavior>
+				<State id="Start">
+					<Transition hitpointsLessThan=".25">Four</Transition>
+					<Transition hitpointsLessThan=".50">Three</Transition>
+					<Transition hitpointsLessThan=".75">Two</Transition>
+					<Transition hitpointsLessThan="1">One</Transition>
+				</State>
+				<State id="One">
+					<Behavior tagName="p1">SetTag</Behavior>
+					<Behavior tagName="checking">ClearTag</Behavior>
+				</State>
+				<State id="Two">
+					<Behavior tagName="p2">SetTag</Behavior>
+					<Behavior tagName="checking">ClearTag</Behavior>
+				</State>
+				<State id="Three">
+					<Behavior tagName="p3">SetTag</Behavior>
+					<Behavior tagName="checking">ClearTag</Behavior>
+				</State>
+				<State id="Four">
+					<Behavior tagName="checking">ClearTag</Behavior>
+				</State>
+				<Transition hasTag="p3done">Choose</Transition>
+				<Transition afterTime="0.2" noTag="checking">Choose</Transition>	
+			</State>
+			<Transition hasTag="p1" noTag="p1done" hitpointsLessThan=".75">ThrowOff</Transition>	
+			<Transition hasTag="p2" noTag="p2done" hitpointsLessThan=".50">ThrowOff</Transition>	
+			<Transition hasTag="p3" noTag="p3done" hitpointsLessThan=".25">ThrowOff</Transition>	
+		</DefineEmbed>
+		
+		<DefineEmbed name="throwCoffins">
+			<State id="ThrowCoffins">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<State id="Position">
+					<Behavior speed="1.3" range="0">StayCloseToSpawn</Behavior>
+					<Transition afterTime="1">Shoot</Transition>
+				</State>
+				<State id="Shoot">
+					<Behavior speed="1.3" range="0">StayCloseToSpawn</Behavior>
+					<Behavior type="auto" childId="Coffin Creature" range="8.5" rangeJitter="0" defaultAngle="0" cooldown="5">ObjectToss</Behavior>
+					<Behavior type="auto" childId="Coffin Creature" range="8.5" rangeJitter="0" defaultAngle="90" cooldown="5">ObjectToss</Behavior>
+					<Behavior type="auto" childId="Coffin Creature" range="8.5" rangeJitter="0" defaultAngle="180" cooldown="5">ObjectToss</Behavior>
+					<Behavior type="auto" childId="Coffin Creature" range="8.5" rangeJitter="0" defaultAngle="270" cooldown="5">ObjectToss</Behavior>
+				</State>
+				<Transition afterTime="1.2" hitpointsLessThan="0.68">DualSwarms</Transition>
+				<Transition afterTime="1.2">TurnIntoBats</Transition>	
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="daggers">
+			<Behavior type="targeted" defaultAngle="0" numShots="{numShots}"  projectileId="0" cooldown="1.6" range="8" offset="0" angle="{angle}" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="{numShots}"  projectileId="0" cooldown="1.6" range="8" offset="0.4" angle="{angle}" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="{numShots}"  projectileId="0" cooldown="1.6" range="8" offset="0.8" angle="{angle}" predictive="1">Shoot</Behavior>
+		</DefineEmbed>
+		
+		<SoulboundLoot prob=".3" min="1">Holy Water</SoulboundLoot>
+		
+		<SoulboundLoot tier="7" prob=".2" threshold=".025">Armor</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".08">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".15" threshold=".05">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".1" threshold=".07">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".08" threshold=".07">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".05" threshold=".18">Weapon</SoulboundLoot>
+		
+		<SoulboundLoot tier="4" prob=".1">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".06" threshold=".18">ClassSpecial</SoulboundLoot>
+		
+		<SoulboundLoot prob=".1" threshold=".10">Ring of Divine Faith</SoulboundLoot>
+		<SoulboundLoot prob=".08" threshold=".11">Chasuble of Holy Light</SoulboundLoot>
+		<SoulboundLoot prob=".05" threshold=".14">St. Abraham's Wand</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".15">Tome of Purification</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".18">Wine Cellar Incantation</SoulboundLoot>
+	</Object>
+
+	<Object type="0x1721" id="Vampire Bat">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>26</Index></AnimatedTexture>
+		
+		<HitSound>monster/bats_hit</HitSound>
+		<DeathSound>monster/bats_death</DeathSound>
+		
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>25</Defense>
+		<XpMult>0.0</XpMult>
+		<Z>0.24</Z>
+		<Flying/>
+   		<Size>80</Size>
+		<ShadowSize>80</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Invisible</ObjectId>
+			<Damage>40</Damage>
+			<Speed>0</Speed>
+			<Size>80</Size>
+			<LifetimeMS>100</LifetimeMS>
+			<ConditionEffect duration="3.6">Confused</ConditionEffect>
+		</Projectile>
+		
+		<Behavior listenIds="Lord Ruthven">FollowOrders</Behavior>
+		
+		<State id="Ini">
+			<Behavior bucket="movement" protecteeId="Lord Ruthven" acquireRange="7" protectionRange="2" reprotectRange="0.75" speed="2.2">Protect</Behavior>
+			<Behavior bucket="movement" speed="1.2">Wander</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="0" range="0">Shoot</Behavior>
+		</State>	
+	</Object>
+	
+	<Object type="0x1722" id="Coffin Creature">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiObjBig</File><Index>0x22</Index></Texture>
+		
+		<Animation prob="1" period="0">
+			<Frame time="0.4"><Texture><File>lofiObjBig</File><Index>0x22</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x23</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x24</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x25</Index></Texture></Frame>
+			<Frame time="3"><Texture><File>lofiObjBig</File><Index>0x26</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x25</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x24</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x23</Index></Texture></Frame>
+		</Animation>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>20</Defense>
+		<XpMult>0</XpMult>
+   		<Size>120</Size>
+		<ShadowSize>80</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Coffin Bullet</ObjectId>
+			<Damage>65</Damage>
+			<Speed>60</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1600</LifetimeMS>
+		</Projectile>
+		
+		<Behavior listenIds="Bat Swarm 1">FollowOrders</Behavior>
+		
+		<State id="Ini">
+			<State id="Shut">
+				<!--Behavior effect="Armored">ConditionEffect</Behavior-->
+				<Transition afterTime=".4">Opening</Transition>	
+			</State>
+			<State id="Opening">
+				<Transition afterTime=".6">Shoot</Transition>	
+			</State>
+			<State id="Closing">
+				<Transition afterTime=".6">Shut</Transition>	
+			</State>
+			<State id="Shoot">
+				<Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="0" offset="0.2" range="9">Shoot</Behavior>
+				<Transition afterTime="3">Closing</Transition>	
+			</State>
+			<Transition afterTime="20" noTag="dontdie">Die</Transition>	
+		</State>	
+		
+		
+		<State id="Die">
+			<Behavior time="0" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+		</State>	
+		
+		<Behavior prob="0.5" childId="Lil Feratu">MetamorphoseAtDeath</Behavior>
+		<Behavior prob="0.5" childId="Lil Feratu">MetamorphoseAtDeath</Behavior>
+		<Behavior prob="0.4" childId="Lil Feratu">MetamorphoseAtDeath</Behavior>
+		<Behavior prob="0.3" childId="Lil Feratu">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+	<Object type="0x1723" id="Bat Swarm 1">
+		<DisplayId>Bat Swarm</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>26</Index></AnimatedTexture>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<MaxHitPoints>125</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Flying/>
+   		<Size>0</Size>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<Behavior listenIds="Lord Ruthven">FollowOrders</Behavior>
+		
+		<State id="Part">
+			<Behavior speed="2" distance="4" angle="0" cooldown="1">Move</Behavior>
+			<Transition afterTime="1">Attack</Transition>
+			<Order>
+				<Behavior tagName="dontdie">SetTag</Behavior>
+			</Order>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		
+		<State id="Attack">
+			<Behavior bucket="movement" speed="2" cooldown="0" range="12">Charge</Behavior>
+			<Transition afterTime="10">Regroup</Transition>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		
+		<State id="Regroup">
+			<Behavior speed="2" range="0">StayCloseToSpawn</Behavior>
+			<Order>
+				<Behavior tagName="dontdie">ClearTag</Behavior>
+			</Order>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		
+		<State id="Die">
+			<Behavior time="0" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+		</State>
+		
+		<Behavior cooldown="0" childIds="Vampire Bat Swarmer 1" maxChildren="10" startWithMinions="false">MakeMinions</Behavior>		
+	</Object>
+
+	<Object type="0x1724" id="Vampire Bat Swarmer 1">
+		<DisplayId>Vampire Bat Swarmer</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>26</Index></AnimatedTexture>
+		<HitSound>monster/bats_hit</HitSound>
+		<DeathSound>monster/bats_death</DeathSound>
+		
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>25</Defense>
+		<XpMult>0</XpMult>
+		<Z>0.24</Z>
+		<Flying/>
+   		<Size>80</Size>
+		<ShadowSize>80</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Invisible</ObjectId>
+			<Damage>40</Damage>
+			<Speed>0</Speed>
+			<Size>80</Size>
+			<LifetimeMS>100</LifetimeMS>
+			<ConditionEffect duration="3.6">Confused</ConditionEffect>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior listenIds="Lord Ruthven">FollowOrders</Behavior>
+			<Behavior bucket="movement" protecteeId="Bat Swarm 1" acquireRange="7" protectionRange="2" reprotectRange="0.75" speed="2.2">Protect</Behavior>
+			<Behavior bucket="movement" speed="1.2">Wander</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="0" range="0">Shoot</Behavior>
+			<Transition noneExist="Bat Swarm 1">Attack</Transition>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		<State id="Attack">
+			<Behavior bucket="movement" speed="1.35" cooldown=".6" range="10">Charge</Behavior>
+			<Behavior bucket="movement" speed="1.25">Wander</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="0" range="0">Shoot</Behavior>
+			<Transition noneExist="Bat Swarm 1">Attack</Transition>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x1725" id="Bat Swarm 2">
+		<DisplayId>Bat Swarm</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>26</Index></AnimatedTexture>
+		<MaxHitPoints>125</MaxHitPoints>
+		<XpMult>0.0</XpMult>
+		<Flying/>
+   		<Size>0</Size>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<Behavior listenIds="Lord Ruthven">FollowOrders</Behavior>
+		
+		<State id="Part">
+			<Behavior speed="2" distance="4" angle="270" cooldown="1">Move</Behavior>
+			<Transition afterTime="1">Attack</Transition>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		
+		<State id="Attack">
+			<Behavior bucket="movement" speed="2" cooldown="0" range="12">Charge</Behavior>
+			<Transition afterTime="10">Regroup</Transition>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		
+		<State id="Regroup">
+			<Behavior speed="2" range="0">StayCloseToSpawn</Behavior>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		
+		<State id="Die">
+			<Behavior time="0" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+		</State>
+		
+		
+		<Behavior cooldown="0" childIds="Vampire Bat Swarmer 2" maxChildren="10" startWithMinions="false">MakeMinions</Behavior>		
+	</Object>
+
+	<Object type="0x1726" id="Vampire Bat Swarmer 2">
+		<DisplayId>Vampire Bat Swarmer</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>26</Index></AnimatedTexture>
+		
+		<HitSound>monster/bats_hit</HitSound>
+		<DeathSound>monster/bats_death</DeathSound>
+		
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>25</Defense>
+		<XpMult>0.0</XpMult>
+		<Z>0.24</Z>
+		<Flying/>
+   		<Size>80</Size>
+		<ShadowSize>80</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Invisible</ObjectId>
+			<Damage>40</Damage>
+			<Speed>0</Speed>
+			<Size>80</Size>
+			<LifetimeMS>100</LifetimeMS>
+			<ConditionEffect duration="3.6">Confused</ConditionEffect>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior listenIds="Lord Ruthven">FollowOrders</Behavior>
+			<Behavior bucket="movement" protecteeId="Bat Swarm 2" acquireRange="7" protectionRange="2" reprotectRange="0.75" speed="2.2">Protect</Behavior>
+			<Behavior bucket="movement" speed="1.2">Wander</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="0" range="0">Shoot</Behavior>
+			<Transition noneExist="Bat Swarm 2">Attack</Transition>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		
+		<State id="Attack">
+			<Behavior bucket="movement" speed="1.35" cooldown=".6" range="10">Charge</Behavior>
+			<Behavior bucket="movement" speed="1.25">Wander</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="0" range="0">Shoot</Behavior>
+			<Transition noneExist="Bat Swarm 2">Attack</Transition>
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+		</State>	
+	</Object>
+
+	<Object type="0x1727" id="Vampire Bat Swarmer">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>26</Index></AnimatedTexture>
+		<HitSound>monster/bats_hit</HitSound>
+		<DeathSound>monster/bats_death</DeathSound>
+		
+		<MaxHitPoints>125</MaxHitPoints>
+		<Defense>25</Defense>
+		<XpMult>1</XpMult>
+		<Z>0.24</Z>
+		<Flying/>
+   		<Size>80</Size>
+		<ShadowSize>80</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Invisible</ObjectId>
+			<Damage>40</Damage>
+			<Speed>0</Speed>
+			<Size>80</Size>
+			<LifetimeMS>100</LifetimeMS>
+			<ConditionEffect duration="3">Confused</ConditionEffect>
+		</Projectile>
+		
+		<State id="Attack">
+			<Behavior bucket="movement" speed="1.35" cooldown=".6" range="10">Charge</Behavior>
+			<Behavior bucket="movement" speed="1.25">Wander</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="0" cooldown="0" range="0">Shoot</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x1728" id="Nosferatu">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>19</Index></AnimatedTexture>
+		
+		<HitSound>monster/mummies_death</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		
+		<MaxHitPoints>1100</MaxHitPoints>
+		<Defense>45</Defense>
+		<XpMult>0.75</XpMult>
+   		<Size>100</Size>
+		<ShadowSize>60</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Bone Swipe</ObjectId>
+			<Damage>80</Damage>
+			<Speed>40</Speed>
+			<Size>100</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="3">Weak</ConditionEffect>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Vampire Magic</ObjectId>
+			<Damage>60</Damage>
+			<Speed>55</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1600</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="2" range="10" offset="1" angle="25" predictive="0.75">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="5"  projectileId="1" cooldown="3" range="10" offset="0" angle="4" predictive="0.75">Shoot</Behavior>
+			<Behavior bucket="movement" acquireRange="10" range="1" speed="0.25" duration="4" cooldown="1" predictive="true">Follow</Behavior>
+			<Behavior bucket="movement" speed=".5">Wander</Behavior>
+		</State>	
+		
+		<SoulboundLoot prob=".015">Bone Dagger</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".005">Ring</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".025">ClassSpecial</SoulboundLoot>
+	</Object>
+
+	<Object type="0x1729" id="Armor Guard">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>20</Index></AnimatedTexture>
+		
+		<HitSound>monster/elves_death</HitSound>
+		<DeathSound>monster/golems_death</DeathSound>
+		
+		<MaxHitPoints>900</MaxHitPoints>
+		<Defense>25</Defense>
+		<XpMult>1</XpMult>
+   		<Size>100</Size>
+		<ShadowSize>60</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>ArmorGuard Attack</ObjectId>
+			<Damage>90</Damage>
+			<Speed>35</Speed>
+			<Size>100</Size>
+			<LifetimeMS>3400</LifetimeMS>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Rockbomb Spike</ObjectId>
+			<Damage>65</Damage>
+			<Speed>55</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1400</LifetimeMS>
+		</Projectile>
+		
+		<Behavior effect="Armored">ConditionEffect</Behavior>
+		
+		<State id="Barrage">
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="1" cooldown="2" range="10" offset="0" angle="10" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="1" cooldown="2" range="10" offset="0.2" angle="10" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="1" cooldown="2" range="10" offset="0.4" angle="10" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="1" cooldown="2" range="10" offset="0.6" angle="10" predictive="1">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="1" cooldown="2" range="10" offset="0.8" angle="10" predictive="1">Shoot</Behavior>
+			<Transition afterTime="3.8" random="0.5">SlowShot</Transition>
+			<Transition afterTime="3.8">BombToss</Transition>
+		</State>
+		
+		<State id="SlowShot">
+			<Behavior type="auto" defaultAngle="0" numShots="2"  projectileId="0" cooldown="4" range="10" offset="0" angle="180" predictive="1">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="45" numShots="2"  projectileId="0" cooldown="4" range="10" offset=".6" angle="180" predictive="1">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="90" numShots="2"  projectileId="0" cooldown="4" range="10" offset="1.2" angle="180" predictive="1">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="135" numShots="2"  projectileId="0" cooldown="4" range="10" offset="1.8" angle="180" predictive="1">Shoot</Behavior>
+			<Transition afterTime="3.8" random="0.5">Barrage</Transition>
+			<Transition afterTime="3.8">BombToss</Transition>
+		</State>
+		
+		<State id="BombToss">
+			<Behavior type="targeted" childId="RockBomb" range="8" rangeJitter="1" defaultAngle="0" cooldown="3">ObjectToss</Behavior>
+			<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="1" cooldown="2.4" range="10" offset="0" angle="180" predictive="1">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="90" numShots="1"  projectileId="1" cooldown="2.4" range="10" offset=".6" angle="180" predictive="1">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="180" numShots="1"  projectileId="1" cooldown="2.4" range="10" offset="1.2" angle="180" predictive="1">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="270" numShots="1"  projectileId="1" cooldown="2.4" range="10" offset="1.8" angle="180" predictive="1">Shoot</Behavior>
+			<Transition afterTime="6.2" random="0.5">SlowShot</Transition>
+			<Transition afterTime="6.2">Barrage</Transition>
+		</State>
+		
+		<Behavior bucket="movement" speed=".25">Wander</Behavior>	
+		
+		<SoulboundLoot tier="6" prob=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".005">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".01">ClassSpecial</SoulboundLoot>
+	</Object>
+
+	<Object type="0x172a" id="RockBomb">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiObj2</File><Index>0x4d</Index></Texture>
+		
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<MaxHitPoints>400</MaxHitPoints>
+		<Defense>130</Defense>
+		<XpMult>0</XpMult>
+   		<Size>80</Size>
+		<ShadowSize>60</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Rockbomb Spike</ObjectId>
+			<Damage>55</Damage>
+			<Speed>55</Speed>
+			<Size>90</Size>
+			<LifetimeMS>1400</LifetimeMS>
+		</Projectile>
+		
+		<Behavior initialDelay="1.8" range="0" numShots="8" projectileId="0">Explode</Behavior>
+	</Object>
+
+	<Object type="0x172b" id="Hellhound">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>21</Index></AnimatedTexture>
+		
+		<HitSound>monster/abyss_brutes_hit</HitSound>
+		<DeathSound>monster/abyss_brutes_death</DeathSound>
+		
+		<MaxHitPoints>600</MaxHitPoints>
+		<Defense>30</Defense>
+		<XpMult>1</XpMult>
+   		<Size>100</Size>
+		<ShadowSize>60</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>HellHoundAttack</ObjectId>
+			<Damage>65</Damage>
+			<Speed>80</Speed>
+			<Size>100</Size>
+			<LifetimeMS>1200</LifetimeMS>
+			<ConditionEffect duration="3.6">Bleeding</ConditionEffect>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior type="targeted" defaultAngle="0" numShots="5"  projectileId="0" cooldown="1" range="8" offset="0" angle="8" predictive="1">Shoot</Behavior>
+			<Behavior bucket="movement" speed="2" cooldown="2.6" range="16">Charge</Behavior>
+			<Behavior bucket="movement" speed=".7">Wander</Behavior>
+		</State>
+		
+		<SoulboundLoot tier="6" prob=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".03">Armor</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".01">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".04">Ring</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".01">ClassSpecial</SoulboundLoot>
+	</Object>
+
+	<Object type="0x172c" id="Lesser Bald Vampire">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>27</Index></AnimatedTexture>
+		
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/undead_dwarves_hit</DeathSound>
+		
+		<MaxHitPoints>400</MaxHitPoints>
+		<Defense>15</Defense>
+		<XpMult>1</XpMult>
+   		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Vampire Magic Ball</ObjectId>
+			<Damage>50</Damage>
+			<Speed>55</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1600</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="1" range="10" offset="0" angle="4" predictive="0.75">Shoot</Behavior>
+			
+			<Behavior bucket="movement" acquireRange="10" range="2" speed="0.8" duration="2" cooldown="2.6" predictive="true">Follow</Behavior>
+			<Behavior bucket="movement" distance="8" speed="0.8">StayBack</Behavior>
+			<Behavior bucket="movement" speed=".8" cooldown="1.4" range="7">Charge</Behavior>
+			<Behavior bucket="movement" speed=".5">Wander</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x172d" id="Helmet Head">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<Texture><File>lofiObj2</File><Index>0x4e</Index></Texture>
+		
+		<Animation prob="1" period="0">
+			<Frame time="0.1"><Texture><File>lofiObj2</File><Index>0x4e</Index></Texture></Frame>
+			<Frame time="0.1"><Texture><File>lofiObj2</File><Index>0x4f</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObj2</File><Index>0x5a</Index></Texture></Frame>
+			<Frame time="0.1"><Texture><File>lofiObj2</File><Index>0x5b</Index></Texture></Frame>
+			<Frame time="0.1"><Texture><File>lofiObj2</File><Index>0x5c</Index></Texture></Frame>
+		</Animation>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<MaxHitPoints>350</MaxHitPoints>
+		<Defense>30</Defense>
+		<XpMult>1</XpMult>
+   		<Size>80</Size>
+		<ShadowSize>60</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>HellHoundAttack</ObjectId>
+			<Damage>40</Damage>
+			<Speed>60</Speed>
+			<Size>100</Size>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior bucket="movement" speed=".8" cooldown="1.4" range="7">Charge</Behavior>
+			<Behavior bucket="movement" speed=".6">Wander</Behavior>
+		</State>	
+	</Object>
+
+	<Object type="0x172e" id="Mixcoatl Summoner">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<MaxHitPoints>10</MaxHitPoints>
+   		<Size>0</Size>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Ini">
+			<Transition noneExist="Mixcoatl the Masked God">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		<State id="NeverUsed">
+			<Behavior cooldown="0" childIds="Mixcoatl the Masked God" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+		</State>
+		<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x172f" id="Thessal Summoner">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<MaxHitPoints>10</MaxHitPoints>
+   		<Size>0</Size>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Ini">
+			<Transition noneExist="Thessal the Mermaid Goddess,Thessal the Mermaid Goddess Wounded">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		<State id="NeverUsed">
+			<Behavior cooldown="0" childIds="Thessal the Mermaid Goddess" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+		</State>
+		<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x1730" id="Septavius Summoner">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<MaxHitPoints>10</MaxHitPoints>
+   		<Size>0</Size>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Ini">
+			<Transition noneExist="Septavius the Ghost God">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		<State id="NeverUsed">
+			<Behavior cooldown="0" childIds="Septavius the Ghost God" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+		</State>
+		<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x1731" id="Stheno Summoner">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<MaxHitPoints>10</MaxHitPoints>
+   		<Size>0</Size>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Ini">
+			<Transition noneExist="Stheno the Snake Queen">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		<State id="NeverUsed">
+			<Behavior cooldown="0" childIds="Stheno the Snake Queen" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+		</State>
+		<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x1732" id="Arachna Summoner">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<MaxHitPoints>10</MaxHitPoints>
+   		<Size>0</Size>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Ini">
+			<Transition noneExist="Arachna the Spider Queen">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		<State id="NeverUsed">
+			<Behavior cooldown="0" childIds="Arachna the Spider Queen" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+		</State>
+		<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x1736" id="Vampire Summoner">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<MaxHitPoints>10</MaxHitPoints>
+   		<Size>0</Size>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Ini">
+			<Transition noneExist="Lord Ruthven">Die</Transition>
+		</State>
+		<State id="Die">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+		<State id="NeverUsed">
+			<Behavior cooldown="0" childIds="Lord Ruthven" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+		</State>
+		<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x1737" id="Coffin">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiObjBig</File><Index>0x22</Index></Texture>
+		
+		<HitSound>monster/wooden_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_death</DeathSound>
+		
+		<MaxHitPoints>20000</MaxHitPoints>
+		<Defense>25</Defense>
+   		<Size>120</Size>
+		<ShadowSize>80</ShadowSize>
+		
+		<State id="Ini">
+			<Transition hitpointsLessThan="0.65" random="0.5">SpawnEnemies</Transition>
+			<Transition hitpointsLessThan="0.65">Metamorph</Transition>
+		</State>
+		
+		<State id="SpawnEnemies">
+			<Behavior cooldown="1" childIds="Nosferatu" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior cooldown="0" childIds="Vampire Bat Swarmer" maxChildren="8" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior cooldown="0" childIds="Vampire Bat Swarmer" maxChildren="8" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior cooldown="0" childIds="Vampire Bat Swarmer" maxChildren="8" startWithMinions="false">MakeMinions</Behavior>
+			<Behavior cooldown="0" childIds="Vampire Bat Swarmer" maxChildren="8" startWithMinions="false">MakeMinions</Behavior>
+			<Transition afterTime="2.0">Done</Transition>
+		</State>
+
+		<State id="Metamorph">
+			<Behavior time="0.0" childId="Coffin Creature">Metamorphose</Behavior>
+		</State>
+		
+		<State id="Done">
+		</State>	
+		
+		<SoulboundLoot prob=".05">Bone Dagger</SoulboundLoot>
+		<SoulboundLoot prob=".2" min="1">Holy Water</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".1">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".1">Armor</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".03">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".03">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".08">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".08">ClassSpecial</SoulboundLoot>
+		
+		<SoulboundLoot prob=".015" threshold=".17">Ring of Divine Faith</SoulboundLoot>
+		<SoulboundLoot prob=".01" threshold=".14">St. Abraham's Wand</SoulboundLoot>
+		<SoulboundLoot prob=".007" threshold=".11">Chasuble of Holy Light</SoulboundLoot>
+		<SoulboundLoot prob=".001" threshold=".18">Wine Cellar Incantation</SoulboundLoot>
+	</Object>
+
+	<Object type="0x1738" id="Lil Feratu">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<AnimatedTexture><File>chars8x8rEncounters</File><Index>28</Index></AnimatedTexture>
+		
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/undead_dwarves_hit</DeathSound>
+		
+		<MaxHitPoints>480</MaxHitPoints>
+		<Defense>35</Defense>
+		<XpMult>0</XpMult>
+   		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Vampire Magic</ObjectId>
+			<Damage>65</Damage>
+			<Speed>55</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1600</LifetimeMS>
+		</Projectile>
+		
+		<State id="Ini">
+			<Behavior type="targeted" defaultAngle="0" numShots="5"  projectileId="0" cooldown="1" range="10" offset="0" angle="15" predictive="0.75">Shoot</Behavior>
+			
+			<Behavior bucket="movement" acquireRange="10" range="2" speed="0.8" duration="2" cooldown="2.6" predictive="true">Follow</Behavior>
+			<Behavior bucket="movement" distance="2" speed="0.8">StayBack</Behavior>
+			<Behavior bucket="movement" speed="1.25" cooldown="1" range="8">Charge</Behavior>
+			<Behavior bucket="movement" speed=".8">Wander</Behavior>
+		</State>
+	</Object>
+</Objects>

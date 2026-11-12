@@ -1,0 +1,1707 @@
+<Objects>
+	<Object type="0x65a" id="Skeleton">
+		<Group>Skeletons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x01</Index></AnimatedTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>50</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>10</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" listenIds="Deathmage">FollowOrders</Behavior>
+		<Behavior bucket="movement" range="1" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.02">Long Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Dirk</SoulboundLoot>
+	</Object>
+	<Object type="0x65b" id="Skeleton Swordsman">
+		<Group>Skeletons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x02</Index></AnimatedTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>55</MaxHitPoints>
+		<Defense>2</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>15</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" listenIds="Deathmage">FollowOrders</Behavior>
+		<Behavior bucket="movement" range="1" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Long Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Steel Shield</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Bronze Helm</SoulboundLoot>
+	</Object>
+	<Object type="0x65c" id="Skeleton Veteran">
+		<Group>Skeletons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x03</Index></AnimatedTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>60</MaxHitPoints>
+		<Defense>4</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>20</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" listenIds="Deathmage">FollowOrders</Behavior>
+		<Behavior bucket="movement" range="1" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Long Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Golden Shield</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Cloak of Darkness</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Spider Venom</SoulboundLoot>
+	</Object>
+	<Object type="0x65d" id="Skeleton Mage">
+		<Group>Skeletons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x04</Index></AnimatedTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>50</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blue Magic</ObjectId>
+			<Damage>20</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" listenIds="Deathmage">FollowOrders</Behavior>
+		<Behavior bucket="movement" range="7" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.02">Missile Wand</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Comet Staff</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Comet Staff</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Fire Nova Spell</SoulboundLoot>
+	</Object>
+	<Object type="0x65e" id="Skeleton King">
+		<Group>Skeletons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x05</Index></AnimatedTexture>
+		<HitSound>monster/skeletons_hit</HitSound>
+		<DeathSound>monster/skeletons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>75</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blue Bolt</ObjectId>
+			<Damage>15</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="3" range="10" cooldown="0.4">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+	</Object>
+	<Object type="0x65f" id="Mummy">
+		<Group>Mummies</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x07</Index></AnimatedTexture>
+		<HitSound>monster/mummies_hit</HitSound>
+		<DeathSound>monster/mummies_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>140</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>30</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Lich" protectionRange="10" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Spirit Salve Tome</SoulboundLoot>
+	</Object>
+	<Object type="0x660" id="Mummy King">
+		<Group>Mummies</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x08</Index></AnimatedTexture>
+		<HitSound>monster/mummies_hit</HitSound>
+		<DeathSound>monster/mummies_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>140</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>40</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Lich" protectionRange="10" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Spirit Salve Tome</SoulboundLoot>
+	</Object>
+	<Object type="0x661" id="Mummy Pharaoh">
+		<Group>Mummies</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x09</Index></AnimatedTexture>
+		<HitSound>monster/mummies_hit</HitSound>
+		<DeathSound>monster/mummies_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>140</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>40</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Lich" protectionRange="10" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Hell's Fire Wand</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Slayer Staff</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Golden Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Golden Dagger</SoulboundLoot>
+	</Object>
+	<Object type="0x662" id="Ghost Archer">
+		<Group>Ghosts</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x0b</Index></AnimatedTexture>
+		<HitSound>monster/ghosts_hit</HitSound>
+		<DeathSound>monster/ghosts_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>130</MaxHitPoints>
+		<Defense>2</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blue Arrow</ObjectId>
+			<Damage>30</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Ghost King" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Attack</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Speed</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Iron Quiver</SoulboundLoot>
+	</Object>
+	<Object type="0x663" id="Ghost Warrior">
+		<Group>Ghosts</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x0c</Index></AnimatedTexture>
+		<HitSound>monster/ghosts_hit</HitSound>
+		<DeathSound>monster/ghosts_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>150</MaxHitPoints>
+		<Defense>4</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>35</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Ghost King" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Attack</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Defense</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Red Iron Helm</SoulboundLoot>
+	</Object>
+	<Object type="0x664" id="Ghost Mage">
+		<Group>Ghosts</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x0d</Index></AnimatedTexture>
+		<HitSound>monster/ghosts_hit</HitSound>
+		<DeathSound>monster/ghosts_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>130</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blue Bolt</ObjectId>
+			<Damage>40</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Ghost King" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Magic</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Attack</SoulboundLoot>
+	</Object>
+	<Object type="0x665" id="Ghost Rogue">
+		<Group>Ghosts</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x0e</Index></AnimatedTexture>
+		<HitSound>monster/ghosts_hit</HitSound>
+		<DeathSound>monster/ghosts_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>130</MaxHitPoints>
+		<Defense>2</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>30</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Ghost King" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Speed</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Health</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Cloak of Speed</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Pit Viper Poison</SoulboundLoot>
+	</Object>
+	<Object type="0x666" id="Ghost Paladin">
+		<Group>Ghosts</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x0f</Index></AnimatedTexture>
+		<HitSound>monster/ghosts_hit</HitSound>
+		<DeathSound>monster/ghosts_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>160</MaxHitPoints>
+		<Defense>6</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>40</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior targetGroups="Ghosts" range="5" cooldown="10">Heal</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Ghost King" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Health</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Magic</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Seal of the Divine</SoulboundLoot>
+	</Object>
+	<Object type="0x667" id="Ghost Knight">
+		<Group>Ghosts</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x10</Index></AnimatedTexture>
+		<HitSound>monster/ghosts_hit</HitSound>
+		<DeathSound>monster/ghosts_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>180</MaxHitPoints>
+		<Defense>8</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>50</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" protecteeId="Ghost King" speed="1.0">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.015">Golden Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.025">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Ring of Defense</SoulboundLoot>
+	</Object>
+	<Object type="0x668" id="Red Demon">
+		<Group>Heros</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar16x16</File><Index>0x41</Index></Texture>
+		<HitSound>monster/flaming_skulls_hit</HitSound>
+		<DeathSound>monster/flaming_skulls_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>7000</MaxHitPoints>
+		<Defense>12</Defense>
+		<Flying/>
+		<Hero/>
+		<Quest/>
+		<God/>
+		<Level>19</Level>
+		<XpMult>1.2</XpMult>
+
+		<Projectile id="0">
+			<ObjectId>Pink Bolt</ObjectId>
+			<Damage>100</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+			<Size>120</Size>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Fire Mystic Shot</ObjectId>
+			<Damage>110</Damage>
+			<Speed>9</Speed>
+			<LifetimeMS>10000</LifetimeMS>
+			<PassesCover/>
+			<Parametric/>
+		</Projectile>
+
+		<Behavior projectileId="0" numShots="5" range="10" cooldown="1.2" angle="5" predictive="1">Shoot</Behavior>
+		<Behavior projectileId="1" numShots="1" range="11" cooldown="1.4">Shoot</Behavior>
+
+		<Behavior bucket="movement" range="5" speed="0.8">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" range="7" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+		<Behavior childIds="Imp" cooldown="10" maxChildren="5">MakeMinions</Behavior>
+		<Behavior childIds="Demon" cooldown="14" maxChildren="3">MakeMinions</Behavior>
+		<Behavior childIds="Demon Warrior" cooldown="18" maxChildren="3">MakeMinions</Behavior>
+
+		<Behavior>Taunt</Behavior>
+
+		<SoulboundLoot prob="0.02">Golden Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Ring of Greater Defense</SoulboundLoot>
+		<SoulboundLoot prob="0.02" threshold=".18">Potion of Speed</SoulboundLoot>
+		<SoulboundLoot prob="0.02">Steel Helm</SoulboundLoot>
+	</Object>
+
+	<Object type="0x669" id="Imp">
+		<Group>Demons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x11</Index></AnimatedTexture>
+		<HitSound>monster/demons_hit</HitSound>
+		<DeathSound>monster/demons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>10</Defense>
+		<Flying/>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Fire Bolt</ObjectId>
+			<Damage>40</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="1" range="10" predictive="0.5" cooldown="0.2">Shoot</Behavior>
+		<Behavior bucket="movement" range="15" speed="1.4">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" speed="0.8">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Missile Wand</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Serpentine Staff</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Fire Bow</SoulboundLoot>
+	</Object>
+	<Object type="0x66a" id="Demon">
+		<Group>Demons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x12</Index></AnimatedTexture>
+		<HitSound>monster/demons_hit</HitSound>
+		<DeathSound>monster/demons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>250</MaxHitPoints>
+		<Defense>12</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>55</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="2" range="10" predictive="0.5">Shoot</Behavior>
+		<Behavior bucket="movement" range="15" speed="1.4">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.4">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.015">Fire Bow</SoulboundLoot>
+	</Object>
+	<Object type="0x66b" id="Demon Warrior">
+		<Group>Demons</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x13</Index></AnimatedTexture>
+		<HitSound>monster/demons_hit</HitSound>
+		<DeathSound>monster/demons_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>260</MaxHitPoints>
+		<Defense>14</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Red Fire</ObjectId>
+			<Damage>60</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>900</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="3" range="10" predictive="0.5">Shoot</Behavior>
+		<Behavior bucket="movement" range="15" speed="1.4">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" range="2.8" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.015">Obsidian Dagger</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Steel Shield</SoulboundLoot>
+	</Object>
+
+	<Object type="0x678" id="Oasis Giant">
+		<Group>Heros</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x2b</Index></Texture>
+		<Size>100</Size>
+		<MaxHitPoints>650</MaxHitPoints>
+		<Defense>15</Defense>
+		<Hero/>
+		<Quest/>
+		<Level>13</Level>
+		<XpMult>5</XpMult>
+		<Projectile id="0">
+			<ObjectId>Green Bolt</ObjectId>
+			<Damage>70</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="4" range="10" predictive="1">Shoot</Behavior>
+		<Behavior bucket="movement" range="2" speed="0.3">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<Behavior groupId="Oasis" cooldown="5" maxChildren="20">MakeMinions</Behavior>
+		<Behavior>Taunt</Behavior>
+	</Object>
+	<Object type="0x679" id="Oasis Ruler">
+		<Group>Oasis</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x00</Index></AnimatedTexture>
+		<Size>110</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Orange Missile</ObjectId>
+			<Damage>55</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>120</Size>
+		</Projectile>
+		<Behavior projectileId="0" numShots="1" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Oasis Giant" protectionRange="10" reprotectRange="3">Protect</Behavior>
+		<Behavior bucket="movement" range="9">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+		<SoulboundLoot prob="0.025">Magic Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x67a" id="Oasis Soldier">
+		<Group>Oasis</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x01</Index></AnimatedTexture>
+		<Size>100</Size>
+		<MaxHitPoints>180</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Pink Bolt</ObjectId>
+			<Damage>30</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1800</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="1" range="10" predictive="0.5">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Oasis Giant" protectionRange="11" reprotectRange="3">Protect</Behavior>
+		<Behavior bucket="movement" range="7">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+		<SoulboundLoot prob="0.025">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x67b" id="Oasis Creature">
+		<Group>Oasis</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x02</Index></AnimatedTexture>
+		<Size>90</Size>
+		<MaxHitPoints>160</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Purple Bolt</ObjectId>
+			<Damage>25</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>1400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="1" range="10" cooldown="0.4">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Oasis Giant" protectionRange="12" reprotectRange="3">Protect</Behavior>
+		<Behavior bucket="movement" range="5">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+		<SoulboundLoot prob="0.025">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x67c" id="Oasis Monster">
+		<Group>Oasis</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x03</Index></AnimatedTexture>
+		<Size>80</Size>
+		<MaxHitPoints>140</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Cyan Magic</ObjectId>
+			<Damage>20</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="1" range="10" predictive="0.5">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Oasis Giant" protectionRange="13" reprotectRange="3">Protect</Behavior>
+		<Behavior bucket="movement" range="3">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+		<SoulboundLoot prob="0.025">Magic Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x67d" id="Cyclops God">
+		<Group>Heros</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar16x16</File><Index>0x42</Index></Texture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>4500</MaxHitPoints>
+		<Defense>8</Defense>
+		<Hero/>
+		<Quest/>
+		<God/>
+		<Level>16</Level>
+		<XpMult>1</XpMult>
+
+		<Projectile id="0">
+			<ObjectId>Beam</ObjectId>
+			<Damage>8</Damage>
+			<Speed>20</Speed>
+			<Size>90</Size>
+			<LifetimeMS>300</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Beam</ObjectId>
+			<Damage>15</Damage>
+			<Speed>40</Speed>
+			<Size>150</Size>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Beam</ObjectId>
+			<Damage>33</Damage>
+			<Speed>60</Speed>
+			<Size>210</Size>
+			<LifetimeMS>900</LifetimeMS>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Beam</ObjectId>
+			<Damage>56</Damage>
+			<Speed>80</Speed>
+			<Size>270</Size>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+
+		<Projectile id="10">
+			<ObjectId>Blade</ObjectId>
+			<Damage>70</Damage>
+			<Speed>65</Speed>
+			<LifetimeMS>2100</LifetimeMS>
+			<Size>140</Size>
+		</Projectile>
+
+		<State id="idle">
+			<Transition hitpointsLessThan="0.8">blade_attack</Transition>
+			<Transition playerWithin="11">blade_attack</Transition>
+		</State>
+		<State id="blade_attack">
+			<Behavior bucket="movement" range="7" speed="0.4">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+			<Behavior projectileId="10" numShots="1" range="10" predictive="0.5" cooldown="90">Shoot</Behavior>
+			<Behavior projectileId="10" angle="10" numShots="2" range="10" predictive="0.5" cooldown="90" offset="0.7">Shoot</Behavior>
+			<Behavior projectileId="10" angle="8.5" numShots="3" range="10" predictive="0.5" cooldown="90" offset="1.4">Shoot</Behavior>
+			<Behavior projectileId="10" angle="7" numShots="4" range="10" predictive="0.5" cooldown="0.7" offset="2.1">Shoot</Behavior>
+
+			<Transition afterTime="4">if_cloaked1</Transition>
+		</State>
+		<State id="if_cloaked1">
+			<Behavior projectileId="10" numShots="15" type="auto" range="10" angle="24" cooldown="1.5" defaultAngle="8" offset="0.4">Shoot</Behavior>
+
+			<Transition playerWithin="10.5">wave_attack</Transition>
+			<Transition afterTime="10">wave_attack</Transition>
+		</State>
+		<State id="wave_attack">
+			<Behavior bucket="movement" range="5" speed="0.6">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+
+			<Behavior numShots="1" projectileId="0" cooldown="0.7" type="targeted" predictive="0" range="9" offset="0.7">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" cooldown="0.7" type="targeted" predictive="0" range="9" offset="0.7">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="2" cooldown="0.7" type="targeted" predictive="0" range="9" offset="0.7">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="3" cooldown="0.7" type="targeted" predictive="0" range="9" offset="0.7">Shoot</Behavior>
+
+			<Transition afterTime="3.8">if_cloaked2</Transition>
+		</State>
+		<State id="if_cloaked2">
+			<Behavior projectileId="10" numShots="15" type="auto" range="10" angle="24" cooldown="1.5" defaultAngle="8" offset="0.4">Shoot</Behavior>
+
+			<Transition playerWithin="10.5">idle</Transition>
+			<Transition afterTime="10">idle</Transition>
+		</State>
+
+		<Behavior bucket="movement" range="5" speed="1.2">StayCloseToSpawn</Behavior>
+
+		<Behavior childIds="Cyclops" cooldown="10" maxChildren="5">MakeMinions</Behavior>
+		<Behavior childIds="Cyclops Warrior" cooldown="14" maxChildren="3">MakeMinions</Behavior>
+		<Behavior childIds="Cyclops Noble" cooldown="16" maxChildren="2">MakeMinions</Behavior>
+		<Behavior childIds="Cyclops Prince" cooldown="18" maxChildren="1">MakeMinions</Behavior>
+		<Behavior childIds="Cyclops King" cooldown="21" maxChildren="1">MakeMinions</Behavior>
+		<Behavior>Taunt</Behavior>
+
+		<Behavior prob=".05" childId="Spider Den Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x67e" id="Cyclops">
+		<Group>Cyclopes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x04</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>150</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>40</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="5" speed="1.2">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Golden Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Studded Leather Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.025">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x67f" id="Cyclops Warrior">
+		<Group>Cyclopes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x05</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>300</MaxHitPoints>
+		<Defense>20</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>50</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="5" speed="1.2">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.015">Golden Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Golden Shield</SoulboundLoot>
+		<SoulboundLoot prob="0.025">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x680" id="Cyclops Noble">
+		<Group>Cyclopes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x06</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>310</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>55</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="5" speed="1.2">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Golden Dagger</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Studded Leather Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.025">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x681" id="Cyclops Prince">
+		<Group>Cyclopes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x07</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>320</MaxHitPoints>
+		<Defense>20</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>55</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="5" speed="1.2">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Mithril Dagger</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Plate Mail</SoulboundLoot>
+		<SoulboundLoot prob="0.025">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob="0.005">Seal of the Divine</SoulboundLoot>
+	</Object>
+	<Object type="0x682" id="Cyclops King">
+		<Group>Cyclopes</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero2</File><Index>0x08</Index></AnimatedTexture>
+		<HitSound>monster/cyclops_hit</HitSound>
+		<DeathSound>monster/cyclops_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>350</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>60</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="5" speed="1.2">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.01">Golden Sword</SoulboundLoot>
+		<SoulboundLoot prob="0.01">Mithril Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.025">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x6af" id="Evil Chicken">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>8</Index></AnimatedTexture>
+		<HitSound>monster/chicken_hit</HitSound>
+		<DeathSound>monster/chicken_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior speed="0.3">Wander</Behavior>
+	</Object>
+	<Object type="0x6b0" id="Evil Chicken Minion">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>8</Index></AnimatedTexture>
+		<HitSound>monster/chicken_hit</HitSound>
+		<DeathSound>monster/chicken_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>30</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior speed="0.3">Wander</Behavior>
+		<Behavior protecteeId="Evil Chicken God">Protect</Behavior>
+	</Object>
+	<Object type="0x6b1" id="Evil Chicken God">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>2</Index></AnimatedTexture>
+		<HitSound>monster/chicken_hit</HitSound>
+		<DeathSound>monster/chicken_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>60</MaxHitPoints>
+		<Defense>0</Defense>
+		<Quest/>
+		<Level>1</Level>
+		<Behavior bucket="movement" range="5" speed="0.4">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.3">Wander</Behavior>
+	</Object>
+	<Object type="0x6b2" id="Evil Hen">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>9</Index></AnimatedTexture>
+		<HitSound>monster/chicken_hit</HitSound>
+		<DeathSound>monster/chicken_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior speed="0.3">Wander</Behavior>
+		<SoulboundLoot prob="1">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x6b3" id="Kitchen Guard">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>6</Index></AnimatedTexture>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/pirates_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>10</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>2</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="7">Shoot</Behavior>
+		<Behavior bucket="movement" range="6" speed="0.6">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+	</Object>
+	<Object type="0x6b4" id="Butcher">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rBeach</File><Index>7</Index></AnimatedTexture>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/pirates_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>10</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>5</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="0.8">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob=".1">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".1">Magic Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x675" id="Phoenix Lord">
+		<Group>Heros</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x2a</Index></Texture>
+		<Size>100</Size>
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>15</Defense>
+		<Flying/>
+		<Hero/>
+		<Quest/>
+		<Level>17</Level>
+		<XpMult>1</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Fire Bolt</ObjectId>
+			<Damage>65</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>
+		
+		<Behavior projectileId="0" numShots="4" range="10" predictive="0.5" cooldown=".6">Shoot</Behavior>
+		
+		<Behavior bucket="movement" range="2" speed="0.3">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		
+		<Behavior groupId="Pyre" cooldown="5" maxChildren="16">MakeMinions</Behavior>
+		<Behavior>Taunt</Behavior>
+		
+		<Behavior childId="Phoenix Egg" prob="1">MetamorphoseAtDeath</Behavior>
+	</Object>
+
+	<Object type="0x676" id="Birdman Chief">
+		<Group>Pyre</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x15</Index></AnimatedTexture>
+		<Size>105</Size>
+		<MaxHitPoints>250</MaxHitPoints>
+		<Defense>11</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>White Flame</ObjectId>
+			<Damage>40</Damage>
+			<Speed>55</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1800</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="1" range="10">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Phoenix Lord" protectionRange="10" reprotectRange="3">Protect</Behavior>
+		<Behavior bucket="movement" range="9">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+		
+		<SoulboundLoot prob="0.05">Magic Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x677" id="Birdman">
+		<Group>Pyre</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHero1</File><Index>0x16</Index></AnimatedTexture>
+		<Size>95</Size>
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>7</Defense>
+		<XpMult>0.1</XpMult>
+		<Projectile id="0">
+			<ObjectId>White Flame</ObjectId>
+			<Damage>46</Damage>
+			<Speed>60</Speed>
+			<Size>80</Size>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" numShots="1" range="10" predictive="0.5">Shoot</Behavior>
+		<Behavior bucket="movement" protecteeId="Phoenix Lord" protectionRange="11" reprotectRange="3">Protect</Behavior>
+		<Behavior bucket="movement" range="7">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+		
+		<SoulboundLoot prob="0.05">Health Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x6c1" id="Phoenix Reborn">
+		<Group>Heros</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x16</File><Index>0x2a</Index></Texture>
+		<Size>100</Size>
+		<MaxHitPoints>4200</MaxHitPoints>
+		<Defense>15</Defense>
+		<Flying/>
+		<Quest/>
+		<Level>17</Level>
+		<XpMult>1</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Fire Spinner</ObjectId>
+			<Damage>55</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>2400</LifetimeMS>
+			<ConditionEffect duration="2.5">Weak</ConditionEffect>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Fire Bolt</ObjectId>
+			<Damage>65</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2400</LifetimeMS>
+		</Projectile>		
+
+		<Behavior bucket="movement" range="5" speed="0.9">StayCloseToSpawn</Behavior>
+		<Behavior bucket="movement" speed="0.9">Wander</Behavior>
+		
+		<Behavior groupId="Pyre" cooldown="1" maxChildren="4">MakeMinions</Behavior>
+			
+		<State id="born_anew">			
+			<Behavior numShots="12" angle="30" projectileId="0" cooldown="90" type="auto" offset="0.5"  defaultAngle="10">Shoot</Behavior>
+			<Behavior numShots="12" angle="30" projectileId="0" cooldown="90" type="auto" offset="1" defaultAngle="25">Shoot</Behavior>
+			<Transition afterTime="1.8">xxx</Transition>
+		</State>		
+		<State id="xxx">
+			<Behavior numShots="4" projectileId="1" cooldown="0.6" type="targeted" predictive="0.5">Shoot</Behavior>
+			
+			<Transition afterTime="2.8">yyy</Transition>
+		</State>
+		<State id="yyy">
+			<Behavior numShots="12" angle="30" projectileId="0" cooldown="90" type="auto" offset="0.5"  defaultAngle="10">Shoot</Behavior>
+			<Behavior numShots="12" angle="30" projectileId="0" cooldown="90" type="auto" offset="1" defaultAngle="25">Shoot</Behavior>
+			
+			<Behavior bucket="attack" numShots="1" projectileId="1" cooldown="0.35" type="targeted" predictive="0.5">Shoot</Behavior>
+			
+			<Transition afterTime="4.5">xxx</Transition>
+		</State>
+
+		<Behavior>Taunt</Behavior>
+		
+		
+	</Object>
+
+	<Object type="0x6c2" id="Phoenix Egg">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x54</Index></Texture>
+		<Size>130</Size>
+		<MaxHitPoints>5000</MaxHitPoints>
+		<Defense>0</Defense>
+		<XpMult>0</XpMult>
+
+		<Behavior childId="Phoenix Reborn" prob="1">MetamorphoseAtDeath</Behavior>
+		
+		<State id="shielded">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Transition afterTime="2">unshielded</Transition>
+		</State>
+		<State id="unshielded">
+			<Behavior type="Flash" color="FF0000" flashPeriod="1" flashRepeats="5000">ShowEffect</Behavior>
+			<State id="grow">
+				<Behavior rate="20" maxSize="150">ChangeSize</Behavior>
+				<Transition afterTime="0.8">shrink</Transition>
+			</State>
+			<State id="shrink">
+				<Behavior rate="-20" minSize="130">ChangeSize</Behavior>
+				<Transition afterTime="0.8">grow</Transition>
+			</State>
+		</State>		
+	</Object>
+	
+	<Object type="0x6da" id="Specter Mine">
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiObj2</File><Index>0x2a</Index></Texture>
+		<Animation prob="1" period="0">
+			<Frame time="0.2"><Texture><File>lofiObj2</File><Index>0x2a</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObj2</File><Index>0x38</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObj2</File><Index>0x39</Index></Texture></Frame>
+		</Animation>
+		
+		<MaxHitPoints>200</MaxHitPoints>
+		<Defense>150</Defense>
+		<XpMult>0.1</XpMult>
+		<Size>100</Size>
+		<ShadowSize>80</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Specter Spike</ObjectId>
+			<Damage>55</Damage>
+			<Speed>60</Speed>
+			<Size>100</Size>
+			<LifetimeMS>1200</LifetimeMS>
+			<MultiHit/>
+			<ConditionEffect duration="4">Sick</ConditionEffect>
+		</Projectile>
+		
+		<State id="Ini">
+			<Transition afterTime=".6">Armed</Transition>
+		</State>
+		
+		<State id="Armed">
+			<Behavior initialDelay="0" range="3" numShots="4" projectileId="0" giveXP="false">Explode</Behavior>
+		</State>
+		
+		<Behavior time="10" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+	</Object>
+
+    <Object type="0x5e6a" id="Zombie Archer">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>50</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Coral Arrow</ObjectId>
+            <Damage>55</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>1500</LifetimeMS>
+            <Size>75</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" range="10" angle="15">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed=".8" acquireRange="10" distance="5">KeepDistance</Behavior>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e6b" id="Zombie Warrior">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>51</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Fire Bolt</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" cooldown="2" range="7" speed="1.2">Charge</Behavior>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e6c" id="Zombie Wizard">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>52</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Fire Missile</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+            <Amplitude>0.5</Amplitude>
+            <Frequency>2</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed=".8" acquireRange="10" distance="5">KeepDistance</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e6d" id="Zombie Rogue">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>53</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Rainbow Magic</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed="1.2" range="4" duration="2" cooldown="4">Follow</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e6e" id="Zombie Priest">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>54</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Directed Explosion</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>50</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior targetGroups="Zombies" cooldown="2" range="7" maxHeal="400">Heal</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed=".8" acquireRange="10" distance="5">KeepDistance</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e6f" id="Zombie Knight">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>55</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Stone Slash</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior acquireRange="7" distance="2" speed=".9">Circle</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7a" id="Zombie Paladin">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>56</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Aqua Slash</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh;Mrrrrrrghhh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7b" id="Zombie Necromancer">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>57</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Aqua Missile</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+            <Amplitude>0.5</Amplitude>
+            <Frequency>2</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7c" id="Zombie Huntress">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>58</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Black Arrow</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1.5" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7d" id="Zombie Mystic">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>59</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Crystal Serpent Missile</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+            <Amplitude>0.5</Amplitude>
+            <Frequency>2</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7e" id="Zombie Trickster">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>60</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Spirit Dagger Slash</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7f" id="Zombie Sorcerer">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>61</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Blue Magic</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e8a" id="Zombie Assassin">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>62</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Green Bolt</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e8b" id="Zombie Ninja">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>63</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Jewel Slash</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+
+	<Object type="0x6db" id="Kage Kami">
+		<Enemy/>
+		<NoMiniMap/>
+		<Class>Character</Class>
+		<Group>Heros</Group>
+		<Level>18</Level>
+		
+		<RandomTexture>
+			<Texture><File>lofiObj2</File><Index>0x3a</Index></Texture>
+			<Texture><File>lofiObj2</File><Index>0x4b</Index></Texture>
+			<Texture><File>lofiObj2</File><Index>0x4c</Index></Texture>
+		</RandomTexture>
+
+		<Portrait>
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>17</Index></AnimatedTexture>
+		</Portrait>
+		
+        <AltTexture id="1">
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>17</Index></AnimatedTexture>
+			<Effect particle="SwirlingMist" cooldown="0.1">XMLEffect</Effect>
+		</AltTexture>
+        <AltTexture id="2">
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>18</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<HitSound>monster/medusa_hit</HitSound>
+		<DeathSound>monster/undead_dwarves_hit</DeathSound>
+		
+		<MaxHitPoints>3000</MaxHitPoints>
+		<Defense>63</Defense>
+		<XpMult>1.4</XpMult>
+   		<Size>120</Size>
+   		<DontFaceAttacks/>
+		
+		<Projectile id="0">
+			<ObjectId>Specter Spinner</ObjectId>
+			<Damage>50</Damage>
+			<Speed>55</Speed>
+			<Size>80</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="4">Sick</ConditionEffect>
+			<ConditionEffect duration="1">Confused</ConditionEffect>
+		</Projectile>
+		
+		<Projectile id="1">
+			<ObjectId>Specter Shot</ObjectId>
+			<Damage>75</Damage>
+			<Speed>35</Speed>
+			<Size>90</Size>
+			<LifetimeMS>2600</LifetimeMS>
+			<ConditionEffect duration="0.4">Paralyzed</ConditionEffect>
+		</Projectile>
+		
+		<State id="Ini">
+			<Transition hitpointsLessThan="0.99">Start</Transition>
+		</State>
+		
+		<State id="Start">
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<State id="Hide">
+				<Behavior effect="Invisible">ConditionEffect</Behavior>
+				<Behavior minSize="0" rate="-200">ChangeSize</Behavior>
+				<Transition afterTime=".4">Show</Transition>
+			</State>
+			<State id="Show">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Behavior maxSize="120" rate="15">ChangeSize</Behavior>
+				<State id="Wait">
+					<Transition afterTime="3.2">Say</Transition>
+				</State>
+				<State id="Say">
+					<Behavior prob="0.75" bubbleTime="5" text="Fear me!;You brought this upon yourself!;You shall pay!;Who dares to desecrate this sacred ground?;You shall pay for sullying this hallowed earth!;Kyoufu no kage!">Say</Behavior>
+				</State>
+			</State>
+			<Transition afterTime="3.8">Normal</Transition>
+		</State>
+		
+		<State id="Normal">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			
+			<Behavior bucket="movement" acquireRange="10" range="2" speed="0.2" duration="1.6" cooldown=".4" predictive="true">Follow</Behavior>
+			
+			<Behavior type="targeted" childId="Specter Mine" range="10"  rangeJitter="1" cooldown="1">ObjectToss</Behavior>
+			
+			<Behavior type="auto" defaultAngle="0" numShots="2"  projectileId="1" cooldown="2.4" range="0" offset="0" angle="180">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="45" numShots="2"  projectileId="1" cooldown="2.4" range="0" offset=".2" angle="180">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="90" numShots="2"  projectileId="1" cooldown="2.4" range="0" offset=".4" angle="180">Shoot</Behavior>
+			<Behavior type="auto" defaultAngle="135" numShots="2"  projectileId="1" cooldown="2.4" range="0" offset=".8" angle="180">Shoot</Behavior>
+			
+			<Transition afterTime="3.4" random="0.05">TransToFlying</Transition>
+		</State>
+		
+		<State id="TransToFlying">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Behavior prob="0.35" bubbleTime="4" text="Fear me!!!;You brought this upon yourself!;Fear the shadows!;You dare to desecrate this sacred ground?;You shall pay!!!;Kyoufu no kage!">Say</Behavior>
+			<Transition afterTime=".2">Flying</Transition>
+		</State>
+		
+		
+		<State id="TransToNormal">
+			<Behavior altTextureId="1">SetAltTexture</Behavior>
+			<Transition afterTime=".2">Normal</Transition>
+		</State>
+		
+		<State id="Flying">
+			<Behavior altTextureId="2">SetAltTexture</Behavior>
+			<Behavior effect="Invincible">ConditionEffect</Behavior>
+			<State id="Charge">
+				<Behavior bucket="movement" acquireRange="10" range="2" speed="1" duration="3" cooldown="0" predictive="true">Follow</Behavior>
+				<Transition afterTime="1" random="0.025">Circle</Transition>
+				<Transition afterTime="1" random="0.025">Retreat</Transition>
+			</State>
+			<State id="Circle">
+				<Behavior bucket="movement" acquireRange="10" distance="4" speed="1">Circle</Behavior>
+				<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+				<Transition afterTime="1" random="0.025">Charge</Transition>
+				<Transition afterTime="1" random="0.025">Retreat</Transition>
+			</State>
+			<State id="Retreat">
+				<Behavior bucket="movement" distance="5.5" speed="1.8">StayBack</Behavior>
+				<Behavior bucket="movement" acquireRange="10" distance="6.5" speed="1">Circle</Behavior>
+				<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+				<Transition afterTime="1" random="0.025">Charge</Transition>
+				<Transition afterTime="1" random="0.025">Circle</Transition>
+			</State>
+			
+			<Behavior type="targeted" defaultAngle="0" numShots="2"  projectileId="0" cooldown=".4" range="10" offset="0" angle="20" predictive="1">Shoot</Behavior>
+			
+			<Transition afterTime="3.4" random="0.05">TransToNormal</Transition>
+		</State>
+		
+		<Behavior prob=".33" childId="Manor of the Immortals Portal">MetamorphoseAtDeath</Behavior>
+		
+		<SoulboundLoot tier="3" prob=".1">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".05">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".1">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".05">Ring</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".2" threshold=".07">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".09" threshold=".07">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".05" threshold=".07">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".15" threshold=".07">Armor</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".08" threshold=".07">Armor</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".05" threshold=".07">Armor</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".1" threshold=".01">Potion</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".1" threshold=".01">Potion</SoulboundLoot>
+		
+		
+	</Object>
+</Objects>
