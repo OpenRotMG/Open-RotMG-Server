@@ -36,9 +36,9 @@ Boss sample: Ent Ancient, Lich, Ghost King, Phoenix Lord. All four tables were l
 
 Discovery: https://docs.realmdex.com/sources.html (“Skillys V1?”→realm-src/realm-cli). Hidden “Skilly's 7.0 NR-Core”/“Educational” links remain unidentified; don't equate with betterSkillys. Zero.Gdk returned 404; no verdict/pin.
 
-## Release 7.0 server-file lead
+## Preserved originals
 
-See `release-7-behavior-reference.md` for the recovered MPGH attachment, verified fingerprint, inspected server-behavior content and unresolved version/provenance/redistribution limits. Reference discovery only; selected source policy is unchanged.
+`data/reference/` contains the original Release 7.0 MPGH archive, extracted XML/C++ files, DOCX text and a local copy of DECA's XML scripting documentation. Its README records sources and fingerprints. Preservation does not change the selected source policy or certify version fit.
 
 ## Legacy comparisons
 
@@ -55,4 +55,4 @@ Trapped `Cooldown` randomizes initial/subsequent delays; `CooldownExact`/FSoD co
 
 ## Implementation contract
 
-Pin feature/engine/XML/registration anchors. Selected client identities/stats/projectiles and bounded populations/native authority/permanent death/committed once-only rewards remain authoritative. Separate reference behavior, historical corroboration, conflicts and reconstruction. Review file-level licenses/notices even for Rust translations; no bundled binaries, stack imports or source/map/client dumps. Deterministic phase/reward/lifecycle tests then native multiplayer verify implementation, not historical fidelity. No hosting/restoration-score/next-feature scope change.
+Pin feature/engine/XML/registration anchors. Selected client identities/stats/projectiles and bounded populations/native authority/permanent death/committed once-only rewards remain authoritative. Separate reference behavior, historical corroboration, conflicts and reconstruction. Review file-level licenses/notices even for Rust translations. The owner's selected `data/reference/` preservation copies are reference-only; do not execute bundled software or import source/map/client dumps into the implementation. Deterministic phase/reward/lifecycle tests then native multiplayer verify implementation, not historical fidelity. No hosting/restoration-score/next-feature scope change.

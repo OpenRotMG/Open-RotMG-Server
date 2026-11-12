@@ -1,0 +1,276 @@
+List of (most) Behaviors
+Shoot: Shoot projectiles (Example in XML)
+type: 
+“targeted” (default): monster will shoot at a player when nearby
+“auto”: monster will shoot continually at a specified angle
+range: (8.0 default) float specifying the distance from a player at which the behavior will be activated (“targeted” only)
+numShots: number of projectiles in each shot
+cooldown: float time in seconds between shots
+cooldownJitter: boolean, whether to vary the cooldown by a random amount
+projectileId: integer that refers to Projectile tag that will describe the projectiles shot.
+childId: Create monster of this type instead of a projectile
+angle: float angle in degrees between projectiles when numShots > 1
+predictive: float between 0 and 1 determining the amount to which the monster attempts to predict where the player is going and shoot at its destination
+defaultAngle: float angle in degrees, shot angle to use in “auto” mode
+arcDegrees: for monsters with facing, the firing arc (centered on the facing angle)
+blastEffect: boolean, whether to show ConeBlast on shot.
+offset: float specifying the time after this behavior becomes active the first shot is fired.
+
+
+Wander: Move in a random direction (Example in XML)
+speed: float determining the speed at which the monster moves
+avoidWater: boolean determines whether the creature avoids water
+
+
+Charge: Move straight toward a nearby player’s position, then stop
+cooldown: float time in sec3onds between moves
+speed: float determining the speed at which the monster moves
+range: float distance at which players can activate this behavior
+
+
+Follow: Move toward a nearby player (Example in XML)
+acquireRange: float distance at which players can activate this behavior
+range: float distance determining how close to get to a player
+
+speed: float determining the speed at which the monster moves
+duration: float time in seconds determines how long to follow a player
+cooldown: float time in seconds determines how long to wait between follows
+predictive: boolean determines whether to try to predict the player position
+
+
+ChangeSize: Causes monster to increase in size (Example in XML)
+rate: float rate of size change in percent per 200 milliseconds (0.2 default, i.e. 1 percent a second)
+minSize: (60 default) float size in percentage to stop shrinking at
+maxSize: (200 default) float size in percentage to stop growing at
+
+
+Metamorphose: Replace monster with different monster
+time: float time in seconds before metamorphosis
+childId: string name of monster to replace this monster with
+dropLoot: (default: false) whether to drop loot
+giveXP: (default: false) whether to give xp to nearby players
+
+
+MetamorphoseAtDeath: Replace monster with different monster on death
+prob: float probability of the metamorphosis taking place
+posJitter: float (default: 0.1) distance in a random direction the new object will be created
+childId: string name of monster to replace this dead monster with
+
+
+Explode: Remove monster and send a spray of projectiles in all directions (Example in XML)
+initialDelay: float time in seconds before exploding
+range: float distance for player to activate.  0.0 range means does not need activation
+numShots: number of projectiles
+arcDegrees: arc of the shot (360 default)
+projectileId: integer that refers to Projectile tag that will describe the projectiles in the explosion
+dropLoot: (default: false) whether to drop loot
+giveXP: (default: false) whether to give xp to nearby players
+
+
+Protect: Keep close a monster of the given type (Example in XML)
+protecteeId: string name of monster to protect
+acquireRange: float distance within which a monster will look for a protectee
+protectionRange: float distance beyond which monster will attempt to “reprotect” the protectee
+reprotectRange: float distance to get within protectee (should be <= protectionRange)
+speed: float determining the speed at which the monster moves when reprotecting
+
+
+Taunt: Send chat messages to annoy players (requires taunts in separate file)
+listId: string name of monster to look up taunts for
+broadcast: boolean whether to yell or just chat
+
+
+Say: Send single chat message
+text: A semi-colon separated list of possible chat messages (e.g. “foo bar; baz bap” will say “foo bar” half the time and “baz bap” the other)
+broadcast: (defaults to false) boolean whether to yell or just chat
+prob: float (defaults to 1) determines the probability of a chat message being sent
+bubbleTime: (defaults to 10) number of seconds to show the bubble for
+
+
+ReleaseSpawnAtDeath: Create a bunch of new monsters at this monsters death
+min: integer minimum number of new monsters
+max: integer maximum number of new monsters
+childId: string name of type of monsters to spawn
+
+
+MakeMinions: Create a bunch of monsters (Example in XML)
+cooldown: time in seconds between creating new monster
+childIds: comma-seperated list of monster types to create
+groupId: name of group to create monsters from (overrides childIds)
+maxChildren: maximum number of minions to have alive at once
+startWithMinions: boolean (default=true) whether minions are created when the monster is.
+
+
+Decay: Kill monster after a certain amount of time
+time: time in seconds before killing monster
+particleEffect: string name of particle effect to trigger (currently empty only “Nova” supported)
+color: color of Nova effect
+dropLoot: (default: false) whether to drop loot
+giveXP: (default: false) whether to give xp to nearby players
+
+
+Orbit: Circle around a given monster type (if it hits a wall, will change direction and circle back in the opposite direction). (Example in XML)N
+protecteeId: string name of monster type to orbit
+clockwise: (default false) boolean determines direction of orbit
+acquireRange: float distance max at which a monster will look for a protectee
+speed: float determining the speed at which the monster moves
+radius: distance at which the monster orbits
+speedVariability: float variability in speed 
+(Defaults to 0.2, or +/- 20% of speed when Orbit is created.)
+radiusVariability: float variability in radius
+(Defaults to 0.50, or +/- 50% of radius when Orbit is created.)
+radiusWobbleDistance: float amplitude of sine wave added to radius
+radiusWobblePeriod: float period of sine wave added to radius
+
+
+Heal: Heal other monsters of given types (Example in XML)
+targetIds: comma-separated list of object ids to heal
+targetGroups: comma-separated list of group names to heal
+cooldown: time in seconds between heals
+range: float max distance to heal at
+maxTargets: (default = infinity) number of targets that can be healed
+maxHeal: (default = infinity) the amount of healing that can be done
+
+
+StayBack: Attempt to stay at least a certain distance from players (basically run away)
+distance: float minimum distance to stay from players
+speed: float determining the speed at which the monster moves
+
+
+KeepDistance: Attempt to stay at exactly a certain distance from players (Example in XML)
+acquireRange: float distance at which players can activate this behavior
+distance: float distance to stay from players
+speed: float determining the speed at which the monster moves
+
+
+Circle: Move in a circle around the playerz 
+acquireRange: float distance at which players can activate this behavior
+distance: float distance to stay from players
+speed: float determining the speed at which the monster moves
+
+
+StayCloseToSpawn: Have monster stay close to the point it spawned at
+speed: float determining the speed at which the monster moves
+cooldown: time in seconds between moving closer to spawn
+range: float max distance to get from spawn
+
+
+FollowOrders: Have the monster follow behaviors specified by another monster (Example in XML)
+listenIds: comma-separated list of monster types to listen to
+acquireRange: float distance max at which a monster will look for an orderer
+
+
+Swirl: Move in a fast tight circle (gives the monster a facing) (Example in XML)
+speed: (2.0 default) float determining the speed at which the monster moves
+acceleration: (2.0 default) float determines the rate at which the speed increases
+turnRate: (pi default) float determines the rate of turn (negative values send object in opposite direction)
+
+
+Buzz: Run toward and through a nearby player (gives the monster a facing)
+speed: (15.0 default) float determining the speed at which the monster moves
+acceleration: (5.0 default) float determines the rate at which the speed increases
+turnRate: (pi default) float determines the rate of turn (negative values send object in opposite direction)
+acquireRange: (20.0 default) float distance at which players can activate this behavior
+cooldown: (2.0 default) float time in seconds between buzzes
+
+
+GrenadeToss: Throw a grenade
+type: 
+“targeted” (default): monster will shoot at a player when nearby
+“auto”: monster will shoot continually at a specified angle
+range: float specifying the distance from a player at which the behavior will be activated or in “auto” mode, how far the grenade will be thrown
+cooldown: float time in seconds between throws
+radius: float radius of damage
+defaultAngle: float angle in degrees, shot angle to use in “auto” mode
+damage: amount of damage done
+minRange: won’t target or throw less than this range
+effect: (default=””, i.e. none) the name of the condition effect to apply if hit
+duration (default=0.0) the duration of the condition effect
+
+
+ObjectToss: Throw an object
+type: 
+“targeted” (default): monster will shoot at a player when nearby
+“auto”: monster will shoot continually at a specified angle
+childId: string name of object to toss
+range: float specifying the distance from a player at which the behavior will be activated or in “auto” mode, how far the object will be thrown
+rangeJitter: (0.0 default) indicates the amount the range varies by in “auto” mode.  For example, range of 5.0 and and rangeJitter of 2.0 means the shots will be uniformly distributed between 3.0 and 7.0.
+defaultAngle: float angle in degrees, shot angle to use in “auto” mode
+cooldown: float time in seconds between throws
+centerObject: (false default) determines whether objects should land at exactly the center of a square (X.5, Y.5).
+minRange: won’t target or throw less than this range
+
+
+Walk: Move to a nearby square of a certain terrain type
+speed: float determining the speed at which the monster moves
+groundTypes: comma-separated list of ground types to move to
+
+
+ShowEffect: Trigger a an effect (Example in XML)
+type: type of effect, “Flash” is main one at this point
+color: hex int color specification
+flashPeriod: time in seconds of a single flash (type == “Flash” only)
+flashRepeats: number of flashes (type == “Flash” only)
+
+
+ConditionEffect: Set a condition effect on the monster (Example in XML)
+effect: the name of the effect (see the list at end of this document)
+duration: the length of time in seconds the effect will last.  The default (0.0) is to be permanent (Note: ConditionEffects will, however, be removed if you transition out of the state with this behavior).
+
+
+BackAndForth: Have monster move back and forth around its current location
+speed: (1.0 default) float determining the speed at which the monster moves
+angle: (0.0 default) float in radians determining the angle of the movement (0 == x axis)
+turnRate: (0.0 default) float determines the change in angle over time
+radius: (4.0 default) float determines the radius of the movement from the original position
+
+
+StayInTerrain: Have monster move back to its terrain
+speed: (0.5 default) float determining the speed at which the monster moves
+terrain: (native terrain is default) the name of the terrain to move back to
+minAltitude: (default: minAltitude of the terrain) int determines the min altitude the behavior accepts
+maxAltitude: (default: maxAltitude of the default) int determines the max altitude the behavior accepts
+
+
+Move: Have monster walk in a straight line
+speed: (1.0 default) float determining the speed at which the monster moves
+distance: (3.0 default) float determining how far the monster moves
+angle: (0.0 default) float determining the direction the monster moves in degrees
+cooldown: (10.0 default) float interval between moves
+
+
+SetAltTexture: Use an alternative texture
+altTextureId: (0 is default) integer specifying the id of the texture to use
+
+
+ChangeGround: Change the ground under the object
+groundId: string specifying the id of the ground to use
+
+
+PlaceMap: Place a .jm file under the object
+map: location of map file (.jm)
+maxPlace: (default 1) how many times to do this action (-1 = infinite)
+cooldown: time in secconds between placing maps (inactive if maxPlace == 1)
+
+
+SetTag: Change the ground under the object
+tagName: name of tag to set
+
+
+ClearTag: Place a .jm file under the object
+tagName: name of tag to clear
+
+
+List of Transitions
+afterTime: Transition immediately after the specified number of seconds.
+hitpointsLessThan: Transition when the hitpoints of the creature fall below the specified proportion (i.e. 0.5 is 50%).
+playerWithin: A player is within the specified number of squares.
+noPlayerWithin: There is no player within the specified number of squares.
+noneExist: There are no objects of the specified type in this dungeon
+exist: There are objects of the specified type in this dungeon
+random: Transition with specified probability on each tick (e.g. random=”.05” has a 5% probability to take this transition every .2 seconds)
+playerSays: Transition when a player within 30 squares says the given phrase (ignoring case and whitespace)
+hasTag: Transition if this tag is set
+noTag: Transition if this tag is not set
+onTile: Transition if on a certain tile (<Transition onTile="tile1, tile2, tile3">StatetoTransition</Transition>
+

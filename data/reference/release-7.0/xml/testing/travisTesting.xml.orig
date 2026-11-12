@@ -1,0 +1,3467 @@
+<Objects>
+    <!--
+    *********************************************************************************
+
+    Hallowrena and Zombies
+
+    *********************************************************************************
+    -->
+
+<<<<<<< HEAD
+=======
+    <Object type="0x5e6a" id="Zombie Archer">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9089193</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Coral Arrow</ObjectId>
+            <Damage>55</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>1500</LifetimeMS>
+            <Size>75</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" range="10" angle="15">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed=".8" acquireRange="10" distance="5">KeepDistance</Behavior>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e6b" id="Zombie Warrior">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9084241</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Fire Bolt</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" cooldown="2" range="7" speed="1.2">Charge</Behavior>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e6c" id="Zombie Wizard">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9087255</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Fire Missile</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+            <Amplitude>0.5</Amplitude>
+            <Frequency>2</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed=".8" acquireRange="10" distance="5">KeepDistance</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e6d" id="Zombie Rogue">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9065350</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Rainbow Magic</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed="1.2" range="4" duration="2" cooldown="4">Follow</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e6e" id="Zombie Priest">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9065296</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Directed Explosion</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>50</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior targetGroups="Zombies" cooldown="2" range="7" maxHeal="400">Heal</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed=".8" acquireRange="10" distance="5">KeepDistance</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e6f" id="Zombie Knight">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9063025</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Stone Slash</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior acquireRange="7" distance="2" speed=".9">Circle</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7a" id="Zombie Paladin">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9065349</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Aqua Slash</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh;Mrrrrrrghhh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7b" id="Zombie Necromancer">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9079281</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Aqua Missile</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+            <Amplitude>0.5</Amplitude>
+            <Frequency>2</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7c" id="Zombie Huntress">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9077251</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Black Arrow</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1.5" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7d" id="Zombie Mystic">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9082249</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Crystal Serpent Missile</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+            <Amplitude>0.5</Amplitude>
+            <Frequency>2</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="2" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7e" id="Zombie Trickster">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9066320</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Spirit Dagger Slash</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e7f" id="Zombie Sorcerer">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9069334</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Blue Magic</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e8a" id="Zombie Assassin">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9065351</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Green Bolt</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e8b" id="Zombie Ninja">
+        <Class>Character</Class>
+        <Group>Zombies</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9098612</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Jewel Slash</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior prob=".5" bubbleTime="2" text="Braaaainssss;Braaaaaaaaainnnsss;Errrrrrggggg;Rrrrrgghhhhh;Hungryyy;Brainssss;Raahhhhgggg;Uugghh">Say</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" speed="1" cooldown="3" range="7">StayCloseToSpawn</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+        </State>
+
+    </Object>
+
+>>>>>>> [Hallowrena] Rebasing changes from a different branch
+    <Object type="0x5e8c" id="Arena North Gate Spawner">
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>0</Size>
+
+        <State id="Ini">
+            <Transition afterTime="1">AreaListen</Transition>
+        </State>
+
+        <State id="AreaListen">
+            <Transition hasGlobalTag="Area5Active">Area5</Transition>
+            <Transition hasGlobalTag="Area4Active">Area4</Transition>
+            <Transition hasGlobalTag="Area3Active">Area3</Transition>
+            <Transition hasGlobalTag="Area2Active">Area2</Transition>
+            <Transition hasGlobalTag="Area1Active">Area1</Transition>
+        </State>
+
+
+        <State id="Area1">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Skeleton" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Skeleton" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Troll 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Troll 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" childIds="Troll 3" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area2">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Ghost 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Ghost 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Ghost 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Ghost 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" childIds="Arena Ghost Bride" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area3">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Risen Warrior" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Risen Warrior" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Warrior" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Risen Mage" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Mage" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Risen Mage" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Mage" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" childIds="Arena Grave Caretaker" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area4">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Vampire" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Vampire" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" childIds="Arena Pumpkin King" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area5">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e8d" id="Arena South Gate Spawner">
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>0</Size>
+
+        <State id="Ini">
+            <Transition afterTime="1">AreaListen</Transition>
+        </State>
+
+        <State id="AreaListen">
+            <Transition hasGlobalTag="Area5Active">Area5</Transition>
+            <Transition hasGlobalTag="Area4Active">Area4</Transition>
+            <Transition hasGlobalTag="Area3Active">Area3</Transition>
+            <Transition hasGlobalTag="Area2Active">Area2</Transition>
+            <Transition hasGlobalTag="Area1Active">Area1</Transition>
+        </State>
+
+
+        <State id="Area1">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Skeleton" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Troll 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Troll 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Troll 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Troll 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area2">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area3">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Risen Brawler" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Risen Warrior" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Warrior" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Risen Mage" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Mage" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Risen Brawler" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Brawler" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Arena Grave Caretaker" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area4">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Risen Mummy" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Vampire" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Risen Mummy" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Mummy" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Arena Pumpkin King" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area5">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e8e" id="Arena East Gate Spawner">
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>0</Size>
+
+        <State id="Ini">
+            <Transition afterTime="1">AreaListen</Transition>
+        </State>
+
+        <State id="AreaListen">
+            <Transition hasGlobalTag="Area5Active">Area5</Transition>
+            <Transition hasGlobalTag="Area4Active">Area4</Transition>
+            <Transition hasGlobalTag="Area3Active">Area3</Transition>
+            <Transition hasGlobalTag="Area2Active">Area2</Transition>
+            <Transition hasGlobalTag="Area1Active">Area1</Transition>
+        </State>
+
+
+        <State id="Area1">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Skeleton" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Skeleton" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Troll 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Troll 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Troll 3" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area2">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Ghost 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Ghost 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" childIds="Arena Possessed Girl" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area3">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Risen Mage" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Risen Brawler" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Brawler" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Arena Grave Caretaker" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area4">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Risen Mummy" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Vampire" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Vampire" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Vampire" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Arena Pumpkin King" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area5">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e8f" id="Arena West Gate Spawner">
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>0</Size>
+
+        <State id="Ini">
+            <Transition afterTime="1">AreaListen</Transition>
+        </State>
+
+        <State id="AreaListen">
+            <Transition hasGlobalTag="Area5Active">Area5</Transition>
+            <Transition hasGlobalTag="Area4Active">Area4</Transition>
+            <Transition hasGlobalTag="Area3Active">Area3</Transition>
+            <Transition hasGlobalTag="Area2Active">Area2</Transition>
+            <Transition hasGlobalTag="Area1Active">Area1</Transition>
+        </State>
+
+
+        <State id="Area1">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Skeleton" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Skeleton" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Troll 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Troll 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Troll 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area2">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Ghost 1" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Ghost 2" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Possessed Girl" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" childIds="Arena Possessed Girl" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area3">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Risen Brawler" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Brawler" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Archer" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Arena Grave Caretaker" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area4">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" childIds="Arena Spider" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" childIds="Arena Risen Mummy" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" childIds="Arena Risen Mummy" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Behavior cooldown="50" childIds="Arena Risen Mummy" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <!--<Behavior cooldown="50" childIds="Arena Pumpkin King" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>-->
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+        <State id="Area5">
+            <State id="Listening">
+                <Transition hasGlobalTag="Wave1Active">Wave1</Transition>
+                <Transition hasGlobalTag="Wave2Active">Wave2</Transition>
+                <Transition hasGlobalTag="Wave3Active">Wave3</Transition>
+                <Transition hasGlobalTag="Wave4Active">Wave4</Transition>
+                <Transition hasGlobalTag="Wave5Active">Wave5</Transition>
+            </State>
+
+            <State id="Wave1">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave2">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave3">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave4">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Wave5">
+                <Behavior cooldown="50" groupId="Zombies" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime="2">Waiting</Transition>
+            </State>
+
+            <State id="Waiting">
+                <Transition noneExist="Hallowrena">ListeningDelay</Transition>
+            </State>
+
+            <State id="ListeningDelay">
+                <Transition afterTime="2">Listening</Transition>
+            </State>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e9a" id="Area 1 Controller">
+        <DisplayId>Arena Master</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>10308127</Id><Right/></RemoteTexture>
+        </AltTexture>
+
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>125</Size>
+        <ShadowSize>0</ShadowSize>
+
+        <State id="Ini">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave1Next">SetGlobalTag</Behavior>
+            <Behavior tagName="Area1Active">SetGlobalTag</Behavior>
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Transition afterTime="1">Listening</Transition>
+        </State>
+
+        <State id="Listening">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior prob="1" text="Say, 'Ready' when you are ready to face your opponents" bubbleTime="2">Say</Behavior>
+            <Transition playerSays="Ready" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="Countdown">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior prob="1" text="The next wave will appear in 10 seconds. Prepare yourself!; The next onslaught will begin in 10 seconds!; You have 10 seconds until your next challenge!" bubbleTime="4">Say</Behavior>
+            <Transition afterTime="10" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="CheckWave">
+            <!--Start from last wave and work to 1-->
+            <!--<Behavior prob="1" text="Checking Wave">Say</Behavior>-->
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Transition hasGlobalTag="Wave5Next">Wave5Start</Transition>
+            <Transition hasGlobalTag="Wave4Next">Wave4Start</Transition>
+            <Transition hasGlobalTag="Wave3Next">Wave3Start</Transition>
+            <Transition hasGlobalTag="Wave2Next">Wave2Start</Transition>
+            <Transition hasGlobalTag="Wave1Next">Wave1Start</Transition>
+        </State>
+
+        <State id="Wave1Start">
+            <!--<Behavior prob="1" text="Wave 1 Start">Say</Behavior>-->
+            <Behavior tagName="Wave1Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round1Active</Transition>
+        </State>
+
+        <State id="Wave2Start">
+            <Behavior tagName="Wave2Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round2Active</Transition>
+        </State>
+
+        <State id="Wave3Start">
+            <Behavior tagName="Wave3Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round3Active</Transition>
+        </State>
+
+        <State id="Wave4Start">
+            <Behavior tagName="Wave4Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round4Active</Transition>
+        </State>
+
+        <State id="Wave5Start">
+            <Behavior tagName="Wave5Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round5Active</Transition>
+        </State>
+
+        <State id="Round1Active">
+            <!--<Behavior prob="1" text="Round 1 Active">Say</Behavior>-->
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round2Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round3Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round4Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round5Active">
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="SetNextWave">
+            <!--<Behavior prob="1" text="Entering SetNextWave">Say</Behavior>-->
+            <State id="DetermineCurrentWave">
+                <!--Needs to go from 1 to 2 to 3 and so on-->
+                <!--<Behavior prob="1" text="Determining Current Wave">Say</Behavior>-->
+                <Transition hasGlobalTag="Wave1Next">ClearWave1SetWave2</Transition>
+                <Transition hasGlobalTag="Wave2Next">ClearWave2SetWave3</Transition>
+                <Transition hasGlobalTag="Wave3Next">ClearWave3SetWave4</Transition>
+                <Transition hasGlobalTag="Wave4Next">ClearWave4SetWave5</Transition>
+                <Transition hasGlobalTag="Wave5Next">IncrementArea</Transition>
+            </State>
+            <State id="ClearWave1SetWave2">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 1 Set Wave 2">Say</Behavior>-->
+                <Behavior tagName="Wave1Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave1Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave2SetWave3">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 2 Set Wave 3">Say</Behavior>-->
+                <Behavior tagName="Wave2Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave3SetWave4">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 3 Set Wave 4">Say</Behavior>-->
+                <Behavior tagName="Wave3Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave4SetWave5">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 4 Set Wave 5">Say</Behavior>-->
+                <Behavior tagName="Wave4Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="IncrementArea">
+                <!--<Behavior prob="1" text="Incrementing Area and should be dead">Say</Behavior>-->
+                <Behavior tagName="Area5Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+                <Transition afterTime="0.5">Decay</Transition>
+            </State>
+            <State id="Decay">
+                <Behavior time="0">Decay</Behavior>
+            </State>
+            <Transition afterTime="2">Countdown</Transition>
+        </State>
+        <Behavior prob="1" childId="Area2 Portal">MetamorphoseAtDeath</Behavior>
+
+
+    </Object>
+
+    <Object type="0x5f21" id="Area 2 Controller">
+        <DisplayId>Arena Master</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>10308127</Id><Right/></RemoteTexture>
+        </AltTexture>
+
+
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>125</Size>
+        <ShadowSize>0</ShadowSize>
+
+        <State id="Ini">
+            <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave1Next">SetGlobalTag</Behavior>
+            <Behavior tagName="Area2Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Listening</Transition>
+        </State>
+
+        <State id="Listening">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior prob="1" text="Say, 'Ready' when you are ready to face your opponents" bubbleTime="2">Say</Behavior>
+            <Transition playerSays="Ready" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="Countdown">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior prob="1" text="The next wave will appear in 10 seconds. Prepare yourself!; The next onslaught will begin in 10 seconds!; You have 10 seconds until your next challenge!" bubbleTime="4">Say</Behavior>
+            <Transition afterTime="10" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="CheckWave">
+            <!--Start from last wave and work to 1-->
+            <!--<Behavior prob="1" text="Checking Wave">Say</Behavior>-->
+            <Transition hasGlobalTag="Wave5Next">Wave5Start</Transition>
+            <Transition hasGlobalTag="Wave4Next">Wave4Start</Transition>
+            <Transition hasGlobalTag="Wave3Next">Wave3Start</Transition>
+            <Transition hasGlobalTag="Wave2Next">Wave2Start</Transition>
+            <Transition hasGlobalTag="Wave1Next">Wave1Start</Transition>
+        </State>
+
+        <State id="Wave1Start">
+            <!--<Behavior prob="1" text="Wave 1 Start">Say</Behavior>-->
+            <Behavior tagName="Wave1Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round1Active</Transition>
+        </State>
+
+        <State id="Wave2Start">
+            <Behavior tagName="Wave2Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round2Active</Transition>
+        </State>
+
+        <State id="Wave3Start">
+            <Behavior tagName="Wave3Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round3Active</Transition>
+        </State>
+
+        <State id="Wave4Start">
+            <Behavior tagName="Wave4Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round4Active</Transition>
+        </State>
+
+        <State id="Wave5Start">
+            <Behavior tagName="Wave5Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round5Active</Transition>
+        </State>
+
+        <State id="Round1Active">
+            <!--<Behavior prob="1" text="Round 1 Active">Say</Behavior>-->
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round2Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round3Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round4Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round5Active">
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="SetNextWave">
+            <!--<Behavior prob="1" text="Entering SetNextWave">Say</Behavior>-->
+            <State id="DetermineCurrentWave">
+                <!--Needs to go from 1 to 2 to 3 and so on-->
+                <!--<Behavior prob="1" text="Determining Current Wave">Say</Behavior>-->
+                <Transition hasGlobalTag="Wave1Next">ClearWave1SetWave2</Transition>
+                <Transition hasGlobalTag="Wave2Next">ClearWave2SetWave3</Transition>
+                <Transition hasGlobalTag="Wave3Next">ClearWave3SetWave4</Transition>
+                <Transition hasGlobalTag="Wave4Next">ClearWave4SetWave5</Transition>
+                <Transition hasGlobalTag="Wave5Next">IncrementArea</Transition>
+            </State>
+            <State id="ClearWave1SetWave2">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 1 Set Wave 2">Say</Behavior>-->
+                <Behavior tagName="Wave1Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave1Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave2SetWave3">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 2 Set Wave 3">Say</Behavior>-->
+                <Behavior tagName="Wave2Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave3SetWave4">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 3 Set Wave 4">Say</Behavior>-->
+                <Behavior tagName="Wave3Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave4SetWave5">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 4 Set Wave 5">Say</Behavior>-->
+                <Behavior tagName="Wave4Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="IncrementArea">
+                <!--<Behavior prob="1" text="Incrementing Area and should be dead">Say</Behavior>-->
+                <Behavior tagName="Area5Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+                <Transition afterTime="0.5">Decay</Transition>
+            </State>
+            <State id="Decay">
+                <Behavior time="0">Decay</Behavior>
+            </State>
+            <Transition afterTime="2">Countdown</Transition>
+        </State>
+        <Behavior prob="1" childId="Area3 Portal">MetamorphoseAtDeath</Behavior>
+
+
+    </Object>
+
+    <Object type="0x5f22" id="Area 3 Controller">
+        <DisplayId>Arena Master</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>10308127</Id><Right/></RemoteTexture>
+        </AltTexture>
+
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>125</Size>
+        <ShadowSize>0</ShadowSize>
+
+        <State id="Ini">
+            <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave1Next">SetGlobalTag</Behavior>
+            <Behavior tagName="Area3Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Listening</Transition>
+        </State>
+
+        <State id="Listening">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior prob="1" text="Say, 'Ready' when you are ready to face your opponents" bubbleTime="2">Say</Behavior>
+            <Transition playerSays="Ready" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="Countdown">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior prob="1" text="The next wave will appear in 10 seconds. Prepare yourself!; The next onslaught will begin in 10 seconds!; You have 10 seconds until your next challenge!" bubbleTime="4">Say</Behavior>
+            <Transition afterTime="10" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="CheckWave">
+            <!--Start from last wave and work to 1-->
+            <!--<Behavior prob="1" text="Checking Wave">Say</Behavior>-->
+            <Transition hasGlobalTag="Wave5Next">Wave5Start</Transition>
+            <Transition hasGlobalTag="Wave4Next">Wave4Start</Transition>
+            <Transition hasGlobalTag="Wave3Next">Wave3Start</Transition>
+            <Transition hasGlobalTag="Wave2Next">Wave2Start</Transition>
+            <Transition hasGlobalTag="Wave1Next">Wave1Start</Transition>
+        </State>
+
+        <State id="Wave1Start">
+            <!--<Behavior prob="1" text="Wave 1 Start">Say</Behavior>-->
+            <Behavior tagName="Wave1Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round1Active</Transition>
+        </State>
+
+        <State id="Wave2Start">
+            <Behavior tagName="Wave2Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round2Active</Transition>
+        </State>
+
+        <State id="Wave3Start">
+            <Behavior tagName="Wave3Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round3Active</Transition>
+        </State>
+
+        <State id="Wave4Start">
+            <Behavior tagName="Wave4Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round4Active</Transition>
+        </State>
+
+        <State id="Wave5Start">
+            <Behavior tagName="Wave5Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round5Active</Transition>
+        </State>
+
+        <State id="Round1Active">
+            <!--<Behavior prob="1" text="Round 1 Active">Say</Behavior>-->
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round2Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round3Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round4Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round5Active">
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="SetNextWave">
+            <!--<Behavior prob="1" text="Entering SetNextWave">Say</Behavior>-->
+            <State id="DetermineCurrentWave">
+                <!--Needs to go from 1 to 2 to 3 and so on-->
+                <!--<Behavior prob="1" text="Determining Current Wave">Say</Behavior>-->
+                <Transition hasGlobalTag="Wave1Next">ClearWave1SetWave2</Transition>
+                <Transition hasGlobalTag="Wave2Next">ClearWave2SetWave3</Transition>
+                <Transition hasGlobalTag="Wave3Next">ClearWave3SetWave4</Transition>
+                <Transition hasGlobalTag="Wave4Next">ClearWave4SetWave5</Transition>
+                <Transition hasGlobalTag="Wave5Next">IncrementArea</Transition>
+            </State>
+            <State id="ClearWave1SetWave2">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 1 Set Wave 2">Say</Behavior>-->
+                <Behavior tagName="Wave1Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave1Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave2SetWave3">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 2 Set Wave 3">Say</Behavior>-->
+                <Behavior tagName="Wave2Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave3SetWave4">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 3 Set Wave 4">Say</Behavior>-->
+                <Behavior tagName="Wave3Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave4SetWave5">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 4 Set Wave 5">Say</Behavior>-->
+                <Behavior tagName="Wave4Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="IncrementArea">
+                <!--<Behavior prob="1" text="Incrementing Area and should be dead">Say</Behavior>-->
+                <Behavior tagName="Area5Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+                <Transition afterTime="0.5">Decay</Transition>
+            </State>
+            <State id="Decay">
+                <Behavior time="0">Decay</Behavior>
+            </State>
+            <Transition afterTime="2">Countdown</Transition>
+        </State>
+        <Behavior prob="1" childId="Area4 Portal">MetamorphoseAtDeath</Behavior>
+
+
+    </Object>
+
+    <Object type="0x5f23" id="Area 4 Controller">
+        <DisplayId>Arena Master</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>10308127</Id><Right/></RemoteTexture>
+        </AltTexture>
+
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>125</Size>
+        <ShadowSize>0</ShadowSize>
+
+        <State id="Ini">
+            <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave1Next">SetGlobalTag</Behavior>
+            <Behavior tagName="Area4Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Listening</Transition>
+        </State>
+
+        <State id="Listening">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior prob="1" text="Say, 'Ready' when you are ready to face your opponents" bubbleTime="2">Say</Behavior>
+            <Transition playerSays="Ready" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="Countdown">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior prob="1" text="The next wave will appear in 10 seconds. Prepare yourself!; The next onslaught will begin in 10 seconds!; You have 10 seconds until your next challenge!" bubbleTime="4">Say</Behavior>
+            <Transition afterTime="10" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="CheckWave">
+            <!--Start from last wave and work to 1-->
+            <!--<Behavior prob="1" text="Checking Wave">Say</Behavior>-->
+            <Transition hasGlobalTag="Wave5Next">Wave5Start</Transition>
+            <Transition hasGlobalTag="Wave4Next">Wave4Start</Transition>
+            <Transition hasGlobalTag="Wave3Next">Wave3Start</Transition>
+            <Transition hasGlobalTag="Wave2Next">Wave2Start</Transition>
+            <Transition hasGlobalTag="Wave1Next">Wave1Start</Transition>
+        </State>
+
+        <State id="Wave1Start">
+            <!--<Behavior prob="1" text="Wave 1 Start">Say</Behavior>-->
+            <Behavior tagName="Wave1Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round1Active</Transition>
+        </State>
+
+        <State id="Wave2Start">
+            <Behavior tagName="Wave2Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round2Active</Transition>
+        </State>
+
+        <State id="Wave3Start">
+            <Behavior tagName="Wave3Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round3Active</Transition>
+        </State>
+
+        <State id="Wave4Start">
+            <Behavior tagName="Wave4Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round4Active</Transition>
+        </State>
+
+        <State id="Wave5Start">
+            <Behavior tagName="Wave5Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round5Active</Transition>
+        </State>
+
+        <State id="Round1Active">
+            <!--<Behavior prob="1" text="Round 1 Active">Say</Behavior>-->
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round2Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round3Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round4Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round5Active">
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="SetNextWave">
+            <!--<Behavior prob="1" text="Entering SetNextWave">Say</Behavior>-->
+            <State id="DetermineCurrentWave">
+                <!--Needs to go from 1 to 2 to 3 and so on-->
+                <!--<Behavior prob="1" text="Determining Current Wave">Say</Behavior>-->
+                <Transition hasGlobalTag="Wave1Next">ClearWave1SetWave2</Transition>
+                <Transition hasGlobalTag="Wave2Next">ClearWave2SetWave3</Transition>
+                <Transition hasGlobalTag="Wave3Next">ClearWave3SetWave4</Transition>
+                <Transition hasGlobalTag="Wave4Next">ClearWave4SetWave5</Transition>
+                <Transition hasGlobalTag="Wave5Next">IncrementArea</Transition>
+            </State>
+            <State id="ClearWave1SetWave2">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 1 Set Wave 2">Say</Behavior>-->
+                <Behavior tagName="Wave1Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave1Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave2SetWave3">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 2 Set Wave 3">Say</Behavior>-->
+                <Behavior tagName="Wave2Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave3SetWave4">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 3 Set Wave 4">Say</Behavior>-->
+                <Behavior tagName="Wave3Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave4SetWave5">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 4 Set Wave 5">Say</Behavior>-->
+                <Behavior tagName="Wave4Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="IncrementArea">
+                <!--<Behavior prob="1" text="Incrementing Area and should be dead">Say</Behavior>-->
+                <Behavior tagName="Area5Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+                <Transition afterTime="0.5">Decay</Transition>
+            </State>
+            <State id="Decay">
+                <Behavior time="0">Decay</Behavior>
+            </State>
+            <Transition afterTime="2">Countdown</Transition>
+        </State>
+        <!--<Behavior prob="1" childId="Area5 Portal">MetamorphoseAtDeath</Behavior>-->
+
+    </Object>
+
+    <Object type="0x5f24" id="Area 5 Controller">
+        <DisplayId>Arena Master</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <MaxHitPoints>10</MaxHitPoints>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Size>0</Size>
+
+        <State id="Ini">
+            <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Behavior tagName="Wave1Next">SetGlobalTag</Behavior>
+            <Behavior tagName="Area5Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Listening</Transition>
+        </State>
+
+        <State id="Listening">
+            <Behavior prob="1" text="Say, 'Ready' when you are ready to face your opponents">Say</Behavior>
+            <Transition playerSays="Ready" noneExist="Hallowrena">CheckWave</Transition>
+        </State>
+
+        <State id="CheckWave">
+            <!--Start from last wave and work to 1-->
+            <!--<Behavior prob="1" text="Checking Wave">Say</Behavior>-->
+            <Transition hasGlobalTag="Wave5Next">Wave5Start</Transition>
+            <Transition hasGlobalTag="Wave4Next">Wave4Start</Transition>
+            <Transition hasGlobalTag="Wave3Next">Wave3Start</Transition>
+            <Transition hasGlobalTag="Wave2Next">Wave2Start</Transition>
+            <Transition hasGlobalTag="Wave1Next">Wave1Start</Transition>
+        </State>
+
+        <State id="Wave1Start">
+            <!--<Behavior prob="1" text="Wave 1 Start">Say</Behavior>-->
+            <Behavior tagName="Wave1Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round1Active</Transition>
+        </State>
+
+        <State id="Wave2Start">
+            <Behavior tagName="Wave2Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round2Active</Transition>
+        </State>
+
+        <State id="Wave3Start">
+            <Behavior tagName="Wave3Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round3Active</Transition>
+        </State>
+
+        <State id="Wave4Start">
+            <Behavior tagName="Wave4Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round4Active</Transition>
+        </State>
+
+        <State id="Wave5Start">
+            <Behavior tagName="Wave5Active">SetGlobalTag</Behavior>
+            <Transition afterTime="1">Round5Active</Transition>
+        </State>
+
+        <State id="Round1Active">
+            <!--<Behavior prob="1" text="Round 1 Active">Say</Behavior>-->
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round2Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round3Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round4Active">
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="Round5Active">
+            <Behavior tagName="Wave5Active">ClearGlobalTag</Behavior>
+            <Transition noneExist="Hallowrena">SetNextWave</Transition>
+        </State>
+
+        <State id="SetNextWave">
+            <!--<Behavior prob="1" text="Entering SetNextWave">Say</Behavior>-->
+            <State id="DetermineCurrentWave">
+                <!--Needs to go from 1 to 2 to 3 and so on-->
+                <!--<Behavior prob="1" text="Determining Current Wave">Say</Behavior>-->
+                <Transition hasGlobalTag="Wave1Next">ClearWave1SetWave2</Transition>
+                <Transition hasGlobalTag="Wave2Next">ClearWave2SetWave3</Transition>
+                <Transition hasGlobalTag="Wave3Next">ClearWave3SetWave4</Transition>
+                <Transition hasGlobalTag="Wave4Next">ClearWave4SetWave5</Transition>
+                <Transition hasGlobalTag="Wave5Next">IncrementArea</Transition>
+            </State>
+            <State id="ClearWave1SetWave2">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 1 Set Wave 2">Say</Behavior>-->
+                <Behavior tagName="Wave1Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave1Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave2SetWave3">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 2 Set Wave 3">Say</Behavior>-->
+                <Behavior tagName="Wave2Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave2Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave3SetWave4">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 3 Set Wave 4">Say</Behavior>-->
+                <Behavior tagName="Wave3Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave3Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="ClearWave4SetWave5">
+                <!--Clear current wave tag and set the next one-->
+                <!--<Behavior prob="1" text="Clear Wave 4 Set Wave 5">Say</Behavior>-->
+                <Behavior tagName="Wave4Next">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave4Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">SetGlobalTag</Behavior>
+            </State>
+            <State id="IncrementArea">
+                <!--<Behavior prob="1" text="Incrementing Area and should be dead">Say</Behavior>-->
+                <Behavior tagName="Area5Active">ClearGlobalTag</Behavior>
+                <Behavior tagName="Wave5Next">ClearGlobalTag</Behavior>
+                <Transition afterTime="0.5">Decay</Transition>
+            </State>
+            <State id="Decay">
+                <Behavior time="0">Decay</Behavior>
+            </State>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+        <Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+
+    </Object>
+
+    <Object type="0x5e9b" id="Area1 Portal">
+        <Class>Portal</Class>
+        <IntergamePortal/>
+        <DungeonName>Area1</DungeonName>
+        <Texture><File>lofiEnvironment</File><Index>0x7c</Index></Texture>
+    </Object>
+
+    <Object type="0x5f25" id="Area2 Portal">
+        <Class>Portal</Class>
+        <IntergamePortal/>
+        <DungeonName>Area2</DungeonName>
+        <Texture><File>lofiEnvironment</File><Index>0x7c</Index></Texture>
+    </Object>
+
+    <Object type="0x5f26" id="Area3 Portal">
+        <Class>Portal</Class>
+        <IntergamePortal/>
+        <DungeonName>Area3</DungeonName>
+        <Texture><File>lofiEnvironment</File><Index>0x7c</Index></Texture>
+    </Object>
+
+    <Object type="0x5f29" id="Area4 Portal">
+        <Class>Portal</Class>
+        <IntergamePortal/>
+        <DungeonName>Area4</DungeonName>
+        <Texture><File>lofiEnvironment</File><Index>0x7c</Index></Texture>
+    </Object>
+
+    <Object type="0x5f2a" id="Area5 Portal">
+        <Class>Portal</Class>
+        <IntergamePortal/>
+        <DungeonName>Area5</DungeonName>
+        <Texture><File>lofiEnvironment</File><Index>0x7c</Index></Texture>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Market Decals
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x5f13" id="Decal Dye">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x27f</Index></Texture>
+    </Object>
+
+    <Object type="0x5f14" id="Decal Cloth">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x280</Index></Texture>
+    </Object>
+
+    <Object type="0x5f15" id="Decal Key">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x281</Index></Texture>
+    </Object>
+
+    <Object type="0x5f16" id="Decal Pet">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x288</Index></Texture>
+    </Object>
+
+    <Object type="0x5f17" id="Decal Fame">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x283</Index></Texture>
+    </Object>
+
+    <Object type="0x5f18" id="Decal Special">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x284</Index></Texture>
+    </Object>
+
+    <Object type="0x5f19" id="Decal Support">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x285</Index></Texture>
+    </Object>
+
+    <Object type="0x5f1c" id="Decal Small Dye">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x286</Index></Texture>
+    </Object>
+
+    <Object type="0x5f1d" id="Decal Small Cloth">
+        <Class>GameObject</Class>
+        <DrawOnGround/>
+        <Texture><File>lofiObj3</File><Index>0x287</Index></Texture>
+    </Object>
+
+
+    <!--
+    *********************************************************************************
+
+    Market Signs
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x5e9c" id="Sign Textile">
+        <Class>GameObject</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>9126071</Id><Right/></RemoteTexture>
+        <HitSound>monster/trees_hit</HitSound>
+        <DeathSound>monster/tress_death</DeathSound>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Static/>
+        <XpMult>0.0</XpMult>
+        <OccupySquare/>
+    </Object>
+
+    <Object type="0x5e9d" id="Sign Dye">
+        <Class>GameObject</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>9078997</Id><Right/></RemoteTexture>
+        <HitSound>monster/trees_hit</HitSound>
+        <DeathSound>monster/tress_death</DeathSound>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Static/>
+        <XpMult>0.0</XpMult>
+        <OccupySquare/>
+    </Object>
+
+    <Object type="0x5e9e" id="Sign Pets">
+        <Class>GameObject</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>9098774</Id><Right/></RemoteTexture>
+        <HitSound>monster/trees_hit</HitSound>
+        <DeathSound>monster/tress_death</DeathSound>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Static/>
+        <XpMult>0.0</XpMult>
+        <OccupySquare/>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Hallowrena Monsters
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x5e9f" id="Arena Headless Horseman">
+        <DisplayId>Headless Horseman</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9225527</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Orange Pumpkin Blast</ObjectId>
+            <Damage>55</Damage>
+            <Speed>80</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>175</Size>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Orange Shot</ObjectId>
+            <Damage>55</Damage>
+            <Speed>80</Speed>
+            <LifetimeMS>1500</LifetimeMS>
+            <Size>225</Size>
+        </Projectile>
+
+        <!--<WhileMoving>-->
+            <!--<Z>0.7</Z>-->
+            <!--<Flying/>-->
+        <!--</WhileMoving>-->
+
+        <State id="Ini">
+            <Behavior speed=".5">Wander</Behavior>
+            <Transition playerWithin="6">Phase1</Transition>
+        </State>
+
+        <State id="Phase1">
+            <State id="SpawnAnchor">
+                <Behavior cooldown="50" childIds="Arena Horseman Anchor" maxChildren="1">MakeMinions</Behavior>
+                <Transition afterTime="1">CircleAttack</Transition>
+            </State>
+            <State id="CircleAttack">
+                <Behavior protecteeId="Arena Horseman Anchor" acquireRange="10" speed="1.8" radius="5">Orbit</Behavior>
+                <Behavior type="targeted" defaultAngle="0" angle="45" numShots="3"  projectileId="0" cooldown="1" range="6" offset="0" predictive="0">Shoot</Behavior>
+                <Transition afterTime="5">ChargeAttack</Transition>
+            </State>
+            <State id="ChargeAttack">
+                <Behavior cooldown="3" speed="2" range="6">Charge</Behavior>
+                <Behavior protecteeId="Arena Horseman Anchor" acquireRange="10" speed="1.3" radius="5">Orbit</Behavior>
+                <Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="1" cooldown="1" range="6" offset="0" predictive="0">Shoot</Behavior>
+                <Transition afterTime="5">CircleAttack</Transition>
+            </State>
+
+            <Transition hitpointsLessThan=".8">Phase2</Transition>
+        </State>
+
+        <State id="Phase2">
+            <Behavior prob="1" text="Phase 2">Say</Behavior>
+            <State id="Split">
+
+            </State>
+        </State>
+    </Object>
+
+    <Object type="0x5f01" id="Arena Ghost 1">
+        <DisplayId>Apparition</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9243354</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Blue Magic</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>150</Size>
+            <Amplitude>0.05</Amplitude>
+            <Frequency>10</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" acquireRange="10" speed="0.5" distance="2.8">Circle</Behavior>
+            <Behavior bucket="movement" cooldown="2" speed="1.2" range="11">Charge</Behavior>
+            <Behavior speed=".6">Wander</Behavior>
+            <Behavior type="targeted" defaultAngle="0" numShots="1"  projectileId="0" cooldown="1" range="5.5" offset="0" predictive="0">Shoot</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f02" id="Arena Risen Mummy">
+        <DisplayId>Risen Mummy</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9225493</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Mummy Blast</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>100</Size>
+            <ConditionEffect duration="2">Slow</ConditionEffect>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior projectileId="0" numShots="1" range="10" predictive="0.5">Shoot</Behavior>
+            <Behavior bucket="movement" range="1" speed="1.6">Follow</Behavior>
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f03" id="Arena Risen Warrior">
+        <DisplayId>Risen Warrior</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9243363</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Purple Bolt</ObjectId>
+            <Damage>45</Damage>
+            <Speed>100</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior projectileId="0" range="3">Shoot</Behavior>
+            <Behavior bucket="movement" range="1" speed="1.3">Follow</Behavior>
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f04" id="Arena Risen Mage">
+        <DisplayId>Risen Mage</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9232464</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Purple Magic</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>150</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior projectileId="0" range="10">Shoot</Behavior>
+            <Behavior bucket="movement" range="7" speed="1.3">Follow</Behavior>
+            <Behavior bucket="movement" speed="0.6" acquireRange="10" distance="3">Circle</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f05" id="Arena Risen Archer">
+        <DisplayId>Risen Archer</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9244347</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Green Arrow</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Thousand Shot Arrow</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior projectileId="0" range="10" numShots="3" angle="33" cooldown="3">Shoot</Behavior>
+            <Behavior projectileId="1" range="10" numShots="1"  cooldown="1.3">Shoot</Behavior>
+            <Behavior bucket="movement" range="7" speed="1.2">Follow</Behavior>
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f06" id="Arena Risen Brawler">
+        <DisplayId>Risen Brawler</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9249316</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Yellow Grey Ball</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>500</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior projectileId="0" numShots="3" range="10">Shoot</Behavior>
+            <Behavior projectileId="1" range="10" numShots="3" cooldown="2">Shoot</Behavior>
+            <Behavior bucket="movement" range="7" speed="1">Follow</Behavior>
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f07" id="Arena Ghost Bride">
+        <DisplayId>Ghost Bride</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9230502</Id><Right/></RemoteTexture>
+
+        <AltTexture id="1">
+            <Texture><File>invisible</File><Index>0</Index></Texture>
+        </AltTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>10000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Ghost Bride Attack 1</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+            <!--<ConditionEffect duration="2">Weak</ConditionEffect>-->
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Ghost Big Blast</ObjectId>
+            <Damage>55</Damage>
+            <Speed>80</Speed>
+            <LifetimeMS>1500</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" acquireRange="8" range="3" duration="3" cooldown="4">Shoot</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="3" numShots="1" type="targeted" predictive=".9">Shoot</Behavior>
+            <Behavior acquireRange="8" projectileId="1" cooldown="1" numShots="4" type="auto" defaultAngle="90" angle="30">Shoot</Behavior>
+            <Transition hitpointsLessThan=".75">Split</Transition>
+        </State>
+
+        <State id="Split">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Effect particle="SwirlingMist" cooldown="0.2">XMLEffect</Effect>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Transition afterTime="5">Hiding1</Transition>
+        </State>
+
+        <State id="Hiding1">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Transition noneExist="Arena Small Ghost Bride">Attack1</Transition>
+        </State>
+
+        <State id="Attack1">
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" acquireRange="8" range="3" duration="3" cooldown="4">Shoot</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="3" numShots="1" type="targeted" predictive=".9">Shoot</Behavior>
+            <Behavior acquireRange="8" projectileId="1" cooldown="1" numShots="4" type="auto" defaultAngle="90" angle="30">Shoot</Behavior>
+            <Transition hitpointsLessThan=".5">Split2</Transition>
+        </State>
+
+        <State id="Split2">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Effect particle="SwirlingMist" cooldown="0.2">XMLEffect</Effect>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Transition afterTime="3">Hiding2</Transition>
+        </State>
+
+        <State id="Hiding2">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Transition noneExist="Arena Small Ghost Bride">Attack2</Transition>
+        </State>
+
+        <State id="Attack2">
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" acquireRange="8" range="3" duration="3" cooldown="4">Shoot</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="3" numShots="1" type="targeted" predictive=".9">Shoot</Behavior>
+            <Behavior acquireRange="8" projectileId="1" cooldown="1" numShots="4" type="auto" defaultAngle="90" angle="30">Shoot</Behavior>
+            <Transition hitpointsLessThan=".25">Split3</Transition>
+        </State>
+
+        <State id="Split3">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Effect particle="SwirlingMist" cooldown="0.2">XMLEffect</Effect>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior childIds="Arena Small Ghost Bride" cooldown="50" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Transition afterTime="3">Hiding3</Transition>
+        </State>
+
+        <State id="Hiding3">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Transition noneExist="Arena Small Ghost Bride">Attack3</Transition>
+        </State>
+
+        <State id="Attack3">
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" acquireRange="8" range="3" duration="3" cooldown="4">Shoot</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="3" numShots="1" type="targeted" predictive=".9">Shoot</Behavior>
+            <Behavior acquireRange="8" projectileId="1" cooldown="1" numShots="4" type="auto" defaultAngle="90" angle="30">Shoot</Behavior>
+        </State>
+
+    </Object>
+
+
+    <Object type="0x5f09" id="Arena Hay Stack">
+        <Class>GameObject</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>9194858</Id><Right/></RemoteTexture>
+        <HitSound>monster/trees_hit</HitSound>
+        <DeathSound>monster/tress_death</DeathSound>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Static/>
+        <XpMult>0.0</XpMult>
+        <OccupySquare/>
+    </Object>
+
+    <Object type="0x5f10" id="Arena Werewolf">
+        <DisplayId>Werewolf</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9287055</Id><Right/></RemoteTexture>
+
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>10508260</Id><Right/></RemoteTexture>
+        </AltTexture>
+
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Green Arrow</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>150</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Transition hasGlobalTag="WerewolfActive">Active</Transition>
+        </State>
+
+        <State id="Active">
+
+        </State>
+    </Object>
+
+    <Object type="0x5f1a" id="Arena Dead Tree">
+        <Class>GameObject</Class>
+        <RandomTexture>
+            <RemoteTexture><Instance>testing</Instance><Id>9513016</Id></RemoteTexture>
+            <RemoteTexture><Instance>testing</Instance><Id>9511022</Id></RemoteTexture>
+            <RemoteTexture><Instance>testing</Instance><Id>9493259</Id></RemoteTexture>
+            <RemoteTexture><Instance>testing</Instance><Id>9491347</Id></RemoteTexture>
+        </RandomTexture>
+        <HitSound>monster/trees_hit</HitSound>
+        <DeathSound>monster/tress_death</DeathSound>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Static/>
+        <XpMult>0.0</XpMult>
+        <OccupySquare/>
+        <EnemyOccupySquare/>
+    </Object>
+
+    <Object type="0x5f1b" id="Arena Statue">
+        <Class>GameObject</Class>
+        <RandomTexture>
+            <RemoteTexture><Instance>testing</Instance><Id>9487339</Id></RemoteTexture>
+            <RemoteTexture><Instance>testing</Instance><Id>9496041</Id></RemoteTexture>
+        </RandomTexture>
+        <HitSound>monster/trees_hit</HitSound>
+        <DeathSound>monster/tress_death</DeathSound>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Static/>
+        <XpMult>0.0</XpMult>
+        <OccupySquare/>
+    </Object>
+
+    <Object type="0x5f12" id="Arena Ghost 2">
+        <DisplayId>Haunting Spectre</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>10073995</Id><Right/></RemoteTexture>
+
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>10153504</Id><Right/></RemoteTexture>
+        </AltTexture>
+        <AltTexture id="2">
+            <RemoteTexture><Instance>testing</Instance><Id>10164395</Id><Right/></RemoteTexture>
+        </AltTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Blue Ghost Blast</ObjectId>
+            <Damage>40</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <!--<Behavior bucket="movement" speed=".7">Wander</Behavior>-->
+            <Behavior bucket="movement" speed="3" cooldown="2" range="12">Charge</Behavior>
+            <Behavior bucket="movement" distance="4" speed=".8">StayBack</Behavior>
+            <Behavior acquireRange="5" projectileId="0" cooldown="1" numShots="3" angle="20">Shoot</Behavior>
+            <Transition afterTime="2">Disappear</Transition>
+        </State>
+
+        <State id="Disappear">
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <State id="1">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime=".1">2</Transition>
+            </State>
+            <State id="2">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".2">1</Transition>
+            </State>
+            <!--<Behavior bucket="movement" speed="3" cooldown="2" range="12">Charge</Behavior>-->
+            <Behavior bucket="movement" speed=".9">Wander</Behavior>
+            <Transition afterTime="1.5">Ini</Transition>
+        </State>
+    </Object>
+
+    <Object type="0x5f1e" id="Troll 1">
+        <DisplayId>Forest Troll</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9427537</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>100</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Troll 1 Attack 1</ObjectId>
+            <Damage>55</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>120</Size>
+        </Projectile>
+
+
+        <State id="Ini">
+            <!--<Behavior bucket="movement" speed=".7">Wander</Behavior>-->
+            <Behavior bucket="movement" cooldown="3" speed="1.1" range="8">Charge</Behavior>
+            <Behavior bucket="movement" speed="1.2" acquireRange="15" range="2" duration="4" predictive="true" cooldown="2">Follow</Behavior>
+            <Behavior acquireRange="5" projectileId="0" cooldown="1" numShots="1">Shoot</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f1f" id="Troll 3">
+        <DisplayId>Troll Matriarch</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9431519</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>175</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>10000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Troll 3 Attack 1</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>175</Size>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Stick Throw</ObjectId>
+            <Damage>80</Damage>
+            <Speed>80</Speed>
+            <LifetimeMS>1200</LifetimeMS>
+            <Size>100</Size>
+            <ConditionEffect duration="2">Weak</ConditionEffect>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior speed="1.3" distance="6" angle="90" cooldown="20">Move</Behavior>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior text="This forest will be your tomb!" prob="1" bubbleTime="2">Say</Behavior>
+            <Behavior type="targeted" childId="Arena Mushroom" range="6" cooldown="3">ObjectToss</Behavior>
+            <Transition afterTime="2">Normal</Transition>
+        </State>
+
+        <State id="Normal">
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior bucket="follow" acquireRange="10" range="3" speed="1" duration="5" cooldown="5.5" predictive="true">Follow</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="1" numShots="1">Shoot</Behavior>
+            <Behavior type="auto" range="8" numShots="6" cooldown="2" cooldownJitter=".5" projectileId="1" angle="60">Shoot</Behavior>
+            <Behavior type="targeted" childId="Arena Mushroom" range="6" cooldown="3">ObjectToss</Behavior>
+            <Transition hitpointsLessThan=".7">Summon</Transition>
+        </State>
+
+        <State id="Summon">
+            <Behavior bubbleTime="2" text="I call upon the aid of warriors past! Smite these trespassers!" prob="1">Say</Behavior>
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior childIds="Arena Skeleton" cooldown="4" maxChildren="5" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior type="auto" range="8" numShots="6" cooldown="1.5" cooldownJitter=".5" projectileId="0" angle="60">Shoot</Behavior>
+            <Behavior type="auto" range="8" numShots="6" cooldown="1.5" cooldownJitter=".5" projectileId="1" angle="35">Shoot</Behavior>
+            <Behavior type="targeted" childId="Arena Mushroom" range="6" cooldown="3">ObjectToss</Behavior>
+            <Transition noneExist="Arena Skeleton">Enrage</Transition>
+        </State>
+
+
+        <State id="Enrage">
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.1" flashRepeats="15">ShowEffect</Behavior>
+            <Behavior rate=".5" maxSize="200">ChangeSize</Behavior>
+            <Behavior bucket="follow" acquireRange="10" range="3" speed="1.5" duration="5" cooldown="5.5" predictive="true">Follow</Behavior>
+            <Behavior bucket="charge" cooldown="3" speed="1.7" range="7">Charge</Behavior>
+            <Behavior type="auto" range="8" numShots="6" cooldown=".7" cooldownJitter=".5" projectileId="1" angle="60">Shoot</Behavior>
+            <Behavior type="targeted" childId="Arena Mushroom" range="6" cooldown="1.5">ObjectToss</Behavior>
+            <Transition afterTime="15">Normal 2</Transition>
+        </State>
+
+        <State id="Normal 2">
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior rate=".5" minSize="150">ChangeSize</Behavior>
+            <Behavior bucket="follow" acquireRange="10" range="3" speed="1" duration="5" cooldown="5.5" predictive="true">Follow</Behavior>
+            <Behavior type="targeted" childId="Arena Mushroom" range="6" cooldown="3">ObjectToss</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="1" numShots="1">Shoot</Behavior>
+            <Transition hitpointsLessThan=".4">Summon</Transition>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5f20" id="Troll 2">
+        <DisplayId>Troll Pathfinder</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9428481</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Troll 2 Attack 1</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>100</Size>
+            <ConditionEffect duration="2">Bleeding</ConditionEffect>
+        </Projectile>
+
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior bucket="movement" speed="1.5" acquireRange="15" distance="5">KeepDistance</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="1.6" numShots="1">Shoot</Behavior>
+            <Behavior type="targeted" range="6" cooldown="2" radius="3" defaultAngle="30" damage="75" minRange="3">GrenadeToss</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f27" id="Arena Skeleton">
+        <DisplayId>Reanimated Remains</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9322013</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Skeleton Attack</ObjectId>
+            <Damage>55</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="1.2" acquireRange="8" duration="2" cooldown="3.5">Follow</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" protecteeId="Troll 1" acquireRange="15" speed="1.7" radius="1.5">Orbit</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown=".8" numShots="1">Shoot</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f28" id="Arena Possessed Girl">
+        <DisplayId>Possessed Child</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9324077</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Purple Magic Blast</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>500</LifetimeMS>
+            <Size>100</Size>
+            <Amplitude>0.1</Amplitude>
+            <Frequency>10</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="1" acquireRange="15" duration="5" cooldown="3">Follow</Behavior>
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior type="auto" defaultAngle="0" numShots="8" projectileId="0" cooldown=".6" range="0" offset="0" angle="45">Shoot</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f2b" id="Arena Grave Caretaker">
+        <DisplayId>Grave Caretaker</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9432601</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>10000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Angry Ghost</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Fire Spinner</ObjectId>
+            <Damage>55</Damage>
+            <Speed>80</Speed>
+            <LifetimeMS>800</LifetimeMS>
+            <Size>100</Size>
+            <ConditionEffect duration="2">Blind</ConditionEffect>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" acquireRange="10" distance="4" speed="1">KeepDistance</Behavior>
+            <Behavior bucket="movement" speed=".6" duration="2">Wander</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="2" numShots="1">Shoot</Behavior>
+            <Behavior cooldown="1" childIds="Arena Blue Flame" maxChildren="5" startWithMinions="false">MakeMinions</Behavior>
+            <Transition afterTime="10">Circle</Transition>
+        </State>
+
+        <State id="Circle">
+            <Behavior acquireRange="10" distance="3" speed="1.5">Circle</Behavior>
+            <Behavior acquireRange="8" projectileId="1" cooldown="2" numShots="2" defaultAngle="45">Shoot</Behavior>
+            <Behavior cooldown="2" childIds="Arena Blue Flame" maxChildren="5" startWithMinions="false">MakeMinions</Behavior>
+            <Transition afterTime="8">Ini</Transition>
+        </State>
+
+    </Object>
+
+    <Object type="0x5f2c" id="Arena Spider">
+        <DisplayId>Grave Spider</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9279059</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>90</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Spider Bolt</ObjectId>
+            <Damage>100</Damage>
+            <Speed>50</Speed>
+            <LifetimeMS>800</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior projectileId="0" numShots="3" range="10" predictive="0.5">Shoot</Behavior>
+            <!--<Behavior bucket="movement" range="5" speed="1.6">Follow</Behavior>-->
+            <Behavior bucket="movement" speed="2.0" acceleration="2.0">Swirl</Behavior>
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f2d" id="Arena Pumpkin King">
+        <DisplayId>Pumpkin King</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9235449</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Orange Pumpkin Wave</ObjectId>
+            <Damage>55</Damage>
+            <Speed>40</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>150</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed=".7">Wander</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="1" numShots="2" angle="45">Shoot</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f2e" id="Arena Vampire">
+        <DisplayId>Vengeful Vampire</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9290053</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>100</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Vampire Attack</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1500</LifetimeMS>
+            <Size>100</Size>
+            <Amplitude>0.8</Amplitude>
+            <Frequency>2</Frequency>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior projectileId="0" numShots="3" cooldown="2" range="10" predictive="0.5">Shoot</Behavior>
+            <Behavior bucket="movement" range="6" speed="1.6">Follow</Behavior>
+            <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f2f" id="Arena Blue Flame">
+        <DisplayId>Forgotten Soul</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>10270355</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>75</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Blue Magic</ObjectId>
+            <Damage>55</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>900</LifetimeMS>
+            <Size>80</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior protecteeId="Arena Grave Caretaker" acquireRange="15" speed="2" radius="1.5">Orbit</Behavior>
+            <Transition playerWithin="3">AttackPlayer</Transition>
+        </State>
+
+        <State id="AttackPlayer">
+            <Behavior cooldown="3" speed="6" range="9">Charge</Behavior>
+            <Transition playerWithin="1">Explode</Transition>
+            <Transition playerWithin="4">Follow</Transition>
+        </State>
+
+        <State id="Follow">
+            <Behavior acquireRange="6" range=".5" speed="1.4" duration="10" cooldown="2" predictive="true">Follow</Behavior>
+            <Transition playerWithin="1">Explode</Transition>
+        </State>
+
+        <State id="Explode">
+            <Behavior initialDelay="0" range="0.0" numShots="10" arcDegrees="360" projectileId="0" dropLoot="false" giveXP="false">Explode</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f30" id="Arena Small Ghost Bride">
+        <DisplayId>Ghost Bride</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9230502</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>75</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>5000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Blue Magic</ObjectId>
+            <Damage>55</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>900</LifetimeMS>
+            <Size>80</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="1.4" cooldown="3" range="7">Charge</Behavior>
+            <Behavior bucket="movement" speed=".6">Wander</Behavior>
+            <Behavior acquireRange="8" projectileId="0" cooldown="1" numShots="3" angle="30">Shoot</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f31" id="Arena Mushroom">
+        <DisplayId>Deadly Mushroom</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>10489459</Id><Right/></RemoteTexture>
+
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>10525007</Id><Right/></RemoteTexture>
+        </AltTexture>
+        <AltTexture id="2">
+            <RemoteTexture><Instance>testing</Instance><Id>10512018</Id><Right/></RemoteTexture>
+        </AltTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>175</Size>
+        <ShadowSize>75</ShadowSize>
+        <MaxHitPoints>5000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Blue Magic</ObjectId>
+            <Damage>90</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>900</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Transition playerWithin="3">A1</Transition>
+        </State>
+
+        <State id="A1">
+            <Transition afterTime=".75">A2</Transition>
+        </State>
+        <State id="A2">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Transition afterTime=".75">A3</Transition>
+        </State>
+        <State id="A3">
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Transition afterTime="1">Explode</Transition>
+        </State>
+
+        <State id="Explode">
+            <Behavior type="Flash" color="FFFFFF" flashPeriod="0.1" flashRepeats="30">ShowEffect</Behavior>
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Behavior initalDelay="3" range="0" numShots="6" projectileId="0">Explode</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5f32" id="Arena Horseman Anchor">
+        <DisplayId>Headless Horseman</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>0</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>5000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Blue Magic</ObjectId>
+            <Damage>90</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>900</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <State id="Ini">
+            <Transition hasGlobalTag="HorsemanDead">Die</Transition>
+        </State>
+
+        <State id="Die">
+            <Behavior time="0">Decay</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5f33" id="Arena Big Demon">
+        <DisplayId>Hellish Brute</DisplayId>
+        <Class>Character</Class>
+        <Group>Hallowrena</Group>
+        <Enemy/>
+
+        <RemoteTexture><Instance>testing</Instance><Id>9319028</Id><Right/></RemoteTexture>
+
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>10527265</Id><Right/></RemoteTexture>
+        </AltTexture>
+
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>0</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>5000</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Demon Fire Blast</ObjectId>
+            <Damage>90</Damage>
+            <Speed>70</Speed>
+            <LifetimeMS>900</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+
+        <State id="Ini">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Transition hasGlobalTag="DemonAwake">Active</Transition>
+        </State>
+
+        <State id="Active">
+            <Behavior speed="1">Wander</Behavior>
+        </State>
+
+    </Object>
+
+
+    <!--
+    *********************************************************************************
+
+    Jeebs
+
+    *********************************************************************************
+    -->
+    <Object type="0x099b" id="Jeebs">
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <RemoteTexture><Instance>testing</Instance><Id>7632526</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>200</Size>
+        <ShadowSize>50</ShadowSize>
+        <Defense>10</Defense>
+
+        <State id="Ini">
+            <Behavior prob="1" bubbleTime="3" text="Hello! I'm Jeebs.Ask me questions and I'll answer them if I can.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="Listening">
+            <Transition playerSays="Boosh">AnswerBoosh</Transition>
+            <Transition playerSays="how to get to oryx">AnswerOryxLair</Transition>
+            <Transition playerSays="pets">AnswerPets</Transition>
+            <Transition playerSays="vaults">AnswerVault</Transition>
+            <Transition playerSays="Thessal">AnswerThessal</Transition>
+            <Transition playerSays="how to create guild">AnswerCreateGuild</Transition>
+            <Transition playerSays="how to join guild">AnswerJoinGuild</Transition>
+        </State>
+
+        <State id="AnswerBoosh">
+            <Behavior prob="1" bubbleTime="3" text="Boosh is a developer for ROTMG.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerOryxLair">
+            <Behavior prob="1" bubbleTime="3" text="In order to enter Oryx's Lair you need to slay enough monsters in a realm. This will anger Oryx and he will summon you to his lair.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerPets">
+            <Behavior prob="1" bubbleTime="3" text="Pets are cosmetic creatures that will daringly follow you around wherever you go. They cannot be hurt, but make sure not to die with them or they will be lost.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerVault">
+            <Behavior prob="1" bubbleTime="3" text="Vaults are a great way to store your treasures for safe keeping. If your character dies, the items in your vault will remain safe for your next character.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerThessal">
+            <Behavior prob="1" bubbleTime="3" text="Quite the beauty but she is also dangerous at close range.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerCreateGuild">
+            <Behavior prob="1" bubbleTime="3" text="You can create your own guild by spending 1000 Fame at the Guild Charter in the Nexus. Once created you can invite other players.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerJoinGuild">
+            <Behavior prob="1" bubbleTime="3" text="You can join a guild by having a member of that guild invite you.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+    </Object>
+
+</Objects>

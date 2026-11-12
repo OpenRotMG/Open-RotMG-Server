@@ -1,0 +1,161 @@
+<Objects>
+	<Object type="0x1400" id="Purple Drake">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x8</File><Index>0x30</Index></Texture>
+		<Flying/>
+		<Z>0.2</Z>
+		<NoMiniMap/>
+		<Behavior range="2.5" speed="1.0">Shadow</Behavior>
+		<Behavior time="30" particleEffect="Nova" color="0x3E3A78">Decay</Behavior>
+		<Behavior range="8" damage="35" cooldown=".3" color="0x3E3A78">Zap</Behavior>
+	</Object>
+	<Object type="0x1401" id="White Drake">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x8</File><Index>0x31</Index></Texture>
+		<Flying/>
+		<Z>0.2</Z>
+		<NoMiniMap/>
+        <Behavior range="2.5" speed="1.0">Shadow</Behavior>
+		<Behavior time="60" particleEffect="Nova" color="0xFFFFFF">Decay</Behavior>
+		<Behavior range="5" healing="25" cooldown=".5" color="0xFFFFFF">HealZap</Behavior>
+	</Object>
+	<Object type="0x1402" id="Blue Drake">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x8</File><Index>0x32</Index></Texture>
+		<Flying/>
+		<Z>0.2</Z>
+		<NoMiniMap/>
+        <Behavior range="2.5" speed="1.0">Shadow</Behavior>
+		<Behavior time="30" particleEffect="Nova" color="0x003298">Decay</Behavior>
+		<Behavior range="6" damage="0" cooldown="1.0" color="0x003298" 
+			conditionEffect="Paralyzed" conditionDuration="5">Zap</Behavior>
+	</Object>
+	<Object type="0x1403" id="Orange Drake">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x8</File><Index>0x33</Index></Texture>
+		<Flying/>
+		<Z>0.2</Z>
+		<NoMiniMap/>
+        <Behavior range="2.5" speed="1.0">Shadow</Behavior>
+		<Behavior time="30" particleEffect="Nova" color="0xEB8931">Decay</Behavior>
+		<Behavior range="5" damage="0" cooldown="2.0" color="0xEB8931" 
+			conditionEffect="Stasis" conditionDuration="5">Zap</Behavior>
+	</Object>
+	<Object type="0x1404" id="Green Drake">
+		<Class>Character</Class>
+		<Texture><File>lofiChar216x8</File><Index>0x34</Index></Texture>
+		<Flying/>
+		<Z>0.2</Z>
+		<NoMiniMap/>
+        <Behavior range="2.5" speed="1.0">Shadow</Behavior>
+		<Behavior time="30" particleEffect="Nova" color="0x48D747">Decay</Behavior>
+		<Behavior range="7" damage="0" cooldown=".3" color="0x48D747" 
+			conditionEffect="Slowed" conditionDuration="10">Zap</Behavior>
+	</Object>
+    <Object type="0x1405" id="Yellow Drake">
+        <Class>Character</Class>
+        <Texture><File>lofiChar216x8</File><Index>0x35</Index></Texture>
+        <Flying/>
+        <Z>0.2</Z>
+        <NoMiniMap/>
+        <Behavior range="2.5" speed="1.0">Shadow</Behavior>
+        <Behavior time="30" particleEffect="Nova" color="0xEEEE73">Decay</Behavior>
+        <Behavior range="6" damage="0" cooldown="0.5" color="0xEEEE73" 
+            conditionEffect="Bleeding" conditionDuration="10"
+            poisonDuration="10" poisonTotalDamage="300">Zap</Behavior>
+    </Object>
+    
+	<Object type="0x1406" id="Red Drake">
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x8rEncounters</File><Index>0</Index></AnimatedTexture>
+		<Flying/>
+		<Z>0.2</Z>
+		<NoMiniMap/>
+		<Behavior range="2.5" speed="1.0">Shadow</Behavior>
+		<Behavior time="30" particleEffect="Nova" color="0xE20040">Decay</Behavior>
+		<Behavior range="6" damage="250" cooldown="0.3" color="0xE20040">Zap</Behavior>
+	</Object>
+	<Object type="0x1407" id="Lil Firecracker"> <!-- 0xce2121,0x215ece,0xe5dada -->
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<Sound id="0">weapon/firework</Sound>
+		<ShadowSize>0</ShadowSize>
+		<Size>0</Size>
+		<State id="Fire">
+			<Behavior radius="3"  minDamage="25" maxDamage="80" radiusVariability="0.4" posJitter="1.0" color="0xf41b13,0x1a66f2,0xf2e6e6" cooldown="0.4" cooldownJitter="0.39" soundId="0">TrapTrigger</Behavior>
+			<Behavior time="5">Decay</Behavior>
+		</State>
+	</Object>
+	
+	<Object type="0x1408" id="Big Firecracker">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<Sound id="0">weapon/firework</Sound>
+		<ShadowSize>0</ShadowSize>
+		<Size>0</Size>
+		<State id="Fire">
+			<Behavior radius="3" minDamage="25" maxDamage="80" radiusVariability="0.4" posJitter="1.0" color="0xf41b13,0x1a66f2,0xf2e6e6" cooldown="0.4" cooldownJitter="0.39" soundId="0">TrapTrigger</Behavior>
+			<Behavior time="10">Decay</Behavior>
+		</State>
+	</Object>
+	<Object type="0x1409" id="Spirit Prism Bomb">
+		<Class>Character</Class>
+		<Texture><File>lofiObj3</File><Index>0xce</Index></Texture>
+		<Animation prob="1" period="0.4">
+			<Frame time="0.2"><Texture><File>lofiObj3</File><Index>0xcf</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObj3</File><Index>0xd6</Index></Texture></Frame>
+		</Animation>
+		<NoMiniMap/>
+		<Sound id="0">weapon/fire_wand</Sound>
+		<ShadowSize>70</ShadowSize>
+		<Size>100</Size>
+		<State id="Ini">
+			<Transition afterTime="3">Fire</Transition>
+		</State>
+		<State id="Fire"> <!-- 0x6d74c6 or 0x382a54 -->
+			<Behavior rate="-100" minSize="0">ChangeSize</Behavior>
+            <Behavior radius="2.4"  minDamage="40" maxDamage="90" radiusVariability="0" posJitter="1.6" color="0xff5132" cooldown="0.15" cooldownJitter="0" soundId="0">TrapTrigger</Behavior>
+            <!--
+			<Behavior radius="4.4" minDamage="150" maxDamage="400" radiusVariability="0" posJitter="0" color="0xff5132" cooldown="5" cooldownJitter="false" soundId="0">TrapTrigger</Behavior>
+             -->
+			<Behavior time="1">Decay</Behavior>
+		</State>
+	</Object>
+	<Object type="0x140a" id="Sand Castle">
+		<Class>Character</Class>
+		<RandomTexture>
+			<Texture><File>lofiObj3</File><Index>0x194</Index></Texture>
+			<Texture><File>lofiObj3</File><Index>0x195</Index></Texture>
+			<Texture><File>lofiObj3</File><Index>0x196</Index></Texture>
+            
+			<Texture><File>lofiObj3</File><Index>0x197</Index></Texture>
+			<Texture><File>lofiObj3</File><Index>0x198</Index></Texture>
+			<Texture><File>lofiObjBig</File><Index>0x47</Index></Texture>
+
+			<Texture><File>lofiObjBig</File><Index>0x48</Index></Texture>
+			<Texture><File>lofiObjBig</File><Index>0x49</Index></Texture>
+			<Texture><File>lofiObjBig</File><Index>0x4a</Index></Texture>
+		</RandomTexture>
+		<NoMiniMap/>
+		<ShadowSize>0</ShadowSize>
+		<MinSize>80</MinSize>
+		<MaxSize>120</MaxSize>
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Behavior time="30">Decay</Behavior>
+		<Behavior range="6" healing="10" cooldown="1.2" color="0xFFFFFF">HealZap</Behavior>
+	</Object>
+    <Object type="0x140b" id="Rock Candy Grenade">
+		<Class>Character</Class>
+		<Texture><File>invisible</File><Index>0</Index></Texture>
+		<NoMiniMap/>
+		<Sound id="0">weapon/firework</Sound>
+		<ShadowSize>0</ShadowSize>
+		<Size>0</Size>
+		<State id="Fire">
+			<Behavior radius="3"  minDamage="100" maxDamage="230" radiusVariability="0.6" posJitter="2.5" color="0xff8c8c" cooldown="0.4" cooldownJitter="0.3" soundId="0">TrapTrigger</Behavior>
+			<Behavior time="5">Decay</Behavior>
+		</State>
+	</Object>
+</Objects>

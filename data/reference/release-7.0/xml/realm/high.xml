@@ -1,0 +1,1702 @@
+<Objects>
+   
+	<!-- HighSand -->
+	
+	<Object type="0x646" id="Minotaur">
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar16x16</File><Index>0x48</Index></Texture>
+		<HitSound>monster/ogres_hit</HitSound>
+		<DeathSound>monster/ogres_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>850</MaxHitPoints>
+		<Defense>7</Defense>
+		<Terrain>HighSand</Terrain>
+		<God/>
+		<SpawnProb>0.7</SpawnProb>
+		<XpMult>0.8</XpMult>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>52</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1200</LifetimeMS>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Blade</ObjectId>
+			<Damage>28</Damage>
+			<Speed>90</Speed>
+			<Size>100</Size>
+			<LifetimeMS>430</LifetimeMS>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Blade</ObjectId>
+			<Damage>28</Damage>
+			<Speed>90</Speed>
+			<Size>100</Size>
+			<LifetimeMS>430</LifetimeMS>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>			
+		
+		<State id="idle">
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+
+			<Transition playerWithin="10">charge</Transition>
+		</State>		
+		<State id="charge">		
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" acquireRange="11" range="1.6" speed="6" predictive="1">Follow</Behavior>
+
+			<Transition afterTime="0.2">spam_blades</Transition>
+		</State>
+		<State id="spam_blades">
+			<Behavior projectileId="0" numShots="1" range="8" type="targeted" cooldown="90" offset="1">Shoot</Behavior>
+			<Behavior projectileId="0" numShots="2" range="8" type="targeted" angle="16" cooldown="90" offset="1.2">Shoot</Behavior>
+			<Behavior projectileId="0" numShots="3" range="8" type="targeted" cooldown="90" offset="1.6" predictive="0.2">Shoot</Behavior>
+			<Behavior projectileId="0" numShots="1" range="8" type="targeted" angle="24" cooldown="90" offset="2.2">Shoot</Behavior>
+			<Behavior projectileId="0" numShots="2" range="8" type="targeted" cooldown="90" offset="2.8" predictive="0.2">Shoot</Behavior>
+			<Behavior projectileId="0" numShots="3" range="8" type="targeted" angle="16" cooldown="90" offset="3.2">Shoot</Behavior>
+
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+
+			<Transition afterTime="4.4">blade_ring</Transition>
+		</State>
+		<State id="blade_ring">
+			<Behavior projectileId="1" numShots="12" angle="30" range="7" type="auto" cooldown="0.8" offset="0.6" defaultAngle="0">Shoot</Behavior>
+			<Behavior projectileId="2" numShots="6" angle="60" range="7" type="auto" cooldown="0.8" offset="1.0" defaultAngle="15">Shoot</Behavior>
+
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" acquireRange="10" range="1" speed="0.6">Follow</Behavior>
+			<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+
+			<Transition afterTime="3.5">pause</Transition>
+		</State>
+		<State id="pause">
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+
+			<Transition afterTime="1">idle</Transition>
+		</State>
+
+		<Behavior prob=".04" childId="Snake Pit Portal">MetamorphoseAtDeath</Behavior>
+		
+		<SoulboundLoot tier="5" prob=".08">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".08">Armor</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".025">Ring</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".1">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot prob="0.0025">Purple Drake Egg</SoulboundLoot>
+	</Object>
+
+	<Object type="0x647" id="Flayer">
+		<Group>Flayers</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x0b</Index></AnimatedTexture>
+		<HitSound>monster/flayers_hit</HitSound>
+		<DeathSound>monster/flayers_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>140</MaxHitPoints>
+		<Defense>8</Defense>
+		<Terrain>HighSand</Terrain>
+		<Projectile id="0">
+			<ObjectId>Blue Magic</ObjectId>
+			<Damage>40</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>2700</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="140">StayAbove</Behavior>
+		<Behavior projectileId="0" range="10" predictive="0.5">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Magic Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x648" id="Flayer Veteran">
+		<Group>Flayers</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x0c</Index></AnimatedTexture>
+		<HitSound>monster/flayers_hit</HitSound>
+		<DeathSound>monster/flayers_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>280</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>HighSand</Terrain>
+		<Projectile id="0">
+			<ObjectId>Purple Magic</ObjectId>
+			<Damage>50</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>1500</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="10" predictive="0.5">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.2">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Magic Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x649" id="Flayer God">
+		<Group>Flayers</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar16x16</File><Index>0x51</Index></Texture>
+		<HitSound>monster/flayers_hit</HitSound>
+		<DeathSound>monster/flayers_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>1400</MaxHitPoints>
+		<Defense>12</Defense>
+		<Terrain>HighSand</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+		<God/>
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>60</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>2200</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Grey Star</ObjectId>
+			<Damage>0</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>2200</LifetimeMS>
+			<ConditionEffect duration="10">Quiet</ConditionEffect>
+		</Projectile>
+
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="10" predictive="0.5" cooldown="0.4">Shoot</Behavior>
+		<Behavior projectileId="1" range="10" predictive="1">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+		<Behavior childIds="Flayer" maxChildren="2" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Flayer Veteran" maxChildren="3" cooldown="8">MakeMinions</Behavior>
+
+		<Behavior prob=".05" childId="Snake Pit Portal">MetamorphoseAtDeath</Behavior>
+
+		<SoulboundLoot tier="5" prob=".08">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".08">Armor</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".025">Ring</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".075">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot prob="0.0025">Purple Drake Egg</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0903" id="Flamer King">
+		<Group>Flamers</Group>
+		<Enemy/>
+		<Class>Character</Class>
+
+		<!-- AESTHETICS -->	
+		<AnimatedTexture><File>chars8x8rMid</File><Index>26</Index></AnimatedTexture>
+		<HitSound>monster/demons_hit</HitSound>
+		<DeathSound>monster/demons_death</DeathSound>
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>White Flame</ObjectId>
+			<Speed>80</Speed>
+			<Damage>29</Damage>
+			<Size>105</Size>
+			<LifetimeMS>500</LifetimeMS>
+			<MultiHit/>
+			<Amplitude>0.6</Amplitude>
+			<Frequency>0.5</Frequency>	
+		</Projectile>		
+
+		<!-- DEFAULT PROPERTIES -->	
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>7</Defense>
+		<XpMult>0.4</XpMult>
+		<SpawnProb>1.0</SpawnProb>
+		<Terrain>HighSand</Terrain>
+		
+		<!-- LOOT -->	
+		<SoulboundLoot prob=".01">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".04" tier="2">Ring</SoulboundLoot>
+		
+		<!-- STATES -->	
+		<State id="Attacking">	
+			<State id="Charge">
+				<Behavior childIds="Flamer" cooldown="10" maxChildren="5">MakeMinions</Behavior>
+				<Behavior range="0.1" speed="0.7">Follow</Behavior>
+				<Transition playerWithin="2">Bullet1</Transition>
+			</State>
+			
+	    	<State id="Bullet1">
+				<Behavior type="Flash" color="FFAA00" flashPeriod=".2" flashRepeats="20">ShowEffect</Behavior>
+				<Behavior rate="20" maxSize="140">ChangeSize</Behavior>
+       			<Behavior numShots="1" projectileId="0" cooldown="0.2" >Shoot</Behavior>
+				<Transition afterTime="4">Wait1</Transition>
+	    	</State>
+
+	   		<State id="Wait1">
+				<Behavior rate="-20" maxSize="80">ChangeSize</Behavior>
+				<Transition afterTime="0.5">Charge</Transition>
+			</State>
+		
+			<Transition hitpointsLessThan="0.2">FlashBeforeExplode</Transition>
+		</State>
+		
+		<State id="FlashBeforeExplode">
+			<Behavior type="Flash" color="FF0000">ShowEffect</Behavior>
+			<Transition afterTime="0.3">Explode</Transition>
+		</State>
+		
+		<State id="Explode">
+			<Behavior range="0.0" projectileId="0">Explode</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0904" id="Flamer">
+		<Group>Flamers</Group>
+		<Enemy/>
+		<Class>Character</Class>
+
+		<!-- AESTHETICS -->	
+		<AnimatedTexture><File>chars8x8rMid</File><Index>25</Index></AnimatedTexture>
+		<HitSound>monster/demons_hit</HitSound>
+		<DeathSound>monster/demons_death</DeathSound>
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>White Flame</ObjectId>
+			<Speed>80</Speed>
+			<Damage>29</Damage>
+			<Size>100</Size>
+			<LifetimeMS>500</LifetimeMS>
+			<MultiHit/>
+			<Amplitude>0.3</Amplitude>
+			<Frequency>0.5</Frequency>	
+		</Projectile>		
+
+		<!-- DEFAULT PROPERTIES -->	
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>12</Defense>
+		<XpMult>0.05</XpMult>
+		<Terrain>HighSand</Terrain>
+		
+		<!-- LOOT -->	
+		<SoulboundLoot tier="5" prob=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot prob="0.2">Magic Potion</SoulboundLoot>
+		
+		<!-- STATES -->	
+		<State id="Attacking">	
+			<State id="Charge">
+				<Behavior bucket="movement" protecteeId="Flamer King" range="0.1" speed="0.7">Protect</Behavior>
+				<Behavior bucket="movement" range="0.1" speed="0.7">Follow</Behavior>
+				<Transition playerWithin="2">Bullet1</Transition>
+			</State>
+			
+	    	<State id="Bullet1">
+				<Behavior rate="20" maxSize="130">ChangeSize</Behavior>
+				<Behavior type="Flash" color="FFAA00" flashPeriod="0.2" flashRepeats="20">ShowEffect</Behavior>
+       			<Behavior numShots="1" projectileId="0" cooldown="0.2" >Shoot</Behavior>
+				<Transition afterTime="4">Wait1</Transition>
+	    	</State>
+
+	   		<State id="Wait1">
+				<Behavior rate="-20" minSize="70">ChangeSize</Behavior>
+				<Transition afterTime="0.6">Charge</Transition>
+			</State>
+		
+			<Transition hitpointsLessThan="0.2">FlashBeforeExplode</Transition>
+		</State>
+		
+		<State id="FlashBeforeExplode">
+			<Behavior type="Flash" color="FF0000">ShowEffect</Behavior>
+			<Transition afterTime="0.3">Explode</Transition>
+		</State>
+		
+		<State id="Explode">
+			<Behavior range="0.0" projectileId="0">Explode</Behavior>
+		</State>
+	</Object>
+
+	<!-- HighPlains -->
+	
+	<Object type="0x63a" id="Undead Dwarf Warrior">
+		<Group>Undead Dwarves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x00</Index></AnimatedTexture>
+		<HitSound>monster/undead_dwarves_hit</HitSound>
+		<DeathSound>monster/undead_dwarves_death</DeathSound>
+		<Size>90</Size>
+		<MaxHitPoints>250</MaxHitPoints>
+		<Defense>7</Defense>
+		<Terrain>HighPlains</Terrain>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>40</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<Behavior prob=".05" childId="Spider Den Portal">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+	<Object type="0x63b" id="Undead Dwarf Axebearer">
+		<Group>Undead Dwarves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x01</Index></AnimatedTexture>
+		<HitSound>monster/undead_dwarves_hit</HitSound>
+		<DeathSound>monster/undead_dwarves_death</DeathSound>
+		<Size>90</Size>
+		<MaxHitPoints>260</MaxHitPoints>
+		<Defense>7</Defense>
+		<Terrain>HighPlains</Terrain>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>50</Damage>
+			<Speed>120</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x63c" id="Undead Dwarf Mage">
+		<Group>Undead Dwarves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x02</Index></AnimatedTexture>
+		<HitSound>monster/undead_dwarves_hit</HitSound>
+		<DeathSound>monster/undead_dwarves_death</DeathSound>
+		<Size>90</Size>
+		<MaxHitPoints>210</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>HighPlains</Terrain>
+
+		<Projectile id="0">
+			<ObjectId>Blue Bolt</ObjectId>
+			<Damage>29</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>2400</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+
+		<State id="idle">
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" protecteeId="Undead Dwarf King" acquireRange="11" speed="0.7" protectionRange="10" reprotectRange="3">Protect</Behavior>
+			
+			<Transition playerWithin="12">circle_player</Transition>
+		</State>		
+		<State id="circle_player">
+			<Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" predictive="0.3" offset="0.5">Shoot</Behavior>
+
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" distance="3.5" acquireRange="11">Circle</Behavior>			
+			
+			<Transition afterTime="3.5">circle_king</Transition>
+			<Transition noPlayerWithin="20">idle</Transition>
+		</State>
+		<State id="circle_king">
+			<Behavior numShots="5" projectileId="0" cooldown="1.6" type="auto" angle="72" predictive="0.3" offset="0.5" defaultAngle="20">Shoot</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.6" type="auto" angle="72" predictive="0.3" offset="1.3" defaultAngle="33">Shoot</Behavior>
+
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" protecteeId="Undead Dwarf King" radius="2.5" speed="1.2" radiusVariability="0.1" acquireRange="12" speedVariability="0.1">Orbit</Behavior>
+			<Behavior bucket="movement" speed="1.2">Wander</Behavior>
+
+			<Transition afterTime="3.5">circle_player</Transition>
+			<Transition noPlayerWithin="20">idle</Transition>
+		</State>
+
+		<SoulboundLoot prob="0.03">Magic Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x63e" id="Undead Dwarf King">
+		<Group>Undead Dwarves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x04</Index></AnimatedTexture>
+		<HitSound>monster/undead_dwarves_hit</HitSound>
+		<DeathSound>monster/undead_dwarves_death</DeathSound>
+		<Size>90</Size>
+		<MaxHitPoints>400</MaxHitPoints>
+		<Defense>7</Defense>
+		<Terrain>HighPlains</Terrain>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>55</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1.4" speed="0.8">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x63f" id="Soulless Dwarf">
+		<Group>Undead Dwarves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x05</Index></AnimatedTexture>
+		<HitSound>monster/undead_dwarves_hit</HitSound>
+		<DeathSound>monster/undead_dwarves_death</DeathSound>
+		<Size>90</Size>
+		<MaxHitPoints>250</MaxHitPoints>
+		<Defense>11</Defense>
+		<Terrain>HighPlains</Terrain>
+
+		<Projectile id="0">
+			<ObjectId>Blue Magic</ObjectId>
+			<Damage>55</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1700</LifetimeMS>
+		</Projectile>
+
+		<Behavior projectileId="0" range="10">Shoot</Behavior>
+
+		<State id="idle">
+			<Transition playerWithin="10.5">run1</Transition>
+		</State>
+		<State id="run1">
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" protecteeId="Undead Dwarf God" speed="1.1" acquireRange="16" protectionRange="10" reprotectRange="1">Protect</Behavior>
+			<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+			<Transition afterTime="2">run2</Transition>
+		</State>
+		<State id="run2">
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" range="4" speed="0.8" acquireRange="15">KeepDistance</Behavior>
+			<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+			<Transition afterTime="1.4">run3</Transition>
+		</State>		
+		<State id="run3">
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" protecteeId="Undead Dwarf King" speed="1" acquireRange="16" protectionRange="2" reprotectRange="2">Protect</Behavior>
+			<Behavior bucket="movement" protecteeId="Undead Dwarf Axebearer" speed="1" acquireRange="16" protectionRange="2" reprotectRange="2">Protect</Behavior>
+			<Behavior bucket="movement" protecteeId="Undead Dwarf Warrior" speed="1" acquireRange="16" protectionRange="2" reprotectRange="2">Protect</Behavior>
+			<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+			<Transition afterTime="2">idle</Transition>
+		</State>
+
+		<SoulboundLoot prob="0.03">Magic Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x640" id="Undead Dwarf God">
+		<Group>Undead Dwarves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar16x16</File><Index>0x4b</Index></Texture>
+		<HitSound>monster/dwarf_god_hit</HitSound>
+		<DeathSound>monster/dwarf_god_death</DeathSound>
+		<Size>90</Size>
+		<MaxHitPoints>800</MaxHitPoints>
+		<Defense>11</Defense>
+		<Terrain>HighPlains</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+
+		<Projectile id="0">
+			<ObjectId>Pink Bolt</ObjectId>
+			<Damage>30</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1700</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Blue Star</ObjectId>
+			<Damage>0</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2200</LifetimeMS>
+			<ConditionEffect duration="3">Confused</ConditionEffect>
+		</Projectile>
+
+		<Behavior projectileId="0" numShots="3" range="10">Shoot</Behavior>
+		<Behavior projectileId="1" range="10" predictive="0.5" cooldown="1.2">Shoot</Behavior>
+
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior bucket="movement" range="7" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+		<Behavior childIds="Undead Dwarf Warrior" maxChildren="3" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Undead Dwarf Axebearer" maxChildren="3" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Undead Dwarf Mage" maxChildren="3" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Undead Dwarf King" maxChildren="2" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Soulless Dwarf" maxChildren="1" cooldown="10">MakeMinions</Behavior>
+
+		<Behavior prob=".05" childId="Snake Pit Portal">MetamorphoseAtDeath</Behavior>
+
+		<SoulboundLoot tier="5" prob=".08">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".08">Armor</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".025">Ring</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".1">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot prob="0.0025">Purple Drake Egg</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x0900" id="Shield Orc Key">
+		<Group>Shield Orcs</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Shield Orc Queen</DisplayId>
+
+		<!-- AESTHETICS -->	
+		<AnimatedTexture><File>chars8x8rMid</File><Index>23</Index></AnimatedTexture>
+		<HitSound>monster/orcs_hit</HitSound>
+		<DeathSound>monster/orcs_death</DeathSound>
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>30</Speed>
+			<Damage>40</Damage>
+			<Size>30</Size>
+			<LifetimeMS>3000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>		
+
+		<!-- DEFAULT PROPERTIES -->	
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>0</Defense>
+		<XpMult>0.5</XpMult>
+		<Terrain>HighPlains</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+
+		<!-- LOOT -->	
+		<SoulboundLoot prob=".04">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01" tier="4">Armor</SoulboundLoot>
+
+		<!-- STATES -->			
+
+		<State id="Waiting">
+			<Behavior childIds="Shield Orc Flooder" cooldown="10" maxChildren="1">MakeMinions</Behavior>
+			<Behavior childIds="Shield Orc Shield" cooldown="10" maxChildren="1">MakeMinions</Behavior>
+			<Behavior childIds="Shield Orc Shield" cooldown="10" maxChildren="1">MakeMinions</Behavior>
+			<Order>
+				<Behavior protecteeId="Shield Orc Flooder">Protect</Behavior>
+			</Order>
+			<Transition playerWithin="15">Attacking</Transition>
+		</State>
+		
+		<State id="Attacking">
+			<Behavior protecteeId="Shield Orc Flooder" radius="3" speed="1">Orbit</Behavior>
+			<Order>
+				<State id="Attack1">
+					<Behavior type="Flash" color="000000" flashPeriod="10" flashRepeats="100">ShowEffect</Behavior>
+					<Behavior numShots="1" projectileId="0" cooldown="0.5" >Shoot</Behavior>
+					<Transition hitpointsLessThan="0.5">Heal</Transition>
+				</State>
+				
+				<State id="Heal">
+					<Behavior targetGroups="Shield Orcs" cooldown=".5" >Heal</Behavior>
+					<Transition afterTime="0.5">Attack1</Transition>		
+				</State>
+			</Order>
+			
+			<Transition hitpointsLessThan="0.5">FlashBeforeExplode</Transition>
+			<Transition noPlayerWithin="30">Waiting</Transition>
+		</State>
+
+		<State id="FlashBeforeExplode">
+			<Order>
+				<Behavior type="Flash" color="FF0000">ShowEffect</Behavior>
+			</Order>		
+			<Behavior type="Flash" color="FF0000">ShowEffect</Behavior>
+			<Transition afterTime="0.3">Explode</Transition>
+		</State>
+		
+		<State id="Explode">
+			<Order>
+				<Behavior range="0.0" projectileId="0">Explode</Behavior>
+			</Order>
+			<Behavior range="0.0" projectileId="0">Explode</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x0901" id="Shield Orc Flooder">
+		<Group>Shield Orcs</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Shield Orc King</DisplayId>
+
+		<!-- AESTHETICS -->	
+		<AnimatedTexture><File>chars8x8rMid</File><Index>24</Index></AnimatedTexture>
+		<HitSound>monster/orcs_hit</HitSound>
+		<DeathSound>monster/orcs_death</DeathSound>
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>60</Speed>
+			<Damage>40</Damage>
+			<Size>30</Size>
+			<LifetimeMS>700</LifetimeMS>
+			<MultiHit/>
+		</Projectile>		
+
+		<!-- DEFAULT PROPERTIES -->	
+		<MaxHitPoints>2000</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>60</Defense>
+		<XpMult>0.0</XpMult>
+		<Terrain>HighPlains</Terrain>
+
+		<!-- LOOT -->	
+		<SoulboundLoot prob=".04">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01" tier="4">ClassSpecial</SoulboundLoot>
+
+		<!-- STATES -->			
+
+	    <State id="Start">
+				<Transition afterTime="0.01">Attacking</Transition>
+	    </State>
+
+		<State id="Attacking">
+			<Behavior bucket="movement" listenIds="Shield Orc Key">FollowOrders</Behavior>
+			<Behavior bucket="movement" speed="0.1">Wander</Behavior>	
+		</State>
+	</Object>
+
+	<Object type="0x0902" id="Shield Orc Shield">
+		<Group>Shield Orcs</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<DisplayId>Shield Orc Warrior</DisplayId>
+
+		<!-- AESTHETICS -->	
+		<AnimatedTexture><File>chars8x8rMid</File><Index>22</Index></AnimatedTexture>
+		<HitSound>monster/orcs_hit</HitSound>
+		<DeathSound>monster/orcs_death</DeathSound>
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>60</Speed>
+			<Damage>40</Damage>
+			<Size>30</Size>
+			<LifetimeMS>700</LifetimeMS>
+			<MultiHit/>
+		</Projectile>		
+
+		<!-- DEFAULT PROPERTIES -->	
+		<MaxHitPoints>5000</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>0</Defense>
+		<XpMult>0.0</XpMult>
+		<Terrain>HighPlains</Terrain>
+
+		<!-- LOOT -->	
+		<SoulboundLoot prob=".04">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01">Magic Potion</SoulboundLoot>
+		<SoulboundLoot prob=".01" tier="2">Ring</SoulboundLoot>
+
+		<!-- STATES -->			
+
+	    <State id="Start">
+				<Transition afterTime="0.01">Attacking</Transition>
+	    </State>
+
+		<State id="Attacking">
+			<Behavior protecteeId="Shield Orc Flooder" radius="3" speed="1">Orbit</Behavior>
+			<Behavior bucket="movement" listenIds="Shield Orc Key">FollowOrders</Behavior>
+			<Behavior bucket="movement" speed="0.1">Wander</Behavior>		
+		</State>
+	</Object>
+	
+	<Object type="0x0957" id="Urgle">
+		<Group>Traptossers</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Terrain>HighPlains</Terrain>
+
+		<!-- AESTHETICS -->	
+		<AnimatedTexture><File>chars16x16dEncounters</File><Index>9</Index></AnimatedTexture>
+		<HitSound>monster/demons_hit</HitSound>
+		<DeathSound>monster/demons_death</DeathSound>
+
+		<!-- DEFAULT PROPERTIES -->	
+		<MaxHitPoints>1600</MaxHitPoints>
+		<Size>100</Size>
+		<Defense>9</Defense>
+		<XpMult>0.5</XpMult>
+		<SpawnProb>1.0</SpawnProb>
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>70</Speed>
+			<Damage>48</Damage>
+			<Size>80</Size>
+			<LifetimeMS>1500</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		
+		<!-- LOOT -->
+		<SoulboundLoot tier="5" prob=".08" threshold=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".08" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".05" threshold=".18">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".02" threshold=".18">Ring</SoulboundLoot>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+		
+		<!-- STATES -->	
+		<!--<Behavior prob="1" childId="Urgle Spawn">MetamorphoseAtDeath</Behavior>-->
+		<Behavior prob=".1" childId="Spider Den Portal">MetamorphoseAtDeath</Behavior>		
+
+		<State id="fight">
+            <!--
+			<Behavior bucket="movement" protecteeId="Cube God" acquireRange="40" protectionRange="22" reprotectRange="18" speed="0.8">Protect</Behavior>
+			<Behavior bucket="movement" protecteeId="Skull Shrine" acquireRange="40" protectionRange="22" reprotectRange="18" speed="0.8">Protect</Behavior>
+             -->
+			<Behavior bucket="movement" range="3" speed="0.8">StayCloseToSpawn</Behavior>
+			<Behavior speed="0.5">Wander</Behavior>
+
+			<Behavior numShots="1" projectileId="0" cooldown="1" type="targeted" predictive="0.3">Shoot</Behavior>
+
+			<State id="idle">			
+				<Transition playerWithin="10.5">toss_horizontal_traps</Transition>						
+			</State>			
+			<State id="toss_horizontal_traps">
+				<Behavior childId="Left Horizontal Trap" cooldown="90" type="auto" range="9" defaultAngle="230">ObjectToss</Behavior>
+				<Behavior childId="Left Horizontal Trap" cooldown="90" type="auto" range="10" defaultAngle="180">ObjectToss</Behavior>
+				<Behavior childId="Left Horizontal Trap" cooldown="90" type="auto" range="9" defaultAngle="140">ObjectToss</Behavior>
+				
+				<Transition afterTime="1">toss_vertical_traps</Transition>
+			</State>
+			<State id="toss_vertical_traps">
+				<Behavior childId="Top Vertical Trap" cooldown="90" type="auto" range="8" defaultAngle="200">ObjectToss</Behavior>
+				<Behavior childId="Top Vertical Trap" cooldown="90" type="auto" range="10" defaultAngle="240">ObjectToss</Behavior>
+				<Behavior childId="Top Vertical Trap" cooldown="90" type="auto" range="10" defaultAngle="280">ObjectToss</Behavior>
+				<Behavior childId="Top Vertical Trap" cooldown="90" type="auto" range="8" defaultAngle="320">ObjectToss</Behavior>
+				
+				<Transition afterTime="1">toss_diagonal_traps</Transition>
+			</State>
+			<State id="toss_diagonal_traps">
+				<Behavior childId="45-225 Diagonal Trap" cooldown="90" type="auto" range="2" defaultAngle="45">ObjectToss</Behavior>
+				<Behavior childId="45-225 Diagonal Trap" cooldown="90" type="auto" range="7" defaultAngle="45">ObjectToss</Behavior>
+				
+				<Behavior childId="45-225 Diagonal Trap" cooldown="90" type="auto" range="11" defaultAngle="225">ObjectToss</Behavior>
+				<Behavior childId="45-225 Diagonal Trap" cooldown="90" type="auto" range="6" defaultAngle="225">ObjectToss</Behavior>				
+
+				<Behavior childId="135-315 Diagonal Trap" cooldown="90" type="auto" range="2" defaultAngle="135">ObjectToss</Behavior>
+				<Behavior childId="135-315 Diagonal Trap" cooldown="90" type="auto" range="7" defaultAngle="135">ObjectToss</Behavior>
+				
+				<Behavior childId="135-315 Diagonal Trap" cooldown="90" type="auto" range="11" defaultAngle="315">ObjectToss</Behavior>
+				<Behavior childId="135-315 Diagonal Trap" cooldown="90" type="auto" range="6" defaultAngle="315">ObjectToss</Behavior>
+
+				<Transition afterTime="1">wait</Transition>
+			</State>
+			<State id="wait">						
+				<Transition afterTime="2.4">idle</Transition>
+			</State>			
+		</State>	
+	</Object>
+
+	<Object type="0x0958" id="Left Horizontal Trap">
+		<DisplayId>Trap Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints><Defense>1000</Defense>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>7</Index></AnimatedTexture>
+		<Size>100</Size>
+		<StasisImmune/>
+		<Enemy/>
+
+		<!-- PROJECTILES -->		
+		
+		<Projectile id="1">
+			<ObjectId>Web Thread</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>1450</LifetimeMS>
+			<ConditionEffect duration="6">Weak</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Web Thread 2</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>1450</LifetimeMS>
+			<ConditionEffect duration="2">Blind</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Web Thread 3</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>1450</LifetimeMS>
+			<ConditionEffect duration="2.4">Armor Broken</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>		
+		
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		
+		<State id="weak_effect">
+			<Behavior numShots="1" projectileId="1" cooldown="0.2" type="auto" defaultAngle="0">Shoot</Behavior>
+
+			<Transition afterTime="2">blind_effect</Transition>
+		</State>
+		<State id="blind_effect">
+			<Behavior numShots="1" projectileId="2" cooldown="0.2" type="auto" defaultAngle="0">Shoot</Behavior>
+
+			<Transition afterTime="2">pierce_effect</Transition>
+		</State>
+		<State id="pierce_effect">
+			<Behavior numShots="1" projectileId="3" cooldown="0.2" type="auto" defaultAngle="0">Shoot</Behavior>
+
+			<Transition afterTime="2">weak_effect</Transition>
+		</State>		
+		
+		<Behavior time="6">Decay</Behavior>
+	</Object>
+
+	<Object type="0x0959" id="Top Vertical Trap">
+		<DisplayId>Trap Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints><Defense>1000</Defense>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>7</Index></AnimatedTexture>
+		<Size>100</Size>
+		<StasisImmune/>
+		<Enemy/>
+
+		<!-- PROJECTILES -->		
+		
+		<Projectile id="1">
+			<ObjectId>Web Thread</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>1450</LifetimeMS>
+			<ConditionEffect duration="6">Weak</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Web Thread 2</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>1450</LifetimeMS>
+			<ConditionEffect duration="2">Blind</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Web Thread 3</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>1450</LifetimeMS>
+			<ConditionEffect duration="2.4">Armor Broken</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>		
+		
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		
+		<State id="weak_effect">
+			<Behavior numShots="1" projectileId="1" cooldown="0.2" type="auto" defaultAngle="90">Shoot</Behavior>
+
+			<Transition afterTime="2">blind_effect</Transition>
+		</State>
+		<State id="blind_effect">
+			<Behavior numShots="1" projectileId="2" cooldown="0.2" type="auto" defaultAngle="90">Shoot</Behavior>
+
+			<Transition afterTime="2">pierce_effect</Transition>
+		</State>
+		<State id="pierce_effect">
+			<Behavior numShots="1" projectileId="3" cooldown="0.2" type="auto" defaultAngle="90">Shoot</Behavior>
+
+			<Transition afterTime="2">weak_effect</Transition>
+		</State>		
+		
+		<Behavior time="6">Decay</Behavior>
+	</Object>
+
+	<Object type="0x0960" id="45-225 Diagonal Trap">
+		<DisplayId>Trap Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints><Defense>1000</Defense>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>7</Index></AnimatedTexture>
+		<Size>100</Size>
+		<StasisImmune/>
+		<Enemy/>
+
+		<!-- PROJECTILES -->		
+
+		<Projectile id="1">
+			<ObjectId>Web Thread</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>370</LifetimeMS>
+			<ConditionEffect duration="6">Weak</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Web Thread 2</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>370</LifetimeMS>
+			<ConditionEffect duration="2">Blind</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Web Thread 3</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>370</LifetimeMS>
+			<ConditionEffect duration="2.4">Armor Broken</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>		
+		
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		
+		<State id="weak_effect">
+			<Behavior numShots="1" projectileId="1" cooldown="0.2" type="auto" defaultAngle="45">Shoot</Behavior>
+
+			<Transition afterTime="2">blind_effect</Transition>
+		</State>
+		<State id="blind_effect">
+			<Behavior numShots="1" projectileId="2" cooldown="0.2" type="auto" defaultAngle="45">Shoot</Behavior>
+
+			<Transition afterTime="2">pierce_effect</Transition>
+		</State>
+		<State id="pierce_effect">
+			<Behavior numShots="1" projectileId="3" cooldown="0.2" type="auto" defaultAngle="45">Shoot</Behavior>
+
+			<Transition afterTime="2">weak_effect</Transition>
+		</State>		
+		
+		<Behavior time="6">Decay</Behavior>
+	</Object>
+	
+	<Object type="0x0961" id="135-315 Diagonal Trap">
+		<DisplayId>Trap Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints><Defense>1000</Defense>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>7</Index></AnimatedTexture>
+		<Size>100</Size>
+		<StasisImmune/>
+		<Enemy/>
+
+		<!-- PROJECTILES -->		
+
+		<Projectile id="1">
+			<ObjectId>Web Thread</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>370</LifetimeMS>
+			<ConditionEffect duration="6">Weak</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="2">
+			<ObjectId>Web Thread 2</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>370</LifetimeMS>
+			<ConditionEffect duration="2">Blind</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>
+		<Projectile id="3">
+			<ObjectId>Web Thread 3</ObjectId>
+			<Damage>20</Damage>
+			<Size>210</Size>
+			<Speed>70</Speed>
+			<LifetimeMS>370</LifetimeMS>
+			<ConditionEffect duration="2.4">Armor Broken</ConditionEffect>
+			<MultiHit/>
+			<PassesCover/>
+		</Projectile>		
+		
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		
+		<State id="weak_effect">
+			<Behavior numShots="1" projectileId="1" cooldown="0.2" type="auto" defaultAngle="135">Shoot</Behavior>
+
+			<Transition afterTime="2">blind_effect</Transition>
+		</State>
+		<State id="blind_effect">
+			<Behavior numShots="1" projectileId="2" cooldown="0.2" type="auto" defaultAngle="135">Shoot</Behavior>
+
+			<Transition afterTime="2">pierce_effect</Transition>
+		</State>
+		<State id="pierce_effect">
+			<Behavior numShots="1" projectileId="3" cooldown="0.2" type="auto" defaultAngle="135">Shoot</Behavior>
+
+			<Transition afterTime="2">weak_effect</Transition>
+		</State>		
+		
+		<Behavior time="6">Decay</Behavior>
+	</Object>
+	
+	<!-- HighForest -->
+	<Object type="0x642" id="Ogre Mage">
+		<Group>Ogres</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x07</Index></AnimatedTexture>
+		<HitSound>monster/ogres_hit</HitSound>
+		<DeathSound>monster/ogres_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>300</MaxHitPoints>
+		<Defense>7</Defense>
+		<Terrain>HighForest</Terrain>
+		
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>38</Damage>
+			<Speed>67</Speed>
+			<LifetimeMS>1500</LifetimeMS>
+		</Projectile>
+		
+		<Behavior projectileId="0" range="10" predictive="0.3">Shoot</Behavior>
+		
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior bucket="movement" distance="6" speed="0.5">Circle</Behavior>
+		<Behavior bucket="movement" protecteeId="Ogre King" speed="1.2" acquireRange="100" protectionRange="10" reprotectRange="1">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+	</Object>
+	
+	<Object type="0x643" id="Ogre Warrior">
+		<Group>Ogres</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x08</Index></AnimatedTexture>
+		<HitSound>monster/ogres_hit</HitSound>
+		<DeathSound>monster/ogres_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>270</MaxHitPoints>
+		<Defense>7</Defense>
+		<Terrain>HighForest</Terrain>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>48</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+		
+		<Behavior projectileId="0" range="3" predictive=".5">Shoot</Behavior>
+		
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior bucket="movement" protecteeId="Ogre King" speed="1.2" acquireRange="15" protectionRange="10" reprotectRange="5">Protect</Behavior>
+		<Behavior bucket="movement" acquireRange="10.5" range="1.6" speed="1.4" duration="2.6" cooldown="2.2" predictive="1">Follow</Behavior>
+		<Behavior bucket="movement" range="6" speed="0.6">Circle</Behavior>
+		
+		<SoulboundLoot prob="0.03">Magic Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x644" id="Ogre Wizard">
+		<Group>Ogres</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x09</Index></AnimatedTexture>
+		<HitSound>monster/ogres_hit</HitSound>
+		<DeathSound>monster/ogres_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>300</MaxHitPoints>
+		<Defense>7</Defense>
+		<Terrain>HighForest</Terrain>
+		
+		<Projectile id="0">
+			<ObjectId>Green Bolt</ObjectId>
+			<Damage>42</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>2200</LifetimeMS>
+			<Size>100</Size>
+		</Projectile>
+		
+		<Behavior numShots="1" projectileId="0" cooldown="0.3" type="targeted">Shoot</Behavior>		
+		
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior bucket="movement" range="6" speed="0.5">Circle</Behavior>
+		<Behavior bucket="movement" protecteeId="Ogre King" speed="1.2" acquireRange="100" protectionRange="10" reprotectRange="1">Protect</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+		<SoulboundLoot prob="0.03">Magic Potion</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x645" id="Ogre King">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x0a</Index></AnimatedTexture>
+		<HitSound>monster/ogres_hit</HitSound>
+		<DeathSound>monster/ogres_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>500</MaxHitPoints>
+		<Defense>7</Defense>
+		<Terrain>HighForest</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>50</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>400</LifetimeMS>
+		</Projectile>
+
+		<Behavior childIds="Ogre Warrior" cooldown="12" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+		<Behavior childIds="Ogre Mage" cooldown="16" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+		<Behavior childIds="Ogre Wizard" cooldown="20" maxChildren="2" startWithMinions="false">MakeMinions</Behavior>
+		
+		<State id="idle">			
+			<Transition playerWithin="10">grenade_blade_combo</Transition>						
+		</State>
+		<State id="grenade_blade_combo">
+			<State id="grenade1">
+				<Behavior cooldown="100" type="targeted" radius="3" damage="60">GrenadeToss</Behavior>
+
+				<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+				<Behavior bucket="movement" speed="0.3">Wander</Behavior>
+
+				<Transition afterTime="2">grenade2</Transition>
+			</State>
+			<State id="grenade2">
+				<Behavior cooldown="100" type="targeted" radius="3" damage="60">GrenadeToss</Behavior>
+
+				<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+				<Behavior bucket="movement" speed="0.5">Wander</Behavior>
+
+				<Transition afterTime="3">slow_follow</Transition>
+			</State>		
+			<State id="slow_follow">
+				<Behavior projectileId="0" numShots="1" range="13" type="targeted" cooldown="1">Shoot</Behavior>
+
+				<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+				<Behavior bucket="movement" acquireRange="9" range="3.5" speed="0.4" duration="4">Follow</Behavior>
+
+				<Transition afterTime="4">grenade1</Transition>
+			</State>
+
+			<Transition hitpointsLessThan=".45">furious</Transition>
+		</State>
+		<State id="furious">
+			<Behavior cooldown="1.5" type="targeted" radius="2.4" damage="55" range="9">GrenadeToss</Behavior>
+
+			<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+			<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+				
+			<Transition afterTime="12">idle</Transition>
+		</State>
+
+		<Behavior prob=".02" childId="Snake Pit Portal">MetamorphoseAtDeath</Behavior>
+
+		<SoulboundLoot tier="4" prob=".1">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".1">Armor</SoulboundLoot>		
+		<SoulboundLoot tier="5" prob=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".06">Armor</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".01">Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.015">Magic Potion</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".05">Ring</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".09">ClassSpecial</SoulboundLoot>
+	</Object>
+	
+	<Object type="0x64a" id="Night Elf Archer">
+		<Group>Night Elves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x0d</Index></AnimatedTexture>
+		<HitSound>monster/night_elves_hit</HitSound>
+		<DeathSound>monster/night_elves_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>240</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>HighForest</Terrain>
+		<Projectile id="0">
+			<ObjectId>Blue Arrow</ObjectId>
+			<Damage>36</Damage>
+			<Speed>75</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="10" predictive="1">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.5">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x64b" id="Night Elf Warrior">
+		<Group>Night Elves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x0e</Index></AnimatedTexture>
+		<HitSound>monster/night_elves_hit</HitSound>
+		<DeathSound>monster/night_elves_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>280</MaxHitPoints>
+		<Defense>2</Defense>
+		<Terrain>HighForest</Terrain>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>40</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="3" predictive="1">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed="1.5">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x64c" id="Night Elf Mage">
+		<Group>Night Elves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x0f</Index></AnimatedTexture>
+		<HitSound>monster/night_elves_hit</HitSound>
+		<DeathSound>monster/night_elves_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>220</MaxHitPoints>
+		<Defense>0</Defense>
+		<Terrain>HighForest</Terrain>
+		<Projectile id="0">
+			<ObjectId>Blue Magic</ObjectId>
+			<Damage>40</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="10" predictive="1">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.5">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x64d" id="Night Elf Veteran">
+		<Group>Night Elves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x10</Index></AnimatedTexture>
+		<HitSound>monster/night_elves_hit</HitSound>
+		<DeathSound>monster/night_elves_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>300</MaxHitPoints>
+		<Defense>4</Defense>
+		<Terrain>HighForest</Terrain>
+		<Projectile id="0">
+			<ObjectId>Gold Arrow</ObjectId>
+			<Damage>52</Damage>
+			<Speed>80</Speed>
+			<LifetimeMS>2000</LifetimeMS>
+			<Size>120</Size>
+			<MultiHit/>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="10" predictive="1">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.5">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x64f" id="Night Elf King">
+		<Group>Night Elves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8rHigh</File><Index>0x12</Index></AnimatedTexture>
+		<HitSound>monster/night_elves_hit</HitSound>
+		<DeathSound>monster/night_elves_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>180</MaxHitPoints>
+		<Defense>5</Defense>
+		<Terrain>HighForest</Terrain>
+		<Projectile id="0">
+			<ObjectId>Green Magic</ObjectId>
+			<Damage>60</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior projectileId="0" range="10" predictive="1">Shoot</Behavior>
+		<Behavior bucket="movement" range="7" speed="1.5">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+
+	<Object type="0x650" id="Lizard God">
+		<Group>Night Elves</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar16x16</File><Index>0x49</Index></Texture>
+		<HitSound>monster/lizard_god_hit</HitSound>
+		<DeathSound>monster/lizard_god_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>900</MaxHitPoints>
+		<Defense>12</Defense>
+		<Terrain>HighForest</Terrain>
+		<God/>
+		<SpawnProb>1.0</SpawnProb>
+
+		<Projectile id="0">
+			<ObjectId>Green Bolt</ObjectId>
+			<Damage>30</Damage>
+			<Speed>70</Speed>
+			<LifetimeMS>1600</LifetimeMS>
+		</Projectile>
+
+		<Behavior bucket="movement" minAltitude="160">StayAbove</Behavior>
+		<Behavior bucket="movement" range="7" speed="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+
+		<State id="idle">
+			<Transition playerWithin="10.2">normal_attack</Transition>
+		</State>
+		<State id="normal_attack">
+			<Behavior projectileId="0" numShots="3" range="10" angle="3" predictive="0.5">Shoot</Behavior>
+
+			<Transition afterTime="4">if_cloaked</Transition>
+		</State>
+		<State id="if_cloaked">
+			<Behavior projectileId="0" numShots="8" type="auto" range="10" angle="45" cooldown="1.6" defaultAngle="20" offset="0.4">Shoot</Behavior>
+			<Behavior projectileId="0" numShots="8" type="auto" range="10" angle="45" cooldown="1.6" defaultAngle="42" offset="1.2">Shoot</Behavior>
+
+			<Transition playerWithin="10">normal_attack</Transition>
+		</State>
+
+		<Behavior childIds="Night Elf Archer" maxChildren="4" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Night Elf Warrior" maxChildren="3" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Night Elf Mage" maxChildren="2" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Night Elf Veteran" maxChildren="2" cooldown="10">MakeMinions</Behavior>
+		<Behavior childIds="Night Elf King" maxChildren="1" cooldown="10">MakeMinions</Behavior>
+
+		<Behavior prob=".05" childId="Snake Pit Portal">MetamorphoseAtDeath</Behavior>
+
+		<SoulboundLoot tier="5" prob=".08">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".08">Armor</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".025">Ring</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".075">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot prob="0.0025">Purple Drake Egg</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0206" id="Dragon Egg">
+		<Class>Character</Class>
+		<Texture>
+			<File>lofiChar8x8</File>
+			<Index>0xe5</Index>
+		</Texture>
+		<HitSound>monster/eggs_hit</HitSound>
+		<DeathSound>monster/eggs_death</DeathSound>
+		<MaxHitPoints>75</MaxHitPoints>
+		<Enemy/>
+		<BloodProb>0.5</BloodProb>
+		<BloodColor>0x50d71b</BloodColor>
+		<Terrain>HighForest</Terrain>
+		<SpawnProb>1.0</SpawnProb>
+		<Behavior prob=".30" childId="White Dragon Whelp">MetamorphoseAtDeath</Behavior>
+		<Behavior prob=".20" childId="Juvenile White Dragon">MetamorphoseAtDeath</Behavior>
+		<Behavior prob=".10" childId="Adult White Dragon">MetamorphoseAtDeath</Behavior>
+	</Object>
+	
+	<Object type="0x0207" id="White Dragon Whelp">
+		<Class>Character</Class>
+		<Size>65</Size>
+		<Texture>
+			<File>lofiChar8x8</File>
+			<Index>0xe4</Index>
+		</Texture>
+		<HitSound>monster/dragons_hit</HitSound>
+		<DeathSound>monster/dragons_death</DeathSound>
+		<MaxHitPoints>240</MaxHitPoints>
+		<Enemy/>
+		<BloodProb>0.5</BloodProb>
+		<BloodColor>0x50d71b</BloodColor>
+		<Terrain>HighForest</Terrain>
+
+		<Projectile>
+			<ObjectId>Red Fire</ObjectId>
+			<Speed>70</Speed>
+			<Damage>30</Damage>
+			<Size>80</Size>
+			<LifetimeMS>2300</LifetimeMS>
+		</Projectile>
+
+		<Behavior bucket="movement"  minAltitude="140">StayAbove</Behavior>
+		<Behavior bucket="movement" acquireRange="10.5" range="2.5" speed="2" duration="2.2" cooldown="3.2" predictive="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.9">Wander</Behavior>
+
+		<Behavior numShots="2" angle="20" projectileId="0" cooldown="0.75" type="targeted" predictive="0.3">Shoot</Behavior>
+	</Object>
+	
+	<Object type="0x0208" id="Juvenile White Dragon">
+		<Class>Character</Class>
+		<Size>90</Size>
+		<Texture>
+			<File>lofiChar16x8</File>
+			<Index>0x7c</Index>
+		</Texture>
+		<HitSound>monster/dragons_hit</HitSound>
+		<DeathSound>monster/dragons_death</DeathSound>
+		<MaxHitPoints>300</MaxHitPoints>
+		<Enemy/>
+		<BloodProb>0.5</BloodProb>
+		<BloodColor>0x50d71b</BloodColor>
+		<Terrain>HighForest</Terrain>
+
+		<Projectile>
+			<ObjectId>Red Fire</ObjectId>
+			<Speed>70</Speed>
+			<Damage>43</Damage>
+			<Size>100</Size>
+			<LifetimeMS>2200</LifetimeMS>
+		</Projectile>
+
+		<Behavior bucket="movement"  minAltitude="140">StayAbove</Behavior>
+		<Behavior bucket="movement" acquireRange="10.5" range="2.2" speed="1.8" duration="3" cooldown="3" predictive="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.75">Wander</Behavior>
+
+		<Behavior numShots="2" angle="20" projectileId="0" cooldown="0.75" type="targeted" predictive="0.3">Shoot</Behavior>
+
+		<SoulboundLoot tier="7" prob=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="6" prob=".07">Armor</SoulboundLoot>
+	</Object>
+
+	<Object type="0x0209" id="Adult White Dragon">
+		<Class>Character</Class>
+		<Size>120</Size>
+		<Texture>
+			<File>lofiChar16x16</File>
+			<Index>0x47</Index>
+		</Texture>
+		<HitSound>monster/dragons_hit</HitSound>
+		<DeathSound>monster/dragons_death</DeathSound>
+		<MaxHitPoints>400</MaxHitPoints>
+		<Terrain>HighForest</Terrain>
+		<Enemy/>
+
+		<Projectile>
+			<ObjectId>Red Fire</ObjectId>
+			<Speed>70</Speed>
+			<Damage>60</Damage>
+			<Size>120</Size>
+			<LifetimeMS>2200</LifetimeMS>
+		</Projectile>
+
+		<Behavior bucket="movement"  minAltitude="140">StayAbove</Behavior>
+		<Behavior bucket="movement" acquireRange="10.5" range="1.8" speed="1.4" duration="4" cooldown="2" predictive="1">Follow</Behavior>
+		<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+
+		<Behavior numShots="3" angle="15" projectileId="0" cooldown="0.75" type="targeted" predictive="0.3">Shoot</Behavior>
+
+		<SoulboundLoot prob=".03">Health Potion</SoulboundLoot>
+		<SoulboundLoot prob=".03">Magic Potion</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot prob="0.005">Seal of the Divine</SoulboundLoot>
+		<SoulboundLoot prob=".002">White Drake Egg</SoulboundLoot>
+	</Object>
+    
+    <!--
+     *********************************************************************************
+     
+     SPECIAL ENEMIES
+     
+     *********************************************************************************
+     -->
+    <Object type="0x5e26" id="Beer God Dead">
+		<Enemy/>
+		<Class>Character</Class>
+        <Texture><File>lofiObj3</File><Index>0x26d</Index></Texture>
+		<Size>0</Size>
+		<MaxHitPoints>1000</MaxHitPoints>
+		<XpMult>0</XpMult>
+		<Order>
+            <Behavior tagName="dead">SetTag</Behavior>
+        </Order>
+        <Behavior time="2">Decay</Behavior>
+	</Object>
+    
+    <Object type="0x5e25" id="Beer God">
+		<Enemy/>
+		<Class>Character</Class>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>52</Index></AnimatedTexture> <!-- 8961856 closed mouth -->
+        
+        <AltTexture id="1"> <!-- kegsmash -->
+            <AnimatedTexture><File>chars16x16rEncounters</File><Index>53</Index></AnimatedTexture> <!-- 8992036 closed mouth -->
+        </AltTexture>
+        
+		<HitSound>monster/lizard_god_hit</HitSound>
+		<DeathSound>monster/lizard_god_death</DeathSound>
+		<Size>0</Size>
+		<MaxHitPoints>4000</MaxHitPoints>
+		<Defense>10</Defense>
+		<Terrain>HighForest</Terrain>
+        <!--
+         <Terrain>HighPlains</Terrain>
+         -->
+		<Level>15</Level>
+		<XpMult>1.4</XpMult>
+		<SpawnProb>0.05</SpawnProb>
+		
+		<Projectile id="0">
+			<ObjectId>Beer Barrel</ObjectId>
+			<Damage>75</Damage>
+			<Speed>65</Speed>
+			<Size>130</Size>
+			<LifetimeMS>1400</LifetimeMS>
+			<ConditionEffect duration="4">Drunk</ConditionEffect>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Beer Shockwave</ObjectId>
+			<Damage>100</Damage>
+			<Speed>55</Speed>
+			<Size>140</Size>
+			<LifetimeMS>800</LifetimeMS>
+		</Projectile>
+        
+		<State id="Ini">
+            <Order>
+                <Behavior tagName="found">SetTag</Behavior>
+            </Order>
+            
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+            <Behavior acquireRange="2.6" listenIds="Beer Slurp">FollowOrders</Behavior>
+			<Transition hasTag="found">Appear</Transition>
+		</State>	
+        
+        <State id="Pause">
+            <Order>
+                <Behavior tagName="circle">SetTag</Behavior>
+            </Order>
+			<Transition afterTime="5">Appear</Transition>
+        </State>
+        
+        <State id="Appear">
+            <Order>
+                <Behavior tagName="found">SetTag</Behavior>
+            </Order>
+            
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+			<Behavior rate="10" maxSize="140">ChangeSize</Behavior>
+			<Transition afterTime="2">Battle</Transition>
+        </State>
+        
+		<State id="Battle">
+            <Order>
+                <Behavior tagName="found">SetTag</Behavior>
+            </Order>		
+			<Behavior bucket="movement" minAltitude="85">StayAbove</Behavior>
+            
+            <State id="ChooseAttack">
+                <Transition afterTime="0">BeerRush,BeerVolley</Transition>
+            </State>
+            
+            <State id="BeerVolley">
+                <Behavior projectileId="0" numShots="1" range="8" type="targeted" cooldown="0.4" offset="0" predictive="0.8">Shoot</Behavior>
+                <Behavior bucket="movement" acquireRange="11" range="3" speed="0.8" predictive="true">Follow</Behavior>
+                <Behavior bucket="movement" speed="0.4">Wander</Behavior>
+                <Transition afterTime="5">ChooseAttack</Transition>
+            </State>
+            
+            <State id="BeerRush">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <State id="PlayerNumber">
+                    <Transition playerWithin="14|12">Many</Transition>
+                    <Transition playerWithin="14|8">Bunch</Transition>
+                    <Transition playerWithin="14|4">Few</Transition>
+                    <Transition afterTime="0.4">One</Transition>
+                </State>
+                <State id="Many">
+                    <Behavior speed="1.7" cooldown=".6" range="10">Charge</Behavior>
+                    <Transition playerWithin="5|5">Attack</Transition>
+                    <Transition afterTime="3">Attack</Transition>
+                </State>
+                <State id="Bunch">
+                    <Behavior speed="1.7" cooldown=".6" range="10">Charge</Behavior>
+                    <Transition playerWithin="4|3">Attack</Transition>
+                    <Transition afterTime="3">Attack</Transition>
+                </State>
+                <State id="Few">
+                    <Behavior speed="1.7" cooldown=".6" range="10">Charge</Behavior>
+                    <Transition playerWithin="3|2">Attack</Transition>
+                    <Transition afterTime="3">Attack</Transition>
+                </State>
+                <State id="One">
+                    <Behavior speed="1.7" cooldown=".6" range="10">Charge</Behavior>
+                    <Transition playerWithin="2">Attack</Transition>
+                    <Transition afterTime="3">Attack</Transition>
+                </State>
+                <State id="Attack">
+                    <Behavior projectileId="1" numShots="10" angle="36" range="0" type="auto" cooldown="0.3" offset="0">Shoot</Behavior>
+                    <Transition afterTime="0.8">PlayerNumber</Transition>
+                </State>
+                <Transition afterTime="6" random="0.05">ChooseAttack</Transition>
+            </State>
+            
+			<Behavior type="targeted" range="12" cooldown="2" radius="3" damage="100" minRange="4.6" textureSourceId="Beer Bottle">GrenadeToss</Behavior> <!-- effect="Drunk" duration="4" -->
+		</State>
+        
+		<SoulboundLoot prob="0.2" threshold=".07">Mad God Ale</SoulboundLoot>
+		<SoulboundLoot prob="0.2" threshold=".07">Oryx Stout</SoulboundLoot>
+		<SoulboundLoot prob="0.2" threshold=".07">Realm-wheat Hefeweizen</SoulboundLoot>
+        
+		<SoulboundLoot tier="7" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="9" prob=".005">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".01">Armor</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".001">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".0075">Ring</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".0005">Ring</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".02">ClassSpecial</SoulboundLoot>
+        
+		<SoulboundLoot prob="0.015" threshold=".18">Potion of Defense</SoulboundLoot>
+		<SoulboundLoot prob="0.015" threshold=".18">Potion of Attack</SoulboundLoot>
+        
+		<Behavior prob="1" posJitter="0" childId="Beer God Dead">MetamorphoseAtDeath</Behavior>
+	</Object>
+    <!--
+     *********************************************************************************
+     
+     END SPECIAL ENEMIES
+     
+     *********************************************************************************
+     -->
+</Objects>

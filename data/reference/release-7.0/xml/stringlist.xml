@@ -1,0 +1,402 @@
+<StringLists>
+	<StringList id="Beach Bum">
+		<Strings id="new">
+			<String>An elusive Beach Bum is hiding somewhere in the Realm.</String>
+			<String>What is this lazy Beach Bum doing in my Realm?!</String>
+		</Strings>
+        <!--
+		<Strings id="killed">
+			<String>{KILLER} has killed an innocent Beach Bun!</String>
+		</Strings>
+         -->
+	</StringList>
+    
+	<StringList id="Ghost Ship">
+		<Strings id="new">
+			<String>A Ghost Ship has entered the Realm.</String>
+            <String>My Ghost Ship will terrorize you pathetic peasants!</String>
+		</Strings>
+		<Strings id="one">
+			<String>My Ghost Ship will send you to a watery grave.</String>
+			<String>You filthy mongrels stand no chance against my Ghost Ship!</String>
+            <String>My Ghost Ship's cannonballs will crush your pathetic Knights!</String>
+		</Strings>
+		<Strings id="killed">
+			<String>{KILLER}, you foul creature.  I shall see to your death personally!</String>
+			<String>{KILLER}, has crossed me for the last time! My Ghost Ship shall be avenged.</String>
+			<String>{KILLER} is such a jerk!</String>
+			<String>How could a creature like {KILLER} defeat my dreaded Ghost Ship?!</String>
+            <String>The spirits of the sea will seek revenge on your worthless soul, {KILLER}!</String>
+		</Strings>
+		<Strings id="death">
+			<String>My Ghost Ship will return!</String>
+            <String>Alas, my beautiful Ghost Ship has sunk!</String>
+		</Strings>
+	</StringList>
+    
+	<StringList id="Skull Shrine">
+		<Strings id="new">
+			<String>Your futile efforts are no match for a Skull Shrine!</String>
+		</Strings>
+		<Strings id="one">
+			<String>Pathetic fools!  A Skull Shrine guards me!</String>
+			<String>Miserable scum!  My Skull Shrine is invincible!</String>
+		</Strings>
+		<Strings id="many">
+			<String>Insects!  {COUNT} Skull Shrines still protect me</String>
+			<String>You hairless apes will never overcome my {COUNT} Skull Shrines!</String>
+			<String>You frail humans will never defeat my {COUNT} Skull Shrines!</String>
+			<String>Miserable worms like you cannot stand against my {COUNT} Skull Shrines!</String>
+			<String>Imbeciles!  My {COUNT} Skull Shrines make me invincible!</String>
+		</Strings>
+		<Strings id="killed">
+			<String>{KILLER}, you insignificant cur!  The penalty for destroying a Skull Shrine is death!</String>
+			<String>{KILLER}, you contemptible pig!  Ruining my Skull Shrine will be the last mistake you ever make!</String>
+			<String>{KILLER}, you will rue the day you dared to defile my Skull Shrine!</String>
+			<String>{KILLER} razed one of my Skull Shrines -- I WILL HAVE MY REVENGE!</String>
+		</Strings>
+		<Strings id="death">
+			<String>You defaced a Skull Shrine!  Minions, to arms!</String>
+		</Strings>
+	</StringList>
+
+	<StringList id="Cube God">
+		<Strings id="new">
+			<String>Your meager abilities cannot possibly challenge a Cube God!</String>
+		</Strings>
+		<Strings id="one">
+			<String>Worthless mortals!  A mighty Cube God defends me!</String>
+			<String>Wretched mongrels!  An unconquerable Cube God is my bulwark!</String>
+		</Strings>
+		<Strings id="many">
+			<String>You piteous cretins!  {COUNT} Cube Gods still guard me!</String>
+			<String>Your pathetic rabble will never survive against my {COUNT} Cube Gods!</String>
+			<String>Filthy vermin! My {COUNT} Cube Gods will exterminate you!</String>
+			<String>You feeble creatures have no hope against my {COUNT} Cube Gods!</String>
+			<String>Loathsome slugs!  My {COUNT} Cube Gods will defeat you!</String>
+		</Strings>
+		<Strings id="killed">
+			<String>{KILLER}, you pathetic swine!  How dare you assault my Cube God?</String>
+			<String>{KILLER}, you wretched dog!  You killed my Cube God!</String>
+			<String>{KILLER}, you may have destroyed my Cube God but you will never defeat me!</String>
+			<String>I have many more Cube Gods, {KILLER}!</String>
+		</Strings>
+		<Strings id="death">
+			<String>You have dispatched my Cube God, but you will never escape my Realm!</String>
+		</Strings>
+	</StringList>
+
+	<StringList id="Pentaract">
+		<Strings id="new">
+			<String>Behold my Pentaract, and despair!</String>
+		</Strings>
+		<Strings id="one">
+			<String>I am invincible while my Pentaract stands!</String>
+			<String>Ignorant fools!  A Pentaract guards me still!</String>
+		</Strings>
+		<Strings id="many">
+			<String>Wretched creatures!  {COUNT} Pentaracts remain!</String>
+			<String>You detestable humans will never defeat my {COUNT} Pentaracts!</String>
+			<String>My {COUNT} Pentaracts will protect me forever!</String>
+			<String>Your weak efforts will never overcome my {COUNT} Pentaracts!</String>
+			<String>Defiance is useless!  My {COUNT} Pentaracts will crush you!</String>
+		</Strings>
+		<Strings id="killed">
+			<String>{KILLER}, you lowly scum!  You'll regret that you ever touched my Pentaract!</String>
+			<String>{KILLER}, you flea-ridden animal!  You destroyed my Pentaract!</String>
+			<String>{KILLER}, by destroying my Pentaract you have sealed your own doom!</String>
+		</Strings>
+		<Strings id="death">
+			<String>That was but one of many Pentaracts!</String>
+			<String>You have razed my Pentaract, but you will die here in my Realm!</String>
+		</Strings>
+	</StringList>
+
+	<StringList id="Grand Sphinx">
+		<Strings id="new">
+			<String>At last, a Grand Sphinx will teach you to respect!</String>
+		</Strings>
+		<Strings id="one">
+			<String>A Grand Sphinx is more than a match for this rabble.</String>
+			<String>Gaze upon the beauty of the Grand Sphinx and feel your last hopes drain away.</String>
+			<String>You festering rat-catchers!  A Grand Sphinx will make you doubt your purpose!</String>
+		</Strings>
+		<Strings id="many">
+			<String>My Grand Sphinxes will bewitch you with their beauty!</String>
+			<String>My {COUNT} Grand Sphinxes protect my Chamber with their lives!</String>
+			<String>Regret your choices, blasphemers!  My {COUNT} Grand Sphinxes will teach you respect!</String>
+			<String>You dull-spirited apes!  You shall pose no challenge for {COUNT} Grand Sphinxes!</String>
+		</Strings>
+		<Strings id="killed">
+			<String>{KILLER}, you up-jumped goat herder!  You shall pay for defeating my Grand Sphinx!</String>
+			<String>{KILLER}, you foul ruffian!  Do not think I forget your defiling of my Grand Sphinx!</String>
+			<String>{KILLER}, you pestiferous lout!  I will not forget what you did to my Grand Sphinx!</String>
+			<String>My Grand Sphinx, she was so beautiful.  I will kill you myself, {KILLER}!</String>
+			<String>My Grand Sphinx had lived for thousands of years!  You, {KILLER}, will not survive the day!</String>
+		</Strings>
+		<Strings id="death">
+			<String>The death of my Grand Sphinx shall be avenged!</String>
+		</Strings>
+	</StringList>
+
+	<StringList id="Lord of the Lost Lands">
+		<Strings id="new">
+			<String>Cower in fear of my Lord of the Lost Lands!</String>
+			<String>My Lord of the Lost Lands will make short work of you!</String>
+		</Strings>
+		<Strings id="one">
+			<String>Give up now! You stand no chance against a Lord of the Lost Lands!</String>
+			<String>Pathetic fools! My Lord of the Lost Lands will crush you all!</String>
+			<String>You are nothing but disgusting slime to be scraped off the foot of my Lord of the Lost Lands!</String>
+		</Strings>
+		<Strings id="many">
+			<String>Cower before your destroyer! You stand no chance against {COUNT} Lords of the Lost Lands!</String>
+			<String>Your pathetic band of fighters will be crushed under the might feet of my {COUNT} Lords of the Lost Lands!</String>
+			<String>Feel the awesome might of my {COUNT} Lords of the Lost Lands!</String>
+			<String>Together, my {COUNT} Lords of the Lost Lands will squash you like a bug!</String>
+			<String>Do not run! My {COUNT} Lords of the Lost Lands only wish to greet you!</String>
+		</Strings>
+		<Strings id="killed">
+			<String>You win this time, {KILLER}, but mark my words:  You will fall before the day is done.</String>
+			<String>{KILLER}, I will never forget you exploited my Lord of the Lost Lands' weakness!</String>
+			<String>{KILLER}, you have done me a service! That Lord of the Lost Lands was not worthy of serving me.</String>
+			<String>You got lucky this time {KILLER}, but you stand no chance against me!</String>
+		</Strings>
+		<Strings id="death">
+			<String>How dare you foul-mouthed hooligans treat my Lord of the Lost Lands with such indignity!</String>
+			<String>What trickery is this?!  My Lord of the Lost Lands was invincible!</String>
+		</Strings>
+	</StringList>
+	
+	<StringList id="Hermit God">
+		<Strings id="new">
+			<String>My Hermit God's thousand tentacles shall drag you to a watery grave!</String>
+		</Strings>
+		<Strings id="one">
+			<String>You will be pulled to the bottom of the sea by my mighty Hermit God.</String>
+			<String>Flee from my Hermit God, unless you desire a watery grave!</String>
+			<String>My Hermit God awaits more sacrifices for the majestic Thessal.</String>
+			<String>My Hermit God will pull you beneath the waves!</String>
+			<String>You will make a tasty snack for my Hermit God!</String>
+		</Strings>
+		<Strings id="many">
+			<String>You will make a tasty snack for my Hermit Gods!</String>
+			<String>I will enjoy watching my {COUNT} Hermit Gods fight over your corpse!</String>
+		</Strings>
+		<Strings id="killed">
+			<String>You were lucky this time, {KILLER}!  You will rue this day that you killed my Hermit God!</String>
+			<String>You naive imbecile, {KILLER}! Without my Hermit God, Dreadstump is free to roam the seas without fear!</String>
+			<String>My Hermit God was more than you'll ever be, {KILLER}.  I will kill you myself!</String>
+		</Strings>
+		<Strings id="death">
+			<String>This is preposterous!  There is no way you could have defeated my Hermit God!</String>
+		</Strings>
+	</StringList>
+
+    <StringList id="Oryx the Mad God">
+        <Strings id="everySoOften">
+            <String>Fools! I still have {HITPOINTS} hitpoints!</String>
+            <String>Puny mortals! My {HITPOINTS} hitpoints are more than enough!</String>
+            <String>I have {HITPOINTS} hitpoints and I shall destroy you!</String>
+            <String>Insignificant peons!  I have {HITPOINTS} hitpoints!</String>
+            <String>You cosmic peasants!  My {HITPOINTS} hitpoints make me mightier than you!</String>
+        </Strings>
+        <Strings id="mydeath">
+            <String>You have defeated my simulacrum, but I remain safe in my wine cellar!</String>
+        </Strings>
+    </StringList>
+
+    <StringList id="Oryx the Mad God 2">
+        <Strings id="everySoOften">
+            <String>Pathetic mortals! I have {HITPOINTS} hitpoints!</String>
+            <String>Foolish humans! My {HITPOINTS} hitpoints give me strength!</String>
+            <String>I have {HITPOINTS} hitpoints and I shall annihilate you!</String>
+            <String>Miniscule worms!  I still have {HITPOINTS} hitpoints!</String>
+            <String>Galactic serfs!  Cower before my {HITPOINTS} hitpoints!</String>
+        </Strings>
+        <Strings id="mydeath">
+            <String>You puny mortals!  I....shall....return....!</String>
+        </Strings>
+    </StringList>
+
+	<StringList id="Deathmage">
+		<Strings id="everySoOften">
+			<String>My skeletons will make short work of you.</String>
+			<String>{PLAYER}, you are no match for my army of undead!</String>
+			<String>{PLAYER}, you will soon be my undead slave!</String>
+			<String>You will never leave this graveyard alive!</String>
+			<String>More bones for my collection!</String>
+		</Strings>
+		<Strings id="one">
+			<String>My final Deathmage will kill you all!</String>
+			<String>My final Deathmage shall exterminate you!</String>
+		</Strings>
+		<Strings id="many">
+			<String>Fools! I still have {COUNT} deathmages protecting me!</String>
+			<String>My {COUNT} deathmages will collect your bones!</String>
+		</Strings>
+	</StringList>
+
+	<StringList id="Lich">
+		<Strings id="everySoOften">
+			<String>How dare you disturb my eternal slumber, {PLAYER}!</String>
+			<String>I will eat your soul, {PLAYER}!</String>
+			<String>You will drown in a sea of undead!</String>
+			<String>All that I touch turns to dust!</String>
+		</Strings>
+		<Strings id="one">
+			<String>My final Lich will protect me forever!</String>
+			<String>My final Lich shall consume your souls!</String>
+		</Strings>
+		<Strings id="many">
+			<String>I am invincible while my {COUNT} Liches still stand!</String>
+			<String>My {COUNT} Liches will feast on your essence!</String>
+		</Strings>
+	</StringList>
+	
+	<StringList id="Ent Ancient">
+		<Strings id="everySoOften">
+			<String>How dare you disturb our grove!</String>
+			<String>The forest shall crush you, {PLAYER}!</String>
+			<String>In this place, the trees fight back!</String>
+			<String>You chop and you burn... you deserve no mercy!</String>
+			<String>The last man-thing I crushed looked just like you, {PLAYER}!</String>
+			<String>You will find no wood for your fires here... only death!</String>
+			<String>You fell ancient trees without remorse; it ends now!</String>
+		</Strings>
+		<Strings id="one">
+			<String>My final Ent Ancient will destroy you all!</String>
+			<String>My final Ent Ancient shall crush you!</String>
+		</Strings>
+		<Strings id="many">
+			<String>Mortal scum! My {COUNT} Ent Ancients will defend me forever!</String>
+			<String>My forest of {COUNT} Ent Ancients is all the protection I need!</String>
+		</Strings>
+	</StringList>
+
+    <StringList id="Oasis Giant">
+        <Strings id="everySoOften">
+            <String>I rule this place, {PLAYER}! </String>
+            <String>Minions! We shall have {PLAYER} for dinner!</String>
+            <String>You must be thirsty, {PLAYER}. Enter my waters!</String>
+            <String>Come closer, {PLAYER}! Yes, closer!</String>
+            <String>Surrender to my aquatic army, {PLAYER}!</String>
+        </Strings>
+        <Strings id="one">
+            <String>A powerful Oasis Giant still fights for me!</String>
+            <String>You will never defeat me while an Oasis Giant remains!</String>
+        </Strings>
+        <Strings id="many">
+            <String>My {COUNT} Oasis Giants will feast on your flesh!</String>
+            <String>You have no hope against my {COUNT} Oasis Giants!</String>
+        </Strings>
+    </StringList>
+    
+    <StringList id="Phoenix Lord">
+        <Strings id="everySoOften">
+            <String>Purge yourself, {PLAYER}, in the heat of my flames!</String>
+            <String>Alas, {PLAYER}, you will taste death but once!</String>
+            <String>I have met many like you, {PLAYER}, in my thrice thousand years.</String>
+            <String>Some die and are ashes, but I am ever reborn!.</String>
+            <String>The ashes of past heroes cover my plains!</String>
+            <String>This place is not for mortals, {PLAYER}. Begone whence you came!</String>
+        </Strings>
+        <Strings id="one">
+            <String>My last Phoenix Lord will blacken your bones!</String>
+            <String>My final Phoenix Lord will never fall!</String>
+        </Strings>
+        <Strings id="many">
+            <String>Maggots! My {COUNT} Phoenix Lords will burn you to ash!</String>
+            <String>My {COUNT} Phoenix Lords will serve me forever!</String>
+        </Strings>
+    </StringList>
+
+	<StringList id="Ghost King">
+		<Strings id="everySoOften">
+			<String>I do not fear the corporeal</String>
+			<String>Do you think your weapons can hurt me, {PLAYER}?</String>
+			<String>My kingdom is long dead, but our spirits drag on.</String>
+			<String>Do not defile our memory of this place!</String>
+			<String>My kingdom was burned to ashes... you can do no worse.</String>
+			<String>There was joy here, once.</String>
+			<String>We have grown lonely over the millenia. Join us, {PLAYER}.</String>
+		</Strings>
+		<Strings id="one">
+			<String>A mighty Ghost King remains to guard me!</String>
+			<String>My final Ghost King is untouchable!</String>
+		</Strings>
+		<Strings id="many">
+			<String>My {COUNT} Ghost Kings give me more than enough protection!</String>
+			<String>Pathetic humans!  My {COUNT} Ghost Kings shall destroy you utterly!</String>
+		</Strings>
+	</StringList>
+
+	<StringList id="Cyclops God">
+		<Strings id="everySoOften">
+			<String>Leave my castle!</String>
+			<String>You will be my food, {PLAYER}!</String>
+			<String>I will suck the marrow from your bones!</String>
+			<String>More wine!</String>
+			<String>Blargh!!</String>
+			<String>I will floss with your tendons!</String>
+			<String>Die, puny human!</String>
+			<String>I smell the blood of an Englishman!</String>
+		</Strings>
+		<Strings id="one">
+			<String>My last Cyclops God will smash you to pieces!</String>
+			<String>My final Cyclops God shall crush your puny skulls!</String>
+		</Strings>
+		<Strings id="many">
+			<String>My {COUNT} powerful Cyclops Gods will smash you!</String>
+			<String>Cretins!  I have {COUNT} Cyclops Gods to guard me!</String>
+		</Strings>
+	</StringList>
+
+	<StringList id="Red Demon">
+		<Strings id="everySoOften">
+			<String>Would you attempt to destroy us? I know your name, {PLAYER}!</String>
+			<String>Our anguish is endless, unlike your lives!</String>
+			<String>What do you know of suffering? I can teach you much, {PLAYER}</String>
+			<String>I will deliver your soul to Oryx, {PLAYER}!</String>
+			<String>There can be no forgiveness!</String>
+			<String>You cannot hurt us.  You cannot help us.  You will feed us.</String>
+			<String>Oryx will not end our pain.  We can only share it... with you!</String>
+			<String>Your life is an affront to Oryx. You will die.</String>
+		</Strings>
+		<Strings id="one">
+			<String>My final Red Demon is unassailable!</String>
+			<String>A Red Demon still guards me!</String>
+		</Strings>
+		<Strings id="many">
+			<String>Fools! There is no escape from my {COUNT} Red Demons!</String>
+			<String>My legion of {COUNT} Red Demons live only to serve me!</String>
+		</Strings>
+	</StringList>
+
+    <StringList id="Dreadstump the Pirate King">
+        <Strings id="everySoOften">
+            <String>It is a glorious thing to be a Pirate King!</String>
+            <String>Arrrrrrr!!!</String>
+            <String>More rum!</String>
+        </Strings>
+    </StringList>
+
+    <StringList id="Bonegrind the Butcher">
+        <Strings id="everySoOften">
+            <String>Oryx's minions will eat well tonight!</String>
+            <String>Ahhhh!! Fresh meat for the minions!</String>
+            <String>More mortals for the minions to feast on!</String>
+            <String>Plump and fleshy!  Just like I like them!</String>
+            <String>Guards!  Bring in another prisoner!</String>
+            <String>Oryx always feeds his minions well!</String>
+            <String>Another glorious day in Oryx's kitchens!</String>
+            <String>This one can go in the soup!</String>
+        </Strings>
+    </StringList>
+
+    <StringList id="Inactive Sarcophagus">
+        <Strings id="everySoOften">
+            <String>Those who damage me may find great treasure, {PLAYER}, but the gods will not forget this insult!</String>
+        </Strings>
+    </StringList>
+</StringLists>

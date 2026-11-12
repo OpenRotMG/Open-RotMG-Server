@@ -1,0 +1,1425 @@
+<Objects>
+    <!--
+    *********************************************************************************
+
+    Treasure Dungeon
+
+    *********************************************************************************
+    -->
+
+    <Object type="0x1e17" id="Treasure Thief">
+        <Class>Character</Class>
+        <Enemy/>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>47</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>10000</MaxHitPoints>
+        <Defense>10</Defense>
+        <XpMult>0.7</XpMult>
+
+        <State id="Ini">
+            <Transition playerWithin="8">Alive</Transition>
+        </State>
+        <State id="Alive">
+            <State id="Run1">
+                <!--<Behavior bucket="movement" speed=".5">Wander</Behavior>-->
+                <Behavior bucket="movement" speed=".8" distance="6" acquireRange="9">KeepDistance</Behavior>
+                <Behavior bucket="movement" speed=".9">Wander</Behavior>
+                <Transition hitpointsLessThan=".8">Drop1</Transition>
+            </State>
+
+            <State id="Run2">
+                <!--<Behavior bucket="movement" speed=".6">Wander</Behavior>-->
+                <Behavior bucket="movement" speed=".8" distance="5" acquireRange="9">KeepDistance</Behavior>
+                <Behavior bucket="movement" speed=".9">Wander</Behavior>
+                <Transition hitpointsLessThan=".6">Drop2</Transition>
+            </State>
+
+            <State id="Run3">
+                <!--<Behavior bucket="movement" speed=".8">Wander</Behavior>-->
+                <Behavior bucket="movement" speed=".9" distance="6" acquireRange="9">KeepDistance</Behavior>
+                <Behavior bucket="movement" speed=".9">Wander</Behavior>
+                <Transition hitpointsLessThan=".4">Drop3</Transition>
+            </State>
+
+            <State id="Run4">
+                <!--<Behavior bucket="movement" speed=".9">Wander</Behavior>-->
+                <Behavior bucket="movement" speed=".9" distance="5" acquireRange="9">KeepDistance</Behavior>
+                <Behavior bucket="movement" speed=".9">Wander</Behavior>
+                <Transition hitpointsLessThan=".8">Drop4</Transition>
+            </State>
+
+            <State id="Run5">
+                <!--<Behavior bucket="movement" speed="1">Wander</Behavior>-->
+                <Behavior bucket="movement" speed="1" distance="5" acquireRange="9">KeepDistance</Behavior>
+            </State>
+
+            <State id="Drop1">
+                <!--<Behavior prob="1" bubbleTime="1" text="Drop1 is a go">Say</Behavior>-->
+                <Behavior cooldown="0" childIds="Treasure Dropper" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime=".1">Run2</Transition>
+            </State>
+
+            <State id="Drop2">
+                <!--<Behavior prob="1" bubbleTime="1" text="Drop2 is a go">Say</Behavior>-->
+                <Behavior cooldown="0" childIds="Treasure Dropper" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime=".1">Run3</Transition>
+            </State>
+
+            <State id="Drop3">
+                <!--<Behavior prob="1" bubbleTime="1" text="Drop3 is a go">Say</Behavior>-->
+                <Behavior cooldown="0" childIds="Treasure Dropper" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime=".1">Run4</Transition>
+            </State>
+
+            <State id="Drop4">
+                <!--<Behavior prob="1" bubbleTime="1" text="Drop4 is a go">Say</Behavior>-->
+                <Behavior cooldown="0" childIds="Treasure Dropper" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+                <Transition afterTime=".1">Run5</Transition>
+            </State>
+            <Transition afterTime="30">Die</Transition>
+        </State>
+
+        <State id="Die">
+            <Behavior time="1" dropLoot="false">Decay</Behavior>
+        </State>
+
+        <SoulboundLoot prob="1" threshold="0">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob="1" threshold="0">Magic Potion</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".02" threshold=".05">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".008" threshold=".05">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".0004" threshold=".10">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".0002" threshold=".18">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".016" threshold=".05">Armor</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".008" threshold=".05">Armor</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".004" threshold=".10">Armor</SoulboundLoot>
+        <SoulboundLoot tier="11" prob=".0002" threshold=".10">Armor</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".008" threshold=".05">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".002" threshold=".10">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="3" prob=".016" threshold=".05">Ring</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".004" threshold=".10">Ring</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".001" threshold=".18">Ring</SoulboundLoot>
+        <SoulboundLoot tier="2" prob=".25" threshold=".10">Potion</SoulboundLoot>
+
+    </Object>
+
+    <Object type="0x1e18" id="Treasure Dropper">
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <ShadowSize>0</ShadowSize>
+
+        <!--<Behavior prob="1" bubbleTime="1" text="Summoned Loot">Say</Behavior>-->
+        <Behavior time="0.1" dropLoot="true">Decay</Behavior>
+
+        <SoulboundLoot prob=".5" threshold="0" max="1">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob=".5" threshold="0" max="1">Magic Potion</SoulboundLoot>
+        <SoulboundLoot prob=".01" threshold="0" max="1">Potion of Wisdom</SoulboundLoot>
+        <SoulboundLoot prob=".02" threshold="0" max="1">Potion of Defense</SoulboundLoot>
+        <SoulboundLoot prob=".01" threshold="0" max="1">Potion of Attack</SoulboundLoot>
+        <SoulboundLoot prob=".01" threshold="0" max="1">Potion of Speed</SoulboundLoot>
+
+    </Object>
+
+    <Object type="0x1e40" id="Treasure Pile">
+        <Class>GameObject</Class>
+        <Z>-.2</Z>
+        <RandomTexture>
+            <Texture><File>lofiObjBig</File><Index>0x63</Index></Texture>
+            <Texture><File>lofiObjBig</File><Index>0x64</Index></Texture>
+            <Texture><File>lofiObjBig</File><Index>0x65</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x1ff</Index></Texture>
+            <Texture><File>lofiObjBig</File><Index>0x66</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x200</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x201</Index></Texture>
+            <Texture><File>lofiObjBig</File><Index>0x67</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x202</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x203</Index></Texture>
+        </RandomTexture>
+        <OccupySquare/>
+        <EnemyOccupySquare/>
+        <NoMiniMap/>
+        <Static/>
+    </Object>
+
+    <Object type="0x1e41" id="Treasure Chests">
+        <Class>GameObject</Class>
+        <Z>-.2</Z>
+        <RandomTexture>
+            <Texture><File>lofiObjBig</File><Index>0x67</Index></Texture>
+            <Texture><File>lofiObjBig</File><Index>0x68</Index></Texture>
+            <Texture><File>lofiObjBig</File><Index>0x69</Index></Texture>
+        </RandomTexture>
+        <OccupySquare/>
+        <EnemyOccupySquare/>
+        <NoMiniMap/>
+        <Static/>
+    </Object>
+
+    <Object type="0x1e42" id="Treasure Enemy">
+        <DisplayId>Treasure Mimic</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+        <AnimatedTexture><File>chars16x16rEncounters</File><Index>48</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>50</ShadowSize>
+        <MaxHitPoints>2000</MaxHitPoints>
+        <Defense>10</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Golden Coin</ObjectId>
+            <Speed>50</Speed>
+            <Damage>75</Damage>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <Projectile id="1">
+            <ObjectId>Ruby</ObjectId>
+            <Speed>50</Speed>
+            <Damage>90</Damage>
+            <LifetimeMS>2000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Transition playerWithin="3">Attack2</Transition>
+            <Behavior effect="Invincible">ConditionEffect</Behavior>
+        </State>
+
+        <State id="Attack">
+            <Behavior bucket="movement" acquireRange="7" distance="3" speed=".6">Circle</Behavior>
+            <Behavior numShots="1" projectileId="0" cooldown="1" type="targeted">Shoot</Behavior>
+            <Transition afterTime="5">Attack2</Transition>
+            <Transition noPlayerWithin="5">Immune</Transition>
+        </State>
+
+        <State id="Attack2">
+            <Behavior bucket="movement">Buzz</Behavior>
+            <Behavior numShots="2" projectileId="1" cooldown="1" type="targeted" angle="45">Shoot</Behavior>
+            <Transition afterTime="2">Attack</Transition>
+            <Transition noPlayerWithin="5">Immune</Transition>
+        </State>
+
+        <State id="Immune">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Transition playerWithin="8">Attack</Transition>
+        </State>
+
+        <SoulboundLoot prob=".02">Potion of Defense</SoulboundLoot>
+        <SoulboundLoot prob=".02">Potion of Attack</SoulboundLoot>
+        <SoulboundLoot prob=".02">Potion of Speed</SoulboundLoot>
+        <SoulboundLoot prob=".02">Potion of Dexterity</SoulboundLoot>
+
+    </Object>
+
+    <Object type="0x1e43" id="Log Trap Clockwise">
+        <DisplayId>Log Trap</DisplayId>
+        <Class>Character</Class>
+        <Enemy/>
+        <Texture><File>lofiObjBig</File><Index>0x6a</Index></Texture>
+
+        <AltTexture id="1">
+            <Texture><File>lofiObjBig</File><Index>0x6b</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <Texture><File>lofiObjBig</File><Index>0x6c</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="3">
+            <Texture><File>lofiObjBig</File><Index>0x6d</Index></Texture>
+        </AltTexture>
+
+        <Size>100</Size>
+        <ShadowSize>50</ShadowSize>
+        <StasisImmune/>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <Defense>10</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Invisible</ObjectId>
+            <Speed>50</Speed>
+            <Damage>50</Damage>
+            <LifetimeMS>100</LifetimeMS>
+            <Size>0</Size>
+            <MultiHit/>
+        </Projectile>
+
+        <State id="Ini">
+            <Transition afterTime=".2">AttackMove</Transition>
+        </State>
+
+        <DefineEmbed name="Spin">
+            <State id="A1">
+                <Transition afterTime=".05">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime=".05">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".05">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime=".05">A1</Transition>
+            </State>
+        </DefineEmbed>
+
+        <State id="AttackMove">
+            <State id="StartTile">
+                <!--<Behavior tagName="E">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="W">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="N">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="S">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="S|E">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="S|W">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="N|E">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="N|W">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="N|S|E|W">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="East">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="West">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="North">ClearGlobalTag</Behavior>-->
+                <!--<Behavior tagName="South">ClearGlobalTag</Behavior>-->
+                <Transition onTile="Track W End">WestEnd</Transition>
+                <Transition onTile="Track E End">EastEnd</Transition>
+                <Transition onTile="Track S End">SouthEnd</Transition>
+                <Transition onTile="Track N End">NorthEnd</Transition>
+                <!--<Transition onTile="Track H Path">HPath</Transition>-->
+                <!--<Transition onTile="Track V Path">VPath</Transition>-->
+                <Transition onTile="Track NW Corner">NWCorner</Transition>
+                <Transition onTile="Track NE Corner">NECorner</Transition>
+                <Transition onTile="Track SE Corner">SECorner</Transition>
+                <Transition onTile="Track SW Corner">SWCorner</Transition>
+                <Transition onTile="Track M Junction">MJunction</Transition>
+            </State>
+
+            <State id="WestEnd">
+                <!--<Behavior tagName="E">SetGlobalTag</Behavior>-->
+                <Transition>MoveEast</Transition>
+            </State>
+
+            <State id="EastEnd">
+                <!--<Behavior tagName="W">SetGlobalTag</Behavior>-->
+                <Transition>MoveWest</Transition>
+            </State>
+
+            <State id="SouthEnd">
+                <!--<Behavior tagName="N">SetGlobalTag</Behavior>-->
+                <Transition>MoveNorth</Transition>
+            </State>
+
+            <State id="NorthEnd">
+                <!--<Behavior tagName="S">SetGlobalTag</Behavior>-->
+                <Transition>MoveSouth</Transition>
+            </State>
+
+            <State id="NWCorner">
+                <!--<Behavior tagName="S|E">SetGlobalTag</Behavior>-->
+                <Transition>MoveEast</Transition>
+            </State>
+
+            <State id="NECorner">
+                <!--<Behavior tagName="S|W">SetGlobalTag</Behavior>-->
+                <Transition>MoveSouth</Transition>
+            </State>
+
+            <State id="SWCorner">
+                <!--<Behavior tagName="N|E">SetGlobalTag</Behavior>-->
+                <Transition>MoveNorth</Transition>
+            </State>
+
+            <State id="SECorner">
+                <!--<Behavior tagName="N|W">SetGlobalTag</Behavior>-->
+                <Transition>MoveWest</Transition>
+            </State>
+
+            <State id="MJunction">
+                <!--<Behavior tagName="N|S|E|W">SetGlobalTag</Behavior>-->
+                <Transition>MoveEast,MoveNorth,MoveWest,MoveSouth</Transition>
+            </State>
+
+            <State id="MoveWest">
+                <Embed name="Spin"></Embed>
+                <Behavior numShots="4" projectileId="0" cooldown=".3" type="auto" range="10" angle="90">Shoot</Behavior>
+                <Behavior bucket="movement" speed="1" distance="4" angle="180" cooldown="1">Move</Behavior>
+                <Transition onTile="Track N End,Track E End,Track W End,Track S End,Track M Junction,Track NW Corner,Track NE Corner,Track SW Corner,Track SE Corner">StartTile</Transition>
+            </State>
+            <State id="MoveEast">
+                <Embed name="Spin"></Embed>
+                <Behavior numShots="4" projectileId="0" cooldown=".3" type="auto" range="10" angle="90">Shoot</Behavior>
+                <Behavior bucket="movement" speed="1" distance="4" angle="0" cooldown="1">Move</Behavior>
+                <Transition onTile="Track N End,Track E End,Track W End,Track S End,Track M Junction,Track NW Corner,Track NE Corner,Track SW Corner,Track SE Corner">StartTile</Transition>
+            </State>
+            <State id="MoveNorth">
+                <Embed name="Spin"></Embed>
+                <Behavior numShots="4" projectileId="0" cooldown=".3" type="auto" range="10" angle="90">Shoot</Behavior>
+                <Behavior bucket="movement" speed="1" distance="4" angle="270" cooldown="1">Move</Behavior>
+                <Transition onTile="Track N End,Track E End,Track W End,Track S End,Track M Junction,Track NW Corner,Track NE Corner,Track SW Corner,Track SE Corner">StartTile</Transition>
+            </State>
+            <State id="MoveSouth">
+                <Embed name="Spin"></Embed>
+                <Behavior numShots="4" projectileId="0" cooldown=".3" type="auto" range="10" angle="90">Shoot</Behavior>
+                <Behavior bucket="movement" speed="1" distance="4" angle="90" cooldown="1">Move</Behavior>
+                <Transition onTile="Track N End,Track E End,Track W End,Track S End,Track M Junction,Track NW Corner,Track NE Corner,Track SW Corner,Track SE Corner">StartTile</Transition>
+            </State>
+        </State>
+
+    </Object>
+
+
+    <Object type="0x5e1d" id="Treasure Rat">
+        <Enemy/>
+        <Class>Character</Class>
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>40</Index></AnimatedTexture>
+
+        <AltTexture id="1">
+            <AnimatedTexture><File>chars16x16rEncounters</File><Index>49</Index></AnimatedTexture>
+        </AltTexture>
+
+        <HitSound>monster/default_hit</HitSound>
+        <DeathSound>monster/dark_elves_death</DeathSound>
+        <Size>100</Size>
+        <MaxHitPoints>4000</MaxHitPoints>
+        <Defense>15</Defense>
+
+
+        <Projectile id="0">
+            <ObjectId>H Baby Blast</ObjectId>
+            <Size>200</Size>
+            <Speed>65</Speed>
+            <Damage>120</Damage>
+            <LifetimeMS>1000</LifetimeMS>
+        </Projectile>
+
+        <State id="Ini">
+            <State id="Wander">
+                <Behavior speed="0.3">Wander</Behavior>
+                <Transition afterTime="1" random="0.1">Sit</Transition>
+            </State>
+            <State id="Sit">
+                <Transition afterTime="1" random="0.1">Wander</Transition>
+            </State>
+            <Transition hitpointsLessThan=".98">Change</Transition>
+            <Transition playerWithin="4">Follow</Transition>
+        </State>
+
+        <State id="Follow">
+            <Behavior bucket="movement" acquireRange="10" range="2" speed=".9" duration="5" cooldown="5" predictive="1">Follow</Behavior>
+            <Transition hitpointsLessThan=".98">Change</Transition>
+        </State>
+
+        <State id="Change">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior rate="14" maxSize="160">ChangeSize</Behavior>
+            <Transition afterTime="1">Base</Transition>
+        </State>
+
+        <State id="Base">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior bucket="movement" acquireRange="6" range="0" speed="0.7" duration="3.6" cooldown="0.4" predictive="true">Follow</Behavior>
+            <Behavior type="targeted" range="8" numShots="1" cooldown="1.1" projectileId="0" angle="30" offset="0.8">Shoot</Behavior>
+        </State>
+
+        <!--Potion Loot-->
+        <SoulboundLoot prob=".1">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob=".2">Magic Potion</SoulboundLoot>
+
+        <!--Tier 8 Loot-->
+        <SoulboundLoot tier="8" prob=".01">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".01">Armor</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".01">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".01">Armor</SoulboundLoot>
+
+    </Object>
+
+    <Object type="0x5e1e" id="Treasure Flame Trap 1.2 Sec">
+        <DisplayId>Flame Trap</DisplayId>
+        <Class>GameObject</Class>
+        <Enemy/>
+        <DrawOnGround/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <AltTexture id="1">
+            <Texture><File>lofiObj3</File><Index>0x204</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <Texture><File>lofiObj3</File><Index>0x205</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="3">
+            <Texture><File>lofiObj3</File><Index>0x206</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="4">
+            <Texture><File>lofiObj3</File><Index>0x207</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="5">
+            <Texture><File>lofiObj3</File><Index>0x208</Index></Texture>
+        </AltTexture>
+
+
+        <Projectile id="0">
+            <ObjectId>Invisible</ObjectId>
+            <Damage>50</Damage>
+            <Speed>0</Speed>
+            <LifetimeMS>100</LifetimeMS>
+            <Size>100</Size>
+            <MultiHit/>
+        </Projectile>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <State id="Ini">
+            <Transition afterTime="1.5">FlameOn</Transition>
+        </State>
+
+        <DefineEmbed name="FireAnim">
+            <State id="A1">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime=".2">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".2">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime=".2">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime=".2">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime=".2">Clear</Transition>
+            </State>
+            <State id="Clear">
+                <Transition afterTime=".2">A1</Transition>
+            </State>
+        </DefineEmbed>
+
+        <State id="FlameOn">
+            <Embed name="FireAnim"></Embed>
+            <Behavior cooldown=".2" projectileId="0">Shoot</Behavior>
+            <Transition afterTime="1">Ini</Transition>
+        </State>
+    </Object>
+
+    <Object type="0x5e3b" id="Treasure Flame Trap 1.7 Sec">
+        <DisplayId>Flame Trap</DisplayId>
+        <Class>GameObject</Class>
+        <Enemy/>
+        <DrawOnGround/>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+
+        <AltTexture id="1">
+            <Texture><File>lofiObj3</File><Index>0x204</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <Texture><File>lofiObj3</File><Index>0x205</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="3">
+            <Texture><File>lofiObj3</File><Index>0x206</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="4">
+            <Texture><File>lofiObj3</File><Index>0x207</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="5">
+            <Texture><File>lofiObj3</File><Index>0x208</Index></Texture>
+        </AltTexture>
+
+
+        <Projectile id="0">
+            <ObjectId>Invisible</ObjectId>
+            <Damage>50</Damage>
+            <Speed>0</Speed>
+            <LifetimeMS>100</LifetimeMS>
+            <Size>100</Size>
+            <MultiHit/>
+        </Projectile>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <State id="Ini">
+            <Transition afterTime="1.5">FlameOn</Transition>
+        </State>
+
+        <DefineEmbed name="FireAnim">
+            <State id="A1">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime=".2">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".2">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime=".2">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime=".2">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime=".2">Clear</Transition>
+            </State>
+            <State id="Clear">
+                <Transition afterTime="1.7">A1</Transition>
+            </State>
+        </DefineEmbed>
+
+        <State id="FlameOn">
+            <Embed name="FireAnim"></Embed>
+            <Behavior cooldown=".2" projectileId="0">Shoot</Behavior>
+            <Transition afterTime="1">Ini</Transition>
+        </State>
+    </Object>
+
+    <Object type="0x5e2a" id="Treasure Plunderer">
+        <Class>Character</Class>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>41</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2000</MaxHitPoints>
+        <Defense>15</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Invisible</ObjectId>
+            <Damage>50</Damage>
+            <Speed>0</Speed>
+            <LifetimeMS>100</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Transition playerWithin="9">Combat</Transition>
+        </State>
+
+        <State id="Combat">
+            <Behavior bucket="movement" protecteeId="Treasure Robber" acquireRange="9" protectionRange="9" reprotectRange="2" speed=".8">Protect</Behavior>
+            <Behavior bucket="movement" speed=".5">Wander</Behavior>
+            <Behavior bucket="movement" speed="1" distance="4" acquireRange="8">KeepDistance</Behavior>
+            <Behavior targetIds="Treasure Robber" cooldown="2" range="8" maxHeal="300">Heal</Behavior>
+            <Behavior type="targeted" range="8" cooldown="1.5" radius="3" damage="75" minRange="2">GrenadeToss</Behavior>
+        </State>
+
+        <!--Potion Loot-->
+        <SoulboundLoot prob=".1">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob=".2">Magic Potion</SoulboundLoot>
+        <SoulboundLoot prob=".01">Potion of Speed</SoulboundLoot>
+
+        <!--Loot-->
+        <SoulboundLoot tier="3" prob=".01">Ring</SoulboundLoot>
+        <SoulboundLoot tier="3" prob=".01">ClassSpecial</SoulboundLoot>
+
+    </Object>
+
+    <Object type="0x5e2b" id="Treasure Robber">
+        <Class>Character</Class>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>42</Index></AnimatedTexture>
+
+        <AltTexture id="1">
+            <Texture><File>lofiObj3</File><Index>0x209</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <Texture><File>lofiObj3</File><Index>0x20a</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="3">
+            <Texture><File>lofiObj3</File><Index>0x20b</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="4">
+            <Texture><File>lofiObj3</File><Index>0x20c</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="5">
+            <Texture><File>lofiObj3</File><Index>0x20d</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="6">
+            <Texture><File>invisible</File><Index>0</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="7">
+            <AnimatedTexture><File>chars8x8rEncounters</File><Index>43</Index></AnimatedTexture>
+        </AltTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>2500</MaxHitPoints>
+        <Defense>20</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Dagger Throw</ObjectId>
+            <Damage>55</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>1000</LifetimeMS>
+            <Size>100</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Transition playerWithin="9">Visible</Transition>
+        </State>
+
+        <State id="Visible">
+            <State id="Ranged">
+                <Behavior bucket="movement" speed="1.5" range="9" cooldown="3">Charge</Behavior>
+                <Behavior bucket="movement" acquireRange="10" range="2" speed=".7" duration="3" cooldown="5" predictive="1">Follow</Behavior>
+                <Behavior projectileId="0" type="targeted" range="8" numShots="4" angle="30">Shoot</Behavior>
+            </State>
+            <Transition hitpointsLessThan=".5">Invisible</Transition>
+        </State>
+
+        <State id="VisibleHalfHealth">
+            <State id="Ranged">
+                <Behavior bucket="movement" speed="1.5" range="9" cooldown="2">Charge</Behavior>
+                <Behavior bucket="movement" acquireRange="10" range="2" speed=".7" duration="3" cooldown="5" predictive="1">Follow</Behavior>
+                <Behavior bucket="movement" speed=".6">Wander</Behavior>
+                <Behavior projectileId="0" type="targeted" range="8" numShots="4" angle="30">Shoot</Behavior>
+            </State>
+            <Transition afterTime="5">Invisible</Transition>
+        </State>
+
+        <DefineEmbed name="Invis">
+            <State id="A1">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime=".1">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".1">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime=".1">A4</Transition>
+            </State>
+            <State id="A4">
+                <Behavior altTextureId="4">SetAltTexture</Behavior>
+                <Transition afterTime=".1">A5</Transition>
+            </State>
+            <State id="A5">
+                <Behavior altTextureId="5">SetAltTexture</Behavior>
+                <Transition afterTime=".1">A6</Transition>
+            </State>
+
+            <State id="A6">
+                <Behavior altTextureId="6">SetAltTexture</Behavior>
+            </State>
+        </DefineEmbed>
+
+        <State id="Invisible">
+            <Embed name="Invis"></Embed>
+            <Behavior type="targeted" range="10" numShots="9" predictive=".7" cooldown="10000" projectileId="0" angle="40">Shoot</Behavior>
+            <Behavior type="targeted" range="10" numShots="1" predictive=".7" cooldown="1" projectileId="0">Shoot</Behavior>
+            <!--<Behavior bucket="movement" speed="15" acceleration="5">Buzz</Behavior>-->
+            <Behavior bucket="movement" acquireRange="8" range="3" speed=".6" duration="3" cooldown="3.5" predictive="1">Follow</Behavior>
+            <Transition afterTime="5">VisibleHalfHealth</Transition>
+        </State>
+
+        <!--Potion Loot-->
+        <SoulboundLoot prob=".1">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob=".2">Magic Potion</SoulboundLoot>
+        <SoulboundLoot prob=".02">Potion of Defense</SoulboundLoot>
+
+        <!--Tier 9 Loot-->
+        <SoulboundLoot tier="9" prob=".01">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".01">Armor</SoulboundLoot>
+    </Object>
+
+
+    <Object type="0x5e2c" id="Golden Oryx Effigy">
+        <Class>Character</Class>
+        <Enemy/>
+
+        <God/>
+        <Quest/>
+        <NoArticle/>
+
+        <AnimatedTexture><File>chars16x16dEncounters2</File><Index>41</Index></AnimatedTexture>
+
+        <AltTexture id="1">
+            <AnimatedTexture><File>chars16x16dEncounters2</File><Index>42</Index></AnimatedTexture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <AnimatedTexture><File>chars16x16dEncounters2</File><Index>42</Index></AnimatedTexture>
+            <Effect particle="SwirlingMist" cooldown="0.1">XMLEffect</Effect>
+        </AltTexture>
+
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>225</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>25000</MaxHitPoints>
+        <Defense>30</Defense>
+
+        <Projectile id="1">
+            <ObjectId>Golden Blast</ObjectId>
+            <Damage>80</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>3000</LifetimeMS>
+            <Size>150</Size>
+        </Projectile>
+
+        <Projectile id="2">
+            <ObjectId>Gold Fireball</ObjectId>
+            <Damage>90</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>3000</LifetimeMS>
+            <Size>150</Size>
+        </Projectile>
+
+
+        <State id="Ini">
+            <Transition hitpointsLessThan=".99">Q1 Spawn Minion</Transition>
+        </State>
+
+        <DefineEmbed name="TransitionVulnerable">
+            <State id="T1">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".05">T2</Transition>
+            </State>
+            <State id="T2">
+                <Transition afterTime=".05">T3</Transition>
+            </State>
+            <State id="T3">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".1">T4</Transition>
+            </State>
+            <State id="T4">
+                <Transition afterTime=".1">T5</Transition>
+            </State>
+            <State id="T5">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".1">T6</Transition>
+            </State>
+            <State id="T6">
+                <Transition afterTime=".1">T7</Transition>
+            </State>
+            <State id="T7">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".1">T8</Transition>
+            </State>
+            <State id="T8">
+                <Transition afterTime=".1">T9</Transition>
+            </State>
+            <State id="T9">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+            </State>
+        </DefineEmbed>
+
+        <DefineEmbed name="TransitionInvulnerable">
+            <State id="T1">
+                <Transition afterTime=".05">T2</Transition>
+            </State>
+            <State id="T2">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".05">T3</Transition>
+            </State>
+            <State id="T3">
+                <Transition afterTime=".1">T4</Transition>
+            </State>
+            <State id="T4">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".1">T5</Transition>
+            </State>
+            <State id="T5">
+                <Transition afterTime=".1">T6</Transition>
+            </State>
+            <State id="T6">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".1">T7</Transition>
+            </State>
+            <State id="T7">
+                <Transition afterTime=".1">T8</Transition>
+            </State>
+            <State id="T8">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".1">T9</Transition>
+            </State>
+            <State id="T9">
+
+            </State>
+        </DefineEmbed>
+
+        <State id="Q1 Spawn Minion">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+
+            <Behavior childId="Gold Planet" cooldown="10000" type="auto" defaultAngle="0" range="7">ObjectToss</Behavior>
+            <Behavior childId="Gold Planet" cooldown="10000" type="auto" defaultAngle="45" range="7">ObjectToss</Behavior>
+            <Behavior childId="Gold Planet" cooldown="10000" type="auto" defaultAngle="90" range="7">ObjectToss</Behavior>
+            <Behavior childId="Gold Planet" cooldown="10000" type="auto" defaultAngle="135" range="7">ObjectToss</Behavior>
+            <Behavior childId="Gold Planet" cooldown="10000" type="auto" defaultAngle="180" range="7">ObjectToss</Behavior>
+            <Behavior childId="Gold Planet" cooldown="10000" type="auto" defaultAngle="225" range="7">ObjectToss</Behavior>
+            <Behavior childId="Gold Planet" cooldown="10000" type="auto" defaultAngle="270" range="7">ObjectToss</Behavior>
+            <Behavior childId="Gold Planet" cooldown="10000" type="auto" defaultAngle="315" range="7">ObjectToss</Behavior>
+
+            <Behavior childId="Treasure Oryx Defender" cooldown="10000" type="auto" defaultAngle="0" range="3">ObjectToss</Behavior>
+            <Behavior childId="Treasure Oryx Defender" cooldown="10000" type="auto" defaultAngle="90" range="3">ObjectToss</Behavior>
+            <Behavior childId="Treasure Oryx Defender" cooldown="10000" type="auto" defaultAngle="180" range="3">ObjectToss</Behavior>
+            <Behavior childId="Treasure Oryx Defender" cooldown="10000" type="auto" defaultAngle="270" range="3">ObjectToss</Behavior>
+
+
+            <Behavior rate="-.2" minSize="60">ChangeSize</Behavior>
+            <Transition afterTime="4">Q1 Invulnerable</Transition>
+        </State>
+
+        <State id="Q1 Invulnerable">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior tagName="Expand">SetGlobalTag</Behavior>
+            <Transition noneExist="Treasure Oryx Defender">Q1 Vulnerable Transition</Transition>
+        </State>
+
+        <State id="Q1 Vulnerable Transition">
+            <Embed name="TransitionVulnerable"></Embed>
+            <Transition afterTime=".8">Q1 Vulnerable</Transition>
+        </State>
+
+        <State id="Q1 Vulnerable">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior text="My protectors!;My guardians are gone!;What have you done?;You destroy my guardians in my house? Blasphemy!" prob=".75" bubbleTime="1">Say</Behavior>
+            <Behavior tagName="Shrink">SetGlobalTag</Behavior>
+            <Transition hitpointsLessThan=".75">Q2 Invulnerable Transition</Transition>
+        </State>
+
+        <State id="Q2 Invulnerable Transition">
+            <Embed name="TransitionInvulnerable"></Embed>
+            <Transition afterTime=".8">Q2 Spawn Minion</Transition>
+        </State>
+
+        <State id="Q2 Spawn Minion">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior tagName="Expand">SetGlobalTag</Behavior>
+            <Behavior childId="Treasure Oryx Defender" cooldown="10000" type="auto" defaultAngle="0" range="3">ObjectToss</Behavior>
+            <Behavior childId="Treasure Oryx Defender" cooldown="10000" type="auto" defaultAngle="90" range="3">ObjectToss</Behavior>
+            <Behavior childId="Treasure Oryx Defender" cooldown="10000" type="auto" defaultAngle="180" range="3">ObjectToss</Behavior>
+            <Behavior childId="Treasure Oryx Defender" cooldown="10000" type="auto" defaultAngle="270" range="3">ObjectToss</Behavior>
+            <Behavior rate="-.2" minSize="60">ChangeSize</Behavior>
+            <Transition afterTime="4">Q2 Invulnerable</Transition>
+        </State>
+
+        <State id="Q2 Invulnerable">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior tagName="Expand">SetGlobalTag</Behavior>
+            <Transition noneExist="Treasure Oryx Defender">Q2 Vulnerable Transition</Transition>
+        </State>
+
+        <State id="Q2 Vulnerable Transition">
+            <Embed name="TransitionVulnerable"></Embed>
+            <Transition afterTime=".8">Q2 Vulnerable</Transition>
+        </State>
+
+        <State id="Q2 Vulnerable">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Behavior text="My protectors are no more!; You Mongrels are ruining my beautiful treasure!;You won't leave with your pilfered loot!;I'm weakened" prob=".75" bubbleTime="1">Say</Behavior>
+            <Behavior tagName="Shrink">SetGlobalTag</Behavior>
+            <Transition hitpointsLessThan=".6">Q3 Vulnerable Transition</Transition>
+        </State>
+
+        <DefineEmbed name="DeathSpiral">
+            <Behavior type="Flash" color="0000FF" flashPeriod="0.1" flashRepeats="10">ShowEffect</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="0.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="0.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="80" offset="0.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="70" offset="0.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="60" offset="0.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="50" offset="1.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="40" offset="1.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="30" offset="1.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="20" offset="1.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="10" offset="1.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="0" offset="2.2" angle="45">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="0" offset="2.4" angle="45">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="0" offset="2.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="10" offset="2.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="20" offset="3.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="30" offset="3.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="40" offset="3.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="50" offset="3.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="60" offset="3.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="70" offset="4.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="80" offset="4.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="4.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="4.6" angle="45">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="4.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="5.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="5.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="80" offset="5.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="70" offset="5.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="60" offset="5.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="50" offset="6.0" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="40" offset="6.2" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="30" offset="6.4" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="20" offset="6.6" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="10" offset="6.8" angle="90">Shoot</Behavior>
+            <Behavior numShots="4" projectileId="2" cooldown="10" type="auto" defaultAngle="0" offset="7.0" angle="45">Shoot</Behavior>
+        </DefineEmbed>
+
+        <DefineEmbed name="GrenadeBarrage">
+            <State id="CardinalBarrage">
+                <Behavior type="auto" range="0" cooldown="1" radius=".5" defaultAngle="0" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="3" cooldown="1" radius="1" defaultAngle="0" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="3" cooldown="1" radius="1" defaultAngle="90" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="3" cooldown="1" radius="1" defaultAngle="180" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="3" cooldown="1" radius="1" defaultAngle="270" damage="70">GrenadeToss</Behavior>
+                <Transition afterTime="1.5">OrdinalBarrage</Transition>
+            </State>
+            <State id="OrdinalBarrage">
+                <Behavior type="auto" range="0" cooldown="1" radius=".5" defaultAngle="0" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="3" cooldown="1" radius="1" defaultAngle="45" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="3" cooldown="1" radius="1" defaultAngle="135" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="3" cooldown="1" radius="1" defaultAngle="225" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="3" cooldown="1" radius="1" defaultAngle="315" damage="70">GrenadeToss</Behavior>
+                <Transition afterTime="1.5">CardinalBarrage2</Transition>
+            </State>
+            <State id="CardinalBarrage2">
+                <Behavior type="auto" range="0" cooldown="1" radius=".5" defaultAngle="0" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="6" cooldown="1" radius="3" defaultAngle="0" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="6" cooldown="1" radius="3" defaultAngle="90" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="6" cooldown="1" radius="3" defaultAngle="180" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="6" cooldown="1" radius="3" defaultAngle="270" damage="70">GrenadeToss</Behavior>
+                <Transition afterTime="1.5">OrdinalBarrage2</Transition>
+            </State>
+            <State id="OrdinalBarrage2">
+                <Behavior type="auto" range="0" cooldown="1" radius=".5" defaultAngle="0" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="6" cooldown="1" radius="3" defaultAngle="45" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="6" cooldown="1" radius="3" defaultAngle="135" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="6" cooldown="1" radius="3" defaultAngle="225" damage="70">GrenadeToss</Behavior>
+                <Behavior type="auto" range="6" cooldown="1" radius="3" defaultAngle="315" damage="70">GrenadeToss</Behavior>
+                <Transition afterTime="1.5">CardinalBarrage</Transition>
+            </State>
+
+        </DefineEmbed>
+
+        <DefineEmbed name="Q3Attack">
+            <State id="Attack1">
+                <Embed name="GrenadeBarrage"></Embed>
+                <Behavior type="Flash" color="0000FF" flashPeriod="0.1" flashRepeats="10">ShowEffect</Behavior>
+                <Transition afterTime="8.5">Attack2</Transition>
+            </State>
+            <State id="Attack2">
+                <Embed name="DeathSpiral"></Embed>
+                <Transition afterTime="7">Recuperate</Transition>
+            </State>
+            <State id="Recuperate">
+                <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+                <Behavior targetIds="Golden Oryx Effigy" cooldown="1" range="5" maxHeal="200">Heal</Behavior>
+                <Transition afterTime="3">Attack1</Transition>
+            </State>
+        </DefineEmbed>
+
+        <State id="Q3 Vulnerable Transition">
+            <Embed name="TransitionVulnerable"></Embed>
+            <Transition afterTime=".8">Q3</Transition>
+        </State>
+
+        <State id="Q3">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Embed name="Q3Attack"></Embed>
+            <Behavior min="1" max="1" childId="Realm Portal Opener">ReleaseSpawnAtDeath</Behavior>
+        </State>
+
+
+        <!--Potion Loot-->
+        <SoulboundLoot prob=".1">Potion of Defense</SoulboundLoot>
+        <SoulboundLoot prob="0.001">Wine Cellar Incantation</SoulboundLoot>
+
+        <!--Tier 8 Loot-->
+        <SoulboundLoot tier="8" prob=".5">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".5">Armor</SoulboundLoot>
+
+        <!--Tier 9 Loot-->
+        <SoulboundLoot tier="9" prob=".01">Armor</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".01">Weapon</SoulboundLoot>
+
+        <!--Tier 10 Loot-->
+        <SoulboundLoot tier="10" prob=".005">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".005">Armor</SoulboundLoot>
+
+        <!--Rings-->
+        <SoulboundLoot tier="5" prob=".005">Ring</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".5">Ring</SoulboundLoot>
+
+        <!--Class Specials-->
+        <SoulboundLoot tier="5" prob=".0025">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".05">ClassSpecial</SoulboundLoot>
+
+        <!--Ninja Specific-->
+        <SoulboundLoot prob=".1">Silver Star</SoulboundLoot>  <!--Tier 3 Class Special-->
+        <SoulboundLoot prob=".01">Wind Circle</SoulboundLoot>  <!--Tier 4 Class Special-->
+        <SoulboundLoot prob=".001">Ichimonji</SoulboundLoot>    <!--Tier 10 Weapon-->
+        <SoulboundLoot prob=".02">Jewel Eye Katana</SoulboundLoot>    <!--Tier 9 Weapon-->
+
+    </Object>
+
+    <Object type="0x5e2d" id="Treasure Map">
+        <Class>Equipment</Class>
+        <Item/>
+        <Texture><File>lofiObj3</File><Index>0x20e</Index></Texture>
+        <SlotType>10</SlotType>
+        <Description>A map that reveals the way to hidden treasure.</Description>
+        <Sound>use_key</Sound>
+        <Consumable/>
+        <Soulbound/>
+        <Activate id="Treasure Cave Portal">Create</Activate>
+    </Object>
+
+    <Object type="0x5e2e" id="Treasure Cave Portal">
+        <Class>Portal</Class>
+        <IntergamePortal/>
+        <DungeonName>Cave of A Thousand Treasures</DungeonName>
+        <Texture><File>lofiObj3</File><Index>0x20f</Index></Texture>
+        <Behavior time="30">Decay</Behavior>
+    </Object>
+
+    <Object type="0x5e3a" id="Treasure Oryx Defender">
+        <Class>Character</Class>
+        <Enemy/>
+
+        <AnimatedTexture><File>chars16x16dEncounters2</File><Index>43</Index></AnimatedTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>150</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>3000</MaxHitPoints>
+        <Defense>30</Defense>
+
+        <Projectile id="1">
+            <ObjectId>Golden Blast</ObjectId>
+            <Damage>80</Damage>
+            <Speed>30</Speed>
+            <LifetimeMS>3000</LifetimeMS>
+            <Size>125</Size>
+        </Projectile>
+
+        <State id="Ini">
+            <Behavior bucket="movement" protecteeId="Golden Oryx Effigy" acquireRange="6" speed=".5" speedVariability="0" radius="3" radiusVariability="0">Orbit</Behavior>
+            <Behavior projectileId="1" cooldown="3" cooldownJitter="1.5" type="auto" numShots="8" angle="45">Shoot</Behavior>
+        </State>
+    </Object>
+
+    <Object type="0x5e3c" id="Treasure Pot">
+        <Class>Character</Class>
+        <Enemy/>
+        <OccupySquare/>
+        <EnemyOccupySquare/>
+        <NoMiniMap/>
+        <Static/>
+
+
+        <RandomTexture>
+            <Texture><File>lofiObj3</File><Index>0x210</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x211</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x212</Index></Texture>
+        </RandomTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>125</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>500</MaxHitPoints>
+        <Defense>10</Defense>
+        <XpMult>0.0</XpMult>
+
+        <SoulboundLoot prob=".15">Health Potion</SoulboundLoot>
+        <SoulboundLoot prob=".10">Magic Potion</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".002">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="7" prob=".02">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="6" prob=".1">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".0002">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".00002">Weapon</SoulboundLoot>
+        <SoulboundLoot tier="8" prob=".002">Armor</SoulboundLoot>
+        <SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+        <SoulboundLoot tier="6" prob=".1">Armor</SoulboundLoot>
+        <SoulboundLoot tier="9" prob=".0002">Armor</SoulboundLoot>
+        <SoulboundLoot tier="10" prob=".00002">Armor</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".00005">Ring</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".0005">Ring</SoulboundLoot>
+        <SoulboundLoot tier="3" prob=".005">Ring</SoulboundLoot>
+        <SoulboundLoot tier="2" prob=".05">Ring</SoulboundLoot>
+        <SoulboundLoot tier="1" prob=".5">Ring</SoulboundLoot>
+        <SoulboundLoot tier="5" prob=".000025">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="4" prob=".00025">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="3" prob=".0025">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="2" prob=".025">ClassSpecial</SoulboundLoot>
+        <SoulboundLoot tier="1" prob=".3">ClassSpecial</SoulboundLoot>
+
+
+
+    </Object>
+
+    <Object type="0x5e3d" id="Boulder">
+        <Class>Character</Class>
+        <Enemy/>
+
+        <Texture><File>lofiObj3</File><Index>0x213</Index></Texture>
+
+        <AltTexture id="1">
+            <Texture><File>lofiObj3</File><Index>0x214</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="2">
+            <Texture><File>lofiObj3</File><Index>0x215</Index></Texture>
+        </AltTexture>
+
+        <AltTexture id="3">
+            <Texture><File>lofiObj3</File><Index>0x216</Index></Texture>
+        </AltTexture>
+
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>250</Size>
+        <ShadowSize>0</ShadowSize>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Defense>10</Defense>
+
+        <Projectile id="0">
+            <ObjectId>Invisible</ObjectId>
+            <Damage>60</Damage>
+            <Speed>100</Speed>
+            <LifetimeMS>100</LifetimeMS>
+            <Size>75</Size>
+            <MultiHit/>
+        </Projectile>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <DefineEmbed name="Animate">
+            <State id="A1">
+                <Behavior altTextureId="3">SetAltTexture</Behavior>
+                <Transition afterTime=".1">A2</Transition>
+            </State>
+            <State id="A2">
+                <Behavior altTextureId="2">SetAltTexture</Behavior>
+                <Transition afterTime=".1">A3</Transition>
+            </State>
+            <State id="A3">
+                <Behavior altTextureId="1">SetAltTexture</Behavior>
+                <Transition afterTime=".1">A4</Transition>
+            </State>
+            <State id="A4">
+                <Transition afterTime=".1">A1</Transition>
+            </State>
+        </DefineEmbed>
+
+        <State id="Ini">
+            <Behavior bucket="movement" speed="1.55" distance="30" angle="90" cooldown="1">Move</Behavior>
+            <Embed name="Animate"></Embed>
+            <Behavior type="auto" numShots="6" angle="30" defaultAngle="90" cooldown="0" projectileId="0">Shoot</Behavior>
+            <Transition afterTime="4">Die</Transition>
+        </State>
+
+        <State id="Die">
+            <Behavior time="0">Decay</Behavior>
+        </State>
+
+
+    </Object>
+
+    <Object type="0x5e3f" id="Boulder Spawner">
+        <Class>Character</Class>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <Size>0</Size>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <StasisImmune/>
+
+
+        <State id="Ini">
+            <Behavior cooldown="2" childIds="Boulder" maxChildren="15" startWithMinions="false">MakeMinions</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e4a" id="Gold Planet">
+        <Class>Character</Class>
+        <AnimatedTexture><File>chars8x8rEncounters</File><Index>44</Index></AnimatedTexture>
+        <Enemy/>
+
+        <HitSound>monster/cubes_hit</HitSound>
+        <DeathSound>monster/cubes_death</DeathSound>
+        <Defense>5</Defense>
+        <XpMult>0.0</XpMult>
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Size>200</Size>
+        <StasisImmune/>
+
+        <Projectile id="1">
+            <ObjectId>Grey Spiral</ObjectId>
+            <Damage>60</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>900</LifetimeMS>
+            <Size>150</Size>
+            <ConditionEffect duration="1">Blind</ConditionEffect>
+        </Projectile>
+
+        <Projectile id="2">
+            <ObjectId>Black Ball</ObjectId>
+            <Damage>80</Damage>
+            <Speed>60</Speed>
+            <LifetimeMS>900</LifetimeMS>
+            <Size>150</Size>
+        </Projectile>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <DefineEmbed name="GreySpiral">
+            <State id="Firing">
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="0.0" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="90" offset="0.4" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="80" offset="0.8" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="70" offset="1.2" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="1" cooldown="10" type="auto" defaultAngle="60" offset="1.6" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="50" offset="2" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="40" offset="2.4" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="30" offset="2.8" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="20" offset="3.2" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="1" cooldown="10" type="auto" defaultAngle="10" offset="3.6" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="0" offset="4" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="-10" offset="4.4" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="-20" offset="4.8" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="2" cooldown="10" type="auto" defaultAngle="-30" offset="5.2" angle="180">Shoot</Behavior>
+                <Behavior numShots="2" projectileId="1" cooldown="10" type="auto" defaultAngle="-40" offset="5.6" angle="180">Shoot</Behavior>
+                <Transition afterTime="5.6">Reset</Transition>
+            </State>
+            <State id="Reset">
+                <Transition afterTime="0">Firing</Transition>
+            </State>
+        </DefineEmbed>
+
+        <State id="Ini">
+            <Behavior bucket="movement" protecteeId="Golden Oryx Effigy" radius="7" speed=".5" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+            <Transition hasGlobalTag="Expand">Expand</Transition>
+        </State>
+
+
+        <State id="Shrink">
+            <!--<Behavior tagName="Shrink">ClearGlobalTag</Behavior>-->
+            <State id="P1">
+                <Behavior bucket="movement" protecteeId="Golden Oryx Effigy" radius="9" speed=".5" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+                <Embed name="GreySpiral"></Embed>
+                <Transition afterTime=".5">P2</Transition>
+            </State>
+            <State id="P2">
+                <Behavior bucket="movement" protecteeId="Golden Oryx Effigy" radius="8" speed=".5" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+                <Embed name="GreySpiral"></Embed>
+                <Transition afterTime=".5">Hold</Transition>
+            </State>
+            <State id="Hold">
+                <Embed name="GreySpiral"></Embed>
+                <Behavior bucket="movement" protecteeId="Golden Oryx Effigy" radius="8" speed=".5" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+            </State>
+            <Transition hasGlobalTag="Expand">ClearShrinkTag</Transition>
+            <Transition noneExist="Golden Oryx Effigy">Die</Transition>
+        </State>
+
+        <State id="Expand">
+            <!--<Behavior tagName="Expand">ClearGlobalTag</Behavior>-->
+            <State id="P1">
+                <Behavior bucket="movement" protecteeId="Golden Oryx Effigy" radius="8" speed=".5" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+                <Embed name="GreySpiral"></Embed>
+                <Transition afterTime="0.5">P2</Transition>
+            </State>
+            <State id="P2">
+                <Behavior bucket="movement" protecteeId="Golden Oryx Effigy" radius="9" speed=".5" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+                <Embed name="GreySpiral"></Embed>
+                <Transition afterTime=".5">Hold</Transition>
+            </State>
+            <State id="Hold">
+                <Embed name="GreySpiral"></Embed>
+                <Behavior bucket="movement" protecteeId="Golden Oryx Effigy" radius="10" speed=".5" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+            </State>
+            <Transition hasGlobalTag="Shrink">ClearExpandTag</Transition>
+            <Transition noneExist="Golden Oryx Effigy">Die</Transition>
+        </State>
+
+        <State id="ClearExpandTag">
+            <Behavior tagName="Expand">ClearGlobalTag</Behavior>
+            <Transition afterTime="0">Shrink</Transition>
+        </State>
+
+        <State id="ClearShrinkTag">
+            <Behavior tagName="Shrink">ClearGlobalTag</Behavior>
+            <Transition afterTime="0">Expand</Transition>
+        </State>
+
+        <State id="Die">
+            <Behavior time="0">Decay</Behavior>
+        </State>
+
+    </Object>
+
+    <Object type="0x5e4b" id="Realm Portal Opener">
+        <Class>Character</Class>
+        <Texture><File>invisible</File><Index>0</Index></Texture>
+        <NoMiniMap/>
+        <Size>0</Size>
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+        <StasisImmune/>
+
+
+        <State id="Ini">
+            <Transition afterTime="6">Wait</Transition>
+        </State>
+
+        <State id="Wait">
+            <Transition noneExist="Golden Oryx Effigy">Die</Transition>
+        </State>
+
+        <State id="Die">
+            <Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+            <Behavior time="0">Decay</Behavior>
+        </State>
+
+    </Object>
+
+
+    <Object type="0x5e4e" id="Treasure Rocks">
+        <Class>GameObject</Class>
+        <Z>-.2</Z>
+        <RandomTexture>
+            <Texture><File>lofiObj3</File><Index>0x217</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x218</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x219</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x21a</Index></Texture>
+            <Texture><File>lofiObj3</File><Index>0x21b</Index></Texture>
+        </RandomTexture>
+        <OccupySquare/>
+        <EnemyOccupySquare/>
+        <NoMiniMap/>
+        <Static/>
+    </Object>
+
+</Objects>

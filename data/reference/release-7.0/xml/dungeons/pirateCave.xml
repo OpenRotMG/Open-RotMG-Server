@@ -1,0 +1,344 @@
+<Objects>
+    
+    <!-- 
+     ********************************************************************************* 
+     
+     Revised Dreadstump the Pirate King
+     ready for testing
+     
+     *********************************************************************************
+     -->
+	<Object type="0x0927" id="Dreadstump the Pirate King">
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars16x16dEncounters</File><Index>4</Index></AnimatedTexture>
+		<HitSound>monster/pirate_king_hit</HitSound>
+		<DeathSound>monster/pirate_king_death</DeathSound>
+		<Size>80</Size>
+		<MaxHitPoints>800</MaxHitPoints>
+		<Defense>3</Defense>
+		<Quest/>
+		<StasisImmune/>
+		<Level>1</Level>
+		<XpMult>0.8</XpMult>
+		<NoArticle/>
+		
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>17</Damage>
+			<Speed>75</Speed>
+			<LifetimeMS>1500</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Black Ball</ObjectId>
+			<Damage>25</Damage>
+			<Speed>130</Speed>
+			<LifetimeMS>1100</LifetimeMS>
+		</Projectile>
+        
+		<State id="Start">			
+			<Behavior bucket="movement" speed="0.65">Wander</Behavior>
+			<Behavior bucket="movement" range="6" speed="0.65">StayCloseToSpawn</Behavior>
+			<Transition hitpointsLessThan=".9999">Boast</Transition>						
+		</State>
+		<State id="Boast">
+			<Behavior prob="1" text="Hah! I'll drink my rum out of your skull!">Say</Behavior>
+			
+			<Behavior bucket="movement" speed="0.65">Wander</Behavior>
+			<Behavior bucket="movement" range="6" speed="0.65">StayCloseToSpawn</Behavior>
+			
+			<Behavior projectileId="0" cooldown="0.5" range="8">Shoot</Behavior>
+			
+			<Transition afterTime="3">Normal</Transition>
+		</State>		
+		<State id="Normal">
+			<Behavior prob="1" text="Arrrr...">Say</Behavior>
+			
+			<Behavior projectileId="0" cooldown="0.5" range="8">Shoot</Behavior>
+			<Behavior projectileId="1" cooldown="2.5" range="10" blastEffect="1">Shoot</Behavior>
+            
+			<Behavior bucket="movement" speed="0.65">Wander</Behavior>
+			<Behavior bucket="movement" range="6" speed="0.65">StayCloseToSpawn</Behavior>		
+            
+			<Transition afterTime="6.5">Cannon_Cluster</Transition>
+		</State>	
+		<State id="Cannon_Cluster">
+			<Behavior prob="1" text="Eat cannonballs!">Say</Behavior>
+            
+			<Behavior bucket="movement" range="6" speed="0.4">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" acquireRange="5" distance="5" speed="0.4">Circle</Behavior>
+            
+			<Behavior numShots="1" projectileId="1" cooldown="5" type="targeted" offset="1.8" blastEffect="1">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" cooldown="5" type="targeted" offset="2.2" blastEffect="1">Shoot</Behavior>
+			<Behavior numShots="1" projectileId="1" cooldown="5" type="targeted" offset="2.6" blastEffect="1">Shoot</Behavior>
+			
+			<Transition afterTime="4">Normal</Transition>
+		</State>
+		
+		<Behavior prob="1" childId="Realm Portal">MetamorphoseAtDeath</Behavior>
+		
+		<SoulboundLoot tier="2" prob=".20" threshold=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".10" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".05" threshold=".18">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".2" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".1" threshold=".10">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".05" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".02" threshold=".18">Armor</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".05" threshold=".18">Ring</SoulboundLoot>
+		<SoulboundLoot prob="0.01" threshold=".18">Pirate Rum</SoulboundLoot>
+	</Object>
+    
+    <!-- 
+     ********************************************************************************* 
+     
+     Enemies
+     
+     *********************************************************************************
+     -->
+
+	<Object type="0x683" id="Pirate Lieutenant">
+		<Group>Cave Pirate Bosses</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x00</Index></Texture>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/pirates_death</DeathSound>
+		<Size>105</Size>
+		<MaxHitPoints>65</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Black Ball</ObjectId>
+			<Damage>8</Damage>
+			<Speed>180</Speed>
+			<LifetimeMS>500</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" cooldown="1.5" range="8" blastEffect="1">Shoot</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior protecteeId="Dreadstump the Pirate King" protectionRange="6">Protect</Behavior>
+		<SoulboundLoot tier="2" prob=".20">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".2">Armor</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".1">Armor</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".05">Ring</SoulboundLoot>
+		<SoulboundLoot prob="0.001">Pirate Rum</SoulboundLoot>
+	</Object>
+	<Object type="0x684" id="Pirate Commander">
+		<Group>Cave Pirate Bosses</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x05</Index></Texture>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/pirates_death</DeathSound>
+		<Size>110</Size>
+		<MaxHitPoints>75</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Black Ball</ObjectId>
+			<Damage>10</Damage>
+			<Speed>180</Speed>
+			<LifetimeMS>500</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" cooldown="1.5" range="8" blastEffect="1">Shoot</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior protecteeId="Dreadstump the Pirate King" protectionRange="6">Protect</Behavior>
+		<SoulboundLoot tier="2" prob=".20">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".2">Armor</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".1">Armor</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".05">Ring</SoulboundLoot>
+		<SoulboundLoot prob="0.001">Pirate Rum</SoulboundLoot>
+	</Object>
+	<Object type="0x685" id="Pirate Captain">
+		<Group>Cave Pirate Bosses</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x06</Index></Texture>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/pirates_death</DeathSound>
+		<Size>115</Size>
+		<MaxHitPoints>85</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Black Ball</ObjectId>
+			<Damage>12</Damage>
+			<Speed>180</Speed>
+			<LifetimeMS>500</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" cooldown="1.5" range="8" blastEffect="1">Shoot</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior protecteeId="Dreadstump the Pirate King" protectionRange="6">Protect</Behavior>
+		<SoulboundLoot tier="2" prob=".20">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".2">Armor</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".1">Armor</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".05">Ring</SoulboundLoot>
+		<SoulboundLoot prob="0.001">Pirate Rum</SoulboundLoot>
+	</Object>
+	<Object type="0x686" id="Pirate Admiral">
+		<Group>Cave Pirate Bosses</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x07</Index></Texture>
+		<HitSound>monster/pirates_hit</HitSound>
+		<DeathSound>monster/pirates_death</DeathSound>
+		<Size>120</Size>
+		<MaxHitPoints>95</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Black Ball</ObjectId>
+			<Damage>14</Damage>
+			<Speed>180</Speed>
+			<LifetimeMS>500</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" cooldown="1.5" range="8" blastEffect="1">Shoot</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<Behavior protecteeId="Dreadstump the Pirate King" protectionRange="6">Protect</Behavior>
+		<SoulboundLoot tier="2" prob=".20">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".10">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".2">Armor</SoulboundLoot>
+		<SoulboundLoot tier="2" prob=".1">Armor</SoulboundLoot>
+		<SoulboundLoot tier="1" prob=".05">Ring</SoulboundLoot>
+		<SoulboundLoot prob="0.001">Pirate Rum</SoulboundLoot>
+	</Object>
+	<Object type="0x687" id="Cave Pirate Brawler">
+		<Group>Cave Pirates</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x02</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>10</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>5</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed=".8">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x688" id="Cave Pirate Sailor">
+		<Group>Cave Pirates</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x03</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>15</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>6</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed=".8">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x689" id="Cave Pirate Veteran">
+		<Group>Cave Pirates</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x04</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>20</MaxHitPoints>
+		<Defense>0</Defense>
+		<Projectile id="0">
+			<ObjectId>Blade</ObjectId>
+			<Damage>6</Damage>
+			<Speed>60</Speed>
+			<LifetimeMS>600</LifetimeMS>
+		</Projectile>
+		<Behavior projectileId="0" range="3">Shoot</Behavior>
+		<Behavior bucket="movement" range="1" speed=".8">Follow</Behavior>
+		<Behavior bucket="movement">Wander</Behavior>
+		<SoulboundLoot prob="0.03">Health Potion</SoulboundLoot>
+	</Object>
+	<Object type="0x68a" id="Cave Pirate Moll">
+		<Group>Cave Pirate Pets</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x08</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>100</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior bucket="movement" avoidWater="1">Wander</Behavior>
+		<SoulboundLoot tier="1" prob=".2">ClassSpecial</SoulboundLoot>
+	</Object>
+	<Object type="0x68b" id="Cave Pirate Parrot">
+		<Group>Cave Pirate Pets</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x09</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>70</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior bucket="movement" avoidWater="1">Wander</Behavior>
+		<SoulboundLoot tier="1" prob=".2">ClassSpecial</SoulboundLoot>
+	</Object>
+	<Object type="0x68c" id="Cave Pirate Macaw">
+		<Group>Cave Pirate Pets</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x0a</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>70</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior bucket="movement" avoidWater="1">Wander</Behavior>
+		<SoulboundLoot tier="1" prob=".2">ClassSpecial</SoulboundLoot>
+	</Object>
+	<Object type="0x68d" id="Cave Pirate Monkey">
+		<Group>Cave Pirate Pets</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x0b</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>70</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior bucket="movement" avoidWater="1">Wander</Behavior>
+		<SoulboundLoot tier="1" prob=".2">ClassSpecial</SoulboundLoot>
+	</Object>
+	<Object type="0x68e" id="Cave Pirate Hunchback">
+		<Group>Cave Pirate Pets</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x0c</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>70</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior bucket="movement" avoidWater="1">Wander</Behavior>
+		<SoulboundLoot tier="1" prob=".2">ClassSpecial</SoulboundLoot>
+	</Object>
+	<Object type="0x68f" id="Cave Pirate Cabin Boy">
+		<Group>Cave Pirate Pets</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiChar28x8</File><Index>0x0d</Index></Texture>
+		<HitSound>monster/cave_pirates_hit</HitSound>
+		<DeathSound>monster/cave_pirates_death</DeathSound>
+		<Size>70</Size>
+		<MaxHitPoints>5</MaxHitPoints>
+		<Defense>0</Defense>
+		<Behavior bucket="movement" avoidWater="1">Wander</Behavior>
+		<SoulboundLoot tier="1" prob=".2">ClassSpecial</SoulboundLoot>
+	</Object>
+</Objects>

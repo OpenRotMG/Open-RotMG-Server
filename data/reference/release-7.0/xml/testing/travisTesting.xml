@@ -1,0 +1,488 @@
+<Objects>
+
+    <!--
+    *********************************************************************************
+
+    And here is the overly elabortate pseudo-pathfinding procedure:
+
+        Boss "protects" a corner by having a close proximatity to it but slow speed to get there,
+        as there's no (or if there is, it is unaware to me) "transition enemyWithin" parameter I make do
+        by having the corner "listen" to the boss when it is on top of it, to morph into a corner of the
+        previous number. The boss uses the transition "noneExist" to then move onto the next corner.
+        Unfortunately I don't know how well the boss well actually "order" them, it may require a repeat order
+        if having one single order on an overarcing phase will not be active when the boss comes within range.
+
+
+    *********************************************************************************
+    -->
+
+
+    <Object type="0x7500" id="Corner1">
+        <Class>Character</Class>
+        <Texture><File>lofiChar216x16</File><Index>0x0e</Index></Texture>
+        <Size>0</Size>
+        <Defense>0</Defense>
+        <XpMult>0.0</XpMult>
+        <NoMiniMap/>
+        <Hero/>
+
+        <Behavior groupIds="Dreameater Sections" acquireRange="1.0">FollowOrders</Behavior>
+    </Object>
+
+    <Object type="0x7501" id="Corner2">
+        <Class>Character</Class>
+        <Texture><File>lofiChar216x16</File><Index>0x0e</Index></Texture>
+        <Size>0</Size>
+        <Defense>0</Defense>
+        <XpMult>0.0</XpMult>
+        <NoMiniMap/>
+        <Hero/>
+
+        <Behavior groupIds="Dreameater Sections" acquireRange="1.0">FollowOrders</Behavior>
+    </Object>
+
+    <Object type="0xCHANGE" id="Corner3">
+        <Class>Character</Class>
+        <Texture><File>lofiChar216x16</File><Index>0x0e</Index></Texture>
+        <Size>0</Size>
+        <Defense>0</Defense>
+        <XpMult>0.0</XpMult>
+        <NoMiniMap/>
+        <Hero/>
+
+        <Behavior groupIds="Dreameater Sections" acquireRange="1.0">FollowOrders</Behavior>
+    </Object>
+
+    <Object type="0xCHANGE" id="Corner4">
+        <Class>Character</Class>
+        <Texture><File>lofiChar216x16</File><Index>0x0e</Index></Texture>
+        <Size>0</Size>
+        <Defense>0</Defense>
+        <XpMult>0.0</XpMult>
+        <NoMiniMap/>
+        <Hero/>
+
+        <Behavior groupIds="Dreameater Sections" acquireRange="1.0">FollowOrders</Behavior>
+    </Object>
+
+    <Object type="0xCHANGE" id="Corner0">
+        <Class>Character</Class>
+        <Texture><File>lofiChar216x16</File><Index>0x0e</Index></Texture>
+        <Size>0</Size>
+        <Defense>0</Defense>
+        <XpMult>0.0</XpMult>
+        <NoMiniMap/>
+        <Hero/>
+
+        <Behavior groupIds="Dreameater Sections" acquireRange="1.0">FollowOrders</Behavior>
+    </Object>
+
+    <Object type="0xCHANGE" id="Altar of Nightmares">
+        <Enemy/>
+        <Class>Character</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>11849117</Id></RemoteTexture>
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>11839314</Id></RemoteTexture>
+        </AltTexture>
+        <AltTexture id="2">
+            <RemoteTexture><Instance>testing</Instance><Id>11851068</Id></RemoteTexture>
+        </AltTexture>
+        <!--<AltTexture id="3">-->
+        <RemoteTexture><Instance>testing</Instance><Id>11840345</Id></RemoteTexture>
+        <HitSound>monster/skeletons_hit</HitSound>
+        <DeathSound>monster/skeletons_death</DeathSound>
+        <Size>100</Size>
+        <MaxHitPoints>10000</MaxHitPoints>
+        <Defense>50</Defense>
+        <ShadowSize>200</ShadowSize>
+        <XpMult>2.0</XpMult>
+        <OccupySquare/>
+
+        <State id="Wait">
+            <Behavior text="Pray at this shrine by focusing your destructive tendencies!">Say</Behavior>
+            <Transition hitpointsLessThan="0.85">Cracked</Transition>
+            <Transition hitpointsLessThan="0.50">Broken</Transition>
+            <Transition hitpointsLessThan="0.15">Rubble</Transition>
+        </State>
+        <State id="Cracked">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Transition hitpointsLessThan="0.50">Broken</Transition>
+            <Transition hitpointsLessThan="0.15">Rubble</Transition>
+        </State>
+        <State id="Broken">
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Transition hitpointsLessThan="0.15">Rubble</Transition>
+        </State>
+        <State id="Rubble">
+            <Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+            <Behavior altTextureId="3">SetAltTexture</Behavior>
+        </State>
+
+        <Behavior childId="Nightmare Presenter">MetamorphoseAtDeath</Behavior>
+    </Object>
+
+    <Object type="0xCHANGE" id="DreamTransition">
+        <DisplayId>The Dreameater</DisplayId>
+        <Enemy/>
+        <Class>Character</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>11851051</Id></RemoteTexture>
+        <AltTexture id="1">
+            <RemoteTexture><Instance>testing</Instance><Id>11826842</Id></RemoteTexture>
+        </AltTexture>
+        <AltTexture id="2">
+            <RemoteTexture><Instance>testing</Instance><Id>11838393</Id></RemoteTexture>
+        </AltTexture>
+        <AltTexture id="3">
+            <RemoteTexture><Instance>testing</Instance><Id>11838398</Id></RemoteTexture>
+        </AltTexture>
+        <HitSound>monster/skeletons_hit</HitSound>
+        <DeathSound>monster/skeletons_death</DeathSound>
+        <Size>100</Size>
+        <MaxHitPoints>10000</MaxHitPoints>
+        <Defense>50</Defense>
+        <ShadowSize>200</ShadowSize>
+        <XpMult>0.0</XpMult>
+        <OccupySquare/>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <State id="Talk1">
+            <Behavior childId="Gift of Fear" cooldown="6000" offset="0.4" type="auto" range="3" defaultAngle="225">ObjectToss</Behavior>
+            <Behavior childId="Gift of Fear" cooldown="6000" offset="0.6" type="auto" range="3" defaultAngle="220">ObjectToss</Behavior>
+            <Behavior childId="Gift of Fear" cooldown="6000" offset="0.6" type="auto" range="3" defaultAngle="230">ObjectToss</Behavior>
+            <Behavior text="Ah yes, I sense it in you! Fear! Take these to help you tap into this emotion.">Say</Behavior>
+            <Transition afterTime="2">Blend</Transition>
+        </State>
+        <State id="Blend">
+            <Behavior altTextureId="1">SetAltTexture</Behavior>
+            <Transition afterTime="0.6">Talk2</Transition>
+        </State>
+        <State id="Talk2">
+            <Behavior text="Fear me...">Say</Behavior>
+            <Behavior altTextureId="2">SetAltTexture</Behavior>
+            <Transition afterTime="0.6">Fear</Transition>
+        </State>
+        <State id="Fear">
+            <Behavior text="...and...">Say</Behavior>
+            <Behavior altTextureId="3">SetAltTexture</Behavior>
+            <Behavior time="0.8" childId="The Dreameater1">Metamorphose</Behavior>
+        </State>
+    </Object>
+
+
+    <Object type="0xCHANGE" id="Gift of Fear">
+        <Enemy/>
+        <Class>Character</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>11827721</Id></RemoteTexture>
+        <HitSound>monster/medusa_hit</HitSound>
+        <DeathSound>monster/medusa_death</DeathSound>
+
+        <MaxHitPoints>1000</MaxHitPoints>
+        <Size>100</Size>
+        <Defense>0</Defense>
+        <XpMult>1.0</XpMult>
+
+        <Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+        <SoulboundLoot prob="1" threshold="0.10">Tincture of Fear</SoulboundLoot>
+    </Object>
+
+
+    <Object type="0xCHANGE" id="The Dreameater1">
+        <DisplayId>The Dreameater</DisplayId>
+        <Group>Dreameater Sections</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>11844260</Id></RemoteTexture>
+        <HitSound>monster/skeletons_hit</HitSound>
+        <DeathSound>monster/skeletons_death</DeathSound>
+        <Size>400</Size>
+        <MaxHitPoints>100000</MaxHitPoints>
+        <Defense>25</Defense>
+        <XpMult>5.0</XpMult>
+        <DrawOnGround/>
+
+        <Projectile id="0">
+            <ObjectId>White Bullet</ObjectId>
+            <Damage>100</Damage>
+            <Speed>120</Speed>
+            <Size>200</Size>
+            <LifetimeMS>2000</LifetimeMS>
+            <MultiHit/>
+            <ConditionEffect duration="0">Armor Pierce</ConditionEffect>
+        </Projectile>
+
+        <State id="Talk">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+            <Behavior effect="Stun Immune">ConditionEffect</Behavior>
+
+            <Behavior text="RUN!!">Say</Behavior>
+            <Transition afterTime="1">Spew1</Transition>
+        </State>
+
+        <State id="Spew1">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+            <Behavior effect="Stun Immune">ConditionEffect</Behavior>
+
+            <Behavior projectileId="0" numShots="25" type="auto" range="20" angle="14" cooldown="1.5" defaultAngle="90" offset="0.4">Shoot</Behavior>
+            <Behavior childIds="The Dreameater2" cooldown="360000" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior bucket="movement" protecteeId="Corner1" protectionRange="0.2" speed="0.6" acquireRange="40">Protect</Behavior>
+            <Transition afterTime="1">Spew2</Transition>
+        </State>
+        <State id="Spew2">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+            <Behavior effect="Stun Immune">ConditionEffect</Behavior>
+
+            <Behavior projectileId="0" numShots="25" type="auto" range="20" angle="14" cooldown="1.5" defaultAngle="90" offset="0.4">Shoot</Behavior>
+            <Behavior childIds="The Dreameater3" cooldown="360000" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior bucket="movement" protecteeId="Corner1" protectionRange="0.2" speed="0.7" acquireRange="40">Protect</Behavior>
+            <Transition afterTime="1">Spew3</Transition>
+        </State>
+        <State id="Spew3">
+            <Behavior effect="Invulnerable">ConditionEffect</Behavior>
+            <Behavior effect="Stasis Immune">ConditionEffect</Behavior>
+            <Behavior effect="Stun Immune">ConditionEffect</Behavior>
+
+            <Behavior projectileId="0" numShots="25" type="auto" range="20" angle="14" cooldown="1.5" defaultAngle="90" offset="0.4">Shoot</Behavior>
+            <Behavior childIds="The Dreameater4" cooldown="360000" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+            <Behavior bucket="movement" protecteeId="Corner1" protectionRange="0.2" speed="0.8" acquireRange="40">Protect</Behavior>
+            <Transition afterTime="1">Corner1</Transition>
+        </State>
+
+        <State id="Corner1">
+            <Behavior bucket="movement" protecteeId="Corner1" protectionRange="0.2" speed="1.0" acquireRange="40">Protect</Behavior>
+
+            <Order targetIds="Corner1">
+                <Behavior time="0.2" childId="Corner0">Metamorphose</Behavior>
+            </Order>
+
+            <Transition noneExist="Corner1">Corner2</Transition>
+
+        </State>
+
+        <State id="Corner2">
+            <Behavior bucket="movement" protecteeId="Corner2" protectionRange="0.2" speed="1.0" acquireRange="40">Protect</Behavior>
+
+            <Order targetIds="Corner2">
+                <Behavior time="0.2" childId="Corner1">Metamorphose</Behavior>
+            </Order>
+
+            <Transition noneExist="Corner2">Corner3</Transition>
+
+        </State>
+
+        <State id="Corner3">
+            <Behavior bucket="movement" protecteeId="Corner3" protectionRange="0.2" speed="1.0" acquireRange="40">Protect</Behavior>
+
+            <Order targetIds="Corner3">
+                <Behavior time="0.2" childId="Corner2">Metamorphose</Behavior>
+            </Order>
+
+            <Transition noneExist="Corner3">Corner4</Transition>
+
+        </State>
+
+        <State id="Corner4">
+            <Behavior bucket="movement" protecteeId="Corner4" protectionRange="0.2" speed="1.4" acquireRange="40">Protect</Behavior>
+
+            <Order targetIds="Corner4">
+                <Behavior time="0.2" childId="Corner3">Metamorphose</Behavior>
+            </Order>
+
+            <Transition noneExist="Corner4">Corner0</Transition>
+
+        </State>
+
+
+        <State id="Corner0">
+            <Behavior bucket="movement" protecteeId="Corner0" protectionRange="0.2" speed="0.8" acquireRange="40">Protect</Behavior>
+
+            <Order targetIds="Corner0">
+                <Behavior time="0.2" childId="Corner4">Metamorphose</Behavior>
+            </Order>
+
+            <Transition noneExist="Corner0">Corner1</Transition>
+
+        </State>
+
+    </Object>
+
+
+    <Object type="0xCHANGE" id="The Dreameater2">
+        <DisplayId>The Dreameater</DisplayId>
+        <Group>Dreameater Sections</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>11844260</Id></RemoteTexture>
+        <HitSound>monster/skeletons_hit</HitSound>
+        <DeathSound>monster/skeletons_death</DeathSound>
+        <Size>320</Size>
+        <MaxHitPoints>80000</MaxHitPoints>
+        <Defense>40</Defense>
+        <XpMult>5.0</XpMult>
+        <DrawOnGround/>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <Behavior bucket="movement" protecteeId="The Dreameater1" protectionRange="0.8" speed="1.8" acquireRange="40">Protect</Behavior>
+
+    </Object>
+
+
+    <Object type="0xCHANGE" id="The Dreameater3">
+        <DisplayId>The Dreameater</DisplayId>
+        <Group>Dreameater Sections</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>11844260</Id></RemoteTexture>
+        <HitSound>monster/skeletons_hit</HitSound>
+        <DeathSound>monster/skeletons_death</DeathSound>
+        <Size>240</Size>
+        <MaxHitPoints>60000</MaxHitPoints>
+        <Defense>65</Defense>
+        <XpMult>5.0</XpMult>
+        <DrawOnGround/>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <Behavior bucket="movement" protecteeId="The Dreameater2" protectionRange="0.8" speed="1.8" acquireRange="40">Protect</Behavior>
+
+    </Object>
+
+
+    <Object type="0xCHANGE" id="The Dreameater4">
+        <DisplayId>The Dreameater</DisplayId>
+        <Group>Dreameater Sections</Group>
+        <Enemy/>
+        <Class>Character</Class>
+        <RemoteTexture><Instance>testing</Instance><Id>11844260</Id></RemoteTexture>
+        <HitSound>monster/skeletons_hit</HitSound>
+        <DeathSound>monster/skeletons_death</DeathSound>
+        <Size>160</Size>
+        <MaxHitPoints>40000</MaxHitPoints>
+        <Defense>40</Defense>
+        <XpMult>5.0</XpMult>
+        <DrawOnGround/>
+
+        <Behavior effect="Invincible">ConditionEffect</Behavior>
+
+        <Behavior bucket="movement" protecteeId="The Dreameater3" protectionRange="0.8" speed="1.8" acquireRange="40">Protect</Behavior>
+
+    </Object>
+
+
+    <!--
+    *********************************************************************************
+
+    Tinctures of Fear and Courage
+
+    Boss gives out speed enhancing but attack lowering potions (fear) for those that may use them strategically
+    Dungeon minions give out attack strengthening but speed lowering (courage) for those that take time to kill
+        minions to then help them achieve soulbound on the boss
+
+    *********************************************************************************
+    -->
+
+    <Object type="0xCHANGE" id="Tincture of Fear">
+        <Class>Equipment</Class>
+        <Item/>
+        <Texture><File>lofiObj2</File><Index>0xc7</Index></Texture>
+        <SlotType>10</SlotType>
+        <Description>Adds speed and reduces attack.</Description>
+        <Sound>use_potion</Sound>
+        <Consumable/>
+        <Soulbound/>
+        <Potion/>
+        <BagType>3</BagType>
+        <Activate stat="22" amount="15" duration="45">StatBoostSelf</Activate>
+        <Activate stat="20" amount="-15" duration="60">StatBoostSelf</Activate>
+    </Object>
+
+    <Object type="0xCHANGE" id="Tincture of Courage">
+        <Class>Equipment</Class>
+        <Item/>
+        <Texture><File>lofiObj2</File><Index>0xc7</Index></Texture>
+        <SlotType>10</SlotType>
+        <Description>Adds attack to everyone reduces speed for self.</Description>
+        <Sound>use_potion</Sound>
+        <Consumable/>
+        <Soulbound/>
+        <Potion/>
+        <BagType>3</BagType>
+        <Activate stat="22" amount="-10" duration="30">StatBoostSelf</Activate>
+        <Activate stat="20" amount="15" duration="30">StatBoostSelf</Activate>
+    </Object>
+
+    <!--
+    *********************************************************************************
+
+    Jeebs
+
+    *********************************************************************************
+    -->
+    <Object type="0x099b" id="Jeebs">
+        <Class>Character</Class>
+        <Group>Mad Lab</Group>
+        <RemoteTexture><Instance>testing</Instance><Id>7632526</Id><Right/></RemoteTexture>
+
+        <HitSound>monster/slimes_death</HitSound>
+        <DeathSound>monster/flying_brain_death</DeathSound>
+        <Size>200</Size>
+        <ShadowSize>50</ShadowSize>
+        <Defense>10</Defense>
+
+        <State id="Ini">
+            <Behavior prob="1" bubbleTime="3" text="Hello! I'm Jeebs.Ask me questions and I'll answer them if I can.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="Listening">
+            <Transition playerSays="Boosh">AnswerBoosh</Transition>
+            <Transition playerSays="how to get to oryx">AnswerOryxLair</Transition>
+            <Transition playerSays="pets">AnswerPets</Transition>
+            <Transition playerSays="vaults">AnswerVault</Transition>
+            <Transition playerSays="Thessal">AnswerThessal</Transition>
+            <Transition playerSays="how to create guild">AnswerCreateGuild</Transition>
+            <Transition playerSays="how to join guild">AnswerJoinGuild</Transition>
+        </State>
+
+        <State id="AnswerBoosh">
+            <Behavior prob="1" bubbleTime="3" text="Boosh is a developer for ROTMG.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerOryxLair">
+            <Behavior prob="1" bubbleTime="3" text="In order to enter Oryx's Lair you need to slay enough monsters in a realm. This will anger Oryx and he will summon you to his lair.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerPets">
+            <Behavior prob="1" bubbleTime="3" text="Pets are cosmetic creatures that will daringly follow you around wherever you go. They cannot be hurt, but make sure not to die with them or they will be lost.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerVault">
+            <Behavior prob="1" bubbleTime="3" text="Vaults are a great way to store your treasures for safe keeping. If your character dies, the items in your vault will remain safe for your next character.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerThessal">
+            <Behavior prob="1" bubbleTime="3" text="Quite the beauty but she is also dangerous at close range.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerCreateGuild">
+            <Behavior prob="1" bubbleTime="3" text="You can create your own guild by spending 1000 Fame at the Guild Charter in the Nexus. Once created you can invite other players.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+        <State id="AnswerJoinGuild">
+            <Behavior prob="1" bubbleTime="3" text="You can join a guild by having a member of that guild invite you.">Say</Behavior>
+            <Transition afterTime="2">Listening</Transition>
+        </State>
+
+    </Object>
+
+</Objects>

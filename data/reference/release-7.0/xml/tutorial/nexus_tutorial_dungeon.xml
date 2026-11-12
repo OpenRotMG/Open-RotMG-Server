@@ -1,0 +1,11 @@
+<Dungeons>
+	<Dungeon id="Nexus Tutorial">
+		<Width>128</Width>
+		<Height>128</Height>
+		<CenterStartRoom/>
+		<Visibility>Full</Visibility>
+		<Room id="start">
+			<LocalJM>nexusTutorial.jm</LocalJM>
+		</Room>
+	</Dungeon>
+</Dungeons>

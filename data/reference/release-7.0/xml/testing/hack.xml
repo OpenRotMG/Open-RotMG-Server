@@ -1,0 +1,227 @@
+<!-- object types: 0x0eXX next: 0x0e00 -->
+<Objects>
+	
+	<Object type="0x0e3d" id="Princess Attacker">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+		<DisplayId>The Princess</DisplayId>
+		
+		<RemoteTexture><Instance>production</Instance><Id>26139569</Id><Right/></RemoteTexture>
+		
+		<XpMult>0.0</XpMult>
+   		<Size>100</Size>
+		<MaxHitPoints>100</MaxHitPoints>
+		<Defense>5</Defense>
+		
+		<State id="Cower">
+			<State id="Cower1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime="0.8">Cower2</Transition> 
+			</State>
+			<State id="Cower2">
+				<Behavior text="HELP!" bubbleTime="0.8" prob="1">Say</Behavior>
+				<Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Transition afterTime="0.8">Cower1</Transition> 
+			</State>
+			<Transition noneExist="Princess Attacker">Safe</Transition> 
+		</State>
+		
+		<State id="Safe">
+			<State id="Wait">
+				<Transition playerWithin="1.2">Talk</Transition> 
+			</State>
+			<State id="Talk">
+				<Behavior text="My hero!" bubbleTime="2" prob="1">Say</Behavior>
+				<Behavior tagName="spoke">SetTag</Behavior>
+			</State>
+			<Transition hasTag="spoke">Capture</Transition> 
+		</State>
+	</Object>
+	
+	<Object type="0x0e3c" id="The Princess Intro">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+		<DisplayId>The Princess</DisplayId>
+		
+		<RemoteTexture><Instance>production</Instance><Id>26146455</Id><Right/></RemoteTexture>
+		
+		<AltTexture id="1"> <!-- cower1 -->
+			<RemoteTexture><Instance>testing</Instance><Id>25852084</Id><Right/></RemoteTexture>
+		</AltTexture>
+		<AltTexture id="2"> <!-- cower2 -->
+			<RemoteTexture><Instance>testing</Instance><Id>26171098</Id><Right/></RemoteTexture>
+		</AltTexture>
+		
+		
+		<XpMult>0.0</XpMult>
+   		<Size>100</Size>
+		<MaxHitPoints>600</MaxHitPoints>
+		<Defense>15</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		
+		<State id="Cower">
+			<State id="Cower1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Transition afterTime="0.8">Cower2</Transition> 
+			</State>
+			<State id="Cower2">
+				<Behavior text="HELP!" bubbleTime="0.8" prob="1">Say</Behavior>
+				<Behavior altTextureId="2">SetAltTexture</Behavior>
+				<Transition afterTime="0.8">Cower1</Transition> 
+			</State>
+			<Transition noneExist="Princess Attacker">Safe</Transition> 
+		</State>
+		
+		<State id="Safe">
+			<State id="Wait">
+				<Transition playerWithin="1.2">Talk</Transition> 
+			</State>
+			<State id="Talk">
+				<Behavior text="My hero!" bubbleTime="2" prob="1">Say</Behavior>
+				<Behavior tagName="spoke">SetTag</Behavior>
+			</State>
+			<Transition hasTag="spoke">Capture</Transition> 
+		</State>
+	</Object>
+	
+	<Object type="0x0e3b" id="Camp Fire">
+		<Enemy/>
+		<Class>Character</Class>
+		
+		<Texture><File>lofiObjBig</File><Index>0x0a</Index></Texture>
+		<Animation prob="1.0" period="0.0">
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0b</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0c</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0d</Index></Texture></Frame>
+		</Animation>
+		<Animation prob="1.0" period="0.0">
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0e</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x0f</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiObjBig</File><Index>0x10</Index></Texture></Frame>
+		</Animation>
+		
+		<Size>80</Size>
+		<ShadowSize>90</ShadowSize>
+		<ShadowColor>0xFA9632</ShadowColor>
+		<MaxHitPoints>400</MaxHitPoints>
+		<Defense>80</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior> 
+	</Object>
+	
+	<Object type="0x0e3a" id="Princess">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+		
+		<RandomTexture>
+			<RemoteTexture><Instance>production</Instance><Id>25716700</Id><Right/></RemoteTexture>
+			<RemoteTexture><Instance>production</Instance><Id>25807978</Id><Right/></RemoteTexture>
+			<RemoteTexture><Instance>production</Instance><Id>26169055</Id><Right/></RemoteTexture>
+		</RandomTexture>
+	
+		<XpMult>0.0</XpMult>
+   		<Size>100</Size>
+		<MaxHitPoints>600</MaxHitPoints>
+		<Defense>15</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Walk">
+			<State id="Go">
+				<!--Behavior bucket="movement" speed=".35" groundTypes="Guild Rug Green,Wood Pannel Floor,Wood Plank Floor,Wood Plank Floor Dark,Gothic Floor Slabs 3">Walk</Behavior-->
+				<Behavior bucket="movement" speed=".30">Wander</Behavior>
+				<Transition afterTime="1.0" random=".008">Stop</Transition> 
+			</State>
+			<State id="Stop">
+				<Transition afterTime=".2" random=".05">Go</Transition>
+			</State>
+			<Transition afterTime="3.0" random=".008">Talk</Transition> 
+			<Transition playerWithin="0.9">TalkClose</Transition>
+		</State>
+		<State id="Talk">
+			<Behavior text="Somebody rescue me!;I'm not even a real princess!;This crazy man captured me!;I hate being in jail...;This sucks.;:(" bubbleTime="3" prob="1">Say</Behavior>
+			<Transition afterTime="3">Walk</Transition>
+		</State>
+		<State id="TalkClose">
+			<Behavior text="TOO CLOSE FOR COMFORT!;BACK OFF!!!" bubbleTime="1.6" prob="1">Say</Behavior>
+			<Transition afterTime="2">Walk</Transition>
+		</State>
+	</Object>
+	<Object type="0x0e39" id="NPC1">
+		<Class>Character</Class>
+		<Enemy/>
+		<NoMiniMap/>
+		<DisplayId>Man</DisplayId>
+		
+		<RemoteTexture><Instance>testing</Instance><Id>5747006</Id><Right/></RemoteTexture>
+		
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_hit</DeathSound>
+
+		<Projectile id="0">
+			<ObjectId>Lanturn Blast</ObjectId>
+			<Speed>40</Speed>
+			<Damage>85</Damage>
+			<LifetimeMS>600</LifetimeMS>
+   			<Size>140</Size>
+			<ConditionEffect duration="1">Paralyzed</ConditionEffect>
+		</Projectile>
+
+		<XpMult>0.0</XpMult>
+   		<Size>100</Size>
+		<MaxHitPoints>600</MaxHitPoints>
+		<Defense>15</Defense>
+		
+		<Behavior effect="Invincible">ConditionEffect</Behavior>
+		<State id="Walk">
+			<State id="Go">
+				<!--Behavior bucket="movement" speed=".35" groundTypes="Guild Rug Green,Wood Pannel Floor,Wood Plank Floor,Wood Plank Floor Dark,Gothic Floor Slabs 3">Walk</Behavior-->
+				<Behavior bucket="movement" speed=".35">Wander</Behavior>
+				<Transition afterTime="1.0" random=".01">Stop</Transition> 
+			</State>
+			<State id="Stop">
+				<Transition afterTime=".2" random=".05">Go</Transition>
+			</State>
+			<Transition afterTime="1" playerWithin="1.5">Talk</Transition>
+		</State>
+		<State id="Talk">
+			<Behavior text="Hey, hows it going?;Isn't town-life the greatest!;" bubbleTime="2.4" prob="1">Say</Behavior>
+			<Transition afterTime="2.6">Walk</Transition>
+		</State>
+	</Object>
+	
+	<Object type="0x0e38" id="Rockie">
+		<Class>Character</Class>
+		<Enemy/>
+		
+		<RemoteTexture><Instance>testing</Instance><Id>5745009</Id><Right/></RemoteTexture>
+		
+		<HitSound>monster/stone_walls_hit</HitSound>
+		<DeathSound>monster/stone_walls_hit</DeathSound>
+
+		<Projectile id="0">
+			<ObjectId>Lanturn Blast</ObjectId>
+			<Speed>40</Speed>
+			<Damage>85</Damage>
+			<LifetimeMS>1200</LifetimeMS>
+   			<Size>140</Size>
+		</Projectile>
+
+		<XpMult>0.0</XpMult>
+   		<Size>100</Size>
+		<MaxHitPoints>600</MaxHitPoints>
+		<Defense>15</Defense>
+		
+		<State id="Ini">
+			<Transition playerWithin="9">Attack</Transition>
+		</State>
+		<State id="Attack">
+			<Behavior bucket="movement" speed="0.65" acquireRange="9" predictive="true" cooldown="0">Follow</Behavior>
+			<Behavior initialDelay="5.6" range="1.5" numShots="6" projectileId="0" dropLoot="false" giveXP="false">Explode</Behavior>
+		</State>
+	</Object>
+
+</Objects>

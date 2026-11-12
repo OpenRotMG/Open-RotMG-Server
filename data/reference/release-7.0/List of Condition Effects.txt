@@ -1,0 +1,34 @@
+List of Condition Effects
+
+Players only
+Quiet: Mana is reduced to 0 and remains there for the duration of the effect (i.e. no special ability).  Players only.
+Weak: Attack stat is effectively set to 0.  Players only.
+Sick: No hitpoint regeration.  Players only.
+Blind: Player’s screen goes dark.  Players only.
+Hallucinating: Textures are randomly swapped.  Players only.
+Drunk: Player’s screen gets blurry.  Players only.
+Confused: Player’s movement keys are remapped.  Players only.
+Invisible: Can not be targeted by monsters.  Players only.
+Bleeding: Slowly lose health (instead of regenerating).  Players only.
+Healing: Hitpoint regeneration greatly increased.  Players only.
+Speedy: Movement speed increased by 50%.  Players only.
+Berserk: Attack speed increased by 50%.  Players only.
+Damaging: Damage increased by 50%.  Players only.
+Paused: Player can not interact with world.  Players only.
+Hexed: Player is turned into a random pet. Players only.
+
+Players and enemies
+Slowed: Speed is effectively set to 0 for players or halved for monsters.
+Paralyzed: Can not move.  Players or Monsters.
+Armor Pierce: Projectile damage ignores defense.  Players or Enemy projectiles.
+Stasis: Can not move/interact with world.  Players or Enemies.
+Stasis Immune: Can not become stasis.  Players or Enemies.
+Invincible: Projectiles and other damage ignore character (go through).  Players or enemies.
+Invulnerable: Projectiles and other damage do not harm the creature (but will still hit).  Players or enetmies.
+Armored: Defense is doubled.  Players or enemies.
+Armor Broken: Defense is set to 0.  Players or enemies.
+Dazed: Halves number of projectiles shot.  Enemies only.
+
+Enemies only:
+Stunned: Can not shoot.  Enemies only.
+

@@ -1,0 +1,12 @@
+<Dungeons>
+	<Dungeon id="Kitchen">
+		<Width>256</Width>
+		<Height>256</Height>
+		<CenterStartRoom/>
+		<Visibility>Full</Visibility>
+
+		<Room id="start">
+			<LocalJM>kitchen.jm</LocalJM>
+		</Room>
+	</Dungeon>
+</Dungeons>

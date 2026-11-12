@@ -1,0 +1,2278 @@
+<!-- object types: 0x174X next: 0x174f -->
+<Objects>
+	<Object type="0x1740" id="Oryx the Mad God 1">
+		<DisplayId>Oryx the Mad God</DisplayId>
+		<Enemy/>
+		<Class>Character</Class>
+		<!-- 
+		<Texture><File>lofiChar16x16</File><Index>0x54</Index></Texture>
+		4956207, 4964185
+		 -->
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>37</Index></AnimatedTexture>
+
+		<HitSound>monster/oryx_hit</HitSound>
+		<DeathSound>monster/oryx_death</DeathSound>
+		<Quest/>
+		<God/>
+		<Oryx/>
+		<StasisImmune/>
+		<NoArticle/>
+
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>100</Size>
+		<MaxHitPoints>85000</MaxHitPoints>
+		<Defense>60</Defense>
+		<XpMult>0.35</XpMult>
+
+		<SoulboundLoot tier="9" prob=".1" threshold=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".05" threshold=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".03" threshold=".035">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".01" threshold=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".02" threshold=".04">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="10" prob=".1" threshold=".01">Armor</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".05" threshold=".01">Armor</SoulboundLoot>
+		<SoulboundLoot tier="11" prob=".03" threshold=".035">Armor</SoulboundLoot>
+		<SoulboundLoot tier="12" prob=".02" threshold=".04">Armor</SoulboundLoot>
+		<SoulboundLoot tier="12" prob=".05" threshold=".1">Armor</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".1" threshold=".01">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".02" threshold=".035">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".01" threshold=".01">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".02" threshold=".04">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="4" prob=".02" threshold=".035">Ring</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".04" threshold=".01">Ring</SoulboundLoot>
+		<SoulboundLoot tier="5" prob=".02" threshold=".04">Ring</SoulboundLoot>
+		<SoulboundLoot prob=".1" threshold=".015" min="1">Potion of Attack</SoulboundLoot>
+		<SoulboundLoot prob=".1" threshold=".015" min="1">Potion of Defense</SoulboundLoot>
+
+		<SoulboundLoot tier="4" prob=".5" threshold=".5">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot prob="1" threshold=".5">Potion of Defense</SoulboundLoot>
+
+		<!-- PROJECTILES -->
+		<Projectile id="0">
+			<ObjectId>White Bullet</ObjectId>		<!-- no_knight_can_harm_me -->
+			<Speed>30</Speed>
+			<Damage>160</Damage>
+			<Size>120</Size>
+			<LifetimeMS>700</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">		
+			<ObjectId>White Flame</ObjectId>		<!-- rogue_to_rescue -->
+			<Speed>100</Speed>
+			<Damage>280</Damage>
+			<Size>250</Size>
+			<LifetimeMS>800</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="2">					<!-- minion_toss --> 
+			<ObjectId>White Bolt</ObjectId>
+			<Speed>80</Speed>
+			<Damage>90</Damage>
+			<LifetimeMS>1600</LifetimeMS>
+			<ArmorPiercing/>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="3">					<!-- just_like_old_times -->
+			<ObjectId>Fire Bolt</ObjectId>
+			<Speed>100</Speed>
+			<Damage>40</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+		</Projectile>
+		<Projectile id="4">					<!-- just_like_old_times -->
+			<ObjectId>Green Star</ObjectId>
+			<Speed>80</Speed>
+			<Damage>60</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+			<ConditionEffect duration="9">Slowed</ConditionEffect>
+		</Projectile>	
+		<Projectile id="5">					<!-- hadouken round 2 -->
+			<ObjectId>White Blue Bubble</ObjectId>
+			<Speed>30</Speed>
+			<Damage>100</Damage>
+			<Size>90</Size>
+			<LifetimeMS>4000</LifetimeMS>
+			<ConditionEffect duration="3">Weak</ConditionEffect>
+			<MultiHit/>
+		</Projectile>	
+		<Projectile id="6">					<!-- white planet attack -->
+			<ObjectId>White Ball</ObjectId>
+			<Speed>30</Speed>
+			<Damage>120</Damage>
+			<Size>100</Size>
+			<LifetimeMS>800</LifetimeMS>
+			<MultiHit/>
+		</Projectile>	
+		<Projectile id="7">					<!-- artifact_dance (*all times*) -->
+			<ObjectId>Silver Shield</ObjectId>
+			<Speed>30</Speed>
+			<Damage>290</Damage>
+			<Size>130</Size>
+			<LifetimeMS>500</LifetimeMS>
+			<MultiHit/>
+		</Projectile>		
+		<Projectile id="8">					<!-- artifact_dance (being_defended) -->
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>40</Speed>
+			<Damage>90</Damage>
+			<Size>90</Size>
+			<LifetimeMS>2500</LifetimeMS>
+			<ConditionEffect duration="2">Blind</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="9">					<!-- artifact_dance (attacking) -->
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>55</Speed>
+			<Damage>400</Damage>
+			<Size>200</Size>
+			<LifetimeMS>2100</LifetimeMS>
+			<MultiHit/>
+		</Projectile>		
+		<Projectile id="12">					<!-- ranged_classes_begone -->
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>30</Speed>
+			<Damage>120</Damage>
+			<Size>75</Size>
+			<LifetimeMS>1900</LifetimeMS>
+		</Projectile>
+		<Projectile id="13">					<!-- testing use in ring phases... -->
+			<ObjectId>Dark Gray Spinner</ObjectId>
+			<Speed>90</Speed>
+			<Size>100</Size>
+			<Damage>1</Damage>
+			<LifetimeMS>1800</LifetimeMS>
+			<ConditionEffect duration="8">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="14">					<!-- testing use in ring phases... -->
+			<ObjectId>Gray Spinner</ObjectId>
+			<Speed>90</Speed>
+			<Size>100</Size>
+			<Damage>1</Damage>
+			<LifetimeMS>1800</LifetimeMS>
+			<ConditionEffect duration="8">Weak</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="15">					<!-- orbit around oryx -->
+			<!--ObjectId>White Orbiter</ObjectId-->
+			<ObjectId>White Ball</ObjectId>
+			<Speed>10</Speed>
+			<Size>100</Size>
+			<Damage>100</Damage>
+			<LifetimeMS>2000</LifetimeMS>
+			<Parametric/>
+			<Magnitude>1</Magnitude>
+			<ConditionEffect duration="8">Weak</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="16">					<!-- orbit targeted attack -->
+			<ObjectId>White Superblast</ObjectId>
+			<Speed>55</Speed>
+			<Size>240</Size>
+			<Damage>210</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+			<MultiHit/>
+			<ConditionEffect duration="4">Weak</ConditionEffect>
+		</Projectile>
+		<Projectile id="17">					<!-- chase course arrow -->
+			<ObjectId>White Ball Blast</ObjectId>
+			<Speed>85</Speed>
+			<Size>120</Size>
+			<Damage>180</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+		</Projectile>
+		<Projectile id="18">					<!-- chase course spinner -->
+			<ObjectId>White Star Stunner</ObjectId>
+			<Speed>40</Speed>
+			<Size>100</Size>
+			<Damage>100</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="4">Dazed</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="19">					<!-- chase course spinner -->
+			<ObjectId>White Ball Blast</ObjectId>
+			<Speed>35</Speed>
+			<Size>90</Size>
+			<Damage>100</Damage>
+			<LifetimeMS>3000</LifetimeMS>
+			<ConditionEffect duration="3">Weak</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		
+
+		<!-- STATES -->
+		<State id="start_the_fun">			
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<Transition playerWithin="12">just_like_old_times</Transition>						
+		</State>
+		<State id="just_like_old_times">
+			
+			<Behavior bucket="movement" range="5" speed="0.4">StayCloseToSpawn</Behavior>
+			<Behavior bucket="movement" speed="0.4">Wander</Behavior>			
+			
+			<Behavior projectileId="3" cooldown=".8" range="12" numShots="9" predictive="0.5" offset="1">Shoot</Behavior>
+			<Behavior projectileId="4" cooldown=".8" range="12" numShots="1" offset="1">Shoot</Behavior>
+			
+			<Behavior tagName="2:hadouken">SetTag</Behavior>
+			<Behavior tagName="1:minionToss">SetTag</Behavior>
+			<Behavior tagName="makeMinions">SetTag</Behavior>
+			
+			<!--Transition hitpointsLessThan="0.95">AttackChooser</Transition-->
+			<!--Transition hitpointsLessThan="0.99">Orbitals</Transition-->
+			<!--Transition hitpointsLessThan="0.96">MakeMinions</Transition-->
+			<Transition hitpointsLessThan="0.97">MakeMinions</Transition>
+		</State>
+		
+		
+		<Embed name="makeMinions"></Embed>
+		<Embed name="circleCombat"></Embed>
+		<Embed name="artifactDance"></Embed>
+		<Embed name="hadouken"></Embed>
+		<Embed name="minionToss"></Embed>
+		<Embed name="bulletDance"></Embed>
+	
+		<Embed name="noRepeats"></Embed>
+	
+		<State id="AllIn">
+			<Order>
+				<Behavior tagName="final">SetTag</Behavior>
+			</Order>
+			
+			<State id="Ini">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Behavior bucket="movement" range="0" speed="1">StayCloseToSpawn</Behavior>
+				<Behavior broadcast="1" prob="1" text="THIS SHALL BE YOUR GRAVE!!!;I HAVE HAD ENOUGH OF YOU!!!;DIE!!!;ENOUGH!!!">Say</Behavior>
+				<Behavior targetIds="Oryx the Mad God 1" cooldown="0.4" range="1" maxTargets="1" maxHeal="2500">Heal</Behavior>
+				<Transition afterTime="3">Summon</Transition>
+			</State>
+			<State id="Summon">
+				<Behavior type="Flash" color="ff0000" flashPeriod="0.2" flashRepeats="10">ShowEffect</Behavior>
+				<Behavior rate="10" maxSize="160">ChangeSize</Behavior>
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Behavior numShots="12" defaultAngle="0" projectileId="18" cooldown="1" type="targeted" angle="30" offset="0.2" predictive="0.5">Shoot</Behavior>
+				
+				<Behavior childId="Assassin of Oryx" cooldown="100000" type="auto" range="4.3" defaultAngle="270">ObjectToss</Behavior>
+				<Behavior childId="Assassin of Oryx" cooldown="100000" type="auto" range="4.3" defaultAngle="150">ObjectToss</Behavior>
+				<Behavior childId="Assassin of Oryx" cooldown="100000" type="auto" range="4.3" defaultAngle="30">ObjectToss</Behavior>
+				<Transition afterTime="1">Chase</Transition>
+			</State>
+			<State id="Chase">
+				
+				<Behavior rate="10" maxSize="160">ChangeSize</Behavior>
+				<Behavior effect="Armored">ConditionEffect</Behavior>
+				
+				<Behavior childIds="Assassin of Oryx" cooldown="5" maxChildren="5" startWithMinions="false">MakeMinions</Behavior>
+				
+				<State id="Toss1">
+					<State id="FlashOrNot">
+						<Transition noTag="deathflash">Flash</Transition>
+					</State>
+					<State id="Flash">
+						<Behavior type="Flash" color="ff0000" flashPeriod="0.2" flashRepeats="12">ShowEffect</Behavior>
+						<Behavior tagName="deathflash">SetTag</Behavior>
+					</State>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="3" defaultAngle="45">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="3" defaultAngle="225">ObjectToss</Behavior>
+					<Transition afterTime="2.2">Toss2</Transition>
+				</State>
+				<State id="Toss2">
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="3" defaultAngle="135">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="3" defaultAngle="315">ObjectToss</Behavior>
+					<Transition afterTime="2.2">Wait</Transition>
+				</State>
+				<State id="Wait">
+					<Transition afterTime="12">Toss1</Transition>
+				</State>
+				
+				<Behavior bucket="movement" speed="1.2" cooldown="0.8" range="10">Charge</Behavior>
+				<Behavior bucket="movement" speed="1">Wander</Behavior>		
+				
+				<Behavior numShots="2" projectileId="1" cooldown="1.2" type="targeted" predictive="0.75" angle="16" range="14">Shoot</Behavior>
+				
+				<Behavior numShots="6" defaultAngle="0" projectileId="18" cooldown="3.4" type="targeted" angle="25" offset="3" predictive="1">Shoot</Behavior>
+				<Behavior numShots="4" defaultAngle="0" projectileId="17" cooldown="2" type="targeted" angle="90" offset="1" predictive=".6">Shoot</Behavior>
+				<Transition afterTime="20">Chase</Transition>
+			</State>
+		</State>
+	
+		<State id="WhitePlanet">
+			<Transition hitpointsLessThan="0.060">AllIn</Transition>
+			<State id="Ini">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Behavior bucket="movement" range="0" speed="1">StayCloseToSpawn</Behavior>
+				<Behavior broadcast="1" prob="1" bubbleTime="5" text="I am the master of this existence!!!;I control your fate!;The universe bends to my will alone!!!">Say</Behavior>
+				<!-- 
+				<State id="AntiSpec">
+					<State id="antispectator1">
+						<Behavior childIds="White Moon" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.6">antispectator2</Transition>
+					</State>			
+					<State id="antispectator2">
+						<Behavior childIds="White Moon" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.6">antispectator3</Transition>
+					</State>
+					<State id="antispectator3">
+						<Behavior childIds="White Moon" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.6">antispectator4</Transition>
+					</State>
+					<State id="antispectator4">
+						<Behavior childIds="White Moon" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+					</State>
+				</State>
+				-->
+				<Transition afterTime="1.6">ThrowStuff</Transition>
+			</State>
+			<State id="ThrowStuff">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<!-- 
+				<Behavior childId="White Planet BR" centerObject="true" cooldown="10000" type="auto" defaultAngle="45" range="13.0">ObjectToss</Behavior>
+				<Behavior childId="White Planet BL" centerObject="true" cooldown="10000" type="auto" defaultAngle="135" range="13.0">ObjectToss</Behavior>
+				<Behavior childId="White Planet TL" centerObject="true" cooldown="10000" type="auto" defaultAngle="225" range="13.0">ObjectToss</Behavior>
+				<Behavior childId="White Planet TR" centerObject="true" cooldown="10000" type="auto" defaultAngle="315" range="13.0">ObjectToss</Behavior>
+				 -->
+				<Behavior childId="White Moon" centerObject="true" cooldown="10000" type="auto" defaultAngle="0" range="13.4">ObjectToss</Behavior>
+				<Behavior childId="White Moon" centerObject="true" cooldown="10000" type="auto" defaultAngle="90" range="13.4">ObjectToss</Behavior>
+				<Behavior childId="White Moon" centerObject="true" cooldown="10000" type="auto" defaultAngle="180" range="13.4">ObjectToss</Behavior>
+				<Behavior childId="White Moon" centerObject="true" cooldown="10000" type="auto" defaultAngle="270" range="13.4">ObjectToss</Behavior>
+				 
+				<Behavior childId="White Planet" centerObject="true" cooldown="10000" type="auto" defaultAngle="45" range="9.0">ObjectToss</Behavior>
+				<Behavior childId="White Planet" centerObject="true" cooldown="10000" type="auto" defaultAngle="135" range="9.0">ObjectToss</Behavior>
+				<Behavior childId="White Planet" centerObject="true" cooldown="10000" type="auto" defaultAngle="225" range="9.0">ObjectToss</Behavior>
+				<Behavior childId="White Planet" centerObject="true" cooldown="10000" type="auto" defaultAngle="315" range="9.0">ObjectToss</Behavior>
+				
+				<Transition afterTime="0.2">Attack</Transition>
+			</State>
+			<State id="Attack2">
+				<Embed name="shieldCycle2"></Embed>
+				<Behavior type="auto" defaultAngle="0" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="0.0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="12" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="0.2">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="24" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="0.4">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="36" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="0.6">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="48" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="0.8">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="60" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="1.0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="72" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="1.2">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="84" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="1.4">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="96" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="1.6">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="108" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="1.8">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="120" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="2.0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="132" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="2.2">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="144" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="2.4">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="156" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="2.6">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="168" numShots="4"  projectileId="5" cooldown="3.0" range="0" angle="90" offset="2.8">Shoot</Behavior>
+				<Transition afterTime="8">Attack3</Transition>
+			</State>
+			<State id="Attack">
+				<Embed name="shieldCycle"></Embed>
+				<Behavior type="auto" defaultAngle="0" numShots="24"  projectileId="6" cooldown="2" range="0" angle="15" offset="0.0">Shoot</Behavior>
+				<Behavior numShots="36" projectileId="13" cooldown="90" type="auto" angle="10" defaultAngle="0" offset="0.6">Shoot</Behavior>
+				 
+				<Behavior type="auto" defaultAngle="0" numShots="10"  projectileId="16" cooldown="2" range="0" angle="36" offset="1.0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="18" numShots="10"  projectileId="16" cooldown="2" range="0" angle="36" offset="2.0">Shoot</Behavior>
+				
+				<Transition afterTime="4">Attack2</Transition>
+			</State>
+			<State id="Attack3">
+				<Embed name="shieldCycle3"></Embed>
+				<!--Behavior effect="Invulnerable">ConditionEffect</Behavior-->
+				<Behavior broadcast="1" prob="0.8" bubbleTime="3" text="You have uttered your last pathetic whimper!;SILENCE!;Speak no more, fools!;You have spoken your last!">Say</Behavior>
+				
+				<Behavior type="auto" defaultAngle="0" numShots="24"  projectileId="6" cooldown="2" range="0" angle="15" offset="0.0">Shoot</Behavior>
+				<Behavior numShots="36" projectileId="13" cooldown="90" type="auto" angle="10" defaultAngle="0" offset="0.6">Shoot</Behavior>
+				 
+				<Behavior type="auto" defaultAngle="0" numShots="10"  projectileId="16" cooldown="2" range="0" angle="36" offset="1.0">Shoot</Behavior>
+				<Behavior type="auto" defaultAngle="18" numShots="10"  projectileId="16" cooldown="2" range="0" angle="36" offset="2.0">Shoot</Behavior>
+				
+				<Transition afterTime="7">Attack2</Transition>
+			</State>
+			
+			<!-- AttackDone -->
+			<Transition afterTime="20">AttackDone</Transition>
+		</State>
+	
+		<State id="RepeatAttack">
+				<Transition afterTime="1">WhitePlanet</Transition>
+		</State>
+	
+		<State id="ChaseCourse">
+			<Transition hitpointsLessThan="0.060">AllIn</Transition>
+			<State id="Ini">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Behavior bucket="movement" range="0" speed="1">StayCloseToSpawn</Behavior>
+				<Behavior broadcast="1" prob="1" text="FOOL! Flee while you can!!!;You shall never see the light of day!;Yes, run for your worthless lives!!!;You WILL fear me!!!">Say</Behavior>
+				<Transition afterTime="1.6">ThrowStuff</Transition>
+			</State>
+			<State id="ThrowStuff">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Behavior childIds="Chase Element" cooldown="1000" maxChildren="1" startWithMinions="false">MakeMinions</Behavior>
+				
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="0" range="8.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="90" range="8.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="180" range="8.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="270" range="8.0">ObjectToss</Behavior>
+				
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="45" range="11.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="135" range="11.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="225" range="11.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="315" range="11.0">ObjectToss</Behavior>
+				
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="0" range="16.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="90" range="16.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="180" range="16.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="270" range="16.0">ObjectToss</Behavior>
+				
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="45" range="22.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="135" range="22.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="225" range="22.0">ObjectToss</Behavior>
+				<Behavior childId="Chase Element" centerObject="true" cooldown="10000" type="auto" defaultAngle="315" range="22.0">ObjectToss</Behavior>
+				
+				<Transition afterTime="2">Tag</Transition>
+			</State>
+			<State id="Tag">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Order>
+					<Behavior tagName="attack">SetTag</Behavior>
+				</Order>
+				<Transition afterTime="0.2">Chase</Transition>
+			</State>
+			<State id="Chase">
+				<Embed name="shieldCycle"></Embed>
+				<Behavior bucket="movement" range="23" speed="1.6" cooldown="1.4">StayCloseToSpawn</Behavior>
+				<Behavior bucket="movement" speed="1.2" cooldown="0" range="10">Charge</Behavior>
+				<Behavior numShots="5" defaultAngle="0" projectileId="18" cooldown="2" type="targeted" angle="25" offset="0.2" predictive="1">Shoot</Behavior>
+				<Behavior numShots="2" defaultAngle="0" projectileId="17" cooldown="1.2" type="targeted" angle="30" offset="0.6">Shoot</Behavior>
+				<Behavior numShots="3" defaultAngle="0" projectileId="17" cooldown="1.2" type="targeted" angle="20" offset="1.2">Shoot</Behavior>
+				<Transition afterTime="20">Chase</Transition>
+			</State>
+			<State id="Return">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Behavior broadcast="1" prob="0.7" text="Enough games!">Say</Behavior>
+				<Behavior bucket="movement" range="3.75" speed="0.8">StayCloseToSpawn</Behavior>
+			</State>
+			
+			<Transition afterTime="25">AttackDone</Transition>
+		</State>
+	
+		<State id="Orbitals">
+			<Transition hitpointsLessThan="0.060">AllIn</Transition>
+			<Behavior childId="Black Planet" cooldown="10000" type="auto" defaultAngle="0" range="9.5">ObjectToss</Behavior> 
+			<Behavior childId="Black Planet" cooldown="10000" type="auto" defaultAngle="45" range="9.5">ObjectToss</Behavior>
+			<Behavior childId="Black Planet" cooldown="10000" type="auto" defaultAngle="90" range="9.5">ObjectToss</Behavior>
+			<Behavior childId="Black Planet" cooldown="10000" type="auto" defaultAngle="135" range="9.5">ObjectToss</Behavior> 
+			<Behavior childId="Black Planet" cooldown="10000" type="auto" defaultAngle="180" range="9.5">ObjectToss</Behavior>
+			<Behavior childId="Black Planet" cooldown="10000" type="auto" defaultAngle="225" range="9.5">ObjectToss</Behavior>
+			<Behavior childId="Black Planet" cooldown="10000" type="auto" defaultAngle="270" range="9.5">ObjectToss</Behavior>
+			<Behavior childId="Black Planet" cooldown="10000" type="auto" defaultAngle="315" range="9.5">ObjectToss</Behavior>
+			<!-- 
+			<Behavior numShots="36" projectileId="13" cooldown="90" type="auto" angle="10" defaultAngle="0">Shoot</Behavior>
+			<Behavior numShots="15" projectileId="0" cooldown="0.6" type="auto" angle="24" offset="0.4">Shoot</Behavior>
+			
+			<Behavior numShots="8" defaultAngle="0" projectileId="15" cooldown="1" type="auto" angle="45" offset="0.2">Shoot</Behavior>
+			
+			<Behavior numShots="6" defaultAngle="30" projectileId="15" cooldown="2" type="auto" angle="60" offset="0">Shoot</Behavior>
+			<Behavior numShots="6" defaultAngle="0" projectileId="15" cooldown="2" type="auto" angle="60" offset="1">Shoot</Behavior>
+			-->
+			<Embed name="shieldCycle"></Embed>
+			
+			<Behavior numShots="3" defaultAngle="0" projectileId="15" cooldown="1" type="auto" angle="120" offset="0.4">Shoot</Behavior>
+			
+			<!--Behavior bucket="movement" range="1" speed="0.05">StayCloseToSpawn</Behavior-->
+			
+			<Behavior numShots="3" defaultAngle="0" projectileId="16" cooldown="1" type="targeted" angle="120" offset="1.2">Shoot</Behavior>
+			
+			<Behavior numShots="10" projectileId="19" cooldown="5.2" type="auto" angle="36" defaultAngle="0" offset="4">Shoot</Behavior>
+			<Behavior numShots="10" projectileId="19" cooldown="5.2" type="auto" angle="36" defaultAngle="18" offset="4.6">Shoot</Behavior>
+			
+			<Transition afterTime="23">AttackDone</Transition>
+		</State>
+	
+	
+		<DefineEmbed name="noRepeats">
+			<State id="AttackDone">
+				<Transition>MoveSeccondToThird</Transition>
+			</State>
+			
+			<State id="MoveSeccondToThird">
+				<!--Behavior broadcast="1" prob="1" bubbleTime="1" text="move last to seccond">Say</Behavior-->
+				<Embed name="clearTagsThird"></Embed>
+				<Transition hasTag="2:makeMinions">MakeL</Transition>
+				<Transition hasTag="2:circleCombat">CircL</Transition>
+				<Transition hasTag="2:artifactDance">ArtiL</Transition>
+				<Transition hasTag="2:hadouken">HadoL</Transition>
+				<Transition hasTag="2:minionToss">MiniL</Transition>
+				<Transition hasTag="2:bulletDance">BullL</Transition>
+				<Transition hasTag="2:orbitals">OrbiL</Transition>
+				<Transition hasTag="2:chaseCourse">ChasL</Transition>
+				<Transition hasTag="2:whitePlanet">WhitL</Transition>
+				<Transition afterTime="0.2">MoveLastToSeccond</Transition>
+			</State>
+			
+			<State id="MakeL">
+				<Behavior tagName="2:makeMinions">ClearTag</Behavior>
+				<Behavior tagName="3:makeMinions">SetTag</Behavior>
+				<Transition hasTag="3:makeMinions">MoveLastToSeccond</Transition>
+			</State>
+			<State id="CircL">
+				<Behavior tagName="2:circleCombat">ClearTag</Behavior>
+				<Behavior tagName="3:circleCombat">SetTag</Behavior>
+				<Transition hasTag="3:circleCombat">MoveLastToSeccond</Transition>
+			</State>
+			<State id="ArtiL">
+				<Behavior tagName="2:artifactDance">ClearTag</Behavior>
+				<Behavior tagName="3:artifactDance">SetTag</Behavior>
+				<Transition hasTag="3:artifactDance">MoveLastToSeccond</Transition>
+			</State>
+			<State id="HadoL">
+				<Behavior tagName="2:hadouken">ClearTag</Behavior>
+				<Behavior tagName="3:hadouken">SetTag</Behavior>
+				<Transition hasTag="3:hadouken">MoveLastToSeccond</Transition>
+			</State>
+			<State id="MiniL">
+				<Behavior tagName="2:minionToss">ClearTag</Behavior>
+				<Behavior tagName="3:minionToss">SetTag</Behavior>
+				<Transition hasTag="3:minionToss">MoveLastToSeccond</Transition>
+			</State>
+			<State id="BullL">
+				<Behavior tagName="2:bulletDance">ClearTag</Behavior>
+				<Behavior tagName="3:bulletDance">SetTag</Behavior>
+				<Transition hasTag="3:bulletDance">MoveLastToSeccond</Transition>
+			</State>
+			<State id="OrbiL">
+				<Behavior tagName="2:orbitals">ClearTag</Behavior>
+				<Behavior tagName="3:orbitals">SetTag</Behavior>
+				<Transition hasTag="3:orbitals">MoveLastToSeccond</Transition>
+			</State>
+			<State id="ChasL">
+				<Behavior tagName="2:chaseCourse">ClearTag</Behavior>
+				<Behavior tagName="3:chaseCourse">SetTag</Behavior>
+				<Transition hasTag="3:chaseCourse">MoveLastToSeccond</Transition>
+			</State>
+			<State id="WhitL">
+				<Behavior tagName="2:whitePlanet">ClearTag</Behavior>
+				<Behavior tagName="3:whitePlanet">SetTag</Behavior>
+				<Transition hasTag="3:whitePlanet">MoveLastToSeccond</Transition>
+			</State>
+			
+			<State id="MoveLastToSeccond">
+				<!--Behavior broadcast="1" prob="1" bubbleTime="1" text="move last to seccond">Say</Behavior-->
+				<!--Embed name="clearTagsSeccond"></Embed-->
+				<Transition hasTag="1:makeMinions">Make</Transition>
+				<Transition hasTag="1:circleCombat">Circ</Transition>
+				<Transition hasTag="1:artifactDance">Arti</Transition>
+				<Transition hasTag="1:hadouken">Hado</Transition>
+				<Transition hasTag="1:minionToss">Mini</Transition>
+				<Transition hasTag="1:bulletDance">Bull</Transition>
+				<Transition hasTag="1:orbitals">Orbi</Transition>
+				<Transition hasTag="1:chaseCourse">Chas</Transition>
+				<Transition hasTag="1:whitePlanet">Whit</Transition>
+				<Transition afterTime="0.2">MoveCurrentToFirst</Transition>
+			</State>
+			
+			<State id="Make">
+				<Behavior tagName="1:makeMinions">ClearTag</Behavior>
+				<Behavior tagName="2:makeMinions">SetTag</Behavior>
+				<Transition hasTag="2:makeMinions">MoveCurrentToFirst</Transition>
+			</State>
+			<State id="Circ">
+				<Behavior tagName="1:circleCombat">ClearTag</Behavior>
+				<Behavior tagName="2:circleCombat">SetTag</Behavior>
+				<Transition hasTag="2:circleCombat">MoveCurrentToFirst</Transition>
+			</State>
+			<State id="Arti">
+				<Behavior tagName="1:artifactDance">ClearTag</Behavior>
+				<Behavior tagName="2:artifactDance">SetTag</Behavior>
+				<Transition hasTag="2:artifactDance">MoveCurrentToFirst</Transition>
+			</State>
+			<State id="Hado">
+				<Behavior tagName="1:hadouken">ClearTag</Behavior>
+				<Behavior tagName="2:hadouken">SetTag</Behavior>
+				<Transition hasTag="2:hadouken">MoveCurrentToFirst</Transition>
+			</State>
+			<State id="Mini">
+				<Behavior tagName="1:minionToss">ClearTag</Behavior>
+				<Behavior tagName="2:minionToss">SetTag</Behavior>
+				<Transition hasTag="2:minionToss">MoveCurrentToFirst</Transition>
+			</State>
+			<State id="Bull">
+				<Behavior tagName="1:bulletDance">ClearTag</Behavior>
+				<Behavior tagName="2:bulletDance">SetTag</Behavior>
+				<Transition hasTag="2:bulletDance">MoveCurrentToFirst</Transition>
+			</State>
+			<State id="Orbi">
+				<Behavior tagName="1:orbitals">ClearTag</Behavior>
+				<Behavior tagName="2:orbitals">SetTag</Behavior>
+				<Transition hasTag="2:orbitals">MoveCurrentToFirst</Transition>
+			</State>
+			<State id="Chas">
+				<Behavior tagName="1:chaseCourse">ClearTag</Behavior>
+				<Behavior tagName="2:chaseCourse">SetTag</Behavior>
+				<Transition hasTag="2:chaseCourse">MoveCurrentToFirst</Transition>
+			</State>
+			<State id="Whit">
+				<Behavior tagName="1:whitePlanet">ClearTag</Behavior>
+				<Behavior tagName="2:whitePlanet">SetTag</Behavior>
+				<Transition hasTag="2:whitePlanet">MoveCurrentToFirst</Transition>
+			</State>
+			
+			<State id="MoveCurrentToFirst">
+				<Transition hasTag="makeMinions">MakeF</Transition>
+				<Transition hasTag="circleCombat">CircF</Transition>
+				<Transition hasTag="artifactDance">ArtiF</Transition>
+				<Transition hasTag="hadouken">HadoF</Transition>
+				<Transition hasTag="minionToss">MiniF</Transition>
+				<Transition hasTag="bulletDance">BullF</Transition>
+				<Transition hasTag="orbitals">OrbiF</Transition>
+				<Transition hasTag="chaseCourse">ChasF</Transition>
+				<Transition hasTag="whitePlanet">WhitF</Transition>
+			</State>
+			
+			<State id="MakeF">
+				<Behavior tagName="1:makeMinions">SetTag</Behavior>
+				<Transition hasTag="1:makeMinions">AttackChooser</Transition>
+			</State>
+			<State id="CircF">
+				<Behavior tagName="1:circleCombat">SetTag</Behavior>
+				<Transition hasTag="1:circleCombat">AttackChooser</Transition>
+			</State>
+			<State id="ArtiF">
+				<Behavior tagName="1:artifactDance">SetTag</Behavior>
+				<Transition hasTag="1:artifactDance">AttackChooser</Transition>
+			</State>
+			<State id="HadoF">
+				<Behavior tagName="1:hadouken">SetTag</Behavior>
+				<Transition hasTag="1:hadouken">AttackChooser</Transition>
+			</State>
+			<State id="MiniF">
+				<Behavior tagName="1:minionToss">SetTag</Behavior>
+				<Transition hasTag="1:minionToss">AttackChooser</Transition>
+			</State>
+			<State id="BullF">
+				<Behavior tagName="1:bulletDance">SetTag</Behavior>
+				<Transition hasTag="1:bulletDance">AttackChooser</Transition>
+			</State>
+			<State id="OrbiF">
+				<Behavior tagName="1:orbitals">SetTag</Behavior>
+				<Transition hasTag="1:orbitals">AttackChooser</Transition>
+			</State>
+			<State id="ChasF">
+				<Behavior tagName="1:chaseCourse">SetTag</Behavior>
+				<Transition hasTag="1:chaseCourse">AttackChooser</Transition>
+			</State>
+			<State id="WhitF">
+				<Behavior tagName="1:whitePlanet">SetTag</Behavior>
+				<Transition hasTag="1:whitePlanet">AttackChooser</Transition>
+			</State>
+		</DefineEmbed>	
+	
+		<State id="AttackChooser">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<State id="Start">
+				<!--Behavior broadcast="1" prob="1" bubbleTime="1" text="Choosing...">Say</Behavior-->
+				<Behavior tagName="chosen">ClearTag</Behavior>
+				<Transition hitpointsLessThan="0.55">D,E,F,G,H,I</Transition>
+				<Transition>B,C,D,E,I</Transition>
+				<Transition>B,C,D,E,F,G,H</Transition>
+			</State>
+			
+			<State id="A">
+				<Transition hasTag="1:makeMinions">Start</Transition>
+				<Transition hasTag="2:makeMinions">Start</Transition>
+				<Transition hasTag="3:makeMinions">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="makeMinions">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			<State id="B">
+				<Transition hasTag="1:circleCombat">Start</Transition>
+				<Transition hasTag="2:circleCombat">Start</Transition>
+				<Transition hasTag="3:circleCombat">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="circleCombat">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			<State id="C">
+				<Transition hasTag="1:artifactDance">Start</Transition>
+				<Transition hasTag="2:artifactDance">Start</Transition>
+				<Transition hasTag="3:artifactDance">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="artifactDance">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			<State id="D">
+				<Transition hasTag="1:hadouken">Start</Transition>
+				<Transition hasTag="2:hadouken">Start</Transition>
+				<Transition hasTag="3:hadouken">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="hadouken">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			<State id="E">
+				<Transition hasTag="1:minionToss">Start</Transition>
+				<Transition hasTag="2:minionToss">Start</Transition>
+				<Transition hasTag="3:minionToss">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="minionToss">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			<State id="F">
+				<Transition hasTag="1:bulletDance">Start</Transition>
+				<Transition hasTag="2:bulletDance">Start</Transition>
+				<Transition hasTag="3:bulletDance">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="bulletDance">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			<State id="G">
+				<Transition hasTag="1:orbitals">Start</Transition>
+				<Transition hasTag="2:orbitals">Start</Transition>
+				<Transition hasTag="3:orbitals">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="orbitals">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			<State id="H">
+				<Transition hasTag="1:chaseCourse">Start</Transition>
+				<Transition hasTag="2:chaseCourse">Start</Transition>
+				<Transition hasTag="3:chaseCourse">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="chaseCourse">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			<State id="I">
+				<Transition hasTag="1:whitePlanet">Start</Transition>
+				<Transition hasTag="2:whitePlanet">Start</Transition>
+				<Transition hasTag="3:whitePlanet">Start</Transition>
+				<Embed name="clearTags"></Embed>
+				<Behavior tagName="whitePlanet">SetTag</Behavior>
+				<Transition>Done</Transition>
+			</State>
+			
+			<State id="Done">
+				<!--Behavior broadcast="1" prob="1" bubbleTime="1" text="Chosen: Done">Say</Behavior-->
+				<Behavior tagName="chosen">SetTag</Behavior>
+			</State>
+			
+			<Transition afterTime="0.2" hasTag="chosen">AttackSwitcher</Transition>
+		</State>
+				
+		<State id="AttackSwitcher">
+			<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+			<State id="AttackSwitcher">
+				<Behavior tagName="ready">ClearTag</Behavior>
+				<Transition noTag="noChanceToFlee">ChanceToFlee</Transition>
+				<Transition hasTag="noChanceToFlee">Ready</Transition>
+			</State>
+			<State id="ChanceToFlee">
+				<Embed name="attackSwitchTaunts"></Embed>
+				
+				<Behavior bucket="movement" range="5" speed="0.4">StayCloseToSpawn</Behavior>
+				<Behavior bucket="movement" speed="0.4">Wander</Behavior>
+				
+				<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="20">ShowEffect</Behavior>
+				
+				<Transition afterTime="5">Ready</Transition>
+			</State>
+			<State id="Ready">
+				<Behavior tagName="noChanceToFlee">ClearTag</Behavior>
+				<Behavior tagName="ready">SetTag</Behavior>
+			</State>
+			<Transition afterTime="0.2" hasTag="ready">GoToAttack</Transition>
+		</State>	
+		
+		<State id="GoToAttack">
+			<Transition hitpointsLessThan="0.060">AllIn</Transition>
+			<Transition hasTag="makeMinions">MakeMinions</Transition>
+			<Transition hasTag="circleCombat">CircleCombat</Transition>
+			<Transition hasTag="artifactDance">ArtifactDance</Transition>
+			<Transition hasTag="hadouken">Hadouken</Transition>
+			<Transition hasTag="minionToss">MinionToss</Transition>
+			<Transition hasTag="bulletDance">BulletDance</Transition>
+			<Transition hasTag="orbitals">Orbitals</Transition>
+			<Transition hasTag="chaseCourse">ChaseCourse</Transition>
+			<Transition hasTag="whitePlanet">WhitePlanet</Transition>
+		</State>
+				
+		<DefineEmbed name="attackSwitchTaunts">
+			<State id="Taunts">
+				<State id="CheckNextAttack">
+					<Transition hasTag="1:makeMinions">NoMinions</Transition>
+					<Transition hasTag="1:minionToss">NoMinions</Transition>
+					<Transition hasTag="artifactDance">ArtifactDance</Transition>
+					<Transition hasTag="hadouken">Hadouken</Transition>
+					<Transition hasTag="orbitals">Orbitals</Transition>
+				</State>
+				<State id="NoMinions">
+					<Behavior broadcast="1" prob="1" text="Bah! I need no minions to destroy you!!;I will finish you off myself!;These minions will only get in my way!!!;Leave me my minions...  I wish to crush them PERSONALLY!;Fools! I will deal with you PERSONALLY!">Say</Behavior>
+				</State>
+				<State id="ArtifactDance">
+					<Behavior broadcast="1" prob="1" text="My artifacts will protect me!">Say</Behavior>
+				</State>
+				<State id="Hadouken">
+					<Behavior broadcast="1" prob="1" text="Insufferable fools! If I see you, I will kill you!">Say</Behavior>
+				</State>
+				<State id="Orbitals">
+					<Behavior broadcast="1" prob="1" text="Tremble before my cosmic might!!!">Say</Behavior>
+				</State>
+			</State>
+		</DefineEmbed>	
+		
+		<DefineEmbed name="clearTags">
+			<Behavior tagName="makeMinions">ClearTag</Behavior>
+			<Behavior tagName="circleCombat">ClearTag</Behavior>
+			<Behavior tagName="artifactDance">ClearTag</Behavior>
+			<Behavior tagName="hadouken">ClearTag</Behavior>
+			<Behavior tagName="minionToss">ClearTag</Behavior>
+			<Behavior tagName="bulletDance">ClearTag</Behavior>
+			<Behavior tagName="orbitals">ClearTag</Behavior>
+			<Behavior tagName="chaseCourse">ClearTag</Behavior>
+			<Behavior tagName="whitePlanet">ClearTag</Behavior>
+		</DefineEmbed>	
+		<DefineEmbed name="clearTagsLast">
+			<Behavior tagName="1:makeMinions">ClearTag</Behavior>
+			<Behavior tagName="1:circleCombat">ClearTag</Behavior>
+			<Behavior tagName="1:artifactDance">ClearTag</Behavior>
+			<Behavior tagName="1:hadouken">ClearTag</Behavior>
+			<Behavior tagName="1:minionToss">ClearTag</Behavior>
+			<Behavior tagName="1:bulletDance">ClearTag</Behavior>
+			<Behavior tagName="1:orbitals">ClearTag</Behavior>
+			<Behavior tagName="1:chaseCourse">ClearTag</Behavior>
+			<Behavior tagName="1:whitePlanet">ClearTag</Behavior>
+		</DefineEmbed>	
+		<DefineEmbed name="clearTagsSeccond">
+			<Behavior tagName="2:makeMinions">ClearTag</Behavior>
+			<Behavior tagName="2:circleCombat">ClearTag</Behavior>
+			<Behavior tagName="2:artifactDance">ClearTag</Behavior>
+			<Behavior tagName="2:hadouken">ClearTag</Behavior>
+			<Behavior tagName="2:minionToss">ClearTag</Behavior>
+			<Behavior tagName="2:bulletDance">ClearTag</Behavior>
+			<Behavior tagName="2:orbitals">ClearTag</Behavior>
+			<Behavior tagName="2:chaseCourse">ClearTag</Behavior>
+			<Behavior tagName="2:whitePlanet">ClearTag</Behavior>
+		</DefineEmbed>	
+		<DefineEmbed name="clearTagsThird">
+			<Behavior tagName="3:makeMinions">ClearTag</Behavior>
+			<Behavior tagName="3:circleCombat">ClearTag</Behavior>
+			<Behavior tagName="3:artifactDance">ClearTag</Behavior>
+			<Behavior tagName="3:hadouken">ClearTag</Behavior>
+			<Behavior tagName="3:minionToss">ClearTag</Behavior>
+			<Behavior tagName="3:bulletDance">ClearTag</Behavior>
+			<Behavior tagName="3:orbitals">ClearTag</Behavior>
+			<Behavior tagName="3:chaseCourse">ClearTag</Behavior>
+			<Behavior tagName="3:whitePlanet">ClearTag</Behavior>
+		</DefineEmbed>	
+		
+		<!--
+		<Embed name="makeMinions">
+			<Param name="numShots">5</Param>
+			<Param name="angle">15</Param>
+		</Embed>
+		-->
+		
+		
+		<DefineEmbed name="shieldCycle">
+			<State id="invulnerable">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Transition afterTime="3.6">vulnerable</Transition>
+			</State>			
+			<State id="vulnerable">
+				<Transition afterTime="1.0">invulnerable</Transition>
+			</State>	
+		</DefineEmbed>
+		
+		<DefineEmbed name="shieldCycle2">
+			<State id="invulnerable">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Transition afterTime="1.4">vulnerable</Transition>
+			</State>			
+			<State id="vulnerable">
+				<Transition afterTime="1.4">invulnerable2</Transition>
+			</State>
+			<State id="invulnerable2">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Transition afterTime="2.2">invulnerable</Transition>
+			</State>		
+		</DefineEmbed>
+		
+		<DefineEmbed name="shieldCycle3">
+			<State id="invulnerable">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Transition afterTime="1.6">vulnerable</Transition>
+			</State>			
+			<State id="vulnerable">
+				<Transition afterTime=".8">invulnerable2</Transition>
+			</State>
+			<State id="invulnerable2">
+				<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				<Transition afterTime="1.6">invulnerable</Transition>
+			</State>		
+		</DefineEmbed>
+		
+		<DefineEmbed name="makeMinions"> <!-- new_times -->
+			<State id="MakeMinions">
+				<Transition hitpointsLessThan="0.060">AllIn</Transition>
+				<Behavior tagName="makeMinions">ClearTag</Behavior>
+				<Behavior tagName="minionToss">SetTag</Behavior>
+				
+				<Behavior broadcast="1" prob="0.75" text="Go forth minions! Crush these weaklings!!!">Say</Behavior>
+				<Behavior broadcast="1" listId="Oryx the Mad God">Taunt</Behavior>	
+				
+				<Behavior bucket="movement" range="5" speed="0.4">StayCloseToSpawn</Behavior>
+				<Behavior bucket="movement" speed="0.4">Wander</Behavior>			
+				
+				<Behavior childIds="Minion of Oryx" cooldown="0.3" maxChildren="5" startWithMinions="false">MakeMinions</Behavior>
+				<Behavior projectileId="4" cooldown="0.8" range="22" numShots="4">Shoot</Behavior>
+	
+				<State id="invulnerable1">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Transition afterTime="6">vulnerable</Transition>
+				</State>			
+				<State id="vulnerable">
+					<Transition afterTime="1.5">invulnerable2</Transition>
+					<Transition hitpointsLessThan="0.45">invulnerable2</Transition>
+				</State>
+				<State id="invulnerable2">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				</State>
+	
+				<Transition afterTime="12">AttackDone</Transition>
+			</State>	
+		</DefineEmbed>
+		
+		<DefineEmbed name="circleCombat"> <!-- circular_combat -->		
+			<State id="CircleCombat">
+				<Transition hitpointsLessThan="0.060">AllIn</Transition>
+				<Behavior broadcast="1" prob="1" text="BE SILENT!!!">Say</Behavior>
+				
+				<!--Behavior effect="Stun Immune">ConditionEffect</Behavior-->
+				
+				<State id="set_up_the_ring">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	
+					<Behavior childId="Minion of Oryx" cooldown="10000" type="auto" defaultAngle="0" range="20">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="10000" type="auto" defaultAngle="72" range="20">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="10000" type="auto" defaultAngle="144" range="20">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="10000" type="auto" defaultAngle="216" range="20">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="10000" type="auto" defaultAngle="288" range="20">ObjectToss</Behavior>
+	
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="0" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="24" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="48" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="72" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="96" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="120" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="144" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="168" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="192" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="216" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="240" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="264" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="288" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="312" range="8.5">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="336" range="8.5">ObjectToss</Behavior>				
+	
+					<State id="antispectator1">
+						<Behavior childIds="Anti-Spectator" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.6">antispectator2</Transition>
+					</State>			
+					<State id="antispectator2">
+						<Behavior childIds="Anti-Spectator" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.6">antispectator3</Transition>
+					</State>
+					<State id="antispectator3">
+						<Behavior childIds="Anti-Spectator" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.6">antispectator4</Transition>
+					</State>
+					<State id="antispectator4">
+						<Behavior childIds="Anti-Spectator" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+					</State>
+	
+					<Transition afterTime="4">no_knight_can_harm_me</Transition>
+				</State>
+				<State id="no_knight_can_harm_me">
+					<State id="grenade0">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	
+						<Behavior numShots="36" projectileId="13" cooldown="90" type="auto" angle="10" defaultAngle="0">Shoot</Behavior>
+						<Behavior numShots="36" projectileId="14" cooldown="90" type="auto" angle="10" defaultAngle="5" offset="0.6">Shoot</Behavior>
+						<Behavior numShots="15" projectileId="0" cooldown="90" type="auto" angle="24" offset="0.8">Shoot</Behavior>
+						<Transition afterTime="1">grenade1</Transition>
+					</State>
+					<State id="grenade1">
+						<Behavior numShots="15" projectileId="0" cooldown="0.6" type="auto" angle="24" offset="0.4">Shoot</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="210" range="5.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="30" range="4.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="targeted" radius="2.5" damage="220">GrenadeToss</Behavior>				
+						<Transition afterTime="1.2">grenade2</Transition>
+					</State>
+					<State id="grenade2">
+						<Behavior numShots="15" projectileId="0" cooldown="0.6" type="auto" angle="24" offset="0.4">Shoot</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="70" range="5.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="250" range="4.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="targeted" radius="2.5" damage="220">GrenadeToss</Behavior>
+						<Transition afterTime="1.2">grenade3</Transition>
+					</State>
+					<State id="grenade3">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	
+						<Behavior numShots="15" projectileId="0" cooldown="0.6" type="auto" angle="24" offset="0.4">Shoot</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="0" range="5.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="180" range="4.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="targeted" radius="2.5" damage="220">GrenadeToss</Behavior>				
+						<Transition afterTime="1.2">grenade4</Transition>
+					</State>			
+					<State id="grenade4">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	
+						<Behavior numShots="15" projectileId="0" cooldown="0.6" type="auto" angle="24" offset="0.4">Shoot</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="110" range="5.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="290" range="4.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="targeted" radius="2.5" damage="220">GrenadeToss</Behavior>
+						<Transition afterTime="1.2">grenade5</Transition>
+					</State>	
+					<State id="grenade5">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	
+						<Behavior numShots="15" projectileId="0" cooldown="0.6" type="auto" angle="24" offset="0.4">Shoot</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="325" range="5.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="145" range="4.5">GrenadeToss</Behavior>
+						<Behavior cooldown="90" type="targeted" radius="2.5" damage="220">GrenadeToss</Behavior>				
+						<Transition afterTime="1.2">grenade0</Transition>
+					</State>
+				</State>
+				<Transition afterTime="21">AttackDone</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="artifactDance"> <!-- artifact_dance -->		
+			<State id="ArtifactDance">		
+				<Transition hitpointsLessThan="0.060">AllIn</Transition>
+				
+				<Behavior childId="Guardian Element 1" cooldown="10000" type="auto" defaultAngle="0" range="2">ObjectToss</Behavior>
+				<Behavior childId="Guardian Element 2" cooldown="10000" type="auto" defaultAngle="90" range="2">ObjectToss</Behavior>
+				<Behavior childId="Guardian Element 3" cooldown="10000" type="auto" defaultAngle="180" range="2">ObjectToss</Behavior>
+				<Behavior childId="Guardian Element 4" cooldown="10000" type="auto" defaultAngle="270" range="2">ObjectToss</Behavior>
+	
+				<Behavior childId="Outer Guardian Element" cooldown="10000" type="auto" defaultAngle="120" range="9">ObjectToss</Behavior>
+				<Behavior childId="Outer Guardian Element" cooldown="10000" type="auto" defaultAngle="240" range="9">ObjectToss</Behavior>
+				<Behavior childId="Outer Guardian Element" cooldown="10000" type="auto" defaultAngle="360" range="9">ObjectToss</Behavior>
+	
+				<Behavior numShots="10" projectileId="7" cooldown="0.5" type="auto" angle="30" offset="1.5">Shoot</Behavior>
+	
+				<State id="Attacking1">
+					<State id="shielded">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+						<Transition afterTime="2.5">unshielded</Transition>
+					</State>
+					<State id="unshielded">
+						<Transition afterTime="1">shielded</Transition>
+					</State>
+					<Behavior numShots="3" projectileId="9" cooldown="0.9" type="targeted" angle="120" offset="1.5">Shoot</Behavior>
+					
+					<Transition afterTime="6">Being_defended1</Transition>
+				</State>
+				<State id="Being_defended1">
+					<State id="shielded">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+						<Transition afterTime="2.5">unshielded</Transition>
+					</State>
+					<State id="unshielded">
+						<Transition afterTime="1">shielded</Transition>
+					</State>
+					<Behavior numShots="6" projectileId="8" cooldown="1.5" type="targeted" defaultAngle="0" angle="45">Shoot</Behavior>
+					
+					<Transition afterTime="5">Attacking2</Transition>
+				</State>
+				<State id="Attacking2">
+					<State id="shielded">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+						<Transition afterTime="2.5">unshielded</Transition>
+					</State>
+					<State id="unshielded">
+						<Transition afterTime="1">shielded</Transition>
+					</State>
+					<Behavior numShots="3" projectileId="9" cooldown="0.9" type="targeted" angle="120" offset="1.5">Shoot</Behavior>
+					
+					<Transition afterTime="6">Being_defended2</Transition>
+				</State>
+				<State id="Being_defended2">
+					<State id="shielded">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+						<Transition afterTime="2.5">unshielded</Transition>
+					</State>
+					<State id="unshielded">
+						<Transition afterTime="1">shielded</Transition>
+					</State>
+					
+					<Behavior numShots="6" projectileId="8" cooldown="1.5" type="targeted" defaultAngle="0" angle="45">Shoot</Behavior>
+					
+					<Transition afterTime="5">Attacking3</Transition>
+				</State>
+				<State id="Attacking3">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior numShots="3" projectileId="9" cooldown="0.9" type="targeted" angle="120" offset="1.5">Shoot</Behavior>
+				</State>
+				<Transition afterTime="32">AttackDone</Transition>
+			</State>
+		</DefineEmbed>		
+		
+		<DefineEmbed name="hadouken"> <!-- rouge to the rescue -->
+			<State id="Hadouken">
+				<Transition hitpointsLessThan="0.060">AllIn</Transition>
+				
+				<Behavior broadcast="1" prob="1" text="All who look upon my face shall die.">Say</Behavior>
+						
+				<!--Behavior effect="Stun Immune">ConditionEffect</Behavior-->
+				
+				<Behavior numShots="2" projectileId="1" cooldown="0.5" type="targeted" predictive="0.6" angle="10" range="10">Shoot</Behavior>
+				
+				
+				<State id="Ini">
+					<Transition hitpointsLessThan="0.55">Big</Transition>
+					<Transition hitpointsLessThan="1">Regular</Transition>
+				</State>
+				<State id="Big">		
+					<Behavior type="auto" defaultAngle="0" numShots="1"  projectileId="5" cooldown="1.6" range="0" angle="30" offset="0.2">Shoot</Behavior>	
+					<Behavior type="auto" defaultAngle="180" numShots="1"  projectileId="5" cooldown="1.6" range="0" angle="30" offset="0.4">Shoot</Behavior>	
+					<Behavior type="auto" defaultAngle="270" numShots="1"  projectileId="5" cooldown="1.6" range="0" angle="30" offset="0.6">Shoot</Behavior>	
+					<Behavior type="auto" defaultAngle="90" numShots="1"  projectileId="5" cooldown="1.6" range="0" angle="30" offset="0.8">Shoot</Behavior>	
+					<Behavior type="auto" defaultAngle="225" numShots="1"  projectileId="5" cooldown="1.6" range="0" angle="30" offset="1">Shoot</Behavior>	
+					<Behavior type="auto" defaultAngle="45" numShots="1"  projectileId="5" cooldown="1.6" range="0" angle="30" offset="1.2">Shoot</Behavior>	
+					<Behavior type="auto" defaultAngle="135" numShots="1"  projectileId="5" cooldown="1.6" range="0" angle="30" offset="1.4">Shoot</Behavior>	
+					<Behavior type="auto" defaultAngle="315" numShots="1"  projectileId="5" cooldown="1.6" range="0" angle="30" offset="1.6">Shoot</Behavior>		
+					<State id="invulnerable">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+						<Transition afterTime="3.5">vulnerable</Transition>
+					</State>			
+					<State id="vulnerable">
+						<Transition afterTime="1">invulnerable</Transition>
+					</State>
+					<Behavior tagName="longHadouken">SetTag</Behavior>
+				</State>
+				<State id="Regular">		
+					<State id="invulnerable1">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+						<Transition afterTime="3.5">vulnerable</Transition>
+					</State>			
+					<State id="vulnerable">
+						<Transition afterTime="1">invulnerable2</Transition>
+					</State>
+					<State id="invulnerable2">
+						<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					</State>
+				</State>
+				
+				<Behavior tagName="noChanceToFlee">SetTag</Behavior>
+				<Transition afterTime="7.5" noTag="longHadouken">AttackDone</Transition>
+				<Transition afterTime="13.5">AttackDone</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="minionToss"> <!-- minion_toss -->
+			<State id="MinionToss">
+				<Transition hitpointsLessThan="0.060">AllIn</Transition>
+				
+				<Behavior broadcast="1" listId="Oryx the Mad God">Taunt</Behavior>				
+				
+				<Behavior bucket="movement" range="5" speed="0.6">StayCloseToSpawn</Behavior>
+				<Behavior bucket="movement" speed="0.6">Wander</Behavior>
+				
+				<Behavior numShots="2" projectileId="2" cooldown="1" type="targeted" predictive="0.5" angle="180" range="8.5">Shoot</Behavior>
+				<Behavior numShots="1" projectileId="2" cooldown="1" type="targeted" predictive="0.5" range="8.5">Shoot</Behavior>
+				<Behavior projectileId="4" cooldown="2.4" range="22" numShots="4">Shoot</Behavior>
+				
+				
+				<State id="minion_toss0">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Transition afterTime="2">minion_toss1</Transition>
+				</State>			
+				<State id="minion_toss1">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="3" defaultAngle="30">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="3" defaultAngle="180">ObjectToss</Behavior>
+					
+					<Behavior childId="Assassin of Oryx" cooldown="100000" type="auto" range="3" defaultAngle="330">ObjectToss</Behavior>
+					<Transition afterTime="0.4">minion_toss2</Transition>
+				</State>
+				<State id="minion_toss2">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="4" defaultAngle="120">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="4" defaultAngle="260">ObjectToss</Behavior>
+					
+					<Behavior childId="Assassin of Oryx" cooldown="100000" type="auto" range="4" defaultAngle="40">ObjectToss</Behavior>
+					<Transition afterTime="0.4">minion_toss3</Transition>
+				</State>
+				<State id="minion_toss3">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="6" defaultAngle="210">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="6" defaultAngle="300">ObjectToss</Behavior>
+					
+					<Behavior childId="Assassin of Oryx" cooldown="100000" type="auto" range="6" defaultAngle="120">ObjectToss</Behavior>
+					<Transition afterTime="0.4">minion_toss4</Transition>
+				</State>
+				<State id="minion_toss4">		
+					<!--	
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="11" defaultAngle="0">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="11" defaultAngle="70">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="11" defaultAngle="140">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="11" defaultAngle="210">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="11" defaultAngle="280">ObjectToss</Behavior>
+					-->
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="11" defaultAngle="0">ObjectToss</Behavior>
+					<Behavior childId="Minion of Oryx" cooldown="100000" type="auto" range="11" defaultAngle="120">ObjectToss</Behavior>
+					
+					<Behavior childId="Assassin of Oryx" cooldown="100000" type="auto" range="11" defaultAngle="240">ObjectToss</Behavior>
+					<Transition afterTime="4">watch_the_kids_play</Transition>
+				</State>			
+				<State id="watch_the_kids_play">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+				</State>						
+				<Transition afterTime="15">AttackDone</Transition>
+			</State>
+		</DefineEmbed>
+		
+		<DefineEmbed name="bulletDance"> <!-- ranged_classes_begone -->
+			<State id="BulletDance">	
+				<Transition hitpointsLessThan="0.060">AllIn</Transition>
+						
+				<Behavior broadcast="1" prob="1" text="Time for more dancing! Hahahaha!!">Say</Behavior>
+	
+				<!--Behavior effect="Stun Immune">ConditionEffect</Behavior-->
+				
+				<State id="set_up_the_ring">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="0" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="24" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="48" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="72" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="96" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="120" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="144" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="168" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="192" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="216" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="240" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="264" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="288" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="312" range="8.0">ObjectToss</Behavior>
+					<Behavior childId="Ring Element" cooldown="10000" type="auto" defaultAngle="336" range="8.0">ObjectToss</Behavior>
+	
+					<State id="antispectator1">
+						<Behavior childIds="Anti-Spectator" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.5">antispectator2</Transition>
+					</State>			
+					<State id="antispectator2">
+						<Behavior childIds="Anti-Spectator" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.5">antispectator3</Transition>
+					</State>
+					<State id="antispectator3">
+						<Behavior childIds="Anti-Spectator" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+						<Transition afterTime="0.5">antispectator4</Transition>
+					</State>
+					<State id="antispectator4">
+						<Behavior childIds="Anti-Spectator" cooldown="90" maxChildren="4" startWithMinions="false">MakeMinions</Behavior>
+					</State>
+					
+					 <Transition afterTime="2">grenade1b</Transition> 
+				</State>		
+				<State id="grenade1b">
+					
+					<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="60" range="4.5">GrenadeToss</Behavior>
+				
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="0" offset="0.2">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="45" offset="0.6">Shoot</Behavior>
+					
+					<Transition afterTime="0.7">grenade2b</Transition>
+				</State>			
+				<State id="grenade2b">
+					<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="240" range="4.5">GrenadeToss</Behavior>
+					
+					<State id="Dec">
+						<Transition hasTag="weakened">RemoveTag</Transition>
+						<Transition noTag="weakened">Attack</Transition>
+					</State>
+					<State id="Attack">
+						<Behavior numShots="36" projectileId="13" cooldown="90" type="auto" angle="10" defaultAngle="0" offset="0">Shoot</Behavior>
+						<Behavior numShots="36" projectileId="14" cooldown="90" type="auto" angle="10" defaultAngle="5" offset="0.5">Shoot</Behavior>
+						<Behavior tagName="weakened">SetTag</Behavior>
+					</State>
+					<State id="RemoveTag">
+						<Behavior tagName="weakened">ClearTag</Behavior>
+					</State>
+					
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="7.5" offset="0.6">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="52.5" offset="0.2">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="75">Shoot</Behavior>
+					
+					<Transition afterTime="0.7">grenade3b</Transition>
+				</State>			
+				<State id="grenade3b">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					
+					<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="0" range="4.5">GrenadeToss</Behavior>
+					
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="15" offset="0.2">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="60" offset="0.6">Shoot</Behavior>
+					
+					<Transition afterTime="0.7">grenade4b</Transition>
+				</State>			
+				<State id="grenade4b">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	
+					<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="180" range="4.5">GrenadeToss</Behavior>
+					
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="22,5" offset="0.6">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="67.5" offset="0.2">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="90">Shoot</Behavior>
+					
+					<Transition afterTime="0.7">grenade5b</Transition>
+				</State>
+				<State id="grenade5b">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+					<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="300" range="4.5">GrenadeToss</Behavior>
+					
+	
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="30" offset="0.2">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="75" offset="0.6">Shoot</Behavior>
+					
+					<Transition afterTime="0.7">grenade6b</Transition>
+				</State>			
+				<State id="grenade6b">
+					<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+	
+					<Behavior cooldown="90" type="auto" radius="2.5" damage="220" defaultAngle="120" range="4.5">GrenadeToss</Behavior>
+					
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="37.5" offset="0.6">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="82.5" offset="0.2">Shoot</Behavior>
+					<Behavior numShots="4" projectileId="12" cooldown="0.35" type="auto" angle="90" defaultAngle="105">Shoot</Behavior>				
+					
+					<Transition afterTime="0.7">grenade1b</Transition>
+				</State>
+				
+				<Transition afterTime="21">AttackDone</Transition>
+			</State>
+		</DefineEmbed>
+			 
+		<Behavior>VictoryAtDeath</Behavior>						
+	</Object>
+
+	<Object type="0x1741" id="Assassin of Oryx">
+		<Class>Character</Class>
+		<Enemy/>
+		<AnimatedTexture><File>chars16x16rEncounters</File><Index>23</Index></AnimatedTexture>
+		<AltTexture id="1">
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>24</Index></AnimatedTexture>
+		</AltTexture>
+
+		<MaxHitPoints>4000</MaxHitPoints>
+		<Defense>10</Defense>
+		<XpMult>0</XpMult>
+		<Size>100</Size>
+		<ShadowSize>100</ShadowSize>
+		
+		<Projectile id="0">
+			<ObjectId>Assassin Swipe</ObjectId>
+			<Speed>65</Speed>
+			<Damage>110</Damage>
+			<Size>100</Size>
+			<LifetimeMS>1200</LifetimeMS>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>Assassin Slash</ObjectId>
+			<Damage>80</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>1200</LifetimeMS>
+			<Size>100</Size>
+		</Projectile> 	
+
+		<Behavior listenIds="Oryx the Mad God 1" acquireRange="25">FollowOrders</Behavior>
+		
+		<State id="Ini">
+			<Transition noneExist="Oryx the Mad God 1">NoOryx</Transition>
+			<Behavior bucket="movement" range="20" speed="1.6" cooldown="2.4">Charge</Behavior>
+			<Transition hasTag="final">FinalShowdown</Transition>
+			<Transition afterTime="0.8">OrbitOryx,ChaseAttack</Transition>
+		</State>
+
+		<State id="OrbitOryx">
+			<Transition noneExist="Oryx the Mad God 1">NoOryx</Transition>
+			<Behavior bucket="movement" protecteeId="Oryx the Mad God 1" radius="12" speed="1.4" radiusVariability="1.5" speedVariability="0.5" acquireRange="30">Orbit</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="4"  projectileId="1" cooldown="1.0" range="9" angle="90" offset="0.0">Shoot</Behavior>
+			<Transition afterTime="2.2">ChaseAttack</Transition>
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		
+		<State id="ChaseAttack">
+			<Transition noneExist="Oryx the Mad God 1">NoOryx</Transition>
+			<Behavior bucket="movement" range="12" speed="1.6" cooldown="2.4">Charge</Behavior>
+			<Behavior bucket="movement" distance="3" speed="1.4" acquireRange="15">Circle</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="1.0" range="6" angle="20" offset="0.0" predictive="0.75">Shoot</Behavior>
+			<Behavior type="targeted" defaultAngle="0" numShots="4"  projectileId="1" cooldown="3.2" range="9" angle="90" offset="0.4">Shoot</Behavior>
+			<Transition afterTime="7">OrbitOryx</Transition>
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		
+		
+		<State id="FinalShowdown">
+			<State id="Move">
+				<Behavior bucket="movement" range="20" speed="1.6" cooldown="2.4">Charge</Behavior>
+				<Transition afterTime="0.8">OrbitOryx,ChaseAttack</Transition>
+			</State>
+			
+			<State id="OrbitOryx">
+				<Behavior bucket="movement" protecteeId="Oryx the Mad God 1" radius="13" speed="1.8" radiusVariability="1.5" speedVariability="0.4" acquireRange="30">Orbit</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="4"  projectileId="1" cooldown="1.0" range="9" angle="90" offset="0.0">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="3.2" range="7" angle="20" offset="0.0" predictive="0.75">Shoot</Behavior>
+				<Transition afterTime="5">ChaseAttack</Transition>
+			</State>
+			
+			<State id="ChaseAttack">
+				<Behavior bucket="movement" range="12" speed="1.4" cooldown="2.4">Charge</Behavior>
+				<Behavior bucket="movement" distance="3" speed="1" acquireRange="15">Circle</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="3"  projectileId="0" cooldown="1.0" range="7" angle="20" offset="0.0" predictive="0.75">Shoot</Behavior>
+				<Behavior type="targeted" defaultAngle="0" numShots="4"  projectileId="1" cooldown="3.2" range="9" angle="90" offset="0.4">Shoot</Behavior>
+				<Transition afterTime="5">OrbitOryx</Transition>
+			</State>
+			<Transition noneExist="Oryx the Mad God 1">NoOryx</Transition>
+		</State>
+		
+		<State id="NoOryx">
+			<State id="Chase">
+				<Behavior bucket="movement" distance="7" speed="1" acquireRange="15">Circle</Behavior>
+				<Behavior bucket="movement" range="12" speed="1.4" cooldown="2.4">Charge</Behavior>
+				<Transition afterTime="1">Wander</Transition>
+			</State>
+			<State id="Wander">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Behavior bucket="movement" speed="0">Wander</Behavior>		
+				<Transition afterTime="1">Chase</Transition>
+			</State>
+			
+			<!-- minion death -->
+			<Behavior type="Flash" color="FFFFFF" flashPeriod="0.2" flashRepeats="10">ShowEffect</Behavior>
+			<Behavior numShots="4" projectileId="1" initialDelay="2" range="0">Explode</Behavior>
+			<Behavior time="5" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+		</State>
+		
+		<Behavior time="20" particleEffect="Nova" color="000000" dropLoot="false" giveXP="false">Decay</Behavior>
+		
+		<SoulboundLoot tier="7" prob=".02">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="8" prob=".01">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".02">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".03">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".004">Ring</SoulboundLoot>
+	</Object>
+
+	<Object type="0x1742" id="White Moon">
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiObj2</File><Index>0x78</Index></Texture>
+
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>50</Defense>
+		<XpMult>0</XpMult>
+		<Size>80</Size>
+		<ShadowSize>40</ShadowSize>
+		<Z>0.27</Z>
+		<Flying/>
+		
+		<Projectile id="0">
+			<ObjectId>White Planet Blast</ObjectId>		<!-- no_knight_can_harm_me -->
+			<Speed>43</Speed>
+			<Damage>70</Damage>
+			<Size>80</Size>
+			<LifetimeMS>300</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>White Orb</ObjectId>
+			<Damage>80</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>1000</LifetimeMS>
+			<Size>80</Size>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 
+		<Behavior listenIds="Oryx the Mad God 1" acquireRange="25">FollowOrders</Behavior>	
+
+		<Behavior numShots="10" angle="36" defaultAngle="0" projectileId="0" cooldown="0.7" type="auto" range="5" offset="1.5">Shoot</Behavior>
+		<Behavior numShots="10" angle="36" defaultAngle="18" projectileId="0" cooldown="0.7" type="auto" range="5" offset="1.85">Shoot</Behavior>
+
+		<Behavior bucket="movement" protecteeId="Oryx the Mad God 1" radius="13.4" speed="4" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+
+		<Behavior time="19">Decay</Behavior>
+		
+		<State id="Ini">
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		<State id="FinalShowdown">
+			<Behavior initialDelay="0.2" range="0" numShots="5" projectileId="0">Explode</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x1743" id="White Planet">
+		<Class>Character</Class>
+		<Enemy/>
+		<Texture><File>lofiCharBig</File><Index>0x04</Index></Texture>
+		
+		<Animation prob="1" period="0">
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x05</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x04</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x06</Index></Texture></Frame>
+			
+			<Frame time="0.4"><Texture><File>lofiCharBig</File><Index>0x07</Index></Texture></Frame>
+			
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x06</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x04</Index></Texture></Frame>
+			<Frame time="0.2"><Texture><File>lofiCharBig</File><Index>0x05</Index></Texture></Frame>
+			
+			<Frame time="0.4"><Texture><File>lofiCharBig</File><Index>0x08</Index></Texture></Frame>
+		</Animation>
+	
+
+		<MaxHitPoints>1000</MaxHitPoints>
+		<Defense>50</Defense>
+		<XpMult>0</XpMult>
+		<Size>100</Size>
+		<ShadowSize>30</ShadowSize>
+		<Z>0.26</Z>
+		<Flying/>
+		
+		<Projectile id="0">
+			<ObjectId>White Planet Blast</ObjectId>		<!-- no_knight_can_harm_me -->
+			<Speed>43</Speed>
+			<Damage>70</Damage>
+			<Size>100</Size>
+			<LifetimeMS>400</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>White Orb</ObjectId>
+			<Damage>80</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>1000</LifetimeMS>
+			<Size>80</Size>
+		</Projectile>
+		
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		<Behavior listenIds="Oryx the Mad God 1" acquireRange="25">FollowOrders</Behavior>
+		<!-- 
+		<Behavior numShots="1" projectileId="0" cooldown="4" type="auto" angle="0" defaultAngle="0" offset="0.0">Shoot</Behavior>
+		<Behavior numShots="1" projectileId="0" cooldown="4" type="auto" angle="0" defaultAngle="90" offset="2">Shoot</Behavior>
+		 -->
+		 
+		<Behavior numShots="10" projectileId="0" cooldown="1" type="auto" angle="36" defaultAngle="0" offset="1.4">Shoot</Behavior>
+		
+		<State id="Wide">
+			<Behavior bucket="movement" protecteeId="Oryx the Mad God 1" radius="9" speed="0.75" radiusVariability="0" speedVariability="0" acquireRange="15">Orbit</Behavior>
+			<Transition afterTime="6">Small</Transition>
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		<State id="Small">
+			<Behavior bucket="movement" protecteeId="Oryx the Mad God 1" radius="3" speed="0.75" radiusVariability="0" speedVariability="0" acquireRange="15">Orbit</Behavior>
+			<Transition afterTime="6">Wide</Transition>
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		<State id="FinalShowdown">
+			<Behavior initialDelay="0.2" range="0" numShots="6" projectileId="1">Explode</Behavior>
+		</State>
+		<Behavior initialDelay="19" range="0" numShots="8" projectileId="1">Explode</Behavior>
+	</Object>
+
+	<Object type="0x1744" id="Chase Element">
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints>
+		<Defense>1000</Defense>
+		<Enemy/>
+				
+		<!-- AESTHETICS 4991014 , 4861108, 4858100-->	
+		<Texture><File>lofiObj2</File><Index>0x5f</Index></Texture>
+
+		<!-- PROJECTILES -->		
+		<Projectile id="0">				<!-- Attacking -->
+			<ObjectId>White Ball</ObjectId>
+			<Speed>25</Speed>
+			<Damage>65</Damage>
+			<Size>120</Size>
+			<LifetimeMS>480</LifetimeMS>
+			<ConditionEffect duration="8">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="9"> 				<!-- Warning_shot -->
+			<ObjectId>Black Eye</ObjectId>
+			<Speed>40</Speed>
+			<Damage>20</Damage>
+			<Size>100</Size>
+			<LifetimeMS>480</LifetimeMS>
+			<ConditionEffect duration="8">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>	
+
+		<Projectile id="1">
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>50</Speed>
+			<Damage>65</Damage>
+			<LifetimeMS>1400</LifetimeMS>
+			<Size>60</Size>
+			<ConditionEffect duration="4">Quiet</ConditionEffect>
+		</Projectile>	
+		
+		<Projectile id="2">			<!-- Attacking -->
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>20</Speed>
+			<Damage>65</Damage>
+			<Size>120</Size>
+			<LifetimeMS>340</LifetimeMS>
+			<ConditionEffect duration="8">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>	
+		
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>80</Size>
+		<XpMult>0.0</XpMult>
+
+		<!-- STATES -->
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<Behavior listenIds="Oryx the Mad God 1" acquireRange="25">FollowOrders</Behavior>
+		
+		<State id="Setup">
+			<Transition hasTag="attack">Attacking</Transition>
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>	
+		<State id="Attacking">
+			<Behavior numShots="10" projectileId="0" cooldown="0.8" type="auto" angle="36">Shoot</Behavior>
+			
+			<Behavior numShots="4" projectileId="1" cooldown="2.4" type="auto" angle="90" defaultAngle="0" range="0" offset="0">Shoot</Behavior>
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		<State id="FinalShowdown">
+			<Behavior initialDelay="0.2" range="0" numShots="4" projectileId="1">Explode</Behavior>
+		</State>
+		<Behavior time="19.6">Decay</Behavior>
+	</Object>	
+
+	<Object type="0x1745" id="Black Moon">
+		<Group>Vagrant Repellent</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiObj2</File><Index>0x5f</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<Defense>5</Defense>
+		<XpMult>0.0</XpMult>
+		<MaxHitPoints>1000</MaxHitPoints>		
+		<Size>100</Size>
+        <StasisImmune/>
+
+		<Projectile id="0">
+			<ObjectId>Moon Shot</ObjectId>
+			<Damage>60</Damage>
+			<Speed>50</Speed>
+			<LifetimeMS>900</LifetimeMS>
+			<Size>50</Size>
+			<ConditionEffect duration="4">Dazed</ConditionEffect>
+		</Projectile>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		<Behavior listenIds="Oryx the Mad God 1" acquireRange="25">FollowOrders</Behavior>
+		<!-- 
+		<Behavior numShots="10" angle="36" defaultAngle="0" projectileId="0" cooldown="0.7" type="auto" range="5" offset="1.5">Shoot</Behavior>
+		<Behavior numShots="10" angle="36" defaultAngle="18" projectileId="0" cooldown="0.7" type="auto" range="5" offset="1.85">Shoot</Behavior>
+		
+		http://www.enotes.com/science/q-and-a/how-long-do-planets-take-go-around-sun-289487
+		-->
+		<!-- 
+		<Behavior numShots="6" angle="60" defaultAngle="30" projectileId="0" cooldown="0.8" type="auto" range="5" offset="1.05">Shoot</Behavior>
+		<Behavior numShots="6" angle="60" defaultAngle="0" projectileId="0" cooldown="0.8" type="auto" range="5" offset="1.85">Shoot</Behavior>
+		
+		<Behavior numShots="3" angle="40" defaultAngle="0" projectileId="0" cooldown="0.4" type="targeted" range="5" offset="0.2">Shoot</Behavior>
+		 -->
+		<Behavior numShots="3" angle="15" defaultAngle="0" projectileId="0" cooldown="1" type="targeted" range="5" offset="0.2">Shoot</Behavior>
+		 
+		<Behavior bucket="movement" protecteeId="Black Planet" radius="3.5" speed="1.5" radiusVariability="0" speedVariability="0" acquireRange="2">Orbit</Behavior>
+		
+		<Behavior time="20">Decay</Behavior>
+		
+		<State id="Ini">
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		<State id="FinalShowdown">
+			<Behavior time="0.2">Decay</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x1746" id="Black Planet">
+		<Group>Vagrant Repellent</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<Texture><File>lofiCharBig</File><Index>0x09</Index></Texture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<Defense>5</Defense>
+		<XpMult>0.0</XpMult>
+		<MaxHitPoints>1000</MaxHitPoints>		
+		<Size>100</Size>
+        <StasisImmune/>
+
+		<Projectile id="0">
+			<ObjectId>Planet Shot</ObjectId>
+			<Damage>70</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>450</LifetimeMS>
+			<Size>100</Size>
+		</Projectile>
+		<Projectile id="1">
+			<ObjectId>White Orb</ObjectId>
+			<Damage>80</Damage>
+			<Speed>40</Speed>
+			<LifetimeMS>1000</LifetimeMS>
+			<Size>80</Size>
+		</Projectile>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		<Behavior listenIds="Oryx the Mad God 1" acquireRange="25">FollowOrders</Behavior>
+		<!-- 
+		<Behavior numShots="10" angle="36" defaultAngle="0" projectileId="0" cooldown="0.7" type="auto" range="5" offset="1.5">Shoot</Behavior>
+		<Behavior numShots="10" angle="36" defaultAngle="18" projectileId="0" cooldown="0.7" type="auto" range="5" offset="1.85">Shoot</Behavior>
+		
+		http://www.enotes.com/science/q-and-a/how-long-do-planets-take-go-around-sun-289487
+		-->
+		
+		<Behavior numShots="10" angle="36" defaultAngle="0" projectileId="0" cooldown="0.8" type="auto" range="5" offset="1.85">Shoot</Behavior>
+		
+		<Behavior childIds="Black Moon" cooldown="100" maxChildren="1" startWithMinions="true">MakeMinions</Behavior>
+		<Behavior bucket="movement" protecteeId="Oryx the Mad God 1" radius="9.5" speed="0.2" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+		
+		<Behavior numShots="4" angle="0" defaultAngle="90" projectileId="0" cooldown="10" type="auto" range="0" offset="23.8">Shoot</Behavior>
+		<Behavior initialDelay="21" range="0" numShots="8" projectileId="1">Explode</Behavior>
+		<State id="Ini">
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		<State id="FinalShowdown">
+			<Behavior initialDelay="0.2" range="0" numShots="8" projectileId="1">Explode</Behavior>
+		</State>
+	</Object>
+
+	<Object type="0x1747" id="Anti-Spectator">
+		<Group>Vagrant Repellent</Group>
+		<Enemy/>
+		<Class>Character</Class>
+		<AnimatedTexture><File>chars8x8dEncounters</File><Index>7</Index></AnimatedTexture>
+		<HitSound>monster/cubes_hit</HitSound>
+		<DeathSound>monster/cubes_death</DeathSound>
+		<Defense>5</Defense>
+		<XpMult>0.0</XpMult>
+		<MaxHitPoints>1000</MaxHitPoints>		
+		<Size>100</Size>
+        <StasisImmune/>
+
+		<Projectile id="0">
+			<ObjectId>Violet Missile</ObjectId>
+			<Damage>60</Damage>
+			<Speed>100</Speed>
+			<LifetimeMS>300</LifetimeMS>
+			<Size>90</Size>
+		</Projectile>
+
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+
+		<Behavior numShots="10" angle="36" defaultAngle="0" projectileId="0" cooldown="0.7" type="auto" range="5" offset="1.5">Shoot</Behavior>
+		<Behavior numShots="10" angle="36" defaultAngle="18" projectileId="0" cooldown="0.7" type="auto" range="5" offset="1.85">Shoot</Behavior>
+
+		<Behavior bucket="movement" protecteeId="Oryx the Mad God 1" radius="12" speed="4" radiusVariability="0" speedVariability="0" acquireRange="20">Orbit</Behavior>
+
+		<Behavior time="18">Decay</Behavior>
+	</Object>
+	
+	<Object type="0x1748" id="Ring Element">
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints>
+		<Defense>1000</Defense>
+		<Enemy/>
+
+		<!-- AESTHETICS -->	
+        <Texture><File>lofiObj2</File><Index>0x48</Index></Texture>
+
+		<!-- PROJECTILES -->		
+		<Projectile id="0">				<!-- Attacking -->
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>40</Speed>
+			<Damage>65</Damage>
+			<Size>100</Size>
+			<LifetimeMS>480</LifetimeMS>
+			<ConditionEffect duration="8">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="9"> 				<!-- Warning_shot -->
+			<ObjectId>White Bullet</ObjectId>
+			<Speed>40</Speed>
+			<Damage>20</Damage>
+			<Size>100</Size>
+			<LifetimeMS>480</LifetimeMS>
+			<ConditionEffect duration="8">Quiet</ConditionEffect>
+			<MultiHit/>
+		</Projectile>		
+		
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>50</Size>
+		<XpMult>0.0</XpMult>
+
+		<!-- STATES -->
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior>
+		<Behavior listenIds="Oryx the Mad God 1" acquireRange="25">FollowOrders</Behavior>
+		
+		<State id="Setup">
+			<Transition afterTime="1">Warning_shot</Transition>
+		</State>
+		<State id="Warning_shot">
+			<Behavior numShots="12" projectileId="9" cooldown="0.8" type="auto" angle="30">Shoot</Behavior>
+			<Transition afterTime="1">Attacking</Transition>
+		</State>		
+		<State id="Attacking">
+			<Behavior numShots="12" projectileId="0" cooldown="0.8" type="auto" angle="30">Shoot</Behavior>
+			<Transition hasTag="final">FinalShowdown</Transition>
+		</State>
+		<Behavior time="19">Decay</Behavior>
+			
+		<State id="FinalShowdown">
+			<Behavior time="0">Decay</Behavior>
+		</State>
+	</Object>	
+
+	<Object type="0x1749" id="Minion of Oryx">
+		<Group>Minions of Oryx</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>4000</MaxHitPoints>
+		<Defense>12</Defense>
+		<Enemy/>
+        <!--
+		<StasisImmune/>
+         -->
+        
+		<!-- AESTHETICS -->	
+		<AnimatedTexture><File>chars16x16dEncounters2</File><Index>38</Index></AnimatedTexture>
+		<AltTexture id="1">
+			<AnimatedTexture><File>chars16x16rEncounters</File><Index>25</Index></AnimatedTexture>
+		</AltTexture>
+		
+		<!-- PROJECTILES -->		
+		<Projectile id="0">
+			<ObjectId>Fire Bolt</ObjectId>
+			<Speed>70</Speed>
+			<Damage>55</Damage>
+			<Size>80</Size>
+			<LifetimeMS>1300</LifetimeMS>
+		</Projectile>
+	
+		<Projectile id="1">
+			<ObjectId>Green Star</ObjectId>
+			<Speed>60</Speed>
+			<Damage>75</Damage>
+			<Size>100</Size>
+			<LifetimeMS>1600</LifetimeMS>
+			<ConditionEffect duration="6">Slowed</ConditionEffect>
+			<MultiHit/>
+		</Projectile>		
+		
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>100</Size>
+		<XpMult>0.3</XpMult>
+
+		<SoulboundLoot tier="7" prob=".03">Weapon</SoulboundLoot>
+		<SoulboundLoot tier="7" prob=".03">Armor</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".04">ClassSpecial</SoulboundLoot>
+		<SoulboundLoot tier="3" prob=".004">Ring</SoulboundLoot>
+
+		<!-- STATES -->	
+		
+		<State id="Oryx">
+			<State id="Attacking1">
+				<Behavior speed="0.6">Wander</Behavior>
+	
+				<Transition afterTime="3">Attacking2</Transition>
+			</State>	
+			<State id="Attacking2">
+				<Behavior bucket="movement" acquireRange="8" distance="3.5" speed="0.8">Circle</Behavior>
+				<Behavior bucket="movement" speed="0.8">Wander</Behavior>
+	
+				<Transition afterTime="4">Attacking1</Transition>
+			</State>
+			
+			<Behavior numShots="3" projectileId="0" cooldown="0.8" type="targeted" angle="12">Shoot</Behavior>
+			<Behavior numShots="2" projectileId="1" cooldown="1" type="targeted" angle="180" offset="0.4" predictive="0.35">Shoot</Behavior>
+			
+			<Transition noneExist="Oryx the Mad God 1">NoOryx</Transition>
+		</State>
+		
+		<State id="NoOryx">
+			<State id="Attacking2">
+				<Behavior bucket="movement" acquireRange="8" distance="6" speed="0.8">Circle</Behavior>
+				<Behavior bucket="movement" speed="0.8">Wander</Behavior>
+	
+				<Transition afterTime="1">Attacking1</Transition>
+			</State>
+			<State id="Attacking1">
+				<Behavior altTextureId="1">SetAltTexture</Behavior>
+				<Behavior speed="0">Wander</Behavior>
+				<Transition afterTime="3">Attacking2</Transition>
+			</State>	
+			<!-- minion death -->
+			<Behavior type="Flash" color="FFFFFF" flashPeriod="0.2" flashRepeats="10">ShowEffect</Behavior>
+			<Behavior numShots="5" projectileId="0" initialDelay="2" range="0">Explode</Behavior>
+			<Behavior time="4" particleEffect="Nova" color="a22123" dropLoot="false" giveXP="false">Decay</Behavior>
+		</State>
+		
+		<Behavior time="15">Decay</Behavior>
+	</Object>
+
+	<Object type="0x174a" id="Guardian Element 1">
+		<DisplayId>Guardian Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints>
+		<Defense>1000</Defense>
+		<Enemy/>
+		<StasisImmune/>
+
+		<!-- AESTHETICS -->	
+        <Texture><File>lofiObj2</File><Index>0x4a</Index></Texture>
+
+		<!-- PROJECTILES -->		
+		<Projectile id="0">				<!-- normal fire -->
+			<ObjectId>White Flame</ObjectId>	
+			<Speed>65</Speed>
+			<Damage>60</Damage>
+			<Size>65</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">				<!-- kamikazee -->
+			<ObjectId>White Bullet</ObjectId>	
+			<Speed>52</Speed>
+			<Damage>60</Damage>
+			<Size>60</Size>
+			<LifetimeMS>940</LifetimeMS>
+			<MultiHit/>
+			<Amplitude>0.3</Amplitude>
+			<Frequency>0.5</Frequency>	
+		</Projectile>		
+		
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>130</Size>
+		<XpMult>0.0</XpMult>
+
+		<!-- STATES -->
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		
+		<State id="Setup">
+			<Behavior acquireRange="10" speed="1" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="2">Attacking1</Transition>
+		</State>
+		<State id="Attacking1">
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="0">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Shielding1</Transition>
+		</State>
+		<State id="Shielding1">
+			<Behavior rate="11" maxSize="230">ChangeSize</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.2" type="auto" angle="72">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="5">Attacking2</Transition>
+		</State>		
+		<State id="Attacking2">
+			<Behavior rate="-11" minSize="130">ChangeSize</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="45">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Shielding2</Transition>
+		</State>
+		<State id="Shielding2">
+			<Behavior rate="11" maxSize="230">ChangeSize</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.2" type="auto" angle="72">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="5">Attacking3</Transition>
+		</State>
+		<State id="Attacking3">
+			<Behavior rate="-11" minSize="130">ChangeSize</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="0">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Kamikazee</Transition>
+		</State>		
+		<State id="Kamikazee">
+			<Behavior numShots="8" projectileId="1" initialDelay="2.3" range="0">Explode</Behavior>
+			<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="12">ShowEffect</Behavior>
+			<Behavior acquireRange="10" speed="0.8" radius="4" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+		</State>		
+	</Object>
+
+	<Object type="0x174b" id="Guardian Element 2">
+		<DisplayId>Guardian Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints>
+		<Defense>1000</Defense>
+		<Enemy/>
+		<StasisImmune/>
+
+		<!-- AESTHETICS -->	
+        <Texture><File>lofiObj2</File><Index>0x4a</Index></Texture>
+
+		<!-- PROJECTILES -->		
+		<Projectile id="0">				<!-- normal fire -->
+			<ObjectId>White Flame</ObjectId>	
+			<Speed>65</Speed>
+			<Damage>60</Damage>
+			<Size>65</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">				<!-- kamikazee -->
+			<ObjectId>White Bullet</ObjectId>	
+			<Speed>52</Speed>
+			<Damage>60</Damage>
+			<Size>60</Size>
+			<LifetimeMS>940</LifetimeMS>
+			<MultiHit/>
+			<Amplitude>0.3</Amplitude>
+			<Frequency>0.5</Frequency>	
+		</Projectile>			
+		
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>130</Size>
+		<XpMult>0.0</XpMult>
+
+		<!-- STATES -->
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		
+		<State id="Setup">
+			<Behavior acquireRange="10" speed="1" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="2">Attacking1</Transition>
+		</State>
+		<State id="Attacking1">
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="90">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Shielding1</Transition>
+		</State>
+		<State id="Shielding1">
+			<Behavior rate="11" maxSize="230">ChangeSize</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.2" type="auto" angle="72">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="5">Attacking2</Transition>
+		</State>		
+		<State id="Attacking2">
+			<Behavior rate="-11" minSize="130">ChangeSize</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="135">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Shielding2</Transition>
+		</State>
+		<State id="Shielding2">
+			<Behavior rate="11" maxSize="230">ChangeSize</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.2" type="auto" angle="72">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="5">Attacking3</Transition>
+		</State>
+		<State id="Attacking3">
+			<Behavior rate="-11" minSize="130">ChangeSize</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="90">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Kamikazee</Transition>
+		</State>		
+		<State id="Kamikazee">
+			<Behavior numShots="8" projectileId="1" initialDelay="2.3" range="0">Explode</Behavior>
+			<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="12">ShowEffect</Behavior>
+			<Behavior acquireRange="10" speed="0.8" radius="4" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+		</State>		
+	</Object>
+
+	<Object type="0x174c" id="Guardian Element 3">
+		<DisplayId>Guardian Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints>
+		<Defense>1000</Defense>
+		<Enemy/>
+		<StasisImmune/>
+
+		<!-- AESTHETICS -->	
+        <Texture><File>lofiObj2</File><Index>0x4a</Index></Texture>
+
+		<!-- PROJECTILES -->		
+		<Projectile id="0">				<!-- normal fire -->
+			<ObjectId>White Flame</ObjectId>	
+			<Speed>65</Speed>
+			<Damage>60</Damage>
+			<Size>65</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">				<!-- kamikazee -->
+			<ObjectId>White Bullet</ObjectId>	
+			<Speed>52</Speed>
+			<Damage>60</Damage>
+			<Size>60</Size>
+			<LifetimeMS>940</LifetimeMS>
+			<MultiHit/>
+			<Amplitude>0.3</Amplitude>
+			<Frequency>0.5</Frequency>	
+		</Projectile>			
+		
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>130</Size>
+		<XpMult>0.0</XpMult>
+
+		<!-- STATES -->	
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 
+		
+		<State id="Setup">
+			<Behavior acquireRange="10" speed="1" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="2">Attacking1</Transition>
+		</State>
+		<State id="Attacking1">
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="180">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Shielding1</Transition>
+		</State>
+		<State id="Shielding1">
+			<Behavior rate="11" maxSize="230">ChangeSize</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.2" type="auto" angle="72">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="5">Attacking2</Transition>
+		</State>		
+		<State id="Attacking2">
+			<Behavior rate="-11" minSize="130">ChangeSize</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="225">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Shielding2</Transition>
+		</State>
+		<State id="Shielding2">
+			<Behavior rate="11" maxSize="230">ChangeSize</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.2" type="auto" angle="72">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="5">Attacking3</Transition>
+		</State>
+		<State id="Attacking3">
+			<Behavior rate="-11" minSize="130">ChangeSize</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="180">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Kamikazee</Transition>
+		</State>		
+		<State id="Kamikazee">
+			<Behavior numShots="8" projectileId="1" initialDelay="2.3" range="0">Explode</Behavior>
+			<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="12">ShowEffect</Behavior>
+			<Behavior acquireRange="10" speed="0.8" radius="4" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+		</State>		
+	</Object>
+	
+	<Object type="0x174d" id="Guardian Element 4">
+		<DisplayId>Guardian Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints>
+		<Defense>1000</Defense>
+		<Enemy/>
+		<StasisImmune/>
+
+		<!-- AESTHETICS -->	
+        <Texture><File>lofiObj2</File><Index>0x4a</Index></Texture>
+
+		<!-- PROJECTILES -->		
+		<Projectile id="0">				<!-- normal fire -->
+			<ObjectId>White Flame</ObjectId>	
+			<Speed>65</Speed>
+			<Damage>60</Damage>
+			<Size>65</Size>
+			<LifetimeMS>2000</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		<Projectile id="1">				<!-- kamikazee -->
+			<ObjectId>White Bullet</ObjectId>	
+			<Speed>52</Speed>
+			<Damage>60</Damage>
+			<Size>60</Size>
+			<LifetimeMS>940</LifetimeMS>
+			<MultiHit/>
+			<Amplitude>0.3</Amplitude>
+			<Frequency>0.5</Frequency>	
+		</Projectile>			
+		
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>130</Size>
+		<XpMult>0.0</XpMult>
+
+		<!-- STATES -->
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 	
+		
+		<State id="Setup">
+			<Behavior acquireRange="10" speed="1" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="2">Attacking1</Transition>
+		</State>
+		<State id="Attacking1">
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="270">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Shielding1</Transition>
+		</State>
+		<State id="Shielding1">
+			<Behavior rate="11" maxSize="230">ChangeSize</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.2" type="auto" angle="72">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="5">Attacking2</Transition>
+		</State>		
+		<State id="Attacking2">
+			<Behavior rate="-11" minSize="130">ChangeSize</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="315">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Shielding2</Transition>
+		</State>
+		<State id="Shielding2">
+			<Behavior rate="11" maxSize="230">ChangeSize</Behavior>
+			<Behavior numShots="5" projectileId="0" cooldown="1.2" type="auto" angle="72">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="5">Attacking3</Transition>
+		</State>
+		<State id="Attacking3">
+			<Behavior rate="-11" minSize="130">ChangeSize</Behavior>
+			<Behavior numShots="1" projectileId="0" cooldown="0.6" type="auto" defaultAngle="270">Shoot</Behavior>
+			<Behavior acquireRange="10" speed="1.5" radius="2" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+			<Transition afterTime="6">Kamikazee</Transition>
+		</State>
+		<State id="Kamikazee">
+			<Behavior numShots="8" projectileId="1" initialDelay="2.3" range="0">Explode</Behavior>
+			<Behavior type="Flash" color="00FF00" flashPeriod="0.2" flashRepeats="12">ShowEffect</Behavior>
+			<Behavior acquireRange="10" speed="0.8" radius="4" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0">Orbit</Behavior>
+		</State>		
+	</Object>	
+
+	<Object type="0x174e" id="Outer Guardian Element">
+		<DisplayId>Guardian Element</DisplayId>
+		<Group>AttackType</Group>
+		<Class>Character</Class>
+		<MaxHitPoints>100000</MaxHitPoints>
+		<Defense>1000</Defense>
+		<Enemy/>
+		<StasisImmune/>
+
+		<!-- AESTHETICS -->	
+        <Texture><File>lofiObj2</File><Index>0x4a</Index></Texture>
+
+		<!-- PROJECTILES -->		
+		<Projectile id="0">
+			<ObjectId>White Flame</ObjectId>
+			<Damage>50</Damage>
+			<Size>60</Size>
+			<Speed>80</Speed>
+			<LifetimeMS>620</LifetimeMS>
+			<MultiHit/>
+		</Projectile>
+		
+		<!-- DEFAULT PROPERTIES -->	
+		<Size>130</Size>
+		<XpMult>0.0</XpMult>
+
+		<!-- STATES -->
+		<Behavior effect="Invulnerable">ConditionEffect</Behavior> 
+		
+		<Behavior projectileId="0" numShots="3" range="3" cooldown="1.2" predictive="0.45">Shoot</Behavior>
+		<Behavior acquireRange="20" speed="3.2" radius="8.5" protecteeId="Oryx the Mad God 1" speedVariability="0" radiusVariability="0" radiusWobbleDistance="1" radiusWobblePeriod="1">Orbit</Behavior>
+		<Behavior time="32">Decay</Behavior>
+	</Object>
+</Objects>
