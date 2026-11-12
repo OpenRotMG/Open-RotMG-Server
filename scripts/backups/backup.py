@@ -64,7 +64,7 @@ PORTABLE_TABLES = {
 }
 PORTABLE_GAME = {**DISCORD_GOLD_GAME, **PORTABLE_TABLES}
 COLLECTION_GAME = {**PORTABLE_GAME, 'collections': ('account', 'item', 'found_at', 'source')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: PORTABLE_GAME, 23: COLLECTION_GAME}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: PORTABLE_GAME, 23: COLLECTION_GAME, 24: COLLECTION_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -249,8 +249,7 @@ def validate_guilds(game, accounts):
     guilds, names = {}, set()
     for row in game.get('guilds', []):
         if (type(row['id']) is not int or not 0 < row['id'] <= 2147483647
-                or type(row['name']) is not str or not re.fullmatch('[A-Za-z ]{1,20}', row['name'])
-                or row['name'] != ' '.join(row['name'].split())
+                or type(row['name']) is not str
                 or type(row['level']) is not int or not 1 <= row['level'] <= 4
                 or any(type(row[k]) is not int for k in ['fame', 'earned'])
                 or not 0 <= row['fame'] <= row['earned'] <= 2147483647
@@ -681,7 +680,7 @@ CREATE TABLE discord_recovery(account INTEGER PRIMARY KEY REFERENCES discord_lin
         definitions['game'] += '\nALTER TABLE accounts ADD COLUMN credits INTEGER NOT NULL DEFAULT 100 CHECK(credits BETWEEN 0 AND 2147483647);'
     if bundle['schema'] >= 9:
         definitions['game'] += '''
-CREATE TABLE guilds(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE CHECK(length(name) BETWEEN 1 AND 20 AND name=trim(name) AND name NOT GLOB '*[^A-Za-z ]*'),level INTEGER NOT NULL DEFAULT 1 CHECK(level BETWEEN 1 AND 4),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647),earned INTEGER NOT NULL DEFAULT 0 CHECK(earned BETWEEN fame AND 2147483647),board TEXT NOT NULL DEFAULT '');
+CREATE TABLE guilds(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE,level INTEGER NOT NULL DEFAULT 1 CHECK(level BETWEEN 1 AND 4),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647),earned INTEGER NOT NULL DEFAULT 0 CHECK(earned BETWEEN fame AND 2147483647),board TEXT NOT NULL DEFAULT '');
 CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),guild INTEGER NOT NULL REFERENCES guilds(id),rank INTEGER NOT NULL CHECK(rank IN (0,10,20,30,40)),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647));
 CREATE UNIQUE INDEX one_guild_founder ON guild_members(guild) WHERE rank=40;
 CREATE INDEX guild_roster ON guild_members(guild);

@@ -33,8 +33,8 @@ fn verify(db: &Connection, content: &Content) -> Result<()> {
     );
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=23),
-        "snapshot requires supported local database schema 21, 22 or 23 (found {version})"
+        matches!(version, 21..=24),
+        "snapshot requires supported local database schema 21–24 (found {version})"
     );
     crate::store::account_save::verify_database(db, content)?;
     Ok(())

@@ -90,14 +90,14 @@ class ReleaseContract(unittest.TestCase):
                 restored = json.loads(db.execute('SELECT stats FROM characters WHERE id=?', (value['id'],)).fetchone()[0])
                 self.assertEqual(restored['tombs'], 9)
                 self.assertEqual(db.execute('SELECT name,level,fame,earned,board FROM guilds').fetchone(),
-                                 ('Backup Guild', 2, 3270, 13270, 'Welcome & prepare!\n日本語 🧙'))
+                                 ('50', 2, 3270, 13270, 'Welcome & prepare!\n日本語 🧙'))
                 self.assertEqual(db.execute('SELECT rank,fame FROM guild_members').fetchone(), (40, 13270))
                 rewards = db.execute('SELECT reward,notified_at FROM gold_rewards ORDER BY account,reward').fetchall()
                 self.assertEqual([row[0] for row in rewards], ['discord_link', 'first_bug_report', 'discord_link'])
                 self.assertIsNone(rewards[0][1])
                 self.assertIsNone(rewards[1][1])
                 self.assertGreater(rewards[2][1], 0)
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 23)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 24)
                 for table, column, default in [('characters', 'revision', '0'), ('characters', 'alive', '1'), ('deaths', 'died_at', 'unixepoch()')]:
                     with self.subTest(default=table + '.' + column):
                         self.assertEqual(db.execute('SELECT dflt_value FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone(), (default,))
@@ -111,7 +111,7 @@ class ReleaseContract(unittest.TestCase):
                 for row in [(owner, 'discord_link', 123, None), (owner, 'invalid', 123, None), (owner, 'collection_top_half', 0, None), (owner, 'collection_top_half', 123, 0), (99999, 'discord_link', 123, None)]:
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
-            self.assertEqual(bundle['schema'], 23)
+            self.assertEqual(bundle['schema'], 24)
             canonical16 = legacy_copy(bundle)
             canonical16['schema'] = 16
             for table in ['bot_minds', 'trade_transactions']:
@@ -236,7 +236,7 @@ class ReleaseContract(unittest.TestCase):
                     backup.export(malformed_db, Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'malformed-death.gz', revision, revision, revision)
                 self.assertEqual(malformed_db.read_bytes(), original)
                 self.assertFalse((Path(temporary) / 'malformed-death.gz').exists())
-            for version in [0, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 24]:
+            for version in [0, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 25]:
                 with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
                     source.backup(future)
                     future.execute(f'PRAGMA user_version={version}')

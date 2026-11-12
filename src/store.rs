@@ -749,6 +749,7 @@ impl Store {
                     | 21
                     | 22
                     | 23
+                    | 24
             ),
             "unsupported game database schema {version}"
         );
@@ -819,6 +820,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         migration.execute_batch("CREATE TABLE IF NOT EXISTS trade_transactions(id TEXT PRIMARY KEY,owners TEXT NOT NULL,writes TEXT NOT NULL,revisions TEXT NOT NULL,delivery TEXT,market_key TEXT UNIQUE);
  CREATE TABLE IF NOT EXISTS bot_minds(account INTEGER PRIMARY KEY REFERENCES accounts(id),revision INTEGER NOT NULL CHECK(revision>0),mind TEXT NOT NULL CHECK(json_valid(mind)));")?;
         guilds::migrate(&migration, version)?;
+        guilds::migrate_names(&migration, version)?;
         gold::migrate(&migration, version, rewards_exist)?;
         if version < 19 {
             migration.execute_batch(&discord_gold::SCHEMA.replacen(
@@ -927,7 +929,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
         account_save::migrate(&migration, version)?;
-        migration.pragma_update(None, "user_version", 23)?;
+        migration.pragma_update(None, "user_version", 24)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(

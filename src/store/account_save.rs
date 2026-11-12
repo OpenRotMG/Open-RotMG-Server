@@ -530,7 +530,7 @@ pub(crate) fn check_expected(
 pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResult> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=23),
+        matches!(version, 21..=24),
         "unsupported local preview schema {version}"
     );
     let existing: Option<i32> = if version == 21 {
@@ -902,7 +902,7 @@ impl Store {
 pub(crate) fn verify_database(db: &Connection, content: &Content) -> Result<()> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=23),
+        matches!(version, 21..=24),
         "unsupported local snapshot schema {version}"
     );
     if version >= 22 {

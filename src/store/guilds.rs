@@ -30,6 +30,27 @@ pub enum GuildAction {
 
 #[cfg(test)]
 mod roster_tests;
+#[cfg(test)]
+mod schema_tests;
+
+const GUILDS_SQL: &str = "CREATE TABLE guilds(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE,level INTEGER NOT NULL DEFAULT 1 CHECK(level BETWEEN 1 AND 4),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647),earned INTEGER NOT NULL DEFAULT 0 CHECK(earned BETWEEN fame AND 2147483647),board TEXT NOT NULL DEFAULT '');";
+
+pub(super) fn migrate_names(db: &Connection, version: i32) -> Result<()> {
+    if (9..24).contains(&version) {
+        db.execute_batch(&GUILDS_SQL.replacen("guilds(", "guilds_next(", 1))?;
+        // Evacuating members inside the migration transaction keeps foreign keys enabled during the table rebuild.
+        db.execute_batch("INSERT INTO sqlite_sequence(name,seq) SELECT 'guilds_next',seq FROM sqlite_sequence WHERE name='guilds';
+INSERT INTO guilds_next SELECT * FROM guilds;
+CREATE TEMP TABLE guild_members_saved AS SELECT * FROM guild_members;
+DELETE FROM guild_members;
+DROP TABLE guilds;
+ALTER TABLE guilds_next RENAME TO guilds;
+INSERT INTO guild_members SELECT * FROM guild_members_saved;
+DROP TABLE guild_members_saved;")?;
+        tracing::info!("guild name format constraint removed; server creation rules unchanged");
+    }
+    Ok(())
+}
 
 // Selected 123.5.1 GuildMerchant prices, not the reduced test prices: https://wikiwiki.jp/rmd/test/build121.5.2#guildfame
 pub const HALL_PRICES: [i32; 3] = [10_000, 100_000, 250_000];
@@ -61,8 +82,8 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
             );
         }
     } else {
-        db.execute_batch("CREATE TABLE guilds(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE COLLATE NOCASE CHECK(length(name) BETWEEN 1 AND 20 AND name=trim(name) AND name NOT GLOB '*[^A-Za-z ]*'),level INTEGER NOT NULL DEFAULT 1 CHECK(level BETWEEN 1 AND 4),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647),earned INTEGER NOT NULL DEFAULT 0 CHECK(earned BETWEEN fame AND 2147483647),board TEXT NOT NULL DEFAULT '');
-CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),guild INTEGER NOT NULL REFERENCES guilds(id),rank INTEGER NOT NULL CHECK(rank IN (0,10,20,30,40)),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647));
+        db.execute_batch(GUILDS_SQL)?;
+        db.execute_batch("CREATE TABLE guild_members(account INTEGER PRIMARY KEY REFERENCES accounts(id),guild INTEGER NOT NULL REFERENCES guilds(id),rank INTEGER NOT NULL CHECK(rank IN (0,10,20,30,40)),fame INTEGER NOT NULL DEFAULT 0 CHECK(fame BETWEEN 0 AND 2147483647));
 CREATE UNIQUE INDEX one_guild_founder ON guild_members(guild) WHERE rank=40;
 CREATE INDEX guild_roster ON guild_members(guild);
 CREATE TRIGGER guild_capacity BEFORE INSERT ON guild_members WHEN (SELECT count(*) FROM guild_members WHERE guild=NEW.guild)>=50 BEGIN SELECT RAISE(ABORT,'Guild is full.'); END;")?;
