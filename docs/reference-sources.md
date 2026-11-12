@@ -36,6 +36,10 @@ Boss sample: Ent Ancient, Lich, Ghost King, Phoenix Lord. All four tables were l
 
 Discovery: https://docs.realmdex.com/sources.html (“Skillys V1?”→realm-src/realm-cli). Hidden “Skilly's 7.0 NR-Core”/“Educational” links remain unidentified; don't equate with betterSkillys. Zero.Gdk returned 404; no verdict/pin.
 
+## Release 7.0 server-file lead
+
+See `release-7-behavior-reference.md` for the recovered MPGH attachment, verified fingerprint, inspected server-behavior content and unresolved version/provenance/redistribution limits. Reference discovery only; selected source policy is unchanged.
+
 ## Legacy comparisons
 
 Retired source: https://github.com/trapped/rotmg_svr/tree/593e490803fe0ad168ead408cacd5287d778acfe (no repository-wide license found). The comparisons below record conflicts, not implementation authority.
