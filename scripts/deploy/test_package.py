@@ -16,6 +16,9 @@ class PackageTests(unittest.TestCase):
             os.chdir(root)
             try:
                 files = {name: name.encode() for name in [
+                    'data/objects.xml', 'data/grounds.xml',
+                    'data/reference/README.md', 'data/reference/release-7.0/xml/equip.xml',
+                    'data/reference/deca-xml-documentation/original-html.tar.gz',
                     'data/realm-catalog.json', 'data/realm-sites.json', 'data/realms/world07.json',
                     'data/realms/classic-world-07-reconstruction.wmap',
                     *['data/realms/world07/' + name for name in [
@@ -36,9 +39,11 @@ class PackageTests(unittest.TestCase):
                 with tarfile.open(archive) as bundle:
                     actual = {row.name: bundle.extractfile(row).read() for row in bundle if row.isfile()}
                 witness = 'data/realms/world07/reconstruction-decisions.json'
-                self.assertEqual(actual, {name: content for name, content in files.items() if name != witness})
-                self.assertEqual(subprocess.check_output(['git', 'show', revision + ':' + witness]), files[witness])
-                self.assertEqual((root / witness).read_bytes(), files[witness])
+                excluded = {name for name in files if name == witness or name.startswith('data/reference/')}
+                self.assertEqual(actual, {name: content for name, content in files.items() if name not in excluded})
+                for name in excluded:
+                    self.assertEqual(subprocess.check_output(['git', 'show', revision + ':' + name]), files[name])
+                    self.assertEqual((root / name).read_bytes(), files[name])
             finally:
                 os.chdir(previous)
 
