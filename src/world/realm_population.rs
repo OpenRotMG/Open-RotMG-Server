@@ -1,7 +1,7 @@
 use super::*;
 
-// Population dependence is period-documented; the empty spare, bounds/300s grace are reconstruction policy:
-// https://github.com/OpenRotMG/Open-RotMG-Server/issues/1344
+// Spare-per-occupied-Realm growth scattered a small population across eight worlds; grow only on exhausted admission:
+// https://github.com/OpenRotMG/Open-RotMG-Server/issues/1457
 pub(crate) const MAX_CURRENT: usize = 8;
 const IDLE_GRACE: Duration = Duration::from_secs(300);
 
@@ -286,13 +286,11 @@ impl Directory {
             self.idle.remove(&id);
         }
         let available = self.available_realms();
-        if available.iter().any(|(_, occupancy)| *occupancy == 0) {
+        if !available.is_empty() {
             self.realm_population.bound_reported = None;
             return Ok(());
         }
-        let reason = if !available.is_empty() {
-            "empty_spare"
-        } else if self.endgame.realms.iter().any(|(id, record)| {
+        let reason = if self.endgame.realms.iter().any(|(id, record)| {
             record.enabled
                 && self
                     .worlds
@@ -314,11 +312,7 @@ impl Directory {
                 self.log_realm_population(
                     0,
                     reason,
-                    if reason == "empty_spare" {
-                        "empty spare target unmet: eight current Realm slots; hard capacity remains available"
-                    } else {
-                        "allocation refused: eight current Realm slots; no unreserved open capacity"
-                    },
+                    "allocation refused: eight current Realm slots; no unreserved open capacity",
                 );
                 self.realm_population.bound_reported = Some(reason);
             }

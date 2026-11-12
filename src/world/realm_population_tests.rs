@@ -39,7 +39,7 @@ fn pending_allocation_serializes_repeated_demand_and_reports_worker_failure() {
 #[test]
 fn initial_entry_holds_block_retirement_handoff_to_presence_and_release_on_error() {
     let mut d = directory(2);
-    d.issue(1, 1, 1).unwrap();
+    let (_, key, _) = d.issue(1, 1, 1).unwrap();
     let t = d.clock.now();
     d.realm_population_step(t);
     let first = d.hold_initial_entry(-3).unwrap().unwrap();
@@ -67,6 +67,7 @@ fn initial_entry_holds_block_retirement_handoff_to_presence_and_release_on_error
     })();
     assert!(failed.is_err());
     assert_eq!(d.realm_dependencies(-3), 0);
+    d.cancel_admission(1, key).unwrap();
     d.realm_population_step(t + IDLE_GRACE * 2);
     d.realm_population_step(t + IDLE_GRACE * 3);
     assert!(!d.worlds.contains_key(&-3));
@@ -441,7 +442,7 @@ async fn finish_population_build(app: &crate::server::App) {
 }
 
 #[tokio::test]
-async fn ordinary_two_claimed_actors_in_distinct_72_capacity_realms_allocate_one_empty_spare() {
+async fn ordinary_two_claimed_actors_in_distinct_72_capacity_realms_do_not_allocate() {
     let app = population_app().await;
     let first = claimed_actor(&app, "population-first", -3).await;
     let second = claimed_actor(&app, "population-second", 1).await;
@@ -481,15 +482,15 @@ async fn ordinary_two_claimed_actors_in_distinct_72_capacity_realms_allocate_one
         .unwrap();
     close_actors(&app, vec![first, second]).await;
     assert!(
-        started,
-        "two ordinary claimants need an empty spare despite free hard capacity"
+        !started,
+        "two lightly occupied Realms already have capacity"
     );
-    assert_eq!(count, 3);
+    assert_eq!(count, 2);
     assert_eq!(
-        allocated, 1,
-        "queued concurrent demand must not duplicate allocation"
+        allocated, 0,
+        "queued demand must not create unnecessary Realms"
     );
-    assert_eq!(available, vec![(-3, 1), (1, 1), (next, 0)]);
+    assert_eq!(available, vec![(-3, 1), (1, 1)]);
 }
 
 #[tokio::test]
@@ -564,7 +565,7 @@ async fn coupled_global_72_claims_and_realm_72_hard_admission_remain_unchanged()
 }
 
 #[test]
-fn unexpired_admissions_request_empty_spare_despite_free_hard_capacity() {
+fn unexpired_admissions_do_not_request_growth_with_free_capacity() {
     let mut d = directory(72);
     d.issue(1, 1, -3).unwrap();
     d.issue(2, 2, 1).unwrap();
@@ -573,28 +574,43 @@ fn unexpired_admissions_request_empty_spare_despite_free_hard_capacity() {
     assert_eq!(d.available_realms(), vec![(-3, 1), (1, 1)]);
     d.coordinator_step();
     d.coordinator_step();
-    assert_eq!(d.current_realm_count(), 3);
-    assert_eq!(
-        d.available_realms().iter().filter(|(_, n)| *n == 0).count(),
-        1
-    );
+    assert_eq!(d.current_realm_count(), 2);
+    assert!(d.realm_population.preparing.is_none());
+    assert_eq!(d.available_realms(), vec![(-3, 1), (1, 1)]);
 }
 
 #[test]
-fn eight_current_slots_keep_free_hard_admission_when_empty_spare_target_is_unmet() {
+fn forty_scattered_admissions_do_not_multiply_realms() {
     let mut d = directory(72);
-    let mut account = 1;
-    for expected in 3..=8 {
-        for (id, occupancy) in d.available_realms() {
-            if occupancy == 0 {
-                d.issue(account, account, id).unwrap();
-                account += 1;
-            }
-        }
+    let next = d.next_world;
+    for account in 1..=40 {
+        d.issue(account, account, if account % 2 == 0 { -3 } else { 1 })
+            .unwrap();
         d.coordinator_step();
-        d.coordinator_step();
-        assert_eq!(d.current_realm_count(), expected);
+        assert_eq!(d.current_realm_count(), 2);
+        assert!(d.realm_population.preparing.is_none());
+        assert_eq!(d.next_world, next);
     }
+    assert_eq!(d.available_realms(), vec![(-3, 20), (1, 20)]);
+}
+
+#[test]
+fn eight_current_slots_keep_free_hard_admission_without_an_empty_spare() {
+    let mut d = directory(72);
+    for id in 2..=7 {
+        let world = d.make("realm-shore", "Realm", false, None).unwrap();
+        let mut record = endgame::RealmRecord::new(
+            crate::endgame::RealmCycle::new(world.hero_identities()).unwrap(),
+            d.tick * 50,
+            d.clock.now(),
+        );
+        record.portal_slot = id as usize;
+        record.name = id as usize;
+        record.portal = Some(d.install_realm_portal(id as usize).unwrap());
+        d.worlds.insert(id, world);
+        d.endgame.realms.insert(id, record);
+    }
+    let mut account = 1;
     for (id, occupancy) in d.available_realms() {
         if occupancy == 0 {
             d.issue(account, account, id).unwrap();
@@ -604,7 +620,7 @@ fn eight_current_slots_keep_free_hard_admission_when_empty_spare_target_is_unmet
     let next = d.next_world;
     for _ in 0..3 {
         d.coordinator_step();
-        assert_eq!(d.realm_population.bound_reported, Some("empty_spare"));
+        assert_eq!(d.realm_population.bound_reported, None);
         assert_eq!(d.available_realms().len(), 8);
         assert!(d.initial(-3).is_ok());
         assert!(d.realm_population.preparing.is_none());
