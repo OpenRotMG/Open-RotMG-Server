@@ -40,25 +40,6 @@ fn text_to(name: &str, object: i32, bubble: u8, recipient: &str, text: &str, sta
     }
 }
 
-fn player_text_to(
-    name: &str,
-    object: i32,
-    bubble: u8,
-    recipient: &str,
-    text: &str,
-    stars: i32,
-    reviewed: bool,
-) -> Packet {
-    let marked;
-    let text = if reviewed {
-        marked = format!("[cheater] {text}");
-        &marked
-    } else {
-        text
-    };
-    text_to(name, object, bubble, recipient, text, stars)
-}
-
 pub(crate) fn validate(text: &str) -> Result<()> {
     ensure!(
         !text.trim().is_empty(),
@@ -306,7 +287,6 @@ impl Directory {
             return Ok(());
         }
         let account = sender.character.account;
-        let reviewed = world.content.reviewed(account);
         let name = sender.character.name.clone();
         let guild = sender.presentation.guild.clone();
         let stars = sender.presentation.stars();
@@ -374,7 +354,7 @@ impl Directory {
             let guild = guild.ok_or_else(|| controller("You are not in a guild."))?;
             let message = rest.trim();
             ensure!(!message.is_empty(), controller("Usage: /g <message>"));
-            let packet = player_text_to(&name, -1, 0, "*Guild*", message, stars, reviewed);
+            let packet = text_to(&name, -1, 0, "*Guild*", message, stars);
             let mut recipients = 0;
             for p in self
                 .worlds
@@ -418,15 +398,7 @@ impl Directory {
                 target.character.account != account,
                 controller("You cannot tell yourself.")
             );
-            let packet = player_text_to(
-                &name,
-                -1,
-                0,
-                &target.character.name,
-                message.trim(),
-                0,
-                reviewed,
-            );
+            let packet = text_to(&name, -1, 0, &target.character.name, message.trim(), 0);
             let ignored = target.account_lists[1].contains(&account);
             if !ignored {
                 send(target, packet.id, packet.body.clone());
@@ -452,7 +424,7 @@ impl Directory {
         } else {
             &text
         };
-        let packet = player_text_to(&name, id, 5, "", text, stars, reviewed);
+        let packet = text_to(&name, id, 5, "", text, stars);
         let world = self.resolve(Target::Player(id))?;
         world.ocean_response(id, text)?;
         let pos = world.players[&id].pos;
