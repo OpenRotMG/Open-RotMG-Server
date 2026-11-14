@@ -1090,20 +1090,31 @@ fn level_20s_shoot_realm_event_bosses_and_back_off_out_of_reach() {
             "{kind:#x}"
         );
     }
-    // A wounded Knight out of sword reach keeps backing off until no enemy presses it.
+    // A wounded Knight out of sword reach backs off out of reach, holds while wounded, then returns.
     v.objects.truncate(1);
     v.character.class = 0x031e;
     v.character.items[..3].copy_from_slice(&[0xa82, -1, -1]);
     v.character.hp = 300;
     let mut brain = Brain::new(ARCHETYPES[1], &v);
-    for _ in 0..40 {
-        let d = brain.decide(&v, &c).unwrap();
-        if d.goal != Goal::Recover {
-            break;
-        }
-        v.position = d.movement.expect("a recovering player keeps moving");
-        brain.goal = d.goal;
+    let step = |brain: &mut Brain, v: &mut PlayerView| {
+        let d = brain.decide(v, &c).unwrap();
+        brain.goal = d.goal.clone();
         (v.tick, v.time_ms, v.elapsed_ms) = (v.tick + 1, v.time_ms + 50, v.elapsed_ms + 50);
+        d
+    };
+    for _ in 0..40 {
+        let d = step(&mut brain, &mut v);
+        assert_eq!(d.goal, Goal::Recover);
+        let Some(m) = d.movement else { break };
+        v.position = m;
     }
     assert!(v.position.distance(v.objects[0].position) > 15.);
+    let held = step(&mut brain, &mut v);
+    assert!(
+        held.goal == Goal::Recover && held.movement.is_none(),
+        "holds while wounded"
+    );
+    v.character.hp = 600;
+    v.tick += 60;
+    assert_ne!(step(&mut brain, &mut v).goal, Goal::Recover);
 }

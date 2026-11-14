@@ -903,10 +903,10 @@ impl Brain {
         let pressed = enemies
             .iter()
             .any(|e| e.position.distance(v.position) < 15.);
+        // A wounded player stays out of reach while enemies are in sight instead of walking back into them.
         let retreat = outmatched
-            || pressed
-                && (v.tick < self.recover_until
-                    || (matches!(self.goal, Goal::Recover) && hp < healthy));
+            || v.tick < self.recover_until && !enemies.is_empty()
+            || pressed && matches!(self.goal, Goal::Recover) && hp < healthy;
         let avoid: Vec<_> = enemies
             .iter()
             .filter(|enemy| !retreat && !progression::can_fight(v, content, enemy))
@@ -1463,7 +1463,9 @@ impl Brain {
                 };
             }
             // Live: wounded melee bots stood still beside a Cube God for 15 minutes, never out of reach or in range.
-            if retreat || remedy.is_some() && pressured {
+            let reachable =
+                nearest.is_some_and(|e| e.position.distance(v.position) < combat::OUT_OF_REACH);
+            if retreat && reachable || remedy.is_some() && pressured {
                 let focus = if retreat {
                     nearest.map(|e| e.position)
                 } else if let Some(blue) = remedy {
