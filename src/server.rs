@@ -90,6 +90,7 @@ pub(crate) mod diagnostics;
 mod gold;
 mod guilds;
 mod hiscores;
+mod native;
 pub(crate) mod testing;
 mod updates;
 use account_actions::{
@@ -116,6 +117,7 @@ pub struct App {
     pub content: Arc<Content>,
     pub swf: Arc<Vec<u8>>,
     pub origin: String,
+    pub native: Option<crate::config::Native>,
     pub bot_view_origin: Option<String>,
     pub sfx: PathBuf,
     pub max_players: usize,
@@ -207,6 +209,16 @@ fn limited() -> Response {
     )
         .into_response()
 }
+async fn native_chars(
+    state: State<App>,
+    peer: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(mut query): Query<HashMap<String, String>>,
+    form: Form<HashMap<String, String>>,
+) -> Response {
+    query.insert("native".into(), "1".into());
+    chars(state, peer, headers, Query(query), form).await
+}
 async fn chars(
     State(a): State<App>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -234,7 +246,17 @@ async fn chars(
             browser.authenticate(a.store.browser_identity(account.id).await?);
         }
         let news = a.store.news(account.id, &a.origin).await?;
-        let xml = account.xml(&news, a.server_usage()?);
+        let mut xml = account.xml(&news, a.server_usage()?);
+        if query.get("native").is_some_and(|value| value == "1") {
+            let native = a
+                .native
+                .as_ref()
+                .context("native game connections are not enabled")?;
+            xml = xml.replace(
+                "<DNS>127.0.0.1</DNS>",
+                &format!("<DNS>{}</DNS>", xml_escape(&native.host)),
+            );
+        }
         Ok((xml, browser.and_then(|b| b.cookie)))
     }
     .await;
@@ -599,6 +621,11 @@ async fn health(State(a): State<App>) -> Response {
     match a.world.directory(move |d| Ok(d.health(started))).await {
         Ok(mut v) => {
             v["bot_dialogue"] = crate::bots::dialogue::health(a.dialogue.as_deref());
+            v["native_game"] = a
+                .native
+                .as_ref()
+                .map(|native| serde_json::json!({"host":native.host,"port":2050}))
+                .into();
             Json(v).into_response()
         }
         Err(e) => (StatusCode::SERVICE_UNAVAILABLE, error(e)).into_response(),
@@ -3321,6 +3348,9 @@ fn routes(a: &App, client: PathBuf) -> Router {
             post(pictures::request).layer(DefaultBodyLimit::max(2048)),
         )
         .route("/legacy-api/char/list", post(chars))
+        .route("/legacy-api/native-char/list", post(native_chars))
+        .route("/legacy-api/native-char/fame", post(fame))
+        .route("/legacy-api/native-char/delete", post(delete_character))
         .route("/legacy-api/char/fame", post(fame))
         .route("/legacy-api/char/delete", post(delete_character))
         .route("/legacy-api/account/{operation}", post(account_request))
@@ -3488,6 +3518,14 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf, desktop: bool) -> 
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| {
         format!("cannot listen on {bind}; another server may already use this port. Stop it and rerun ./run.sh")
     })?;
+    let native = match &a.native {
+        Some(config) => Some(
+            tokio::net::TcpListener::bind(config.bind)
+                .await
+                .with_context(|| format!("cannot listen on native game address {}", config.bind))?,
+        ),
+        None => None,
+    };
     if a.shore_bots {
         crate::bots::start(&a).await?;
     }
@@ -3514,7 +3552,21 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf, desktop: bool) -> 
         }
         stopped.send_replace(true);
     });
-    supervise_serving(&a, async { serving.await }, &failure, stop).await
+    supervise_serving(
+        &a,
+        async {
+            match native {
+                Some(listener) => {
+                    tokio::try_join!(async { serving.await }, native::serve(a.clone(), listener))
+                        .map(|_| ())
+                }
+                None => serving.await,
+            }
+        },
+        &failure,
+        stop,
+    )
+    .await
 }
 async fn drain_shutdown(a: &App, stop: impl Future<Output = Result<()>>) -> Result<()> {
     let request = stop.await;

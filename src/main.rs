@@ -201,6 +201,7 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         browser_links: Arc::new(server::browser_link::Service::from_env(&config.origin)?),
         email: server::email::Service::configured()?,
         origin: config.origin,
+        native: config.native,
         bot_view_origin: config.bot_view_origin,
         sfx: config.data.join("sfx"),
         max_players: config.max_players,
