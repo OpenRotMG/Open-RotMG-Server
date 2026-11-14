@@ -310,6 +310,11 @@ fn fame_bonus(n: Node<'_, '_>) -> Result<u32> {
 }
 
 impl Content {
+    pub fn reviewed(&self, account: i32) -> bool {
+        self.reviewed_accounts
+            .iter()
+            .any(|review| review.account == account)
+    }
     pub fn load(dir: &Path) -> Result<Self> {
         let data = std::fs::read_to_string(dir.join("objects.xml"))?;
         let objects_sha256 = format!("{:x}", Sha256::digest(data.as_bytes()));

@@ -3940,13 +3940,14 @@ impl World {
             for (i, boost) in [46, 47, 48, 49, 50, 53, 51, 52].into_iter().enumerate() {
                 stat(&mut o, boost, values[i] - p.character.base[i]);
             }
+            // Reviewed cheaters look like unnamed guests to others; their own client keeps the truth so its name panel still quotes the paid rename price.
             stat(
                 &mut o,
                 56,
-                i32::from(crate::store::name_chosen(
-                    p.character.account,
-                    &p.character.name,
-                )),
+                i32::from(
+                    crate::store::name_chosen(p.character.account, &p.character.name)
+                        && (id == recipient || !self.content.reviewed(p.character.account)),
+                ),
             );
             stat(&mut o, 57, p.character.fame);
             stat(
@@ -6182,12 +6183,7 @@ impl World {
         Ok(id)
     }
     fn kept_marked_drops(&mut self, account: i32, items: &[i32]) -> Result<Vec<i32>> {
-        if !self
-            .content
-            .reviewed_accounts
-            .iter()
-            .any(|review| review.account == account)
-        {
+        if !self.content.reviewed(account) {
             return Ok(items.to_vec());
         }
         let mut kept = Vec::new();

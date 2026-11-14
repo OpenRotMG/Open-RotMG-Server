@@ -20,7 +20,7 @@ fn texts(inbox: &mut mpsc::Receiver<Packet>) -> Vec<(String, String, String)> {
 }
 
 #[tokio::test]
-async fn reviewed_chat_labels_follow_account_ids_without_changing_commands_or_names() {
+async fn reviewed_accounts_get_chat_labels_and_guest_grey_names_without_changing_commands() {
     let mut content = Content::load(std::path::Path::new("data")).unwrap();
     let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let marked = store.list("reviewed-chat-marked".into()).await.unwrap().id;
@@ -73,6 +73,17 @@ async fn reviewed_chat_labels_follow_account_ids_without_changing_commands_or_na
         while inbox.try_recv().is_ok() {}
         inboxes.push(inbox);
     }
+    let name_chosen = |id, recipient| {
+        super::legends_glow_tests::fields(&directory.worlds[&-2].stats(id, recipient).unwrap())[&56]
+    };
+    assert_eq!(
+        [
+            name_chosen(ids[0], ids[1]),
+            name_chosen(ids[0], ids[0]),
+            name_chosen(ids[1], ids[0]),
+        ],
+        [0, 1, 1]
+    );
     let [mut own, mut peer]: [_; 2] = inboxes.try_into().unwrap();
     let now = Instant::now();
     for (i, (input, recipient, body)) in [

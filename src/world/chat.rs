@@ -306,11 +306,7 @@ impl Directory {
             return Ok(());
         }
         let account = sender.character.account;
-        let reviewed = world
-            .content
-            .reviewed_accounts
-            .iter()
-            .any(|review| review.account == account);
+        let reviewed = world.content.reviewed(account);
         let name = sender.character.name.clone();
         let guild = sender.presentation.guild.clone();
         let stars = sender.presentation.stars();
