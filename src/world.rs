@@ -6960,6 +6960,7 @@ impl World {
                 .any(|(p, ..)| pos.distance(*p) < simulation_radius);
             let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind)
                 || kind == 0x925
+                || kind == 0xd64
                 || kind == crate::endgame::ORYX)
                 && entity.activated.is_some();
             if !burst
