@@ -1090,6 +1090,17 @@ fn level_20s_shoot_realm_event_bosses_and_back_off_out_of_reach() {
             "{kind:#x}"
         );
     }
+    // Pentaract: the invincible core cannot be hurt, so its tower is the fight.
+    v.objects[0].kind = 0xd5f;
+    v.objects[0].condition_mask = Some(crate::condition::bit(crate::condition::INVINCIBLE));
+    (v.objects[1].kind, v.objects[1].hp, v.objects[1].max_hp) = (0xd5e, 5000, 5000);
+    let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Fight(3));
+    assert!(d.aim.unwrap().distance(v.objects[1].position) < 3.);
+    v.objects[1].position = Pos { x: 10.5, y: 24.5 };
+    let d = Brain::new(ARCHETYPES[1], &v).decide(&v, &c).unwrap();
+    assert_eq!(d.goal, Goal::Hunt(3), "an out-of-range tower, not the core");
+    (v.objects[0].kind, v.objects[0].condition_mask) = (0xd59, Some(0));
     // A wounded Knight out of sword reach backs off out of reach, holds while wounded, then returns.
     v.objects.truncate(1);
     v.character.class = 0x031e;

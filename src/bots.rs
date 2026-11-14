@@ -1608,9 +1608,27 @@ impl Brain {
                     "autonomous realm quest appeal"
                 );
             }
+            // Live: bots stood at the invincible Pentaract core; while a quest cannot be hurt, its nearest guard is the fight.
+            let target = if progression::vulnerable(quest) {
+                quest
+            } else {
+                enemies
+                    .iter()
+                    .filter(|e| {
+                        progression::vulnerable(e)
+                            && progression::can_fight(v, content, e)
+                            && e.position.distance(quest.position) < 20.
+                    })
+                    .min_by(|a, b| {
+                        a.position
+                            .distance(v.position)
+                            .total_cmp(&b.position.distance(v.position))
+                    })
+                    .unwrap_or(quest)
+            };
             joined.then(|| {
-                choices.push((appeal.score, Goal::Hunt(quest.id), quest.position));
-                Goal::Hunt(quest.id)
+                choices.push((appeal.score, Goal::Hunt(target.id), target.position));
+                Goal::Hunt(target.id)
             })
         } else {
             None
@@ -1641,7 +1659,8 @@ impl Brain {
             && self.mind.cognition.directions >= 8;
         for enemy in enemies {
             if !progression::can_fight(v, content, enemy)
-                || events::shared(&v.map.name) && !progression::vulnerable(enemy)
+                || (events::shared(&v.map.name) || content.objects[&enemy.kind].encounter)
+                    && !progression::vulnerable(enemy)
             {
                 continue;
             }
