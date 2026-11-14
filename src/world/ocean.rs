@@ -416,11 +416,32 @@ impl World {
         target: Option<Pos>,
         elapsed: u64,
     ) -> (Motion, f32) {
-        // Shared NPCs may now tick untargeted; aquatic movement still requires acquisition.
+        let e = &self.entities[&id];
+        if e.kind == 0xd64
+            && let Some(parent) = e.parent.and_then(|id| self.entities.get(&id))
+        {
+            let orbit = e.orbit.expect("activated Hermit tentacle orbit");
+            // Bound chasing by the parent's acquisition range so the last tentacle stays reachable: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.Hermit.cs#L102-L110
+            let chasing = e.pos.distance(parent.pos) < 15.
+                && target.is_some_and(|target| e.pos.distance(target) < 4.);
+            return (
+                if chasing {
+                    Motion::Chase {
+                        sight: 4.,
+                        stop: 1.,
+                    }
+                } else {
+                    Motion::Orbit {
+                        anchor: Anchor::Parent,
+                        radius: orbit.radius,
+                    }
+                },
+                if chasing { speed(0.6) } else { orbit.speed },
+            );
+        }
         let Some(target) = target else {
             return (Motion::Stationary, 0.);
         };
-        let e = &self.entities[&id];
         let distance = e.pos.distance(target);
         let chase = |sight, stop| Motion::Chase { sight, stop };
         let home = |distance| Motion::Protect {

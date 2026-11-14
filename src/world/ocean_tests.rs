@@ -92,6 +92,58 @@ fn oxygen_pockets_do_not_stack_and_empty_air_attributes_lethal_damage() {
 }
 
 #[test]
+fn hermit_tentacles_stay_reachable_and_return_without_players() {
+    let (mut w, player) = super::movement_tests::fixture(0x2e, false);
+    w.name = "Realm".into();
+    w.encounter = true;
+    w.rng = rand::rngs::StdRng::seed_from_u64(1461);
+    let home = Pos { x: 6.5, y: 6.5 };
+    let boss = w.spawn_entity(trench::HERMIT, home, vec![]).unwrap();
+    let e = w.entities.get_mut(&boss).unwrap();
+    e.stage = Some(2);
+    e.activated = Some(0);
+    e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
+    let tentacle = w
+        .spawn_entity(0xd64, Pos { x: 10.5, y: 10.5 }, vec![])
+        .unwrap();
+    w.entities
+        .get_mut(&tentacle)
+        .unwrap()
+        .parent
+        .set(Some(boss), tentacle, &mut w.timed_ids);
+    for _ in 0..300 {
+        let pos = w.entities[&tentacle].pos;
+        w.players.get_mut(&player).unwrap().pos = Pos {
+            x: pos.x + 2.,
+            y: pos.y + 2.,
+        };
+        w.now += 50;
+        w.npc_step();
+        assert!(w.entities[&tentacle].pos.distance(home) < 15.5);
+    }
+    w.position_entity(tentacle, Pos { x: 30.5, y: 30.5 })
+        .unwrap();
+    w.players.get_mut(&player).unwrap().paused = true;
+    for _ in 0..600 {
+        w.now += 50;
+        w.npc_step();
+    }
+    assert!(w.entities[&tentacle].pos.distance(home) < 7.);
+    assert_eq!(w.ocean_children(boss, 0xd64), vec![tentacle]);
+    assert_eq!(w.entities[&boss].stage, Some(2));
+    assert_ne!(
+        w.entities[&boss].conditions(w.now) & crate::condition::bit(crate::condition::INVINCIBLE),
+        0
+    );
+    w.players.get_mut(&player).unwrap().paused = false;
+    w.players.get_mut(&player).unwrap().pos = home;
+    w.remove_entity(tentacle);
+    w.now += 50;
+    w.npc_step();
+    assert_eq!(w.entities[&boss].stage, Some(3));
+}
+
+#[test]
 fn ocean_children_are_the_live_owned_children_of_that_kind() {
     let (mut w, player) = super::movement_tests::fixture(0x2e, false);
     let pos = w.players[&player].pos;
