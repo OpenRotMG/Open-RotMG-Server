@@ -597,6 +597,8 @@ def rehearse(stage, work, config):
     before = rows(shadow / 'game.db')
     cfg = {**config, 'bind': '127.0.0.1:18939', 'data': str(stage / 'data'),
            'state': str(shadow), 'shore_bots': False, 'bot_llm': False}
+    # A migration rehearsal must never bind the live server's public game socket.
+    cfg.pop('native', None)
     path = work / 'shadow.json'
     path.write_text(json.dumps(cfg))
     with (work / 'shadow.log').open('w') as log:

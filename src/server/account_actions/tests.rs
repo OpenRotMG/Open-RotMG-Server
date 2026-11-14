@@ -56,6 +56,7 @@ fn fixture_with_control(native: bool) -> (PathBuf, App) {
         content,
         swf: Arc::default(),
         origin: "http://127.0.0.1:1".into(),
+        native: None,
         bot_view_origin: Some("http://127.0.0.1:1".into()),
         sfx: "data/sfx".into(),
         max_players: 16,

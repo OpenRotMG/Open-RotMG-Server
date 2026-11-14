@@ -8,6 +8,8 @@ pub struct Config {
     #[serde(skip)]
     pub desktop: bool,
     pub bind: SocketAddr,
+    #[serde(default)]
+    pub native: Option<Native>,
     pub origin: String,
     #[serde(default)]
     pub bot_view_origin: Option<String>,
@@ -30,6 +32,13 @@ pub struct Config {
     #[serde(default = "default_realm_count")]
     pub realm_count: usize,
 }
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Native {
+    pub bind: SocketAddr,
+    pub host: String,
+}
+
 fn default_realm_count() -> usize {
     2
 }
@@ -127,6 +136,7 @@ impl Config {
             Self {
                 desktop: false,
                 bind: "127.0.0.1:18923".parse()?,
+                native: None,
                 origin: "http://127.0.0.1:18923".into(),
                 bot_view_origin: Some("http://127.0.0.1:18923".into()),
                 data: root.join("data"),
@@ -183,6 +193,24 @@ impl Config {
         Ok((config, control))
     }
     fn validate(&self, control: bool) -> Result<()> {
+        if let Some(native) = &self.native {
+            ensure!(
+                !self.desktop,
+                "offline desktop servers forbid public native sockets"
+            );
+            ensure!(
+                native.bind.port() == 2050,
+                "native game clients require port 2050"
+            );
+            let authority: axum::http::uri::Authority =
+                native.host.parse().context("invalid native host")?;
+            ensure!(
+                authority.host() == native.host
+                    && authority.port().is_none()
+                    && !native.host.contains('@'),
+                "native host must be a hostname or IP without a port"
+            );
+        }
         if self.desktop {
             ensure!(
                 !control && !self.test_state && !self.behind_proxy,
@@ -272,6 +300,35 @@ impl Config {
 #[cfg(test)]
 mod bot_view_tests {
     use super::*;
+    #[test]
+    fn native_socket_is_opt_in_and_requires_the_client_port_and_a_bare_host() {
+        let (mut config, _) = Config::load(&[]).unwrap();
+        assert!(config.native.is_none());
+        config.native = Some(Native {
+            bind: "127.0.0.1:2050".parse().unwrap(),
+            host: "game.example.test".into(),
+        });
+        config.validate(false).unwrap();
+        for host in [
+            "",
+            "https://game.example.test",
+            "game.example.test:2050",
+            "user@game.example.test",
+        ] {
+            config.native.as_mut().unwrap().host = host.into();
+            assert!(config.validate(false).is_err(), "{host}");
+        }
+        config.native.as_mut().unwrap().host = "game.example.test".into();
+        config.native.as_mut().unwrap().bind.set_port(2051);
+        assert!(
+            config
+                .validate(false)
+                .unwrap_err()
+                .to_string()
+                .contains("port 2050")
+        );
+    }
+
     #[test]
     fn initial_realm_count_accepts_one_to_eight_without_changing_player_limit() {
         let (mut config, _) = Config::load(&[]).unwrap();
