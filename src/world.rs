@@ -6330,19 +6330,21 @@ impl World {
         for (id, p) in &mut self.players {
             if p.character.alive && !p.death_pending && !p.departing && p.pos.distance(e.pos) < 25.
             {
-                let cap = (crate::store::experience_goal(p.character.level)
-                    .expect("validated player level") as f32
-                    * if definition.quest { 0.5 } else { 0.1 }) as i32;
-                let amount = reward.min(cap);
-                if amount != 0 {
+                // Deliberately omits the 7.0 per-kill cap (10%/50% of the level's XP) so low levels get full XP from strong enemies.
+                if reward != 0 {
                     p.queue_experience(
-                        amount,
+                        reward,
                         killer,
                         e.damage
                             .get(&p.character.id)
                             .is_some_and(|damage| *damage > 0),
                     )?;
-                    tracing::debug!(player = id, enemy = e.kind, amount, "experience queued");
+                    tracing::debug!(
+                        player = id,
+                        enemy = e.kind,
+                        amount = reward,
+                        "experience queued"
+                    );
                 }
                 let assigned = p.quest == Some(e.id)
                     || (crate::quest::final_root(e.kind)

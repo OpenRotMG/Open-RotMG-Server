@@ -832,3 +832,17 @@ async fn god_loot_chunks_scatter_inside_corpse_tile_without_changing_owners_or_r
         );
     }
 }
+
+#[tokio::test]
+async fn level_one_players_receive_uncapped_god_experience() {
+    let (mut w, _store, _) = reward_world().await;
+    let god = w
+        .spawn_entity(0x67d, Pos { x: 3.5, y: 3.5 }, vec![])
+        .unwrap();
+    w.defeat_entity(god).unwrap();
+    assert!(
+        w.players
+            .values()
+            .all(|p| p.character.level == 1 && p.experience_queued == 450)
+    );
+}
