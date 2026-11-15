@@ -1039,6 +1039,19 @@ impl Brain {
         if (equipping && s.remedy.is_none()) || (v.map.name == "Vault" && s.inspecting) {
             return Ok((Activity::Equip, decision));
         }
+        if decision.item.is_none()
+            && !reserved
+            && v.map.name == "Nexus"
+            && let Some(drop) = progression::discard(v, content, self.mind.future_class)?
+        {
+            tracing::info!(
+                account = v.session.account,
+                ?drop,
+                "junk left in a Nexus bag"
+            );
+            decision.item = Some(drop);
+            return Ok((Activity::Equip, decision));
+        }
         if self.plan.overdue(now) {
             self.plan.abort(now, "deadline passed");
         }
@@ -1231,7 +1244,7 @@ impl Brain {
                     || !self.mind.market.reserves_stock()
                         && !self.mind.market.vault_full()
                         && self.agreement.is_none()
-                        && progression::stash(v, content)?;
+                        && progression::stash(v, content, self.mind.future_class)?;
                 match v.map.name.as_str() {
                     _ if !due => Yield,
                     "Vault" => {

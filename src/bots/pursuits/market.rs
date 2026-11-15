@@ -1450,7 +1450,7 @@ impl Market {
         if self.session.is_none() && !self.preparing {
             self.session_used = true;
             let purposeful = self.target.is_some();
-            let admitted = purposeful || self.trader || self.sought || rng.gen_ratio(1, 5);
+            let admitted = purposeful || self.trader || self.sought || rng.gen_ratio(1, 2);
             let sought = std::mem::take(&mut self.sought);
             tracing::info!(
                 account = v.session.account,
@@ -1458,7 +1458,7 @@ impl Market {
                 probability = if purposeful || self.trader || sought {
                     1.0
                 } else {
-                    0.2
+                    0.5
                 },
                 reason = if purposeful {
                     "affordable_goal_exchange"

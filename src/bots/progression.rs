@@ -96,7 +96,10 @@ pub(super) fn pickup(
             },
         );
         // Owner, 2012: a poor player takes nearly anything; a rich one only what it needs or the best bags.
-        if value == 0 || value < 60 && market.is_some_and(|m| m.beneath(v, content, *kind)) {
+        if value == 0
+            || value < 60 && market.is_some_and(|m| m.beneath(v, content, *kind))
+            || junk(v, content, *kind, future)?
+        {
             continue;
         }
         for to in 4..v.character.items.len() {
@@ -175,13 +178,41 @@ pub(super) fn can_fight(
             ))
 }
 
-pub(super) fn stash(v: &PlayerView, content: &Content) -> Result<bool> {
+pub(super) fn stash(v: &PlayerView, content: &Content, future: Option<u16>) -> Result<bool> {
     for kind in v.character.items.iter().skip(4).filter(|k| **k >= 0) {
-        if spare(content, *kind)? {
+        if spare(content, *kind)? && !junk(v, content, *kind, future)? {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+/// Gear nobody would pay a whole potion for and neither this nor the next character uses.
+/// Live: 59 of 70 banking trips came back full; unsellable gear filled the Vault.
+pub(super) fn junk(
+    v: &PlayerView,
+    content: &Content,
+    kind: i32,
+    future: Option<u16>,
+) -> Result<bool> {
+    Ok(potion_index(content, kind)?.is_none()
+        && spare(content, kind)?
+        && content.item_values.quote_range(kind).is_err()
+        && priority(v, content, kind, true, future)? < 60)
+}
+
+/// Owner, 2012: unwanted gear was left in Nexus bags for whoever wanted it.
+pub(super) fn discard(
+    v: &PlayerView,
+    content: &Content,
+    future: Option<u16>,
+) -> Result<Option<Action>> {
+    for (slot, kind) in v.character.items.iter().enumerate().skip(4) {
+        if *kind >= 0 && junk(v, content, *kind, future)? {
+            return Ok(Some(Action::Drop { slot: own(v, slot) }));
+        }
+    }
+    Ok(None)
 }
 
 pub(super) fn bank(
@@ -220,6 +251,24 @@ pub(super) fn bank(
             break;
         }
     }
+    let empty = (4..v.character.items.len()).find(|i| v.character.items[*i] < 0);
+    for (slot, kind) in chest.contents.iter().enumerate() {
+        if transfer.is_none()
+            && let Some(to) = empty
+            && *kind >= 0
+            && junk(v, content, *kind, future)?
+        {
+            transfer = Some(Action::Swap {
+                from: Slot {
+                    object: chest.id,
+                    slot,
+                    kind: *kind,
+                },
+                to: own(v, to),
+            });
+            reason = "withdraw_junk_for_nexus";
+        }
+    }
     if transfer.is_none() {
         for (from, kind) in v
             .character
@@ -230,7 +279,11 @@ pub(super) fn bank(
             .filter(|(_, k)| **k >= 0)
         {
             let value = priority(v, content, *kind, true, future)?;
-            if value >= 100 || exclude == Some(*kind) || !spare(content, *kind)? {
+            if value >= 100
+                || exclude == Some(*kind)
+                || !spare(content, *kind)?
+                || junk(v, content, *kind, future)?
+            {
                 continue;
             }
             let to = chest.contents.iter().position(|k| *k == -1);

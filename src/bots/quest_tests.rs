@@ -435,10 +435,10 @@ fn wavelength_vault_errand_banks_before_leaving() {
     let (c, mut v) = fixture();
     v.map.name = "Nexus".into();
     v.quest = None;
-    let (falchion, potion) = (0xa6e, 0xa1f);
+    let (sword, potion) = (0xa47, 0xa1f);
     let stat = progression::potion_index(&c, potion).unwrap().unwrap();
     v.character.base_stats[stat] = c.classes[&v.character.class].caps[stat];
-    v.character.items[4..].copy_from_slice(&[falchion, potion, potion, -1, -1, -1, -1, -1]);
+    v.character.items[4..].copy_from_slice(&[sword, potion, potion, -1, -1, -1, -1, -1]);
     let mut chest = v.objects.remove(0);
     let mut brain = Brain::new(ARCHETYPES[0], &v);
     brain.mind.market.trader = true;
@@ -460,13 +460,13 @@ fn wavelength_vault_errand_banks_before_leaving() {
     v.tick += 5;
     let deposit = brain.decide(&v, &c).unwrap();
     assert_eq!(deposit.goal, Goal::Bank(2));
-    assert!(matches!(&deposit.item, Some(Action::Swap { from, .. }) if from.kind == falchion));
+    assert!(matches!(&deposit.item, Some(Action::Swap { from, .. }) if from.kind == sword));
     assert!(
         deposit.journey.is_none(),
         "the Vault is not left before banking"
     );
     v.character.items[4] = -1;
-    v.objects[0].contents[0] = falchion;
+    v.objects[0].contents[0] = sword;
     v.character.inventory_revision += 1;
     v.tick += 5;
     let leave = brain.decide(&v, &c).unwrap();
@@ -851,26 +851,52 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
 }
 
 #[test]
+fn unsellable_gear_leaves_the_vault_for_a_nexus_bag() {
+    let (falchion, sword) = (0xa6e, 0xa47);
+    let (c, mut v) = fixture();
+    v.map.name = "Vault".into();
+    v.objects[0].kind = 0x504;
+    v.objects[0].position = v.position;
+    v.objects[0].contents = vec![falchion, sword, -1, -1, -1, -1, -1, -1];
+    let d = progression::bank(&v, &c, &Grid::terrain(&v), None, None)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(d.item, Some(Action::Swap { from, .. }) if from.kind == falchion));
+    v.character.items[4] = sword;
+    assert!(
+        progression::stash(&v, &c, None).unwrap(),
+        "priced gear is banked"
+    );
+    v.character.items[4] = falchion;
+    assert!(!progression::stash(&v, &c, None).unwrap());
+    v.map.name = "Nexus".into();
+    v.objects.clear();
+    let d = Brain::new(ARCHETYPES[0], &v).decide(&v, &c).unwrap();
+    assert!(matches!(d.item, Some(Action::Drop { slot }) if slot.kind == falchion));
+}
+
+#[test]
 fn full_bag_does_not_leave_the_realm_to_bank_into_a_full_vault() {
     // Live: 59 of 70 level-20 banking trips came back with the same full bag, every five minutes.
-    let falchion = 0xa6e;
+    let sword = 0xa47;
     for full in [false, true] {
         let (c, mut v) = fixture();
         v.quest = None;
         v.objects.clear();
-        v.character.items[4..].copy_from_slice(&[falchion; 8]);
+        v.character.items[4..].copy_from_slice(&[sword; 8]);
         let (_, mut vault) = fixture();
         vault.map.name = "Vault".into();
         vault.objects[0].kind = 0x504;
-        vault.objects[0].contents = vec![if full { falchion } else { -1 }; 8];
+        vault.objects[0].contents = vec![if full { sword } else { -1 }; 8];
         let mut brain = Brain::new(ARCHETYPES[0], &v);
         brain.mind.market.observe(&vault);
         let d = brain.decide(&v, &c).unwrap();
-        assert_eq!(
-            matches!(d.journey, Some(Journey::Nexus)),
-            !full,
-            "full Vault {full}: {:?}",
-            d.goal
+        assert!(
+            matches!(d.journey, Some(Journey::Nexus))
+                && (!full || brain.plan.owner() != Some(plan::Owner::Bank)),
+            "full Vault {full}: {:?} {:?}",
+            d.goal,
+            brain.plan.owner()
         );
     }
 }
