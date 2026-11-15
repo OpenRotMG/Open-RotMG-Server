@@ -666,7 +666,7 @@ fn explorer_joins_a_crowded_realm_event_by_teleporting_outside_the_fight() {
 }
 
 #[test]
-fn arrow_follower_seeds_an_uncrowded_realm_event() {
+fn quest_hunter_seeds_an_uncrowded_realm_event_that_godlands_farmers_leave() {
     // Live: Lord of the Lost Lands was skipped 16 times in 25 minutes because nobody would start the crowd.
     let (c, mut v) = fixture();
     v.character.level = 20;
@@ -674,7 +674,12 @@ fn arrow_follower_seeds_an_uncrowded_realm_event() {
     v.objects[0].hp = 70000;
     v.objects[0].max_hp = 70000;
     let mut profile = ARCHETYPES[0];
-    profile.role = persona::Role::Newbie;
+    assert_ne!(
+        Brain::new(profile, &v).decide(&v, &c).unwrap().goal,
+        Goal::Hunt(2)
+    );
+    profile.identity = "Gnosis";
+    assert!(quests::hunts_quests(&profile));
     let d = Brain::new(profile, &v).decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Hunt(2));
     assert!(
@@ -1128,4 +1133,43 @@ fn level_20s_shoot_realm_event_bosses_and_back_off_out_of_reach() {
     v.character.hp = 600;
     v.tick += 60;
     assert_ne!(step(&mut brain, &mut v).goal, Goal::Recover);
+}
+
+#[test]
+fn nine_in_ten_level_20s_farm_the_godlands_in_ordinary_gear() {
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.map.layout = Some("classic-world-02-reconstruction".into());
+    let godlands = Pos { x: 100.5, y: 100.5 };
+    v.map.godlands = Arc::new(vec![godlands]);
+    let staff = c.objects[&(v.character.items[0] as u16)].slot_type;
+    v.character.items[0] = c
+        .objects
+        .values()
+        .find(|o| o.slot_type == staff && o.tier == Some(3))
+        .map(|o| i32::from(o.kind))
+        .unwrap();
+    let mut hunters = 0;
+    for profile in persona::PERSONAS.iter() {
+        let mut brain = Brain::new(*profile, &v);
+        brain
+            .crowd
+            .bands
+            .observe(&v, &c, &mut BTreeMap::new(), true);
+        assert_eq!(
+            brain.crowd.bands.limit, 4,
+            "a tier-3 staff still farms the Godlands"
+        );
+        let hunts = quests::hunts_quests(profile);
+        hunters += usize::from(hunts);
+        let expected = if hunts { Goal::Hunt(2) } else { Goal::Venture };
+        assert_eq!(
+            brain.decide(&v, &c).unwrap().goal,
+            expected,
+            "{}",
+            profile.name
+        );
+    }
+    let share = hunters as f32 / persona::PERSONAS.len() as f32;
+    assert!((0.08..0.12).contains(&share), "{hunters} quest hunters");
 }

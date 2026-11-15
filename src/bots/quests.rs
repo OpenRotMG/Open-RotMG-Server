@@ -1,4 +1,4 @@
-//! Why a level-20 player follows the quest arrow: drops worth having, a crowd already there, or habits that ignore the target.
+//! Why a level-20 player leaves the Godlands for the quest arrow: an event worth joining, or a quest-hunting habit.
 use super::*;
 use std::sync::{LazyLock, Mutex};
 
@@ -7,7 +7,6 @@ const SAMPLES: u32 = 400;
 const SPEED_POTION_UNITS: f32 = 3.;
 /// Below this, a quest is not worth a detour for someone with reasons to choose.
 const INTERESTING: f32 = 50.;
-const BORED_MS: u64 = 5 * 60_000;
 
 static VALUES: LazyLock<Mutex<BTreeMap<u16, f32>>> = LazyLock::new(Default::default);
 
@@ -31,44 +30,37 @@ pub(super) fn loot_value(c: &Content, kind: u16) -> f32 {
         })
 }
 
+/// Owner decision: about one level 20 in ten hunts quests; the rest farm the Godlands.
+pub(super) fn hunts_quests(p: &Profile) -> bool {
+    // High bits: the low bits already pick other persona traits.
+    (persona::seed(p.identity) >> 32).is_multiple_of(10)
+}
+
 pub(super) struct Appeal {
     pub score: f32,
     pub value: f32,
     pub crowd: usize,
+    pub event: bool,
     pub habit: Option<&'static str>,
 }
 impl Appeal {
     pub fn interesting(&self) -> bool {
         self.score >= INTERESTING
     }
-    /// Habitual players start the crowd others join; a crowd beats what nobody would fight alone.
+    /// Quest hunters follow the arrow; Godlands farmers leave only for an event they or a crowd can take on.
     pub fn joins(&self, solo: bool) -> bool {
-        self.interesting() && (solo || self.crowd >= 3 || self.habit.is_some())
+        self.interesting() && (self.habit.is_some() || self.event && (solo || self.crowd >= 3))
     }
 }
 
-pub(super) fn appeal(
-    p: &Profile,
-    c: &Content,
-    kind: u16,
-    crowd: usize,
-    last_progress: u64,
-) -> Appeal {
+pub(super) fn appeal(p: &Profile, c: &Content, kind: u16, crowd: usize) -> Appeal {
     // Veterans who recognize valuable bags also know what a quest drops; newcomers judge by the arrow and the crowd.
     let value = if p.knows_blue {
         loot_value(c, kind)
     } else {
         0.
     };
-    let habit = if p.role == persona::Role::Newbie {
-        Some("follows_arrow")
-    } else if persona::seed(p.identity).is_multiple_of(5) {
-        Some("closes_realms")
-    } else if plan::now().saturating_sub(last_progress) >= BORED_MS {
-        Some("bored")
-    } else {
-        None
-    };
+    let habit = hunts_quests(p).then_some("hunts_quests");
     // Live: 93 of 97 level-20 quest follows were Red Demon, a god-tagged hero; only Oryx's events draw crowds.
     let event = c.objects[&kind].encounter;
     // In a 2012 realm of 70 only 5-8 players did midland quests; most level 20s farmed the Godlands.
@@ -81,6 +73,7 @@ pub(super) fn appeal(
         score,
         value,
         crowd,
+        event,
         habit,
     }
 }
@@ -92,7 +85,7 @@ fn red_demon_is_a_hero_not_an_event() {
     let mut p = super::ARCHETYPES[1];
     p.knows_blue = false;
     p.role = persona::Role::Grinder;
-    let score = |kind| appeal(&p, &c, kind, 0, plan::now()).score;
+    let score = |kind| appeal(&p, &c, kind, 0).score;
     assert_eq!(
         score(0x668),
         score(0x678),

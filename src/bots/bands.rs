@@ -24,10 +24,10 @@ pub(super) fn tier(terrain: u8) -> u8 {
         _ => 0,
     }
 }
-fn suitable(v: &PlayerView, c: &Content) -> u8 {
+fn suitable(v: &PlayerView) -> u8 {
     match v.character.level {
-        // Mana comes and goes with casting; gear decides whether the Godlands is survivable.
-        20 if events::equipped(v, c) => 4,
+        // Live: behind a tier-7 gear gate 0.5% of level-20 frames fought gods; 2012 level 20s farmed them in whatever they had.
+        20 => 4,
         15.. => 3,
         10.. => 2,
         _ => 1,
@@ -81,7 +81,7 @@ impl Bands {
                 );
             }
         }
-        self.limit = suitable(v, c);
+        self.limit = suitable(v);
         if v.map.name != "Realm" {
             return false;
         }

@@ -758,7 +758,6 @@ impl Brain {
                 content,
                 quest.kind,
                 self.crowd.near(v, quest.position),
-                self.plan.last_progress,
             )
         })
     }
