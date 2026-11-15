@@ -7,6 +7,8 @@ pub(super) struct Grenade {
     pub(super) radius: f32,
     pub(super) damage: i32,
     pub(super) deadline: u64,
+    // Distances at the telegraph let evidence show who escaped a warned blast, not just who was hit.
+    threatened: Vec<(i32, f32)>,
 }
 
 /// A full budget defers a summon; its encounter keeps acting and retries next tick.
@@ -518,12 +520,19 @@ impl World {
             return Ok(());
         }
         self.telegraph_throw(owner, position, 0xffff0000);
+        let threatened = self
+            .players
+            .iter()
+            .map(|(id, p)| (*id, p.pos.distance(position)))
+            .filter(|(_, distance)| *distance < radius)
+            .collect();
         self.grenades.push(Grenade {
             kind: self.entities[&owner].kind,
             position,
             radius,
             damage,
             deadline: self.now + 1500,
+            threatened,
         });
         Ok(())
     }
@@ -586,6 +595,13 @@ impl World {
             if grenade.deadline > self.now {
                 self.grenades.push(grenade);
                 continue;
+            }
+            for (id, warned) in &grenade.threatened {
+                if let Some(p) = self.players.get(id) {
+                    p.audit_fact(*id, &self.name, self.now, "area_threat", || serde_json::json!({"source_kind":grenade.kind,
+                        "position":[grenade.position.x,grenade.position.y],"radius":grenade.radius,
+                        "distance_at_throw":warned,"distance_at_impact":p.pos.distance(grenade.position)}));
+                }
             }
             if let Err(error) = self.area_damage(
                 grenade.kind,

@@ -4996,6 +4996,24 @@ impl World {
             hit: BTreeSet::new(),
             hit_enemy: false,
         });
+        if shot_index == 0 {
+            // Aim error to the best-aligned enemy separates autoaim from human aim; origin vs self exposes magnet aim.
+            let error = |e: &Entity| {
+                ((e.pos.y - start.y).atan2(e.pos.x - start.x) - aim + std::f32::consts::PI)
+                    .rem_euclid(std::f32::consts::TAU)
+                    - std::f32::consts::PI
+            };
+            let target = self
+                .actors_near(start, 15.)
+                .filter(|e| self.content.objects[&e.kind].enemy)
+                .min_by(|a, b| error(a).abs().total_cmp(&error(b).abs()))
+                .map(|e| serde_json::json!([e.id, e.kind, e.pos.x, e.pos.y, error(e)]));
+            let p = &self.players[&id];
+            p.audit_fact(id, &self.name, self.now, "shot_aim", || {
+                serde_json::json!({"client_ms":time,"bullet":bullet,
+                "aim":aim,"origin":[start.x,start.y],"self":[p.pos.x,p.pos.y],"target":target})
+            });
+        }
         let mut o = Writer::new();
         o.u8(bullet).i32(id).i16(kind as i16).f32(angle);
         spectator::publish(&self.players[&id], 74, &o.0);
@@ -8193,6 +8211,8 @@ mod reviewed_name_tests;
 #[cfg(test)]
 mod shop_tests;
 
+#[cfg(test)]
+mod cheat_evidence_tests;
 #[cfg(test)]
 mod combat_tests;
 #[cfg(test)]

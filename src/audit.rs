@@ -118,7 +118,14 @@ impl CombatBuffer {
     }
 }
 static COMBAT: OnceLock<Mutex<CombatBuffer>> = OnceLock::new();
+#[cfg(test)]
+thread_local! {
+    // Tests run one per thread, so a thread-local copy isolates facts from the shared batch.
+    pub static CAPTURED: std::cell::RefCell<Vec<Value>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 pub fn combat(data: Value) {
+    #[cfg(test)]
+    CAPTURED.with(|c| c.borrow_mut().push(data.clone()));
     COMBAT
         .get_or_init(|| Mutex::new(CombatBuffer::default()))
         .lock()
