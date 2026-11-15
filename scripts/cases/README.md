@@ -3,7 +3,7 @@
 Set `PI_BROWSER_TOOLS` to the absolute managed-browser helper directory and `PI_NATIVE_TEST_CHROME` to the absolute Chrome executable. Linux needs Node 22.15+, Xvfb, xauth, Openbox and the normal user session bus. `PI_NATIVE_TEST_CHROME_ARGS` optionally supplies a JSON array of rendering arguments.
 
 ```sh
-python3 scripts/qa.py native examples/testing/item-use.mjs
+python3 scripts/qa.py native scripts/cases/item-use.mjs
 ```
 
 Copy the small item-use case (`fixture` and `run(game)`), not setup code. The runner allocates durable results outside Git and owns a private display/browser, fresh guest, bounded actions, captures and scratch cleanup. State, profiles and logs remain in the printed results directory. Long jobs use `python3 scripts/qa.py --background native …`; inspect or cancel with `status JOB_DIRECTORY` / `cancel JOB_DIRECTORY`. Linux requires a user systemd manager (250+) and cgroup v2.

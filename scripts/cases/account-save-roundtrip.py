@@ -123,7 +123,7 @@ if args.http_export:
                 assert secret not in (out / 'source-http.log').read_text()
             if args.cors_proxy:
                 env = dict(os.environ, ACCOUNT_SAVE_ORIGIN=source_origin, ACCOUNT_SAVE_PHASE='cors', ACCOUNT_SAVE_CORS_API=base, PI_NATIVE_TEST_CHROME_ARGS='[]')
-                subprocess.run(['node', str(root / 'examples/testing/account-save-native.mjs')], input=b'backup-fixture-password\n', env=env, check=True)
+                subprocess.run(['node', str(root / 'scripts/cases/account-save-native.mjs')], input=b'backup-fixture-password\n', env=env, check=True)
                 browser_content = (out / 'cors-player.json').read_bytes()
                 browser_save = json.loads(browser_content)
                 downloaded.pop('exported_at'); comparable = dict(browser_save); comparable.pop('exported_at')
@@ -204,7 +204,7 @@ for phase in ['before', 'reopened']:
             assert account('backup-fixture-password').tag == 'Error'
             if args.native:
                 env = dict(os.environ, ACCOUNT_SAVE_ORIGIN=base, ACCOUNT_SAVE_LOGIN=result['login'], ACCOUNT_SAVE_PHASE=phase)
-                subprocess.run(['node', str(root / 'examples/testing/account-save-native.mjs')], input=password, env=env, check=True)
+                subprocess.run(['node', str(root / 'scripts/cases/account-save-native.mjs')], input=password, env=env, check=True)
             child.stdin.write(b'stop\n'); child.stdin.flush()
             assert child.wait(timeout=30) == 0
             report['assertions'].append(phase + '-legacy-auth-and-clean-shutdown')

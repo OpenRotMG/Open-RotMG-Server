@@ -2,7 +2,7 @@
 
 Use `scripts/record-demo.mjs` for capture, cursor timing, rendering and technical validation. Gameplay assertions remain in your scenario; recording success does not prove gameplay success. Capture the real before state before editing, then verify after through normal client gameplay. Keep state, scenarios and media outside Git.
 
-Requires Node 22+, Python 3/Pillow, FFmpeg/ffprobe, Noto Sans fonts and the existing owned-tab managed-CDP helper. Use the private-display launch recipe in `examples/testing/README.md`. Prepare a fresh owned gameplay target in that managed Chrome; never use desktop input, activate host windows or use another owner's browser. The tool does not bring tabs forward or restore/fullscreen windows. A hidden target fails readiness instead of activating the desktop. Recording consumes and closes that target, including failed takes.
+Requires Node 22+, Python 3/Pillow, FFmpeg/ffprobe, Noto Sans fonts and the existing owned-tab managed-CDP helper. Use the private-display launch recipe in `scripts/cases/README.md`. Prepare a fresh owned gameplay target in that managed Chrome; never use desktop input, activate host windows or use another owner's browser. The tool does not bring tabs forward or restore/fullscreen windows. A hidden target fails readiness instead of activating the desktop. Recording consumes and closes that target, including failed takes.
 
 ```sh
 node scripts/record-demo.mjs record \

@@ -32,4 +32,4 @@ Serialized authentication, active/pending/fenced ownership refusal, atomic Argon
 **PR156:** native success, old-password refusal, preserved state, actual restart/native reload; reused at its own revision, not freshly repeated.
 https://github.com/OpenRotMG/Open-RotMG-Server/pull/156#issuecomment-6238787224
 
-**New QA:** `examples/testing/change-password.mjs` exercises native validation/refusal/success and cached-password LOAD; active ownership refusal is an HTTP probe. Prepared progress is not earned progression; API probes are not native login. Production/mail/authority/death/ACK/lease rules unchanged. Exact receipts: #925 and the restoration ledger.
+**New QA:** `scripts/cases/change-password.mjs` exercises native validation/refusal/success and cached-password LOAD; active ownership refusal is an HTTP probe. Prepared progress is not earned progression; API probes are not native login. Production/mail/authority/death/ACK/lease rules unchanged. Exact receipts: #925 and the restoration ledger.

@@ -25,7 +25,7 @@ test('the real secondary whisper hook forwards its receipt owner, not the primar
   process.env.PI_BROWSER_TOOLS=root;
   globalThis.WebSocket=class{constructor(){queueMicrotask(()=>this.onopen());}close(){this.onclose?.();}};
   t.mock.method(globalThis,'fetch',async()=>({json:async()=>[{type:'page',id:'unit-target',url:'about:blank',webSocketDebuggerUrl:'ws://unit-only'}]}));
-  const {beforeNavigate}=await import('../examples/testing/whispers.mjs');
+  const {beforeNavigate}=await import('./cases/whispers.mjs');
   await beforeNavigate({browser:{owner:secondary,port:12345,target:'unit-target'},signal:controller.signal});
   assert.deepEqual((await import(pathToFileURL(helper).href)).owners,[secondary]);
 });
