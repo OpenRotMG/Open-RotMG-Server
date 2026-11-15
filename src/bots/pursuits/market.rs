@@ -1664,6 +1664,23 @@ fn fair(q: &[Goods; 2], c: &Content) -> bool {
         Ok(true)
     )
 }
+/// A peer WINDOW pays for `want` with at least the asked goods, or with one money kind whose lowest
+/// value covers the highest value `want` could have. Mixed baskets stay unpriced.
+pub(crate) fn pays(c: &Content, want: &Goods, items: &[i32], offer: &[bool; 12]) -> bool {
+    let paid: Vec<i32> = (4..12).filter(|i| offer[*i]).map(|i| items[i]).collect();
+    if offer[..4].contains(&true) || paid.is_empty() || paid.iter().any(|k| *k != paid[0]) {
+        return false;
+    }
+    let count = paid.len() as u64;
+    if paid[0] == want.kind {
+        return count >= u64::from(want.quantity);
+    }
+    money(c, paid[0])
+        && matches!(
+            (c.item_values.quote_range(paid[0]), c.item_values.quote_range(want.kind)),
+            (Ok(p), Ok(w)) if p.min * count >= w.max * u64::from(want.quantity)
+        )
+}
 /// What 2012 traders paid with: permanent stat potions, plus Paramount Defense rings, Resurrection
 /// amulets and Wine Cellar Incantations, the only gear quoted like money in the trade footage.
 fn money(c: &Content, kind: i32) -> bool {

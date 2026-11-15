@@ -162,11 +162,8 @@ impl Market {
         if empty && v.clock_at < t.empty_offer_until {
             return Ok(None);
         }
-        let compatible = t.offers[1]
-            .iter()
-            .enumerate()
-            .all(|(i, b)| !*b || (i >= 4 && t.items[1][i] == q[1].kind))
-            && t.offers[1].iter().filter(|b| **b).count() == usize::from(q[1].quantity);
+        let compatible = pays(c, &q[1], &t.items[1], &t.offers[1])
+            && free + usize::from(q[0].quantity) >= t.offers[1].iter().filter(|b| **b).count();
         if !compatible && v.time_ms >= t.ready && v.clock_at >= t.ready_at {
             tracing::info!(
                 account = v.session.account,

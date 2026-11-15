@@ -364,6 +364,41 @@ fn buy_order_is_answered_from_spare_stock_outside_own_quote() {
 }
 
 #[test]
+fn windows_pay_with_asked_goods_or_one_money_kind_worth_at_least_as_much() {
+    let c = Content::load(Path::new("data")).unwrap();
+    let window = |want: Goods, offered: &[i32]| {
+        let mut items = vec![-1; 12];
+        let mut offer = [false; 12];
+        for (i, kind) in offered.iter().enumerate() {
+            (items[4 + i], offer[4 + i]) = (*kind, true);
+        }
+        pays(&c, &want, &items, &offer)
+    };
+    assert!(window(goods(SPEED, 1), &[SPEED]));
+    assert!(window(goods(SPEED, 1), &[SPEED, SPEED]));
+    assert!(!window(goods(SPEED, 2), &[SPEED]));
+    assert!(
+        window(goods(SPEED, 1), &[DEX]),
+        "DEX is worth at least a SPD's highest value"
+    );
+    assert!(window(goods(SPEED, 1), &[0xa1f]));
+    assert!(window(goods(DEX, 1), &[SPEED, SPEED]));
+    assert!(
+        !window(goods(DEX, 1), &[SPEED]),
+        "a SPD may be worth less than a DEX"
+    );
+    assert!(
+        !window(goods(SPEED, 1), &[0xa1f, DEX]),
+        "mixed baskets stay unpriced"
+    );
+    assert!(
+        !window(goods(SPEED, 1), &[2563]),
+        "ordinary gear is not money"
+    );
+    assert!(!window(goods(SPEED, 1), &[]));
+}
+
+#[test]
 fn bots_never_offer_ordinary_gear_as_payment_for_gear() {
     // Live: a bot offered 2 Rings of Superior Health for a Ring of Paramount Health; the footage only shows gear sold for potions or money items.
     let c = Content::load(Path::new("data")).unwrap();

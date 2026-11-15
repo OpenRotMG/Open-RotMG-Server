@@ -458,7 +458,12 @@ impl World {
                     t.players.contains(&peer)
                         && t.deliveries == [None, None]
                         && matches(&t.items[side], &mine, &quote[0])
-                        && matches(&t.items[1 - side], &theirs, &quote[1]),
+                        && crate::bots::pursuits::market::pays(
+                            &self.content,
+                            &quote[1],
+                            &t.items[1 - side],
+                            &theirs
+                        ),
                     "window goods differ from inventory-bound market quote"
                 );
                 let inventories = exchanged_items(&t.items, &t.offers)?;
@@ -1199,7 +1204,8 @@ mod community_tests {
             let mut items = w.players[&id].character.items.clone();
             items[4..].fill(-1);
             if side == 0 {
-                items[4] = 0xa20;
+                // A LIFE overpays the quoted DEF.
+                items[4] = 0xae9;
             } else {
                 items[4..8].fill(0xa21);
             }
@@ -1337,7 +1343,7 @@ mod community_tests {
             "another payload under the same receipt cannot authorize thanks"
         );
         w.finish_trade(plan, Ok(revisions)).unwrap();
-        assert_eq!(w.players[&ids[1]].character.items[4], 0xa20);
+        assert_eq!(w.players[&ids[1]].character.items[4], 0xae9);
         assert_eq!(
             w.players[&ids[0]]
                 .character
