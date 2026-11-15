@@ -58,10 +58,18 @@ async fn native_account_list_requires_enabled_transport_and_keeps_browser_dns_un
     )
     .await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let policy = super::http_policy(State(a.clone())).await;
+    assert_eq!(policy.status(), StatusCode::NOT_FOUND);
     a.native = Some(crate::config::Native {
         bind: "127.0.0.1:2050".parse().unwrap(),
         host: "game.example.test".into(),
     });
+    let policy = super::http_policy(State(a.clone())).await;
+    assert_eq!(policy.status(), StatusCode::OK);
+    assert_eq!(
+        policy.headers()["content-type"],
+        "text/x-cross-domain-policy"
+    );
     for native in [false, true] {
         let query = Query(HashMap::from([(
             "native".into(),

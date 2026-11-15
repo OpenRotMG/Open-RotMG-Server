@@ -3358,6 +3358,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
         .route("/legacy-api/guild/{operation}", post(guilds::request))
         .nest_service("/sfx", tower_http::services::ServeDir::new(a.sfx.clone()))
         .route("/client.swf", get(swf))
+        .route("/crossdomain.xml", get(native::http_policy))
         .route("/game", get(websocket))
         .route(
             "/api/diagnostics/{key}",

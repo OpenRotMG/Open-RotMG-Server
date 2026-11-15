@@ -12,6 +12,22 @@ use tokio::{
 
 const POLICY_REQUEST: &[u8] = b"<policy-file-request/>\0";
 const POLICY: &[u8] = b"<?xml version=\"1.0\"?><cross-domain-policy><allow-access-from domain=\"*\" to-ports=\"2050\" /></cross-domain-policy>\0";
+// Adobe Flash Player blocks the downloaded SWF's API requests without this; browser cookies are SameSite=Lax.
+const HTTP_POLICY: &str = "<?xml version=\"1.0\"?><cross-domain-policy><site-control permitted-cross-domain-policies=\"master-only\"/><allow-access-from domain=\"*\" secure=\"false\"/></cross-domain-policy>";
+
+pub(super) async fn http_policy(
+    axum::extract::State(a): axum::extract::State<App>,
+) -> axum::response::Response {
+    use axum::{http::StatusCode, response::IntoResponse};
+    if a.native.is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    (
+        [("content-type", "text/x-cross-domain-policy")],
+        HTTP_POLICY,
+    )
+        .into_response()
+}
 
 pub(super) async fn serve(a: App, listener: TcpListener) -> io::Result<()> {
     tracing::info!(address=%listener.local_addr()?, "native game socket listening");
