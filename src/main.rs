@@ -87,11 +87,11 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         linux_bot_thread_priority = cfg!(target_os = "linux"),
         "runtime platform capabilities"
     );
-    let dialogue = bots::dialogue::Service::configured(config.bot_llm)?;
     let client = config.client;
     let state = config.state;
     tracing::info!(address=%config.bind, state=%state.display(), client=%client.display(), data=%config.data.display(), "local environment selected");
     std::fs::create_dir_all(&state)?;
+    let dialogue = bots::dialogue::Service::configured(config.bot_llm, &state)?;
     if config.desktop {
         STATE_LOCK
             .set(state_lock::StateLock::acquire(&state)?)

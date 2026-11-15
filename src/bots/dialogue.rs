@@ -231,9 +231,10 @@ pub(crate) struct Service {
     slots: Arc<Semaphore>,
     budget: Mutex<Budget>,
     wordings: Mutex<BTreeMap<String, market::Wording>>,
+    repertoires: Option<(std::path::PathBuf, Mutex<market::Saved>)>,
 }
 impl Service {
-    pub fn configured(enabled: bool) -> Result<Option<Arc<Self>>> {
+    pub fn configured(enabled: bool, state: &std::path::Path) -> Result<Option<Arc<Self>>> {
         if !enabled {
             tracing::info!("bot dialogue explicitly disabled");
             return Ok(None);
@@ -241,7 +242,8 @@ impl Service {
         let key = std::env::var("AI_GATEWAY_API_KEY").map_err(|_| {
             anyhow::anyhow!("bot_llm enabled: AI_GATEWAY_API_KEY is required and must be UTF-8")
         })?;
-        let service = Self::new(&key, ENDPOINT, DEADLINE)?;
+        let mut service = Self::new(&key, ENDPOINT, DEADLINE)?;
+        service.restore_repertoires(state.join("bot-market-repertoires.json"))?;
         tracing::info!(
             model = MODEL,
             provider = "nvidia",
@@ -268,6 +270,7 @@ impl Service {
             endpoint: endpoint.into(),
             slots: Arc::new(Semaphore::new(2)),
             wordings: Mutex::new(BTreeMap::new()),
+            repertoires: None,
             budget: Mutex::new(Budget::new(Instant::now())),
         })
     }

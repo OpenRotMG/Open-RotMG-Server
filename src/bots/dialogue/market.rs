@@ -5,6 +5,7 @@ use crate::bots::pursuits::market::{
 };
 
 type Repertoire = [String; 3];
+pub(super) type Saved = BTreeMap<String, (Intent, String)>;
 const FAVORITE_SHAPES: [&str; 8] = [
     "s>{give}={want}",
     "selling {give} for {want}",
@@ -248,6 +249,56 @@ fn render(
 }
 
 impl Service {
+    /// The provider's daily budget regenerates about one repertoire per two minutes, slower than
+    /// deploys restart the server, so speakers would otherwise stay mute after every restart.
+    pub(super) fn restore_repertoires(&mut self, path: std::path::PathBuf) -> Result<()> {
+        let saved: Saved = match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .with_context(|| format!("corrupt market repertoires {}", path.display()))?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(error) => return Err(error).context(format!("read {}", path.display())),
+        };
+        let wordings = self
+            .wordings
+            .get_mut()
+            .expect("market speech cache poisoned");
+        let mut kept = BTreeMap::new();
+        for (key, (intent, reply)) in saved {
+            match repertoire(&reply, intent) {
+                Ok(templates) if key.ends_with(&format!(":{intent:?}")) => {
+                    wordings.insert(
+                        key.clone(),
+                        Wording {
+                            created: Instant::now(),
+                            next: 0,
+                            result: Arc::new(Mutex::new(Some(Ok(templates)))),
+                        },
+                    );
+                    kept.insert(key, (intent, reply));
+                }
+                _ => tracing::warn!(
+                    key,
+                    ?intent,
+                    reply,
+                    "saved market repertoire fails current grammar; it regenerates"
+                ),
+            }
+        }
+        tracing::info!(path = %path.display(), restored = kept.len(), "market repertoires restored");
+        self.repertoires = Some((path, Mutex::new(kept)));
+        Ok(())
+    }
+    fn save_repertoire(&self, key: String, intent: Intent, reply: String) -> Result<()> {
+        let Some((path, saved)) = &self.repertoires else {
+            return Ok(());
+        };
+        let mut saved = saved.lock().expect("saved market repertoires poisoned");
+        saved.insert(key, (intent, reply));
+        let partial = path.with_extension("json.partial");
+        std::fs::write(&partial, serde_json::to_vec(&*saved)?)?;
+        std::fs::rename(&partial, path)?;
+        Ok(())
+    }
     pub(in crate::bots) fn market_wording(
         self: &Arc<Self>,
         name: &str,
@@ -306,12 +357,12 @@ impl Service {
             return Ok(None);
         }
         ensure!(
-            cache.contains_key(&key) || cache.len() < 256,
+            cache.contains_key(&key) || cache.len() < 1024,
             "market speech speaker cache full"
         );
         let result = Arc::new(Mutex::new(None));
         cache.insert(
-            key,
+            key.clone(),
             Wording {
                 created: Instant::now(),
                 next: 0,
@@ -353,13 +404,22 @@ impl Service {
                 Err(error) => {
                     tracing::error!(request=id, bot=name, %error, "market generation failed; no substitute speech")
                 }
-                Ok(_) => tracing::info!(
-                    request = id,
-                    bot = name,
-                    ?intent,
-                    ?templates,
-                    "market reusable repertoire generated"
-                ),
+                Ok(_) => {
+                    tracing::info!(
+                        request = id,
+                        bot = name,
+                        ?intent,
+                        ?templates,
+                        "market reusable repertoire generated"
+                    );
+                    let reply = templates
+                        .as_ref()
+                        .expect("validated market repertoire missing")
+                        .join("|");
+                    if let Err(error) = service.save_repertoire(key, intent, reply) {
+                        tracing::error!(bot = name, %error, "market repertoire not saved; it regenerates after restart");
+                    }
+                }
             }
             *result.lock().expect("market speech result poisoned") =
                 Some(reply.map(|_| templates.expect("validated market repertoire missing")));
@@ -586,6 +646,51 @@ mod tests {
             Some("nty 3 spd for 1 def".into())
         );
         assert_eq!(service.health()["daily_requests"], 0);
+    }
+
+    #[tokio::test]
+    async fn saved_repertoires_speak_after_restart_without_a_provider_request() {
+        let c = content();
+        let path = std::env::temp_dir().join(format!("repertoires-{}.json", rand::random::<u64>()));
+        let restart = || {
+            let mut service =
+                Service::new("unused", "http://127.0.0.1:1", Duration::from_secs(1)).unwrap();
+            service.restore_repertoires(path.clone()).unwrap();
+            Arc::new(service)
+        };
+        let reply = "thx|thanks|tyvm".to_owned();
+        restart()
+            .save_repertoire("Trader:MarketThanks".into(), Intent::MarketThanks, reply)
+            .unwrap();
+        std::fs::write(
+            &path,
+            std::fs::read_to_string(&path).unwrap().replace(
+                '}',
+                r#","Other:MarketThanks":["market_thanks","ty|ty|ty"]}"#,
+            ),
+        )
+        .unwrap();
+        let service = restart();
+        let thanks = Message {
+            text: "ty".into(),
+            channel: Channel::Tell("Guest1".into()),
+        };
+        assert_eq!(
+            service
+                .market_wording("Trader", &thanks, &c, json!({}))
+                .unwrap(),
+            Some("thx".into())
+        );
+        assert!(
+            !service
+                .wordings
+                .lock()
+                .unwrap()
+                .contains_key("Other:MarketThanks"),
+            "a saved repertoire failing current grammar regenerates"
+        );
+        assert_eq!(service.health()["daily_requests"], 0);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
