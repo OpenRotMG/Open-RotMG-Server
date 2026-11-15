@@ -113,7 +113,12 @@ impl Store {
         // Rolling 7/30-day windows are reconstruction, not recovered 123.5.1 policy: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/common/DbModels.cs
         let cutoff = now.saturating_sub(window(&span)?).max(0);
         let legacy_base = self.legacy_base;
-        let reviewed = self.reviewed_json();
+        // Marked players asked to compete with each other, so only their own view keeps cheaters.
+        let reviewed = if self.content.reviewed(account) {
+            "[]".into()
+        } else {
+            self.reviewed_json()
+        };
         self.call(move |db| {
             let tx = db.transaction()?;
             let mut xml = format!("<FameList timespan=\"{span}\">");

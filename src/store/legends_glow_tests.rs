@@ -143,7 +143,7 @@ async fn legends_glow_propagates_foreign_receipt_and_query_errors() {
 }
 
 #[tokio::test]
-async fn reviewed_accounts_are_hidden_from_legends_and_do_not_take_glow_slots() {
+async fn reviewed_accounts_are_hidden_from_honest_legends_and_do_not_take_glow_slots() {
     let mut content = Content::load(Path::new("data")).unwrap();
     content.reviewed_accounts = vec![crate::content::reviews::Review {
         account: 1,
@@ -163,4 +163,10 @@ async fn reviewed_accounts_are_hidden_from_legends_and_do_not_take_glow_slots() 
     let list = store.legends("week".into(), 0, 0).await.unwrap();
     assert!(!list.contains("accountId=\"1\""), "{list}");
     assert!(list.contains(&format!("accountId=\"{honest}\"")), "{list}");
+    let cheaters_view = store.legends("week".into(), cheater, 0).await.unwrap();
+    assert!(cheaters_view.contains("accountId=\"1\""), "{cheaters_view}");
+    assert!(
+        cheaters_view.contains(&format!("accountId=\"{honest}\"")),
+        "{cheaters_view}"
+    );
 }
