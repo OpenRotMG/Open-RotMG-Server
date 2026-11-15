@@ -38,7 +38,7 @@ async fn account(store: &Store, content: &Content, guid: &str) -> i32 {
 async fn glowing(store: &Store, account: i32, now: i64) -> bool {
     let base = store.legacy_base;
     store
-        .call(move |db| legends::is_legend_at(db, account, now, base))
+        .call(move |db| legends::is_legend_at(db, account, now, base, "[]"))
         .await
         .unwrap()
 }
@@ -140,4 +140,27 @@ async fn legends_glow_propagates_foreign_receipt_and_query_errors() {
         .await
         .unwrap();
     assert!(store.is_legend(reader).await.is_err());
+}
+
+#[tokio::test]
+async fn reviewed_accounts_are_hidden_from_legends_and_do_not_take_glow_slots() {
+    let mut content = Content::load(Path::new("data")).unwrap();
+    content.reviewed_accounts = vec![crate::content::reviews::Review {
+        account: 1,
+        reviewed_on: "2026-11-15".into(),
+    }];
+    let store = Store::open(Path::new(":memory:"), &content).unwrap();
+    let cheater = account(&store, &content, "glow-cheater").await;
+    assert_eq!(cheater, 1);
+    let honest = account(&store, &content, "glow-honest").await;
+    let then = super::legends::now().unwrap() - 60;
+    for _ in 0..10 {
+        death(&store, &content, cheater, then).await;
+    }
+    death(&store, &content, honest, then).await;
+    assert!(!store.is_legend(cheater).await.unwrap());
+    assert!(store.is_legend(honest).await.unwrap());
+    let list = store.legends("week".into(), 0, 0).await.unwrap();
+    assert!(!list.contains("accountId=\"1\""), "{list}");
+    assert!(list.contains(&format!("accountId=\"{honest}\"")), "{list}");
 }

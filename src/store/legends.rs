@@ -3,7 +3,7 @@ use super::*;
 // Seeded/legacy bot lives lack a provable zero-fame baseline: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1049
 const ELIGIBLE: &str = "(NOT EXISTS(SELECT 1 FROM shore_bots WHERE account=json_extract(snapshot,'$.account')) OR json_extract(snapshot,'$.lifetime.completeness')='complete')";
 
-fn now() -> Result<i64> {
+pub(super) fn now() -> Result<i64> {
     Ok(i64::try_from(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -11,12 +11,18 @@ fn now() -> Result<i64> {
     )?)
 }
 
-fn ranked(db: &Connection, cutoff: i64, now: i64, limit: i32) -> Result<Vec<(String, String)>> {
-    let mut q = db.prepare(&format!("SELECT snapshot,receipt FROM deaths WHERE died_at>?1 AND died_at<=?2 AND {ELIGIBLE} ORDER BY json_extract(receipt,'$.total') DESC,died_at ASC,character ASC LIMIT ?3"))?;
-    Ok(
-        q.query_map(params![cutoff, now, limit], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?,
-    )
+fn ranked(
+    db: &Connection,
+    cutoff: i64,
+    now: i64,
+    limit: i32,
+    reviewed: &str,
+) -> Result<Vec<(String, String)>> {
+    let mut q = db.prepare(&format!("SELECT snapshot,receipt FROM deaths WHERE died_at>?1 AND died_at<=?2 AND {ELIGIBLE} AND json_extract(snapshot,'$.account') NOT IN (SELECT value FROM json_each(?4)) ORDER BY json_extract(receipt,'$.total') DESC,died_at ASC,character ASC LIMIT ?3"))?;
+    Ok(q.query_map(params![cutoff, now, limit, reviewed], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })?
+    .collect::<rusqlite::Result<_>>()?)
 }
 
 pub(super) fn is_legend_at(
@@ -24,10 +30,12 @@ pub(super) fn is_legend_at(
     account: i32,
     now: i64,
     legacy_base: [i32; 8],
+    reviewed: &str,
 ) -> Result<bool> {
     let mut legendary = false;
     for span in ["week", "month", "all"] {
-        for (raw, paid) in ranked(db, now.saturating_sub(window(span)?).max(0), now, 10)? {
+        let cutoff = now.saturating_sub(window(span)?).max(0);
+        for (raw, paid) in ranked(db, cutoff, now, 10, reviewed)? {
             let receipt = death_awards::decode_receipt(&paid)?;
             let ch = receipt.character(&raw, legacy_base)?;
             validate(&ch)?;
@@ -76,10 +84,20 @@ fn entry(
     ))
 }
 impl Store {
+    fn reviewed_json(&self) -> String {
+        let ids: Vec<i32> = self
+            .content
+            .reviewed_accounts
+            .iter()
+            .map(|r| r.account)
+            .collect();
+        serde_json::json!(ids).to_string()
+    }
     pub async fn is_legend(&self, account: i32) -> Result<bool> {
         let now = now()?;
         let base = self.legacy_base;
-        self.call(move |db| is_legend_at(db, account, now, base))
+        let reviewed = self.reviewed_json();
+        self.call(move |db| is_legend_at(db, account, now, base, &reviewed))
             .await
     }
     pub async fn legends(&self, span: String, account: i32, character: i32) -> Result<String> {
@@ -95,12 +113,13 @@ impl Store {
         // Rolling 7/30-day windows are reconstruction, not recovered 123.5.1 policy: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/common/DbModels.cs
         let cutoff = now.saturating_sub(window(&span)?).max(0);
         let legacy_base = self.legacy_base;
+        let reviewed = self.reviewed_json();
         self.call(move |db| {
             let tx = db.transaction()?;
             let mut xml = format!("<FameList timespan=\"{span}\">");
             let mut mine_listed = false;
             {
-                for (raw, paid) in ranked(&tx, cutoff, now, 20)? {
+                for (raw, paid) in ranked(&tx, cutoff, now, 20, &reviewed)? {
                     let receipt=death_awards::decode_receipt(&paid)?;
                     let c = receipt.character(&raw,legacy_base)?;
                     mine_listed |= c.account == account && c.id == character;
@@ -216,7 +235,7 @@ mod tests {
         let base = store.legacy_base;
         assert!(
             !store
-                .call(move |db| is_legend_at(db, bot, now, base))
+                .call(move |db| is_legend_at(db, bot, now, base, "[]"))
                 .await
                 .unwrap()
         );
@@ -261,13 +280,13 @@ mod tests {
             .unwrap();
         assert!(
             store
-                .call(move |db| is_legend_at(db, bot, now, base))
+                .call(move |db| is_legend_at(db, bot, now, base, "[]"))
                 .await
                 .unwrap()
         );
         assert!(
             store
-                .call(move |db| is_legend_at(db, human.account, now, base))
+                .call(move |db| is_legend_at(db, human.account, now, base, "[]"))
                 .await
                 .unwrap()
         );
