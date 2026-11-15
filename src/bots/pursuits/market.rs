@@ -960,6 +960,14 @@ impl Market {
         {
             // Owner, 2012: "I have a tier 11 staff in my vault" — the seller fetches it for the buyer.
             tracing::info!(account = v.session.account, peer = peer.account, quote = ?counter, "market fetching vault stock for a buyer");
+            if let Some(account) = peer.account {
+                self.respond(
+                    v,
+                    (peer.id, account, name),
+                    ReplyKind::Fetch(counter.clone()),
+                    c,
+                )?;
+            }
             self.quote = Some(counter.clone());
             self.sought = true;
             self.session_used = false;
@@ -1754,10 +1762,18 @@ pub(in crate::bots) fn parse_goods(s: &str, c: &Content) -> Option<Goods> {
         "dhide" => 0xad3,
         "hydra" => 0xaf9,
         _ => {
-            let mut items = c
-                .objects
-                .values()
-                .filter(|o| o.class == "Equipment" && o.name.eq_ignore_ascii_case(name));
+            // Live: "buying t4 scepter" went unanswered; 2012 players named gear by tier and type.
+            let tiered = name
+                .strip_prefix('t')
+                .and_then(|s| s.split_once(' '))
+                .and_then(|(tier, kind)| Some((tier.parse().ok()?, slot_type(kind)?)));
+            let mut items = c.objects.values().filter(|o| {
+                o.class == "Equipment"
+                    && match tiered {
+                        Some((tier, slot)) => o.tier == Some(tier) && o.slot_type == slot,
+                        None => o.name.eq_ignore_ascii_case(name),
+                    }
+            });
             let kind = i32::from(items.next()?.kind);
             if items.next().is_some() {
                 return None;
@@ -1766,6 +1782,33 @@ pub(in crate::bots) fn parse_goods(s: &str, c: &Content) -> Option<Goods> {
         }
     };
     Some(Goods { kind, quantity })
+}
+
+fn slot_type(word: &str) -> Option<i32> {
+    Some(match word.strip_suffix('s').unwrap_or(word) {
+        "sword" => 1,
+        "dagger" | "dirk" => 2,
+        "bow" => 3,
+        "tome" => 4,
+        "shield" => 5,
+        "leather" | "hide" => 6,
+        "heavy" | "mail" => 7,
+        "wand" => 8,
+        "spell" => 11,
+        "seal" => 12,
+        "cloak" => 13,
+        "robe" => 14,
+        "quiver" => 15,
+        "helm" => 16,
+        "staff" | "stave" => 17,
+        "poison" => 18,
+        "skull" => 19,
+        "trap" => 20,
+        "orb" => 21,
+        "prism" => 22,
+        "scepter" | "scep" => 23,
+        _ => return None,
+    })
 }
 
 pub(in crate::bots) fn counter_body(text: &str) -> Option<&str> {

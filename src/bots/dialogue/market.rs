@@ -42,6 +42,13 @@ const BANK_SHAPES: [&str; 5] = [
     "making room",
     "lemme make room",
 ];
+const FETCH_SHAPES: [&str; 5] = [
+    "brb vault",
+    "brb",
+    "1 sec vault",
+    "sec getting it",
+    "in vault brb",
+];
 const THANKS_SHAPES: [&str; 5] = ["ty", "thx", "thanks", "tyvm", "cheers"];
 pub(super) struct Wording {
     created: Instant,
@@ -56,6 +63,7 @@ Alternatives may be priced exchanges or bare selling interest (selling {give}, s
 For market_refuse use short refusals: nty, nah, no thx, sry nty, or one of these followed by need {want}. No {give} or name in refusals.
 For market_counter every template must give the actual complete counterprice: nty, nah, can do, no thx or sry followed by {give} for {want} or {give}={want}. Both goods slots exactly once. For this intent vary only prefix choice and non-token capitalization; keep exactly ONE space after the prefix and exactly the body spacing shown. No ad openings, names, parentheses, other words or trailing punctuation. This is a counteroffer, not agreement.
 For market_bank use only the supplied short capacity syntax_examples; no goods, names, promises or outcome. The program selected actual full-inventory preparation.
+For market_fetch use only the supplied short syntax_examples; no goods, names, promises or outcome. The program is fetching its offered item from its own Vault.
 For market_thanks use only the supplied short acknowledgment syntax_examples; no goods, names, promises or further agreement. The program has verified an exact committed transaction before requesting this wording.
 Keep literal brace tokens lowercase, but vary other capitalization, opening, spacing and permitted ad name signature only as allowed for the selected intent to fit this speaker's supplied voice. No other words, punctuation, promises or acceptance. Current inventory facts are inserted only by the program. Native trade windows alone authorize acceptance."#;
 
@@ -65,6 +73,7 @@ fn voice(seed: u64, intent: Intent) -> Value {
         Intent::MarketRefuse => &REFUSAL_SHAPES,
         Intent::MarketCounter => &COUNTER_SHAPES,
         Intent::MarketBank => &BANK_SHAPES,
+        Intent::MarketFetch => &FETCH_SHAPES,
         Intent::MarketThanks => &THANKS_SHAPES,
         _ => unreachable!("market voice requires a market intent"),
     };
@@ -88,6 +97,7 @@ pub(super) fn constrain_finite_repertoire(
     };
     let shapes = match intent {
         Intent::MarketBank => &BANK_SHAPES,
+        Intent::MarketFetch => &FETCH_SHAPES,
         Intent::MarketThanks => &THANKS_SHAPES,
         _ => return Ok(()),
     };
@@ -167,6 +177,7 @@ fn validated_template(template: &str, intent: Intent) -> std::result::Result<boo
                 Some("{give} for {want}" | "{give}={want}")
             ),
             Intent::MarketBank => BANK_SHAPES.contains(&template.to_ascii_lowercase().as_str()),
+            Intent::MarketFetch => FETCH_SHAPES.contains(&template.to_ascii_lowercase().as_str()),
             Intent::MarketThanks => THANKS_SHAPES.contains(&template.to_ascii_lowercase().as_str()),
             _ => false,
         };
@@ -267,6 +278,8 @@ impl Service {
             )
         } else if message.text == "full inv" {
             (Intent::MarketBank, String::new(), String::new())
+        } else if message.text == "brb vault" {
+            (Intent::MarketFetch, String::new(), String::new())
         } else if message.text == "ty" {
             (Intent::MarketThanks, String::new(), String::new())
         } else if let Some(q) = parse_quote(&message.text, c) {

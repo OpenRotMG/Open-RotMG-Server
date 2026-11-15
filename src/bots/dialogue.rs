@@ -84,6 +84,7 @@ pub(super) enum Intent {
     MarketRefuse,
     MarketCounter,
     MarketBank,
+    MarketFetch,
     MarketThanks,
 }
 #[derive(Debug, Deserialize)]
@@ -958,6 +959,7 @@ impl Brain {
             | Intent::MarketRefuse
             | Intent::MarketCounter
             | Intent::MarketBank
+            | Intent::MarketFetch
             | Intent::MarketThanks => {}
         }
     }

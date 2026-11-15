@@ -5,6 +5,7 @@ use crate::store::TradeWitness;
 pub(super) enum ReplyKind {
     Counter([Goods; 2]),
     Bank([Goods; 2]),
+    Fetch([Goods; 2]),
     Thanks(TradeWitness),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,6 +44,7 @@ impl Market {
                 goods_text(&q[1], c)?
             ),
             ReplyKind::Bank(_) => "full inv".into(),
+            ReplyKind::Fetch(_) => "brb vault".into(),
             ReplyKind::Thanks(_) => "ty".into(),
         })
     }
@@ -60,10 +62,11 @@ impl Market {
         let reply_kind = match &kind {
             ReplyKind::Counter(_) => "counter",
             ReplyKind::Bank(_) => "bank",
+            ReplyKind::Fetch(_) => "fetch",
             ReplyKind::Thanks(_) => "thanks",
         };
         let quote = match &kind {
-            ReplyKind::Counter(q) | ReplyKind::Bank(q) => Some(q),
+            ReplyKind::Counter(q) | ReplyKind::Bank(q) | ReplyKind::Fetch(q) => Some(q),
             ReplyKind::Thanks(_) => None,
         };
         let transaction = match &kind {
@@ -119,7 +122,7 @@ impl Market {
                 && message.text == Self::reply_text(&r.kind, c)?,
             "invalid bound market reply intent"
         );
-        if let ReplyKind::Counter(q) | ReplyKind::Bank(q) = &r.kind {
+        if let ReplyKind::Counter(q) | ReplyKind::Bank(q) | ReplyKind::Fetch(q) = &r.kind {
             ensure!(
                 q[0].kind != q[1].kind
                     && q.iter()
@@ -190,6 +193,11 @@ impl Market {
                 self.preparing
                     && self.quote(v, c, future)?.as_ref() == Some(q)
                     && Self::needs_room(v, q)
+                    && v.objects.iter().any(|p| p.kind == 0x720 && p.usable)
+            }
+            ReplyKind::Fetch(q) => {
+                self.sought
+                    && self.quote(v, c, future)?.as_ref() == Some(q)
                     && v.objects.iter().any(|p| p.kind == 0x720 && p.usable)
             }
             ReplyKind::Thanks(_) => true,

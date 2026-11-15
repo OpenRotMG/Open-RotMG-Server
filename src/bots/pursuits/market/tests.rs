@@ -44,6 +44,12 @@ fn quotes_and_fairness_share_ranges_and_native_whole_item_bounds() {
     }
     assert!(!fair(&[goods(DEFENSE, 0), goods(LIFE, 1)], &c));
     assert!(!fair(&[goods(DEFENSE, 14), goods(LIFE, 2)], &c));
+    assert_eq!(parse_goods("2 t4 scepters", &c), Some(goods(0xb31, 2)));
+    assert_eq!(
+        parse_goods("t10 staff", &c),
+        parse_goods("staff of diabolic secrets", &c)
+    );
+    assert!(parse_goods("t4 ring", &c).is_none() && parse_goods("t9 armor", &c).is_none());
     assert!(parse_quote("wts 1 Crystal Sword for 3 def", &c).is_some());
     assert!(parse_quote("wts 1 Crystal Sword for 1 def + 1 life", &c).is_none());
     assert!(
@@ -417,7 +423,8 @@ fn vault_stock_is_fetched_for_a_buyer_and_a_full_vault_trades_speed_up() {
     };
     assert!(m.receive(&peer_said("wtb def"), &v, &c, None).unwrap());
     assert_eq!(m.quote.as_ref().map(|q| q[0].kind), Some(DEFENSE));
-    assert!(m.sought && m.outgoing.is_none());
+    assert!(m.sought);
+    assert_eq!(m.outgoing.unwrap().text, "brb vault");
 
     let (c, v) = nexus_peer([-1; 8]);
     let m = Market {
