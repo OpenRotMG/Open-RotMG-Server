@@ -1,6 +1,6 @@
 # Owner culture sources
 
-Normalized owner readings, not verbatim testimony or verified 123.5.1 mechanics. This brief and its public references work without the private packet. Exact narration (entry eddde7ca, SHA-256 `81c4d56e024999e3e03a0805a3b6e6c9c01c2e1bf02d5c011906dbb2ebf66a04`) and canonical annotations remain in the received private packet under `incoming-laptop/packet-20261018-c4fc67c5/files/`, relative to the worktree parent. `sample-1.md`/`sample-2.md` supply independent observations/limits. Engineering proposals: `plans/bot-community.md`.
+Normalized owner readings, not verbatim testimony or verified 123.5.1 mechanics. This brief and its public references work without the private packet. Exact narration (entry eddde7ca, SHA-256 `81c4d56e024999e3e03a0805a3b6e6c9c01c2e1bf02d5c011906dbb2ebf66a04`) and canonical annotations remain in the received private packet under `incoming-laptop/packet-20261018-c4fc67c5/files/`, relative to the worktree parent. `sample-1.md`/`sample-2.md` supply independent observations/limits.
 
 ## Scene corrections and uncertainties
 
