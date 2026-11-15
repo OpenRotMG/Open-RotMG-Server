@@ -1,6 +1,10 @@
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, path::Path};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+    sync::{Arc, RwLock},
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -9,8 +13,72 @@ pub struct Review {
     pub reviewed_on: String,
 }
 
+// Shared so a reload reaches every clone of Content: worlds, store and HTTP handlers.
+#[derive(Clone)]
+pub struct Reviews(Arc<RwLock<Vec<Review>>>);
+impl Reviews {
+    pub fn new(rows: Vec<Review>) -> Self {
+        Self(Arc::new(RwLock::new(rows)))
+    }
+    pub fn contains(&self, account: i32) -> bool {
+        self.0
+            .read()
+            .expect("reviewed accounts lock poisoned")
+            .iter()
+            .any(|review| review.account == account)
+    }
+    pub fn rows(&self) -> Vec<Review> {
+        self.0
+            .read()
+            .expect("reviewed accounts lock poisoned")
+            .clone()
+    }
+    fn replace(&self, rows: Vec<Review>, path: &Path) {
+        let ids = |rows: &[Review]| rows.iter().map(|r| r.account).collect::<BTreeSet<_>>();
+        let (before, after) = (ids(&self.rows()), ids(&rows));
+        *self.0.write().expect("reviewed accounts lock poisoned") = rows;
+        tracing::info!(path=%path.display(), decisions=after.len(), added=?after.difference(&before).collect::<Vec<_>>(), removed=?before.difference(&after).collect::<Vec<_>>(), "server reviewed account decisions loaded");
+    }
+}
+
 pub(crate) fn load(path: &Path) -> Result<Vec<Review>> {
     parse(&std::fs::read_to_string(path).context("read reviewed account decisions")?)
+}
+
+/// Loads the file now (failing startup if invalid), then applies later edits without a restart.
+pub(crate) fn watch(path: PathBuf, reviews: Reviews) -> Result<()> {
+    let mut seen = read(&path);
+    reviews.replace(parse(&seen.clone().map_err(anyhow::Error::msg)?)?, &path);
+    std::thread::Builder::new()
+        .name("reviewed-accounts".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                poll(&path, &mut seen, &reviews);
+            }
+        })?;
+    Ok(())
+}
+
+fn read(path: &Path) -> std::result::Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| format!("read reviewed account decisions: {e}"))
+}
+
+fn poll(path: &Path, seen: &mut std::result::Result<String, String>, reviews: &Reviews) {
+    let current = read(path);
+    if current == *seen {
+        return;
+    }
+    *seen = current.clone();
+    match current
+        .map_err(anyhow::Error::msg)
+        .and_then(|text| parse(&text))
+    {
+        Ok(rows) => reviews.replace(rows, path),
+        Err(error) => {
+            tracing::error!(path=%path.display(), error=%format!("{error:#}"), "reviewed account decisions rejected; current marks unchanged")
+        }
+    }
 }
 
 fn parse(text: &str) -> Result<Vec<Review>> {
@@ -74,6 +142,23 @@ mod tests {
         ] {
             assert!(parse(bad).is_err(), "{bad}");
         }
+    }
+    #[test]
+    fn edits_apply_without_restart_and_invalid_edits_keep_current_marks() {
+        let path = std::env::temp_dir().join(format!("reviews-{}.json", std::process::id()));
+        std::fs::write(&path, "[]").unwrap();
+        let reviews = Reviews::new(Vec::new());
+        let mut seen = read(&path);
+        std::fs::write(&path, r#"[{"account":7,"reviewed_on":"2026-11-15"}]"#).unwrap();
+        poll(&path, &mut seen, &reviews);
+        assert!(reviews.contains(7));
+        std::fs::write(&path, "[").unwrap();
+        poll(&path, &mut seen, &reviews);
+        assert!(reviews.contains(7));
+        std::fs::write(&path, "[]").unwrap();
+        poll(&path, &mut seen, &reviews);
+        assert!(!reviews.contains(7));
+        std::fs::remove_file(&path).unwrap();
     }
     #[test]
     fn review_dates_are_calendar_dates_not_just_matching_strings() {

@@ -88,6 +88,7 @@ impl Store {
         let ids: Vec<i32> = self
             .content
             .reviewed_accounts
+            .rows()
             .iter()
             .map(|r| r.account)
             .collect();

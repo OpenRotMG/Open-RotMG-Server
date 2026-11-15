@@ -1,5 +1,5 @@
 use super::*;
-use crate::{content::Review, store::Store};
+use crate::{content::reviews::Review, store::Store};
 
 #[tokio::test]
 async fn reviewed_accounts_look_like_unnamed_guests_to_other_players_only() {
@@ -7,10 +7,10 @@ async fn reviewed_accounts_look_like_unnamed_guests_to_other_players_only() {
     let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let marked = store.list("reviewed-name-marked".into()).await.unwrap().id;
     let plain = store.list("reviewed-name-plain".into()).await.unwrap().id;
-    content.reviewed_accounts = vec![Review {
+    content.reviewed_accounts = crate::content::Reviews::new(vec![Review {
         account: marked,
         reviewed_on: "2026-11-05".into(),
-    }];
+    }]);
     let content = Arc::new(content);
     let mut directory =
         Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 16, 1098).unwrap();

@@ -145,10 +145,11 @@ async fn legends_glow_propagates_foreign_receipt_and_query_errors() {
 #[tokio::test]
 async fn reviewed_accounts_are_hidden_from_honest_legends_and_do_not_take_glow_slots() {
     let mut content = Content::load(Path::new("data")).unwrap();
-    content.reviewed_accounts = vec![crate::content::reviews::Review {
-        account: 1,
-        reviewed_on: "2026-11-15".into(),
-    }];
+    content.reviewed_accounts =
+        crate::content::Reviews::new(vec![crate::content::reviews::Review {
+            account: 1,
+            reviewed_on: "2026-11-15".into(),
+        }]);
     let store = Store::open(Path::new(":memory:"), &content).unwrap();
     let cheater = account(&store, &content, "glow-cheater").await;
     assert_eq!(cheater, 1);

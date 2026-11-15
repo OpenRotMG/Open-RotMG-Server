@@ -6,7 +6,7 @@ pub use abilities::Ability;
 mod consumables;
 pub(crate) mod reviews;
 pub use consumables::{Companion, ConsumableEffect};
-pub use reviews::Review;
+pub use reviews::Reviews;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, io::Read, path::Path};
@@ -218,7 +218,7 @@ pub struct Hazard {
 }
 #[derive(Clone)]
 pub struct Content {
-    pub reviewed_accounts: Vec<Review>,
+    pub reviewed_accounts: Reviews,
     pub(crate) xml_sha256: [String; 2],
     pub objects: BTreeMap<u16, Object>,
     pub(crate) item_values: item_values::ItemValues,
@@ -311,9 +311,7 @@ fn fame_bonus(n: Node<'_, '_>) -> Result<u32> {
 
 impl Content {
     pub fn reviewed(&self, account: i32) -> bool {
-        self.reviewed_accounts
-            .iter()
-            .any(|review| review.account == account)
+        self.reviewed_accounts.contains(account)
     }
     pub fn load(dir: &Path) -> Result<Self> {
         let data = std::fs::read_to_string(dir.join("objects.xml"))?;
@@ -668,7 +666,7 @@ impl Content {
         );
         let item_values = item_values::ItemValues::load(&objects)?;
         let out = Self {
-            reviewed_accounts: reviews::load(&dir.join("reviewed-accounts.json"))?,
+            reviewed_accounts: Reviews::new(reviews::load(&dir.join("reviewed-accounts.json"))?),
             item_values,
             xml_sha256: [objects_sha256, grounds_sha256],
             objects,
