@@ -48,7 +48,11 @@ const PROMPT: &str = "You are the adventurer named in the supplied game state. A
 
 fn reply_schema(payload: &Value) -> std::result::Result<Value, Failure> {
     let market_generation = payload["market_generation"] == true;
-    let reply_limit = if market_generation { 128 } else { 90 };
+    let reply_limit = if market_generation || payload["market_translation"] == true {
+        128
+    } else {
+        90
+    };
     let mut schema = json!({"type":"object","properties":{
             "intent":{"type":"string","enum":payload["allowed_intents"],"description":if market_generation {"The sole allowed market intent."} else {"Actual action. Invite proposes the supplied objective; join accepts that invitation; leave parts company without promising to hold position; wait holds position; talk changes no commitment."}},
             "reply":{"type":"string","maxLength":reply_limit,"description":if market_generation {"Three reusable templates separated by |, keeping literal {give}, {want}, @{name} slots. Never substitute items or names."} else {"Short chat consistent with the selected action."}}},"required":["intent","reply"],"additionalProperties":false});
@@ -86,6 +90,7 @@ pub(super) enum Intent {
     MarketBank,
     MarketFetch,
     MarketThanks,
+    MarketTranslate,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -232,6 +237,7 @@ pub(crate) struct Service {
     slots: Arc<Semaphore>,
     budget: Mutex<Budget>,
     wordings: Mutex<BTreeMap<String, market::Wording>>,
+    translations: Mutex<BTreeMap<String, Option<String>>>,
     repertoires: Option<(std::path::PathBuf, Mutex<market::Saved>)>,
 }
 impl Service {
@@ -271,6 +277,7 @@ impl Service {
             endpoint: endpoint.into(),
             slots: Arc::new(Semaphore::new(2)),
             wordings: Mutex::new(BTreeMap::new()),
+            translations: Mutex::new(BTreeMap::new()),
             repertoires: None,
             budget: Mutex::new(Budget::new(Instant::now())),
         })
@@ -336,10 +343,17 @@ impl Service {
             .expect("dialogue budget poisoned")
             .admit(Instant::now(), payload)?;
         let market_generation = payload["market_generation"] == true;
-        let reply_limit = if market_generation { 128 } else { 90 };
+        let translation = payload["market_translation"] == true;
+        let reply_limit = if market_generation || translation {
+            128
+        } else {
+            90
+        };
         let schema = reply_schema(payload)?;
         let prompt = if market_generation {
             market::PROMPT
+        } else if translation {
+            market::TRANSLATE_PROMPT
         } else if payload["allowed_intents"] == json!(["invite"]) {
             INVITE_PROMPT
         } else {
@@ -963,7 +977,8 @@ impl Brain {
             | Intent::MarketCounter
             | Intent::MarketBank
             | Intent::MarketFetch
-            | Intent::MarketThanks => {}
+            | Intent::MarketThanks
+            | Intent::MarketTranslate => {}
         }
     }
 }

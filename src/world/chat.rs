@@ -441,4 +441,36 @@ impl Directory {
         tracing::info!(player=id, account, world=%world.name, yell, nexus, recipients, bytes=text.len(), "public chat delivered");
         Ok(())
     }
+    pub fn in_nexus(&mut self, id: i32) -> Result<bool> {
+        Ok(self.resolve(Target::World(-2))?.players.contains_key(&id))
+    }
+    /// Bots within earshot hear a player's free-form trade chat as the canonical line they parse;
+    /// players only ever see the original words.
+    pub fn translated_trade(&mut self, id: i32, canonical: &str) -> Result<usize> {
+        let world = self.resolve(Target::World(-2))?;
+        let p = world
+            .players
+            .get(&id)
+            .context("translated trade speaker left the Nexus")?;
+        let account = p.character.account;
+        let packet = text_to(
+            &p.character.name,
+            id,
+            5,
+            "",
+            canonical,
+            p.presentation.stars(),
+        );
+        let mut recipients = 0;
+        for bot in world.players.values().filter(|b| {
+            b.controller == Controller::Autonomous
+                && b.can_chat()
+                && !b.account_lists[1].contains(&account)
+                && p.pos.distance(b.pos) < 15.
+        }) {
+            send(bot, packet.id, packet.body.clone());
+            recipients += 1;
+        }
+        Ok(recipients)
+    }
 }

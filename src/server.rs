@@ -1984,13 +1984,22 @@ async fn handle_inner(
                     Err(error) => return Err(error),
                 };
                 enqueue_reply(tx, reply)?;
-            } else if let Err(error) = a.world.directory(move |d| d.chat(id, text, received)).await
-            {
-                if !lifecycle::rule_rejection(&error) {
-                    return Err(error);
+            } else {
+                let said = text.clone();
+                match a.world.directory(move |d| d.chat(id, said, received)).await {
+                    Ok(()) => {
+                        if let Some(service) = &a.dialogue {
+                            service.translate_trade(a.world.clone(), a.content.clone(), id, text);
+                        }
+                    }
+                    Err(error) => {
+                        if !lifecycle::rule_rejection(&error) {
+                            return Err(error);
+                        }
+                        tracing::warn!(player=id, error=%error, "local chat rejected");
+                        enqueue_reply(tx, crate::world::chat_error(&error.to_string()))?;
+                    }
                 }
-                tracing::warn!(player=id, error=%error, "local chat rejected");
-                enqueue_reply(tx, crate::world::chat_error(&error.to_string()))?;
             }
         }
         wire::EDIT_ACCOUNT_LIST => {
