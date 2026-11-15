@@ -214,6 +214,7 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         picture_reads: Arc::default(),
         connections: Arc::new(tokio::sync::Semaphore::new(config.max_players * 2)),
         control,
+        moderation: server::moderation::Moderation::configured()?,
         discord_link_token: match std::env::var("DISCORD_LINK_TOKEN_FILE") {
             Ok(path) => {
                 let token = std::fs::read_to_string(path)?;

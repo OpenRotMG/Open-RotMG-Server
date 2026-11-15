@@ -70,6 +70,7 @@ fn fixture_with_control(native: bool) -> (PathBuf, App) {
         connections: Arc::new(tokio::sync::Semaphore::new(32)),
         control: None,
         discord_link_token: Some("a".repeat(64)),
+        moderation: None,
         email: None,
         browser_links: Arc::default(),
         owners: Arc::default(),

@@ -90,6 +90,7 @@ pub(crate) mod diagnostics;
 mod gold;
 mod guilds;
 mod hiscores;
+pub mod moderation;
 mod native;
 pub(crate) mod testing;
 mod updates;
@@ -133,6 +134,7 @@ pub struct App {
     pub connections: Arc<tokio::sync::Semaphore>,
     pub control: Option<String>,
     pub discord_link_token: Option<String>,
+    pub moderation: Option<Arc<moderation::Moderation>>,
     pub email: Option<Arc<email::Service>>,
     pub(crate) browser_links: Arc<browser_link::Service>,
     pub owners: Arc<Mutex<BTreeMap<i32, lifecycle::Claim>>>,
@@ -1795,7 +1797,26 @@ async fn handle_inner(
             };
             let id = player.ok_or_else(|| lifecycle::protocol("chat before character"))?;
 
-            if text.split_whitespace().next() == Some("/bug") {
+            if text
+                .split_whitespace()
+                .next()
+                .is_some_and(|c| c.eq_ignore_ascii_case("/report"))
+            {
+                let reporter = account
+                    .as_ref()
+                    .context("authenticated session required")?
+                    .id;
+                let name = text.trim()["/report".len()..].trim();
+                let reply = match moderation::report(a, reporter, id, name).await {
+                    Ok(reply) => reply,
+                    Err(error) if lifecycle::rule_rejection(&error) => error.to_string(),
+                    Err(error) => {
+                        tracing::error!(account=reporter, error=%format!("{error:#}"), "moderator report failed");
+                        format!("Report failed: {error:#}")
+                    }
+                };
+                enqueue_reply(tx, crate::world::chat_info(&reply))?;
+            } else if text.split_whitespace().next() == Some("/bug") {
                 let message = text.trim()["/bug".len()..].trim();
                 let owner = account
                     .as_ref()
@@ -3419,6 +3440,10 @@ fn routes(a: &App, client: PathBuf) -> Router {
         )
         .route("/internal/discord/close-realm", post(discord_close_realm))
         .route("/internal/discord/kick", post(discord_kick))
+        .route(
+            "/internal/moderation/cheat-kick",
+            post(moderation::cheat_kick),
+        )
         .route("/internal/discord/recover", post(discord_recover))
         .route("/api/account/recover", post(reset_password))
         .route("/api/account/verify-email", post(email::confirm));

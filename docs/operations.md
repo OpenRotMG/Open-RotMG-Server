@@ -20,4 +20,6 @@ Native registration converts a guest without changing account ownership; subsequ
 
 Hiscores, drop-collection provenance, browser account linking, self-only `/kick` and Discord `/recover` are described in `docs/hiscores.md`. Native email recovery shares this single-use flow; delivery requires `EMAIL_API_KEY_FILE` and `EMAIL_FROM`.
 
+Marked cheaters are listed in `OPENROTMG_REVIEWED_ACCOUNTS`. Accounts in the comma-separated `OPENROTMG_MODERATORS` can `/report <online player>`, which appends to that file (applied immediately) and posts to the Discord webhook URL read from `REPORT_WEBHOOK_FILE`. `POST /internal/moderation/cheat-kick` (same loopback credential as the Discord API) disconnects a marked account and keeps it out of the Realm for `realm_lockout_seconds`.
+
 Independent credential-free backup and offline restore instructions are in `scripts/backups/OPERATIONS.md`.

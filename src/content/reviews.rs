@@ -33,6 +33,25 @@ impl Reviews {
             .expect("reviewed accounts lock poisoned")
             .clone()
     }
+    /// Appends to the operator file and applies it at once; returns false when already marked.
+    pub fn mark(&self, path: &Path, account: i32, reviewed_on: String) -> Result<bool> {
+        let mut rows = load(path)?;
+        if rows.iter().any(|review| review.account == account) {
+            return Ok(false);
+        }
+        rows.push(Review {
+            account,
+            reviewed_on,
+        });
+        let temp = path.with_extension("json.tmp");
+        let mut file = std::fs::File::create_new(&temp)
+            .with_context(|| format!("create {}", temp.display()))?;
+        std::io::Write::write_all(&mut file, serde_json::to_string_pretty(&rows)?.as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&temp, path).with_context(|| format!("replace {}", path.display()))?;
+        self.replace(rows, path);
+        Ok(true)
+    }
     fn replace(&self, rows: Vec<Review>, path: &Path) {
         let ids = |rows: &[Review]| rows.iter().map(|r| r.account).collect::<BTreeSet<_>>();
         let (before, after) = (ids(&self.rows()), ids(&rows));
@@ -58,6 +77,25 @@ pub(crate) fn watch(path: PathBuf, reviews: Reviews) -> Result<()> {
             }
         })?;
     Ok(())
+}
+
+pub fn today() -> String {
+    let days = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after 1970")
+        .as_secs()
+        / 86_400) as i64;
+    // Howard Hinnant's days-to-civil conversion: https://howardhinnant.github.io/date_algorithms.html#civil_from_days
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
 }
 
 fn read(path: &Path) -> std::result::Result<String, String> {
@@ -159,6 +197,24 @@ mod tests {
         poll(&path, &mut seen, &reviews);
         assert!(!reviews.contains(7));
         std::fs::remove_file(&path).unwrap();
+    }
+    #[test]
+    fn marks_keep_hand_edits_and_ignore_repeats() {
+        let path = std::env::temp_dir().join(format!("reviews-{}.json", rand::random::<u64>()));
+        std::fs::write(&path, r#"[{"account":8,"reviewed_on":"2026-11-06"}]"#).unwrap();
+        let reviews = Reviews::new(Vec::new());
+        assert!(reviews.mark(&path, 9, today()).unwrap());
+        assert!(!reviews.mark(&path, 9, today()).unwrap());
+        assert_eq!(
+            load(&path)
+                .unwrap()
+                .iter()
+                .map(|r| r.account)
+                .collect::<Vec<_>>(),
+            [8, 9]
+        );
+        assert!(reviews.contains(8) && reviews.contains(9) && valid_date(&today()));
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn review_dates_are_calendar_dates_not_just_matching_strings() {

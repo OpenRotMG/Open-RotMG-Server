@@ -1018,6 +1018,7 @@ pub struct Directory {
     endgame: endgame::RealmDirectory,
     realm_population: realm_population::Population,
     teleports: BTreeMap<i32, Instant>,
+    pub realm_lockouts: BTreeMap<i32, Instant>,
     idle: BTreeMap<i32, u64>,
     next_world: i32,
     pub tick: u64,
@@ -1219,6 +1220,7 @@ impl Directory {
             endgame: endgame::RealmDirectory::default(),
             realm_population: realm_population::Population::default(),
             teleports: BTreeMap::new(),
+            realm_lockouts: BTreeMap::new(),
             idle: BTreeMap::new(),
             next_world: 1,
             tick: 0,
@@ -1814,6 +1816,15 @@ impl Directory {
                 ensure!(
                     record.enabled && self.worlds[id].admission_open,
                     controller("Realm is closed")
+                );
+                let locked = self.realm_lockouts.get(&account).map_or(0, |until| {
+                    until.saturating_duration_since(Instant::now()).as_secs()
+                });
+                ensure!(
+                    locked == 0,
+                    anyhow::Error::new(CloseReason::Controller).context(format!(
+                        "You cannot enter the Realm for another {locked} seconds."
+                    ))
                 );
                 *id
             }

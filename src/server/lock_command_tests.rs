@@ -12,7 +12,7 @@ fn account_list(packet: Packet) -> (i32, Vec<i32>) {
     (id, accounts)
 }
 
-async fn chat(socket: &mut NativeSocket, text: &str, expected: &str) -> Lists {
+pub(super) async fn chat(socket: &mut NativeSocket, text: &str, expected: &str) -> Lists {
     let mut body = Writer::new();
     body.utf(text);
     socket
