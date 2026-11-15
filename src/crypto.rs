@@ -374,7 +374,7 @@ mod tests {
     fn public_key_patch_preserves_reference() {
         let dir = std::env::temp_dir().join(format!("openrotmg-key-test-{}", std::process::id()));
         let k = Keys::load(&dir).unwrap();
-        let input = Path::new("../client/client.swf");
+        let input = Path::new("../client/web/client.swf");
         if input.exists() {
             let before = std::fs::read(input).unwrap();
             assert_eq!(

@@ -143,7 +143,7 @@ impl Config {
                 client: root
                     .parent()
                     .context("workspace parent missing")?
-                    .join("client"),
+                    .join("client/web"),
                 state: root.join(".local"),
                 test_state: false,
                 max_players: 85,

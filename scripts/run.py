@@ -46,7 +46,7 @@ def prepare_client(manifest=None):
         raise RuntimeError('Shared client cache must be canonical, absolute and outside the checkout')
     with locked(cache, marker_text='OpenRotMG verified deployed clients v1\n'):
         client = cached_client(selection, cache)
-        vendor = client / 'vendor'
+        vendor = client / 'web/vendor'
         if not vendor.exists():
             with LOG.open('a') as log:
                 code = run([sys.executable, str(client / 'scripts/run.py'), '--prepare-only'], client, log)
@@ -206,7 +206,7 @@ def main():
             code = run(build, ROOT, log)
             if code:
                 raise RuntimeError(f'Server build exited with status {code}. See {LOG}.')
-            command = [str(binary), "--client", str(client), "--port", str(args.port), "--test-state" if args.test_state is not None else "--state", str(state)]
+            command = [str(binary), "--client", str(client / "web"), "--port", str(args.port), "--test-state" if args.test_state is not None else "--state", str(state)]
             if args.realm_seed is not None:
                 command.extend(["--realm-seed", str(args.realm_seed)])
             if args.dev_control:

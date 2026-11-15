@@ -23,7 +23,7 @@ class LauncherTests(unittest.TestCase):
         self.url = f'https://codeload.github.com/OpenRotMG/Open-RotMG-Client/zip/{self.revision}'
         self.client = self.root / '.local' / self.prefix
         self.lock = {'version': '0.7.1-openrotmg.7', 'bundleSha256': 'b' * 64}
-        self.data = self.archive({"client.swf": b"reference", "index.html": b"page", "scripts/run.py": b"prepare", "run.sh": b"#!/bin/sh\n",
+        self.data = self.archive({"web/client.swf": b"reference", "web/index.html": b"page", "scripts/run.py": b"prepare", "run.sh": b"#!/bin/sh\n",
                                   'ruffle/lock.json': json.dumps(self.lock).encode()})
         self.selection = {'client': self.revision, 'client_archive_sha256': hashlib.sha256(self.data).hexdigest(),
                           'runtime_version': self.lock['version'], 'runtime_bundle_sha256': self.lock['bundleSha256']}
