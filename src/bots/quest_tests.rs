@@ -180,6 +180,8 @@ pub(super) fn fixture() -> (Content, PlayerView) {
             allow_teleport: true,
             layout: None,
             godlands: Arc::default(),
+            // Godlands sightings anywhere on this small fixture count as the Godlands.
+            godland_squares: Arc::new((0..6).flat_map(|x| (0..6).map(move |y| (x, y))).collect()),
         },
         character: OwnCharacter {
             conditions: 0,
@@ -503,7 +505,7 @@ fn band_edge_journeys_do_not_preempt_each_other() {
         brain
             .crowd
             .bands
-            .observe(&v, &c, &mut brain.mind.godlands, false);
+            .observe(&v, &c, &mut brain.mind.godlands, false, "Tester");
         v.objects.clear();
         brain.heading = 0.;
         brain.hunting = revisit;
@@ -840,7 +842,7 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
         brain
             .crowd
             .bands
-            .observe(&v, &c, &mut brain.mind.godlands, veteran);
+            .observe(&v, &c, &mut brain.mind.godlands, veteran, "Tester");
         let d = brain.decide(&v, &c).unwrap();
         assert_eq!(d.goal, goal, "remembered {remembered} veteran {veteran}");
         if goal == Goal::Venture {
@@ -932,7 +934,7 @@ fn dodging_keeps_the_trip_and_still_makes_progress() {
     brain
         .crowd
         .bands
-        .observe(&v, &c, &mut brain.mind.godlands, false);
+        .observe(&v, &c, &mut brain.mind.godlands, false, "Tester");
     let d = brain.decide(&v, &c).unwrap();
     assert_eq!(d.goal, Goal::Venture);
     let step = d.movement.expect("a dodging step");
@@ -998,10 +1000,10 @@ fn a_hurt_bot_backs_off_only_near_enemies() {
 }
 
 #[test]
-fn travel_keeps_its_chosen_edge_when_another_becomes_slightly_nearer() {
+fn travel_keeps_its_chosen_edge_until_another_is_much_nearer() {
     // Live snapshots: on open ground a trip's step flipped between waypoints NW and SW as tiles were revealed.
     let (_, mut v) = fixture();
-    let grid = |extra: bool, v: &mut PlayerView| {
+    let grid = |reveal: &[(i16, i16)], v: &mut PlayerView| {
         let geometry = crate::navigation::Geometry::new(
             (128, 128),
             vec![1; 128 * 128],
@@ -1009,26 +1011,38 @@ fn travel_keeps_its_chosen_edge_when_another_becomes_slightly_nearer() {
         );
         let base = (0..=10).flat_map(|x| (0..128).map(move |y| (x, y)));
         let prongs = (11..=20).flat_map(|x| [(x, 40), (x, 60)]);
-        let reveal = extra.then_some((21, 60));
         v.tiles = Arc::new(crate::navigation::Tiles::new(
             geometry,
-            base.chain(prongs).chain(reveal),
+            base.chain(prongs).chain(reveal.iter().copied()),
         ));
         Grid::terrain(v)
     };
     v.position = Pos { x: 10.5, y: 50.5 };
     let target = Pos { x: 100.5, y: 50.5 };
     let mut kept = None;
-    let first = grid(false, &mut v)
+    let first = grid(&[], &mut v)
         .towards_kept(v.position, target, &mut kept)
         .unwrap();
-    let second = grid(true, &mut v)
+    let second = grid(&[(21, 60)], &mut v)
         .towards_kept(v.position, target, &mut kept)
         .unwrap();
     assert_eq!(
         first.y > v.position.y,
         second.y > v.position.y,
         "{first:?} then {second:?}"
+    );
+    let other = if second.y > v.position.y { 40 } else { 60 };
+    let longer: Vec<_> = (21..=40)
+        .map(|x| (x, other))
+        .chain((other == 40).then_some((21, 60)))
+        .collect();
+    let third = grid(&longer, &mut v)
+        .towards_kept(v.position, target, &mut kept)
+        .unwrap();
+    assert_ne!(
+        second.y > v.position.y,
+        third.y > v.position.y,
+        "a much nearer edge replaces the kept one: {second:?} then {third:?}"
     );
 }
 
@@ -1050,7 +1064,7 @@ fn a_venture_keeps_the_destination_it_started_with() {
     brain
         .crowd
         .bands
-        .observe(&v, &c, &mut brain.mind.godlands, false);
+        .observe(&v, &c, &mut brain.mind.godlands, false, "Tester");
     brain.goal = Goal::Venture;
     brain.travel = Some((Goal::Venture, u64::MAX, east));
     let d = brain.decide(&v, &c).unwrap();
@@ -1080,7 +1094,7 @@ fn a_venture_trip_ends_at_its_destination() {
     brain
         .crowd
         .bands
-        .observe(&v, &c, &mut brain.mind.godlands, false);
+        .observe(&v, &c, &mut brain.mind.godlands, false, "Tester");
     brain.goal = Goal::Venture;
     brain.travel = Some((Goal::Venture, u64::MAX, reached));
     let d = brain.decide(&v, &c).unwrap();
@@ -1175,17 +1189,14 @@ fn nine_in_ten_level_20s_farm_the_godlands_in_ordinary_gear() {
         .find(|o| o.slot_type == staff && o.tier == Some(3))
         .map(|o| i32::from(o.kind))
         .unwrap();
-    let mut hunters = 0;
+    let (mut hunters, mut farmers) = (0, 0);
     for profile in persona::PERSONAS.iter() {
         let mut brain = Brain::new(*profile, &v);
         brain
             .crowd
             .bands
-            .observe(&v, &c, &mut BTreeMap::new(), true);
-        assert_eq!(
-            brain.crowd.bands.limit, 4,
-            "a tier-3 staff still farms the Godlands"
-        );
+            .observe(&v, &c, &mut BTreeMap::new(), true, profile.identity);
+        farmers += usize::from(brain.crowd.bands.limit == 4);
         let hunts = quests::hunts_quests(profile);
         hunters += usize::from(hunts);
         let expected = if hunts { Goal::Hunt(2) } else { Goal::Venture };
@@ -1198,4 +1209,9 @@ fn nine_in_ten_level_20s_farm_the_godlands_in_ordinary_gear() {
     }
     let share = hunters as f32 / persona::PERSONAS.len() as f32;
     assert!((0.08..0.12).contains(&share), "{hunters} quest hunters");
+    let share = farmers as f32 / persona::PERSONAS.len() as f32;
+    assert!(
+        (0.85..0.95).contains(&share),
+        "{farmers} Godlands farmers with a tier-3 staff"
+    );
 }

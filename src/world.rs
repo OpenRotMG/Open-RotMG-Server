@@ -797,6 +797,8 @@ pub struct World {
     pub(crate) realm_layout: Option<String>,
     /// Where this Realm map's Godlands lie, as a veteran who played it before remembers.
     pub(crate) godlands: Arc<Vec<Pos>>,
+    /// Every 24-tile square that is mostly Godlands, so a god seen elsewhere is not mistaken for them.
+    pub(crate) godland_squares: Arc<BTreeSet<(i32, i32)>>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
@@ -1359,6 +1361,11 @@ impl Directory {
             )?;
             world.realm_layout = source.as_ref().map(|source| source.name().to_owned());
             world.godlands = Arc::new(godlands(&world.map, &world.content));
+            world.godland_squares = Arc::new(
+                godland_cells(&world.map, &world.content)
+                    .into_keys()
+                    .collect(),
+            );
             world.clock = clock.clone();
             world.attack_epoch = clock.now();
             world.new_tick_at = clock.now();
@@ -3124,6 +3131,7 @@ impl World {
             navigation_geometry: Box::default(),
             realm_layout: None,
             godlands: Arc::default(),
+            godland_squares: Arc::default(),
             timed_ids: BTreeSet::new(),
             quest_ids: BTreeSet::new(),
             gun_ids,
@@ -8278,8 +8286,7 @@ mod quest_tests;
 #[cfg(test)]
 mod map_tests;
 
-/// The biggest Mountains areas, one spot per 24-tile square, at most as many as a bot remembers.
-fn godlands(map: &Map, content: &Content) -> Vec<Pos> {
+fn godland_cells(map: &Map, content: &Content) -> BTreeMap<(i32, i32), Vec<Pos>> {
     let mut squares: BTreeMap<(i32, i32), Vec<Pos>> = BTreeMap::new();
     for (i, cell) in map.cells.iter().enumerate() {
         if cell.terrain == 1 && content.grounds[&cell.ground] > 0. {
@@ -8291,9 +8298,14 @@ fn godlands(map: &Map, content: &Content) -> Vec<Pos> {
             squares.entry((x / 24, y / 24)).or_default().push(pos);
         }
     }
-    let mut spots: Vec<_> = squares
+    squares.retain(|_, cells| cells.len() >= 150);
+    squares
+}
+
+/// The biggest Mountains areas, one spot per 24-tile square, at most as many as a bot remembers.
+fn godlands(map: &Map, content: &Content) -> Vec<Pos> {
+    let mut spots: Vec<_> = godland_cells(map, content)
         .into_values()
-        .filter(|cells| cells.len() >= 150)
         .map(|cells| {
             let n = cells.len() as f32;
             let middle = Pos {

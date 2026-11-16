@@ -40,7 +40,9 @@ fn observe_ground(b: &mut Brain, v: &mut PlayerView, c: &Content) {
         .unwrap()
         .kind;
     let caller = std::mem::replace(&mut v.objects[0].kind, low);
-    b.crowd.bands.observe(v, c, &mut b.mind.godlands, false);
+    b.crowd
+        .bands
+        .observe(v, c, &mut b.mind.godlands, false, b.profile.identity);
     v.objects[0].kind = caller;
 }
 fn pending(b: &mut Brain, v: &PlayerView) {

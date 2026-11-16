@@ -95,25 +95,29 @@ impl Grid {
                 && reachable.contains(p)
                 && center(*p).distance(from) > 3.
         };
+        let best = self
+            .frontier_tiles()
+            .intersection(&reachable)
+            .inspect(|_| {
+                self.candidates.fetch_add(1, Ordering::Relaxed);
+            })
+            .min_by(|a, b| {
+                center(**a)
+                    .distance(target)
+                    .total_cmp(&center(**b).distance(target))
+            })
+            .copied()
+            // Standing at the known edge nearest the target, with nothing revealed beyond, it is out of reach.
+            .filter(usable);
+        let closer = |e: &TilePoint| center(*e).distance(target);
         // Live: near-equal edges swapped as tiles were revealed, so trips flipped between two waypoints for minutes.
+        // Live: a kept edge outlived far better ones and Godlands trips walked away from the Godlands for minutes.
         let edge = kept
-            .filter(|(t, e)| *t == tile(target) && usable(e))
+            .filter(|(t, e)| {
+                *t == tile(target) && usable(e) && best.is_none_or(|b| closer(&b) + 8. > closer(e))
+            })
             .map(|(_, e)| e)
-            .or_else(|| {
-                self.frontier_tiles()
-                    .intersection(&reachable)
-                    .inspect(|_| {
-                        self.candidates.fetch_add(1, Ordering::Relaxed);
-                    })
-                    .min_by(|a, b| {
-                        center(**a)
-                            .distance(target)
-                            .total_cmp(&center(**b).distance(target))
-                    })
-                    .copied()
-                    // Standing at the known edge nearest the target, with nothing revealed beyond, it is out of reach.
-                    .filter(usable)
-            });
+            .or(best);
         self.performance
             .lock()
             .expect("bot timings poisoned")

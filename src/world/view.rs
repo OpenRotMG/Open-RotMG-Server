@@ -118,6 +118,8 @@ pub struct MapInfo {
     /// Where this map's Godlands are, for veterans who played it before; not drawn on the minimap.
     #[serde(skip)]
     pub godlands: Arc<Vec<Pos>>,
+    #[serde(skip)]
+    pub godland_squares: Arc<BTreeSet<(i32, i32)>>,
 }
 #[derive(Serialize)]
 pub struct OwnCharacter {
@@ -383,6 +385,7 @@ impl World {
                 allow_teleport: w.allow_teleport(),
                 layout: w.realm_layout.clone(),
                 godlands: w.godlands.clone(),
+                godland_squares: w.godland_squares.clone(),
             },
             character: OwnCharacter {
                 conditions: p.conditions(w.now) | if p.paused { 1 << 20 } else { 0 },

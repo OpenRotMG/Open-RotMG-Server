@@ -24,14 +24,23 @@ pub(super) fn tier(terrain: u8) -> u8 {
         _ => 0,
     }
 }
-fn suitable(v: &PlayerView) -> u8 {
-    match v.character.level {
-        // Live: behind a tier-7 gear gate 0.5% of level-20 frames fought gods; 2012 level 20s farmed them in whatever they had.
-        20 => 4,
+fn suitable(v: &PlayerView, identity: &str) -> u8 {
+    let level = v.character.level;
+    // Owner, Nov 2026: 90% of level 20s farm the Godlands, 10% fewer per level below, at least 5%.
+    let chance = (0.9 - 0.1 * (20 - level) as f64).max(0.05);
+    let roll = (super::persona::seed(&format!("{identity}:godlands:{level}")) >> 11) as f64
+        / (1u64 << 53) as f64;
+    match level {
+        _ if roll < chance => 4,
         15.. => 3,
         10.. => 2,
         _ => 1,
     }
+}
+fn in_godlands(v: &PlayerView, p: Pos) -> bool {
+    v.map
+        .godland_squares
+        .contains(&((p.x / 24.) as i32, (p.y / 24.) as i32))
 }
 fn region(p: Pos) -> TilePoint {
     ((p.x / REGION).floor() as i16, (p.y / REGION).floor() as i16)
@@ -44,6 +53,7 @@ impl Bands {
         c: &Content,
         godlands: &mut BTreeMap<String, BTreeSet<TilePoint>>,
         veteran: bool,
+        identity: &str,
     ) -> bool {
         let mut learned = false;
         if self.world != Some(v.session.world) {
@@ -69,6 +79,19 @@ impl Bands {
                     );
                     learned = true;
                 }
+                if let Some(known) = godlands.get_mut(layout) {
+                    let before = known.len();
+                    known.retain(|t| in_godlands(v, center(*t)));
+                    if known.len() != before {
+                        tracing::info!(
+                            account = v.session.account,
+                            layout,
+                            dropped = before - known.len(),
+                            "autonomous realm godlands memory outside the Godlands forgotten"
+                        );
+                        learned = true;
+                    }
+                }
                 let remembered = godlands.get(layout).map_or(0, BTreeSet::len);
                 for t in godlands.get(layout).into_iter().flatten() {
                     self.regions.insert(region(center(*t)), (4, center(*t)));
@@ -81,7 +104,7 @@ impl Bands {
                 );
             }
         }
-        self.limit = suitable(v);
+        self.limit = suitable(v, identity);
         if v.map.name != "Realm" {
             return false;
         }
@@ -90,7 +113,11 @@ impl Bands {
             .iter()
             .filter(|o| o.hp > 0 && c.objects[&o.kind].enemy)
         {
-            let tier = tier(c.objects[&enemy.kind].terrain);
+            // Live: a god wandering into the highlands made bots there believe they stood in the Godlands.
+            let tier = match tier(c.objects[&enemy.kind].terrain) {
+                4 if !in_godlands(v, enemy.position) => 3,
+                tier => tier,
+            };
             let entry = self
                 .regions
                 .entry(region(enemy.position))
@@ -203,15 +230,56 @@ mod tests {
         v.objects.push(enemy);
         let mut bands = Bands::default();
         v.character.level = 5;
-        bands.observe(&v, &c, &mut BTreeMap::new(), false);
+        bands.observe(&v, &c, &mut BTreeMap::new(), false, "Tester");
         assert!(!bands.survivable(&v, far));
         assert!(
             bands.survivable(&v, v.position),
             "unobserved ground is not refused"
         );
         v.character.level = 15;
-        bands.observe(&v, &c, &mut BTreeMap::new(), false);
+        bands.observe(&v, &c, &mut BTreeMap::new(), false, "Tester");
         assert!(bands.survivable(&v, far));
         assert_eq!(bands.venture(&v).map(|p| (p.x, p.y)), Some((far.x, far.y)));
+    }
+
+    #[test]
+    fn godlands_draw_most_level_20s_and_fewer_each_level_below() {
+        let (_, mut v) = quest_tests::fixture();
+        for (level, share) in [(20, 0.9), (19, 0.8), (17, 0.6), (14, 0.3), (8, 0.05)] {
+            v.character.level = level;
+            let farmers = crate::bots::persona::PERSONAS
+                .iter()
+                .filter(|p| suitable(&v, p.identity) == 4)
+                .count() as f64;
+            let actual = farmers / crate::bots::persona::PERSONAS.len() as f64;
+            assert!((actual - share).abs() < 0.08, "level {level}: {actual}");
+        }
+    }
+
+    #[test]
+    fn a_god_wandering_outside_the_godlands_is_not_the_godlands() {
+        let (c, mut v) = quest_tests::fixture();
+        let mut god = v.objects.remove(0);
+        god.kind = c
+            .objects
+            .values()
+            .find(|o| o.enemy && o.terrain == 1)
+            .unwrap()
+            .kind;
+        (god.hp, god.position) = (100, Pos { x: 90.5, y: 90.5 });
+        v.objects.push(god);
+        v.map.layout = Some("layout".into());
+        v.map.godland_squares = Arc::new(BTreeSet::from([(0, 0)]));
+        let mut memory =
+            BTreeMap::from([("layout".to_owned(), BTreeSet::from([(10, 10), (91, 91)]))]);
+        let mut bands = Bands::default();
+        assert!(bands.observe(&v, &c, &mut memory, false, "Tester"));
+        assert_eq!(
+            memory["layout"],
+            BTreeSet::from([(10, 10)]),
+            "memory outside the Godlands is forgotten"
+        );
+        assert_eq!(bands.known(Pos { x: 90.5, y: 90.5 }), Some(3));
+        assert_eq!(bands.known(Pos { x: 10.5, y: 10.5 }), Some(4));
     }
 }
