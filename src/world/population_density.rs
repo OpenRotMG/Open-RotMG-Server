@@ -61,8 +61,12 @@ impl World {
         }
         for terrain in 1..=12 {
             let region = &mut self.population_regions[terrain];
-            // Owner playtests found full Kithio density too crowded; keep its proportions at two thirds.
-            region.target = area[terrain] * 2 / (divisors[terrain] * 3);
+            // Owner playtests found full Kithio density too crowded elsewhere, but farmed Godlands too sparse.
+            region.target = if terrain == 1 {
+                area[terrain] / divisors[terrain]
+            } else {
+                area[terrain] * 2 / (divisors[terrain] * 3)
+            };
             ensure!(
                 region.target == 0 || !region.sites.is_empty() && !region.kinds.is_empty(),
                 "terrain {terrain} lacks population sites or species"
@@ -303,7 +307,8 @@ impl World {
                 let counted = counts[terrain as usize];
                 if counted * 2 > target * 3 {
                     self.cull_population(terrain);
-                } else if counted * 4 < target * 3 {
+                // Owner chose to top up heavily farmed Godlands on every check instead of Kithio's 75%.
+                } else if counted * 4 < target * 3 || terrain == 1 && counted < target {
                     self.fill_population(terrain)?;
                 }
             }
