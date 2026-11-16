@@ -195,6 +195,30 @@ impl World {
         Ok(())
     }
 
+    pub(super) fn observe_overlap(&mut self, id: i32, b: &Bullet) -> Result<()> {
+        let flags = self.players[&id].conditions(self.now);
+        let damage =
+            crate::condition::damage(b.damage, self.defense(id)?, flags, b.spec.armor_piercing);
+        let now = self.now;
+        let p = self.players.get_mut(&id).unwrap();
+        while p.overlaps.front().is_some_and(|(at, _)| at + 3000 < now) {
+            p.overlaps.pop_front();
+        }
+        let key = (b.owner, b.id, b.born);
+        if damage == 0
+            || p.overlaps
+                .iter()
+                .any(|(_, o)| (o.owner, o.id, o.born) == key)
+        {
+            return Ok(());
+        }
+        p.overlaps.push_back((now, b.clone()));
+        p.audit_fact(id, &self.name, now, "overlap", || {
+            serde_json::json!({"owner":b.owner,"bullet":b.id,"born_ms":b.born,"source_kind":b.source_kind,"damage":damage})
+        });
+        Ok(())
+    }
+
     pub(super) fn expire_native_projectiles(&mut self) {
         let now = self.clock.now();
         for (id, p) in &mut self.players {

@@ -2,7 +2,7 @@ use super::movement_tests::fixture;
 use super::*;
 use crate::condition::{self, bit};
 
-fn shot(w: &World, owner: i32, kind: u16, index: u8) -> Bullet {
+pub(super) fn shot(w: &World, owner: i32, kind: u16, index: u8) -> Bullet {
     let spec = w.content.get(kind).unwrap().projectiles[&index].clone();
     Bullet {
         owner,

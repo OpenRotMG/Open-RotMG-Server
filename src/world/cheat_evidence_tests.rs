@@ -45,3 +45,17 @@ fn shots_and_warned_blasts_record_aim_and_escape_evidence() {
     );
     assert_eq!(w.players[&id].character.hp, 200);
 }
+
+#[test]
+fn projectile_overlaps_are_recorded_once_without_damaging_humans() {
+    let (mut w, id) = fixture(0x18, false);
+    w.now = 1000;
+    w.bullets.push(super::combat_tests::shot(&w, 999, 0xdf0, 0));
+    for _ in 0..3 {
+        w.step();
+    }
+    let overlaps = facts("overlap");
+    assert_eq!(overlaps.len(), 1);
+    assert!(overlaps[0]["damage"].as_i64().unwrap() > 0);
+    assert_eq!(w.players[&id].character.hp, 200);
+}

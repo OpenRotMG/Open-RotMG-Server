@@ -381,6 +381,7 @@ pub struct Player {
     audit_view: Option<evidence::View>,
     audit_revision: u64,
     visible_projectiles: BTreeMap<(i32, u8), native_hits::VisibleProjectile>,
+    overlaps: VecDeque<(u64, Bullet)>,
     predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
     oxygen: i32,
@@ -3738,6 +3739,7 @@ impl World {
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
+                overlaps: VecDeque::new(),
                 predicted_deaths: BTreeMap::new(),
                 ground_hits: BTreeMap::new(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
@@ -8017,7 +8019,6 @@ impl World {
                             && !p.paused
                             && !p.departing
                             && !p.death_pending
-                            && p.controller != Controller::Human
                             && p.conditions(self.now)
                                 & (crate::condition::bit(crate::condition::STASIS)
                                     | crate::condition::bit(crate::condition::INVINCIBLE))
@@ -8025,6 +8026,11 @@ impl World {
                             && !b.hit.contains(id)
                             && inside_box(p.pos, b.pos)
                         {
+                            if p.controller == Controller::Human {
+                                self.observe_overlap(*id, b)
+                                    .expect("validated projectile overlap");
+                                continue;
+                            }
                             self.damage_player(*id, b, true)
                                 .expect("validated projectile damage");
                             b.hit.insert(*id);
