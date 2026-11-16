@@ -175,8 +175,13 @@ impl Market {
                 },
                 "market incoming exchange refused"
             );
-            let peer = (g.player, g.account, g.name.clone());
-            self.respond(v, peer, ReplyKind::Counter(q), c)?;
+            // Footage, 2011-2013: most sellers closed a bad window without a word; some said "nty".
+            if style(&self.name) % 5 < 2 {
+                self.queue(
+                    format!("nty need {}", goods_text(&q[1], c)?),
+                    Channel::Local,
+                );
+            }
             return Ok(Some(TradeAction::Cancel));
         }
         Ok(

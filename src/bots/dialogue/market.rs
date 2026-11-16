@@ -337,11 +337,14 @@ impl Service {
                         return;
                     }
                     Err(error) => {
-                        service
-                            .translations
-                            .lock()
-                            .expect("translations poisoned")
-                            .remove(&lower);
+                        // Live: one unparseable line was retranslated 11 times; only admission or network failures retry.
+                        if !matches!(error, Failure::Error("invalid_translation")) {
+                            service
+                                .translations
+                                .lock()
+                                .expect("translations poisoned")
+                                .remove(&lower);
+                        }
                         tracing::warn!(player = id, text = lower, %error, "trade chat translation failed; bots did not hear it");
                         return;
                     }

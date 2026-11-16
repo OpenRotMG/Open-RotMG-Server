@@ -142,24 +142,38 @@ async fn incoming_refusal_counter_is_funded_and_expires_with_offer_contact_or_ow
     ));
     v.time_ms += 3001;
     v.clock_at += Duration::from_millis(3001);
+    let mut silent = Market {
+        name: "Buyer".into(),
+        ..market.clone()
+    };
+    assert!(matches!(
+        silent.incoming_action(&v, &app.content, None).unwrap(),
+        Some(crate::world::TradeAction::Cancel)
+    ));
+    assert!(
+        silent.outgoing.is_none(),
+        "most sellers close a bad window without a word"
+    );
     assert!(matches!(
         market.incoming_action(&v, &app.content, None).unwrap(),
         Some(crate::world::TradeAction::Cancel)
     ));
-    let reply = market
-        .outgoing
-        .clone()
-        .expect("refusal with own funded counteroffer");
+    let refusal = market.outgoing.take().expect("this seller says nty");
     assert_eq!(
-        reply.text,
-        format!(
-            "nty wts {} for {}",
-            goods_text(&q[0], &app.content).unwrap(),
-            goods_text(&q[1], &app.content).unwrap()
+        (refusal.text.as_str(), &refusal.channel),
+        (
+            format!("nty need {}", goods_text(&q[1], &app.content).unwrap()).as_str(),
+            &Channel::Local
         )
     );
     market.end_incoming(&v);
     market.trade = None;
+    assert!(
+        market
+            .message_current(&refusal, &v, &app.content, None)
+            .unwrap()
+    );
+    let reply = interest_reply;
     assert!(
         market
             .message_current(&reply, &v, &app.content, None)
