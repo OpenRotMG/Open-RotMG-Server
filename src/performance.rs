@@ -241,7 +241,7 @@ impl Window {
     }
     pub fn report(&mut self) -> Option<Value> {
         let elapsed = self.started?.elapsed();
-        if elapsed < Duration::from_secs(5) {
+        if elapsed < Duration::from_secs(60) {
             return None;
         }
         let achieved_step_hz = self

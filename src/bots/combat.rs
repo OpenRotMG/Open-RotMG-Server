@@ -207,7 +207,7 @@ pub(super) fn attack(
         x: v.position.x + estimate.x,
         y: v.position.y + estimate.y,
     };
-    tracing::info!(player=v.session.player,target=enemy.id,velocity=?velocity,estimate=?estimate,aim=angle(v.position,point),"autonomous execution aim estimate");
+    tracing::debug!(player=v.session.player,target=enemy.id,velocity=?velocity,estimate=?estimate,aim=angle(v.position,point),"autonomous execution aim estimate");
     let range = projectile.speed * projectile.lifetime / 10000.;
     if v.character.conditions & crate::content::STUNNED == 0
         && v.position.distance(point) < range
