@@ -63,6 +63,7 @@ fn fixture_with_control(native: bool) -> (PathBuf, App) {
         behind_proxy: false,
         shore_bots: false,
         bot_population: 0,
+        bot_veterans: 0,
         bot_session_seconds: [1800, 5400],
         dialogue: None,
         requests: Arc::default(),

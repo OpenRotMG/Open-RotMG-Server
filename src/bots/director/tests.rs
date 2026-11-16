@@ -108,7 +108,9 @@ async fn population_skips_a_persona_whose_earlier_session_still_holds_the_accoun
         .map(|p| (p.identity, app.world.clock.now() + Duration::from_secs(60)))
         .collect();
     // Live: "account already has an active session" here terminated the bot-population worker.
-    fill(&app, &done, &mut online, &resting).await.unwrap();
+    fill(&app, &done, &mut online, &mut BTreeSet::new(), &resting)
+        .await
+        .unwrap();
     assert!(online.is_empty());
     drop(held);
 }
@@ -130,9 +132,16 @@ async fn drain_blocks_population_writes_and_shutdown_is_not_a_critical_exit() {
     let mut online = BTreeMap::from([(profile.identity, character.account)]);
     let mut resting = BTreeMap::new();
     lifecycle::drain::prepare(&app);
-    maintain(&app, &done, &mut departed, &mut online, &mut resting)
-        .await
-        .unwrap();
+    maintain(
+        &app,
+        &done,
+        &mut departed,
+        &mut online,
+        &mut BTreeSet::new(),
+        &mut resting,
+    )
+    .await
+    .unwrap();
     assert_eq!(departed.len(), 1);
     assert!(online.contains_key(profile.identity));
     assert_eq!(
@@ -251,9 +260,16 @@ async fn ordinary_session_logout_and_reopen_preserve_career_and_selected_living_
         done.send(exit).await.unwrap();
         let mut online = BTreeMap::from([(profile.identity, character.account)]);
         let mut resting = BTreeMap::new();
-        maintain(&app, &done, &mut departed, &mut online, &mut resting)
-            .await
-            .unwrap();
+        maintain(
+            &app,
+            &done,
+            &mut departed,
+            &mut online,
+            &mut BTreeSet::new(),
+            &mut resting,
+        )
+        .await
+        .unwrap();
         assert!(online.is_empty());
         assert!(resting[profile.identity] > app.world.clock.now() + Duration::from_secs(19 * 60));
         let wallet = app.store.presentation(character.account).await.unwrap();
@@ -480,4 +496,24 @@ async fn all_dead_legacy_personas_initialize_missing_intent_from_real_death_not_
     }
     drop(app);
     std::fs::remove_dir_all(scratch).unwrap();
+}
+
+#[tokio::test]
+async fn veteran_slots_admit_only_level_20s_beyond_the_rank_mix() {
+    let (_dir, mut app) = crate::server::test_app();
+    (app.bot_population, app.bot_veterans) = (3, 2);
+    let (done, _departed) = mpsc::channel(3);
+    let (mut online, mut veterans) = (BTreeMap::new(), BTreeSet::new());
+    fill(&app, &done, &mut online, &mut veterans, &BTreeMap::new())
+        .await
+        .unwrap();
+    assert_eq!((online.len(), veterans.len()), (3, 2));
+    for profile in persona::PERSONAS
+        .iter()
+        .filter(|p| veterans.contains(p.identity))
+    {
+        let character = runtime::persona_character(&app, *profile).await.unwrap();
+        assert_eq!(character.level, 20, "{}", profile.name);
+    }
+    app.shutdown.send_replace(true);
 }

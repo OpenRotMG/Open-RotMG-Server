@@ -44,15 +44,16 @@ async fn fill(
     app: &App,
     done: &mpsc::Sender<Departure>,
     online: &mut BTreeMap<&'static str, i32>,
+    veterans: &mut BTreeSet<&'static str>,
     resting: &BTreeMap<&'static str, Instant>,
 ) -> Result<()> {
     if online.len() >= app.bot_population {
         return Ok(());
     }
-    let targets = targets(app.bot_population);
+    let targets = targets(app.bot_population - app.bot_veterans);
     let classes = app.content.classes.len();
     let mut counts = [0usize; 4];
-    for (&identity, &account) in online.iter() {
+    for (&identity, &account) in online.iter().filter(|(i, _)| !veterans.contains(*i)) {
         counts[rank_band(identity, app.store.account_stars(account).await?, classes)] += 1;
     }
     let mut profiles: Vec<_> = persona::PERSONAS
@@ -92,11 +93,25 @@ async fn fill(
         candidates.push((profile, rank_band(profile.identity, stars, classes)));
     }
     while online.len() < app.bot_population {
+        // Owner, Nov 2026: extra slots beyond the rank mix go to level 20s, so the Realm has enough of them.
+        let veteran = veterans.len() < app.bot_veterans;
         let Some(index) = candidates
             .iter()
             .enumerate()
-            .filter(|(_, (_, band))| counts[*band] < targets[*band])
-            .max_by_key(|(_, (_, band))| targets[*band] - counts[*band])
+            .filter(|(_, (p, band))| {
+                if veteran {
+                    !p.is_guest()
+                } else {
+                    counts[*band] < targets[*band]
+                }
+            })
+            .max_by_key(|(_, (_, band))| {
+                if veteran {
+                    0
+                } else {
+                    targets[*band] - counts[*band]
+                }
+            })
             .map(|(index, _)| index)
         else {
             break;
@@ -126,7 +141,16 @@ async fn fill(
             app.store.account_stars(account).await?,
             classes,
         );
-        if counts[band] >= targets[band] {
+        if veteran && character.level != 20 {
+            tracing::info!(
+                account,
+                name = character.name,
+                level = character.level,
+                "persona is not level 20; remaining offline from a veteran slot"
+            );
+            continue;
+        }
+        if !veteran && counts[band] >= targets[band] {
             tracing::info!(
                 account,
                 name = character.name,
@@ -170,12 +194,17 @@ async fn fill(
             return Err(error);
         }
         online.insert(profile.identity, account);
-        counts[band] += 1;
+        if veteran {
+            veterans.insert(profile.identity);
+        } else {
+            counts[band] += 1;
+        }
         tracing::info!(
             account,
             name,
             profile = profile.identity,
             band,
+            veteran,
             ?counts,
             ?targets,
             online = online.len(),
@@ -198,6 +227,7 @@ async fn maintain(
     done: &mpsc::Sender<Departure>,
     departed: &mut mpsc::Receiver<Departure>,
     online: &mut BTreeMap<&'static str, i32>,
+    veterans: &mut BTreeSet<&'static str>,
     resting: &mut BTreeMap<&'static str, Instant>,
 ) -> Result<()> {
     let stopping = lifecycle::drain::stopping(app);
@@ -222,6 +252,7 @@ async fn maintain(
                             .await?;
                     }
                     online.remove(exit.profile.identity);
+                    veterans.remove(exit.profile.identity);
                     resting.insert(
                         exit.profile.identity,
                         app.world.clock.now() + Duration::from_secs(20 * 60),
@@ -234,7 +265,7 @@ async fn maintain(
                         "inhabitant session ended"
                     );
                 }
-                fill(app, done, online, resting).await
+                fill(app, done, online, veterans, resting).await
             })
             .await
     }
@@ -262,8 +293,17 @@ async fn maintain(
 pub(super) async fn start(app: &App) -> Result<()> {
     let (done, mut departed) = mpsc::channel(app.bot_population.max(1));
     let mut online = BTreeMap::new();
+    let mut veterans = BTreeSet::new();
     let mut resting = BTreeMap::new();
-    maintain(app, &done, &mut departed, &mut online, &mut resting).await?;
+    maintain(
+        app,
+        &done,
+        &mut departed,
+        &mut online,
+        &mut veterans,
+        &mut resting,
+    )
+    .await?;
     let app = app.clone();
     let mut shutdown = app.shutdown.subscribe();
     let supervisor = app.world.supervisor.clone();
@@ -280,7 +320,15 @@ pub(super) async fn start(app: &App) -> Result<()> {
                 if *shutdown.borrow() {
                     return Ok(());
                 }
-                maintain(&app, &done, &mut departed, &mut online, &mut resting).await?;
+                maintain(
+                    &app,
+                    &done,
+                    &mut departed,
+                    &mut online,
+                    &mut veterans,
+                    &mut resting,
+                )
+                .await?;
             }
         },
     );

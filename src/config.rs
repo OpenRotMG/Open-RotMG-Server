@@ -26,6 +26,9 @@ pub struct Config {
     pub bot_llm: bool,
     #[serde(default = "default_bot_population")]
     pub bot_population: usize,
+    /// Slots within bot_population reserved for level-20 personas, outside the rank mix.
+    #[serde(default)]
+    pub bot_veterans: usize,
     #[serde(default = "default_bot_session_seconds")]
     pub bot_session_seconds: [u64; 2],
     pub realm_seed: u64,
@@ -151,6 +154,7 @@ impl Config {
                 shore_bots: true,
                 bot_llm: false,
                 bot_population: default_bot_population(),
+                bot_veterans: 0,
                 bot_session_seconds: default_bot_session_seconds(),
                 realm_seed: rand::random(),
                 realm_count: default_realm_count(),
@@ -277,6 +281,10 @@ impl Config {
                 && self.bot_session_seconds[0] <= self.bot_session_seconds[1]
                 && self.bot_session_seconds[1] <= 86400,
             "bot_session_seconds must be an ordered range between 30 and 86400 seconds"
+        );
+        ensure!(
+            self.bot_veterans <= self.bot_population,
+            "bot_veterans cannot exceed bot_population"
         );
         ensure!(
             self.bot_population <= crate::bots::persona_count(),

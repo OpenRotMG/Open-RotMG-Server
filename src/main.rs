@@ -206,6 +206,7 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         behind_proxy: config.behind_proxy,
         shore_bots: config.shore_bots,
         bot_population: config.bot_population,
+        bot_veterans: config.bot_veterans,
         bot_session_seconds: config.bot_session_seconds,
         dialogue,
         society: Arc::default(),
