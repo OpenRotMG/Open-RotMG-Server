@@ -502,7 +502,9 @@ impl Life {
         if self.gift.is_some() {
             return Some(idle());
         }
+        // Owner, Nov 2026: bots asked each other for heals and potions in the Nexus, where players did not.
         if v.elapsed_ms >= self.next_request
+            && v.map.name != "Nexus"
             && let Some(p) = v.objects.iter().find(|p| {
                 p.hp > 0
                     && p.account.is_some_and(|a| self.known(a))
@@ -996,6 +998,28 @@ mod tests {
     use super::*;
     use crate::bots::runtime::tests::actor;
     use crate::world::TradeAction;
+
+    #[test]
+    fn hurt_bots_ask_a_known_priest_for_heals_outside_the_nexus_only() {
+        let (_, mut v) = crate::bots::quest_tests::fixture();
+        let priest = &mut v.objects[0];
+        (priest.kind, priest.account, priest.name, priest.hp) =
+            (PRIEST, Some(2), "Healer".into(), 100);
+        priest.position = v.position;
+        v.character.hp = 1;
+        let mut life = Life::default();
+        life.remember(&v, 2, "Healer".into(), Interaction::HealedBy, 50);
+        for (map, asked) in [("Nexus", false), ("Realm", true)] {
+            v.map.name = map.into();
+            (life.outgoing, life.next_request) = (None, 0);
+            life.decide(&v);
+            assert_eq!(
+                life.outgoing.as_deref() == Some("Healer, heal please"),
+                asked,
+                "{map}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn gift_kind_health_history_requires_commit_and_applies_once() {
