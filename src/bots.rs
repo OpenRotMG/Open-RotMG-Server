@@ -2001,6 +2001,7 @@ impl Brain {
             Goal::Hunt(id) | Goal::Fight(id) => {
                 !self.unreachable.contains_key(id) || !travel(g, *p)
             }
+            Goal::Loot(id) => !self.unreachable.contains_key(id),
             _ => true,
         });
         // Exploration's maximum score is 20; a clear higher-ranked route makes its full-map search irrelevant.
@@ -2208,6 +2209,15 @@ impl Brain {
                             100
                         };
                         self.blocked.insert(tile(destination), v.tick + aside);
+                        // Live: bots shuttled 12 tiles from a lava-ringed chest for an hour, retrying every 5 seconds.
+                        if let Goal::Loot(id) = &goal {
+                            self.unreachable.insert(*id, v.time_ms + 300_000);
+                            tracing::info!(
+                                player = v.session.player,
+                                bag = id,
+                                "autonomous loot unreachable; set aside"
+                            );
+                        }
                         if travel(&goal, destination) {
                             self.travel = None;
                             if let Goal::Hunt(id) | Goal::Fight(id) = &goal {

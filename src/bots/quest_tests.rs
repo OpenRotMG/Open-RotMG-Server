@@ -1215,3 +1215,57 @@ fn nine_in_ten_level_20s_farm_the_godlands_in_ordinary_gear() {
         "{farmers} Godlands farmers with a tier-3 staff"
     );
 }
+
+#[test]
+fn a_chest_inside_lava_is_set_aside_instead_of_approached_again_and_again() {
+    // Live: bots shuttled 12 tiles from a Red Demon chest for an hour; lava was avoided only within 12 tiles.
+    let (c, mut v) = fixture();
+    v.quest = None;
+    let chest_at = Pos { x: 60.5, y: 60.5 };
+    let lava =
+        |x: i16, y: i16| (55..=65).contains(&x) && (55..=65).contains(&y) && (x, y) != (60, 60);
+    let geometry = crate::navigation::Geometry::new(
+        (128, 128),
+        (0..128 * 128)
+            .map(|i| {
+                if lava((i % 128) as i16, (i / 128) as i16) {
+                    0xf4
+                } else {
+                    1
+                }
+            })
+            .collect(),
+        &BTreeMap::from([(1, 1.), (0xf4, 0.666)]),
+    );
+    v.tiles = Arc::new(crate::navigation::Tiles::new(
+        geometry,
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    let chest = &mut v.objects[0];
+    (chest.id, chest.kind, chest.hp, chest.position) = (3, 0x501, 0, chest_at);
+    chest.contents = vec![0xa22, -1, -1, -1, -1, -1, -1, -1];
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    let step = |brain: &mut Brain, v: &mut PlayerView, y: f32| {
+        v.position = Pos { x: 60.5, y };
+        v.tick += 5;
+        v.time_ms += 250;
+        v.elapsed_ms += 250;
+        brain.decide(v, &c).unwrap().goal
+    };
+    assert_eq!(
+        step(&mut brain, &mut v, 30.5),
+        Goal::Loot(3),
+        "lava beyond sight is not yet known to block"
+    );
+    assert_ne!(
+        step(&mut brain, &mut v, 53.5),
+        Goal::Loot(3),
+        "lava all around blocks every route"
+    );
+    v.tick += 200;
+    assert_ne!(
+        step(&mut brain, &mut v, 30.5),
+        Goal::Loot(3),
+        "an unreachable chest stays set aside"
+    );
+}
