@@ -114,6 +114,33 @@ async fn moderators_mark_online_players_and_detector_kicks_only_marked_accounts(
             (status, String::from_utf8(body.to_vec()).unwrap())
         }
     };
+    for (account, player, expected) in [
+        (bystander, players[2], "is not marked"),
+        (cheater, players[1], r#"{"applied":0}"#),
+    ] {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+        );
+        let request = Overlaps {
+            account,
+            player,
+            hits: vec![(1, 1, 1)],
+        };
+        let response = overlaps(
+            State(app.clone()),
+            ConnectInfo("127.0.0.1:9".parse().unwrap()),
+            headers,
+            Json(request),
+        )
+        .await;
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains(expected), "{body}");
+    }
     let (status, body) = kick(bystander).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(body.contains("is not marked"), "{body}");

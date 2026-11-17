@@ -3454,6 +3454,7 @@ fn routes(a: &App, client: PathBuf) -> Router {
             "/internal/moderation/cheat-kick",
             post(moderation::cheat_kick),
         )
+        .route("/internal/moderation/overlaps", post(moderation::overlaps))
         .route("/internal/discord/recover", post(discord_recover))
         .route("/api/account/recover", post(reset_password))
         .route("/api/account/verify-email", post(email::confirm));

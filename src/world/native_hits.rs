@@ -219,6 +219,41 @@ impl World {
         Ok(())
     }
 
+    /// Commits projectile overlaps the server observed but the client did not report.
+    pub fn apply_overlaps(&mut self, id: i32, hits: &[(i32, u8, u64)]) -> Result<usize> {
+        let mut applied = 0;
+        for &key in hits {
+            let p = self
+                .players
+                .get_mut(&id)
+                .context("overlap target missing")?;
+            if self.safe || !p.character.alive || p.paused || p.departing || p.death_pending {
+                break;
+            }
+            let Some(index) = p
+                .overlaps
+                .iter()
+                .position(|(_, b)| (b.owner, b.id, b.born) == key)
+            else {
+                continue;
+            };
+            let (_, shot) = p.overlaps.remove(index).unwrap();
+            if let Some(seen) = p
+                .visible_projectiles
+                .get_mut(&(key.0, key.1))
+                .filter(|v| v.bullet.born == key.2)
+            {
+                if seen.consumed {
+                    continue;
+                }
+                seen.consumed = true;
+            }
+            self.damage_player(id, &shot, true)?;
+            applied += 1;
+        }
+        Ok(applied)
+    }
+
     pub(super) fn expire_native_projectiles(&mut self) {
         let now = self.clock.now();
         for (id, p) in &mut self.players {

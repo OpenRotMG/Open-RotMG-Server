@@ -179,5 +179,58 @@ pub(super) async fn cheat_kick(
     )
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Overlaps {
+    account: i32,
+    player: i32,
+    hits: Vec<(i32, u8, u64)>,
+}
+pub(super) async fn overlaps(
+    State(a): State<App>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(request): Json<Overlaps>,
+) -> Response {
+    if let Some(response) = private_denial(&a, peer, &headers) {
+        return response;
+    }
+    json_result(
+        async {
+            let Overlaps {
+                account,
+                player,
+                hits,
+            } = request;
+            ensure!(
+                a.content.reviewed(account),
+                "account {account} is not marked"
+            );
+            ensure!((1..=64).contains(&hits.len()), "1-64 hits required");
+            let requested = hits.len();
+            let applied = a
+                .world
+                .directory(move |d| {
+                    let w = d.worlds.get_mut(&d.location(player)?).unwrap();
+                    ensure!(
+                        w.players[&player].character.account == account,
+                        "player {player} is not account {account}"
+                    );
+                    w.apply_overlaps(player, &hits)
+                })
+                .await?;
+            tracing::warn!(
+                account,
+                player,
+                requested,
+                applied,
+                "overlaps applied to marked account"
+            );
+            Ok(serde_json::json!({"applied":applied}))
+        }
+        .await,
+    )
+}
+
 #[cfg(test)]
 mod tests;

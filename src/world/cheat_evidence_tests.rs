@@ -47,15 +47,32 @@ fn shots_and_warned_blasts_record_aim_and_escape_evidence() {
 }
 
 #[test]
-fn projectile_overlaps_are_recorded_once_without_damaging_humans() {
+fn unreported_overlaps_are_recorded_once_and_applied_only_on_request() {
     let (mut w, id) = fixture(0x18, false);
     w.now = 1000;
-    w.bullets.push(super::combat_tests::shot(&w, 999, 0xdf0, 0));
+    let unreported = super::combat_tests::shot(&w, 999, 0xdf0, 0);
+    let mut reported = unreported.clone();
+    reported.id = 254;
+    let keys = [&unreported, &reported].map(|b| (b.owner, b.id, b.born));
+    w.bullets.extend([unreported, reported.clone()]);
     for _ in 0..3 {
         w.step();
     }
     let overlaps = facts("overlap");
-    assert_eq!(overlaps.len(), 1);
-    assert!(overlaps[0]["damage"].as_i64().unwrap() > 0);
-    assert_eq!(w.players[&id].character.hp, 200);
+    assert_eq!(overlaps.len(), 2);
+    assert!(native_hits::expect_shoot_ack(
+        w.players.get_mut(&id).unwrap(),
+        vec![reported],
+        &w.clock
+    ));
+    w.acknowledge_shoot(id, 1000).unwrap();
+    w.native_player_hit(id, 999, 254).unwrap();
+    let hp = w.players[&id].character.hp;
+    assert_eq!(hp, 200 - overlaps[1]["damage"].as_i64().unwrap() as i32);
+    assert_eq!(w.apply_overlaps(id, &keys).unwrap(), 1);
+    assert_eq!(
+        w.players[&id].character.hp,
+        hp - overlaps[0]["damage"].as_i64().unwrap() as i32
+    );
+    assert_eq!(w.apply_overlaps(id, &keys).unwrap(), 0);
 }
