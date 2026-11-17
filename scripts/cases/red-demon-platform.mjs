@@ -1,7 +1,7 @@
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
-export const realmSeed=7;
+export const realmSeed=1;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1});
   if(world.realm_layout!=='classic-world-03-reconstruction')throw Error('Expected seeded World3');
@@ -20,6 +20,7 @@ export async function run(game){
   await writeFile(join(process.env.QA_RESULTS_DIR,'inspection.json'),JSON.stringify({before,after}));
   const floor=after.view.objects.find(e=>e.kind===0x153&&Math.floor(e.position.x)===Math.floor(after.view.position.x)&&Math.floor(e.position.y)===Math.floor(after.view.position.y));
   game.check('chest tile has a visible Partial Red Floor',!!floor);
+  game.check('lava has visible stepping stones beyond the chest',after.view.objects.filter(e=>e.kind===0x153).length>1);
   game.check('prepared invulnerable observer remains alive',after.view.lifecycle.alive);
   const chest=after.diagnostic.entities.find(e=>e.kind===0x501&&e.items[0]>=0&&Math.hypot(e.pos.x-after.view.position.x,e.pos.y-after.view.position.y)<1.5);
   if(!chest)throw Error('No ordinary chest item within native interaction range');

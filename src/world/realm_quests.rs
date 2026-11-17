@@ -150,11 +150,39 @@ impl World {
                         y: y as f32,
                     };
                     if site.kind == 0x668 {
-                        self.place_red_demon_platform(chest)?;
+                        self.place_fissure_platform(chest)?;
                     }
                     self.spawn_landmark_chests(site.kind, chest)?;
                 }
             }
+        }
+        if self.retains_authored_lava() {
+            // Overlay the omitted one-in-five floors without changing maps or encounter RNG: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/setpieces/LavaFissure.cs#L60-L71
+            let mut rng = self.rng.clone();
+            let positions: Vec<_> = self
+                .map
+                .cells
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.ground == 0xf4 && c.object.is_none())
+                .filter(|_| rng.gen_ratio(1, 5))
+                .map(|(i, _)| Pos {
+                    x: (i as i32 % self.map.width) as f32 + 0.5,
+                    y: (i as i32 / self.map.width) as f32 + 0.5,
+                })
+                .filter(|pos| {
+                    self.entities_at(*pos)
+                        .all(|e| !self.content.objects[&e.kind].static_object)
+                })
+                .collect();
+            for pos in &positions {
+                self.place_fissure_platform(*pos)?;
+            }
+            tracing::info!(
+                layout = self.realm_layout,
+                count = positions.len(),
+                "authored lava platforms placed"
+            );
         }
         Ok(())
     }
@@ -207,22 +235,22 @@ impl World {
         }
         Ok(())
     }
-    fn place_red_demon_platform(&mut self, pos: Pos) -> Result<()> {
+    fn place_fissure_platform(&mut self, pos: Pos) -> Result<()> {
         // The chest tile is always Partial Red Floor, so standing there is not lava: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/setpieces/LavaFissure.cs#L71
         let ground = self
             .map
             .cell(pos.x, pos.y)
-            .context("Red Demon chest outside map")?
+            .context("Fissure platform outside map")?
             .ground;
-        ensure!(ground == 0xf4, "Red Demon chest is not on Lava Blend");
+        ensure!(ground == 0xf4, "Fissure platform is not on Lava Blend");
         let floor = self.content.get(0x153)?;
         ensure!(
             floor.static_object && floor.protects_ground && !floor.blocks,
-            "Partial Red Floor cannot protect a fissure chest"
+            "Partial Red Floor cannot protect a fissure"
         );
         ensure!(
             !self.entities_at(pos).any(|e| e.kind == 0x153),
-            "Red Demon chest already has a Partial Red Floor"
+            "Fissure tile already has a Partial Red Floor"
         );
         self.spawn_entity(
             0x153,
@@ -1299,7 +1327,7 @@ mod tests {
     }
 
     #[test]
-    fn authored_red_demon_chest_protects_only_its_tile_without_repainting_lava() {
+    fn authored_fissure_platforms_protect_only_their_tiles_without_repainting_lava() {
         let (mut world, player) = super::super::movement_tests::fixture(0xf4, false);
         let original = world.map.clone();
         let pos = world.players[&player].pos;
@@ -1329,6 +1357,36 @@ mod tests {
             .ground_damage(player, 2202, Pos { x: 9.5, y: 8.5 })
             .unwrap();
         assert!(world.players[&player].character.hp < damaged);
+        world.realm_layout = Some("classic-world-01-reconstruction".into());
+        world.rng = rand::rngs::StdRng::seed_from_u64(7);
+        let mut expected_rng = world.rng.clone();
+        world.populate_authored_sites(&[]).unwrap();
+        assert!(Arc::ptr_eq(&original, &world.map));
+        assert_eq!(world.rng.r#gen::<u64>(), expected_rng.r#gen::<u64>());
+        assert_eq!(
+            world.entities_at(pos).filter(|e| e.kind == 0x153).count(),
+            1
+        );
+        let stone = world
+            .entities
+            .values()
+            .find(|e| e.kind == 0x153 && e.id != floor && e.pos.distance(pos) <= 3.)
+            .unwrap()
+            .pos;
+        let hp = world.players[&player].character.hp;
+        world.ground_damage(player, 2803, stone).unwrap();
+        assert_eq!(world.players[&player].character.hp, hp);
+        let bare = (6..=10)
+            .flat_map(|y| {
+                (6..=10).map(move |x| Pos {
+                    x: x as f32 + 0.5,
+                    y: y as f32 + 0.5,
+                })
+            })
+            .find(|p| p.distance(pos) <= 3. && !world.entities_at(*p).any(|e| e.kind == 0x153))
+            .unwrap();
+        world.ground_damage(player, 3404, bare).unwrap();
+        assert!(world.players[&player].character.hp < hp);
     }
 
     #[test]
@@ -1608,6 +1666,21 @@ mod tests {
                         site.spawn
                     );
                 }
+                let platforms = lava
+                    .iter()
+                    .filter(|i| {
+                        world
+                            .cells
+                            .ids(**i)
+                            .iter()
+                            .any(|id| world.entities[id].kind == 0x153)
+                    })
+                    .count();
+                eprintln!("{name} Realm {id}: {platforms}/{lava_count} lava platforms");
+                assert!(
+                    (lava_count / 10..=lava_count / 3).contains(&platforms),
+                    "{name} Realm {id} lacks scattered lava platforms: {platforms}/{lava_count}"
+                );
                 for i in &lava {
                     let (a, b) = (&original.cells[*i], &world.map.cells[*i]);
                     assert_eq!(
