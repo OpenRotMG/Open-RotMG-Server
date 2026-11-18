@@ -1,5 +1,7 @@
 use super::*;
-use crate::server::lifecycle_finalize_tests::{NativeSocket, socket_load, socket_server};
+use crate::server::lifecycle_finalize_tests::{
+    NativeSocket, socket_hello, socket_load, socket_server,
+};
 use crate::server::lock_command_tests::chat;
 
 #[tokio::test]
@@ -59,6 +61,12 @@ async fn moderators_mark_online_players_and_detector_kicks_only_marked_accounts(
         &mut sockets[2],
         "/report Zipper",
         "Only moderators can use /report.",
+    )
+    .await;
+    chat(
+        &mut sockets[2],
+        "/kick Zipper",
+        "Only moderators can use /kick.",
     )
     .await;
     for (text, reply) in [
@@ -156,8 +164,25 @@ async fn moderators_mark_online_players_and_detector_kicks_only_marked_accounts(
     })
     .await
     .unwrap();
+    // Asking for the Realm at login must not bypass the lockout.
     let mut socket = NativeSocket::connect(port, &app.origin).await;
-    let returned = socket_load(&mut socket, &dir, "Zipper", cheater_character).await;
+    socket.send(socket_hello(&dir, "Zipper", -3, None)).await;
+    socket.receive(wire::MAP_INFO).await;
+    socket
+        .send(Packet {
+            id: wire::LOAD,
+            body: cheater_character.to_be_bytes().to_vec(),
+        })
+        .await;
+    let success = socket.receive(wire::CREATE_SUCCESS).await;
+    let returned = Reader::new(&success.body).i32().unwrap();
+    assert_eq!(
+        app.world
+            .directory(move |d| d.location(returned))
+            .await
+            .unwrap(),
+        -2
+    );
     let bystander_player = players[2];
     let (refused, admitted) = app
         .world
@@ -187,4 +212,12 @@ async fn moderators_mark_online_players_and_detector_kicks_only_marked_accounts(
         .unwrap();
     assert!((290..=300).contains(&seconds), "{refused}");
     assert!(admitted);
+    chat(
+        &mut sockets[0],
+        "/kick Modguy",
+        "You cannot use /kick on yourself.",
+    )
+    .await;
+    chat(&mut sockets[0], "/kick bystander", "Kicked Bystander.").await;
+    assert!(!app.owners.lock().unwrap().contains_key(&bystander));
 }

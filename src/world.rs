@@ -1825,15 +1825,6 @@ impl Directory {
                     record.enabled && self.worlds[id].admission_open,
                     controller("Realm is closed")
                 );
-                let locked = self.realm_lockouts.get(&account).map_or(0, |until| {
-                    until.saturating_duration_since(Instant::now()).as_secs()
-                });
-                ensure!(
-                    locked == 0,
-                    anyhow::Error::new(CloseReason::Controller).context(format!(
-                        "You cannot enter the Realm for another {locked} seconds."
-                    ))
-                );
                 *id
             }
             0x703 if matches!(world.name.as_str(), "Snake Pit" | "Abyss of Demons") => {
@@ -1882,7 +1873,23 @@ impl Directory {
             destination != origin,
             protocol("already in destination world")
         );
+        let locked = self.realm_lockout(account, destination);
+        ensure!(
+            locked == 0,
+            anyhow::Error::new(CloseReason::Controller).context(format!(
+                "You cannot enter the Realm for another {locked} seconds."
+            ))
+        );
         Ok((account, character, destination))
+    }
+    /// Seconds left before `account` may enter `world`; zero unless `world` is a Realm.
+    pub(crate) fn realm_lockout(&self, account: i32, world: i32) -> u64 {
+        if !self.endgame.realms.contains_key(&world) {
+            return 0;
+        }
+        self.realm_lockouts.get(&account).map_or(0, |until| {
+            until.saturating_duration_since(Instant::now()).as_secs()
+        })
     }
     pub fn issue(
         &mut self,

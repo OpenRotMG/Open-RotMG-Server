@@ -49,27 +49,33 @@ impl Moderation {
     }
 }
 
-pub(super) async fn report(
+fn refusal(message: String) -> anyhow::Error {
+    anyhow::Error::new(lifecycle::CloseReason::Controller).context(message)
+}
+
+/// Finds the online human `name` for moderator `moderator`, refusing self-targeting.
+async fn moderated_target(
     a: &App,
-    reporter_account: i32,
-    reporter: i32,
+    command: &str,
+    moderator: i32,
+    player: i32,
     name: &str,
-) -> Result<String> {
+) -> Result<(String, i32, String)> {
     ensure!(
         a.moderation
             .as_ref()
-            .is_some_and(|m| m.moderators.contains(&reporter_account)),
-        lifecycle::controller("Only moderators can use /report.")
+            .is_some_and(|m| m.moderators.contains(&moderator)),
+        refusal(format!("Only moderators can use {command}."))
     );
     ensure!(
         !name.is_empty() && !name.contains(char::is_whitespace),
-        lifecycle::controller("Usage: /report <player name>")
+        refusal(format!("Usage: {command} <player name>"))
     );
     let wanted = name.to_string();
-    let (reporter_name, account, name) = a
+    let (moderator_name, account, name) = a
         .world
         .directory(move |d| {
-            let reporter_name = d.worlds[&d.location(reporter)?].players[&reporter]
+            let moderator_name = d.worlds[&d.location(player)?].players[&player]
                 .character
                 .name
                 .clone();
@@ -83,16 +89,39 @@ pub(super) async fn report(
                 })
                 .ok_or_else(|| lifecycle::controller("Player not found."))?;
             Ok((
-                reporter_name,
+                moderator_name,
                 target.character.account,
                 target.character.name.clone(),
             ))
         })
         .await?;
     ensure!(
-        account != reporter_account,
-        lifecycle::controller("You cannot report yourself.")
+        account != moderator,
+        refusal(match command {
+            "/report" => "You cannot report yourself.".to_string(),
+            _ => format!("You cannot use {command} on yourself."),
+        })
     );
+    Ok((moderator_name, account, name))
+}
+
+pub(super) async fn kick(a: &App, moderator: i32, player: i32, name: &str) -> Result<String> {
+    let (_, account, name) = moderated_target(a, "/kick", moderator, player, name).await?;
+    // The moderator's chat runs inside its own account operation; finalizing another account must not.
+    let app = a.clone();
+    let disconnected = tokio::spawn(async move { app.kick(account).await }).await??;
+    tracing::warn!(moderator, account, %name, disconnected, "moderator kicked account");
+    Ok(format!("Kicked {name}."))
+}
+
+pub(super) async fn report(
+    a: &App,
+    reporter_account: i32,
+    reporter: i32,
+    name: &str,
+) -> Result<String> {
+    let (reporter_name, account, name) =
+        moderated_target(a, "/report", reporter_account, reporter, name).await?;
     let m = a.moderation.clone().expect("checked moderator");
     let reviews = a.content.reviewed_accounts.clone();
     let path = m.reviews.clone();

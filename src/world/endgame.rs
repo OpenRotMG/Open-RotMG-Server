@@ -507,6 +507,7 @@ impl Directory {
                     || matches!(record.cycle.stage, RealmStage::Closing{deadline}|RealmStage::Sealed{deadline} if now>=deadline)
             })
         }).map(|(id,_)|*id).collect();
+        let mut cheaters = Vec::new();
         for origin in &due {
             let world = self.worlds.get_mut(origin).expect("endgame source missing");
             let deaths = std::mem::take(&mut world.critical_deaths);
@@ -572,13 +573,27 @@ impl Directory {
                     }
                     // The selected client starts camera jitter at 14; 13 needs a target: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/net/_1f.as#L900-L908
                     let quake = cooperative::effect(14, -1, Pos { x: 0., y: 0. });
-                    for p in world.players.values() {
+                    for (id, p) in &world.players {
                         send(p, wire::SHOW_EFFECT, quake.clone());
+                        if p.controller == Controller::Human
+                            && world.content.reviewed(p.character.account)
+                        {
+                            cheaters.push((*id, *origin, p.character.account));
+                        }
                     }
                 }
             }
             // Preparation owns its inputs; even closing Realms must run while another loan is pending.
             self.worlds.release_world(origin);
+        }
+        for (player, origin, account) in cheaters {
+            tracing::warn!(
+                player,
+                origin,
+                account,
+                "marked account sent to the Nexus before Oryx's Castle"
+            );
+            self.return_to_nexus(player, origin, false);
         }
         let transferring: Vec<_> = self
             .endgame
@@ -797,11 +812,17 @@ impl Directory {
             record.publish_at = Some(self.tick + crate::endgame::REPLACEMENT_DELAY_MS / 50);
         }
         for player in &players {
+            let account = self.worlds[&origin].players[player].character.account;
             self.endgame.forced.insert(
                 *player,
                 ForcedRoute {
                     origin,
-                    destination: castle_id,
+                    // A marked player still departing from the earthquake keeps its Nexus route.
+                    destination: if self.content.reviewed(account) {
+                        -2
+                    } else {
+                        castle_id
+                    },
                     select_when_paused: true,
                     frozen: false,
                 },
@@ -1792,4 +1813,90 @@ fn instant_damage_quest_clear_starts_closure() {
         "quest-guided clear never closed Realm; remaining roots: {:?}",
         directory.endgame.realms[&-3].cycle.remaining
     );
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn earthquake_sends_marked_players_to_the_nexus_instead_of_the_castle() {
+    let data = std::path::Path::new("data");
+    let mut content = Content::load(data).unwrap();
+    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
+    let mut characters = Vec::new();
+    for name in ["quake-cheater", "quake-honest"] {
+        let account = store.list(name.into()).await.unwrap();
+        characters.push(
+            store
+                .create(account.id, content.get(crate::content::WIZARD).unwrap())
+                .await
+                .unwrap(),
+        );
+    }
+    content.reviewed_accounts =
+        crate::content::reviews::Reviews::new(vec![crate::content::reviews::Review {
+            account: characters[0].account,
+            reviewed_on: "2026-11-18".into(),
+        }]);
+    let content = Arc::new(content);
+    let mut directory = Directory::prepared(data, content.clone(), 16, 12351, 2).unwrap();
+    let map = Map {
+        width: 40,
+        height: 40,
+        cells: vec![
+            crate::content::Cell {
+                ground: 0x46,
+                object: None,
+                config: String::new(),
+                terrain: 0,
+                region: 0,
+            };
+            1600
+        ],
+        spawns: vec![(14.5, 20.5)],
+    };
+    let mut world = World::with_ids(content, Arc::new(map), directory.ids.clone()).unwrap();
+    world.name = "Realm".into();
+    world.encounter = true;
+    let hero = world
+        .insert_entity(HEROES[0], Pos { x: 30.5, y: 30.5 }, vec![])
+        .unwrap();
+    let mut inboxes = Vec::new();
+    let players: Vec<_> = characters
+        .iter()
+        .map(|character| {
+            let (packets, inbox) = mpsc::channel(64);
+            let (lost, _) = watch::channel(None);
+            inboxes.push(inbox);
+            world
+                .enter(
+                    character.clone(),
+                    Some(Output {
+                        trace: None,
+                        packets,
+                        lost,
+                    }),
+                )
+                .unwrap()
+        })
+        .collect();
+    directory.worlds.insert(-3, world);
+    directory.endgame.realms.remove(&-3);
+    directory
+        .bind_realm_heroes(-3, BTreeSet::from([hero]))
+        .unwrap();
+    directory.force_realm_closure(players[1]).unwrap();
+    directory.tick = crate::endgame::CLOSE_DELAY_MS / 50;
+    directory.endgame_step(&[-3]);
+    assert!(matches!(
+        directory.endgame.realms[&-3].cycle.stage,
+        RealmStage::Sealed { .. }
+    ));
+    assert_eq!(
+        directory
+            .endgame
+            .forced
+            .get(&players[0])
+            .map(|r| r.destination),
+        Some(-2)
+    );
+    assert!(!directory.endgame.forced.contains_key(&players[1]));
 }

@@ -1611,7 +1611,11 @@ async fn handle_inner(
                             );
                             Ok((world, None, None, d.hold_initial_entry(world)?))
                         } else {
-                            let world = d.initial(game)?;
+                            let mut world = d.initial(game)?;
+                            // Reconnecting straight to the Realm skipped the portal's lockout.
+                            if d.realm_lockout(id, world) > 0 {
+                                world = -2;
+                            }
                             Ok((world, None, None, d.hold_initial_entry(world)?))
                         }
                     } else {
@@ -1814,6 +1818,25 @@ async fn handle_inner(
                     Err(error) => {
                         tracing::error!(account=reporter, error=%format!("{error:#}"), "moderator report failed");
                         format!("Report failed: {error:#}")
+                    }
+                };
+                enqueue_reply(tx, crate::world::chat_info(&reply))?;
+            } else if text
+                .split_whitespace()
+                .next()
+                .is_some_and(|c| c.eq_ignore_ascii_case("/kick"))
+            {
+                let moderator = account
+                    .as_ref()
+                    .context("authenticated session required")?
+                    .id;
+                let name = text.trim()["/kick".len()..].trim();
+                let reply = match moderation::kick(a, moderator, id, name).await {
+                    Ok(reply) => reply,
+                    Err(error) if lifecycle::rule_rejection(&error) => error.to_string(),
+                    Err(error) => {
+                        tracing::error!(account=moderator, error=%format!("{error:#}"), "moderator kick failed");
+                        format!("Kick failed: {error:#}")
                     }
                 };
                 enqueue_reply(tx, crate::world::chat_info(&reply))?;
