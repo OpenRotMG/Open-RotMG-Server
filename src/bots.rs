@@ -276,6 +276,8 @@ struct Brain {
     travel: Option<(Goal, u64, Pos)>,
     /// Targets whose approach failed, until a time (ms); moving enemies defeat tile exclusion.
     unreachable: BTreeMap<i32, u64>,
+    /// The kept cover wall, its last seen HP and when the attempt expires unless that HP drops.
+    breaking: Option<(i32, i32, u64)>,
     loot_crossing: Option<i32>,
     hazard_movement: Option<Arc<Grid>>,
     last_aim: u64,
@@ -368,6 +370,7 @@ impl Brain {
             steering: None,
             travel: None,
             unreachable: BTreeMap::new(),
+            breaking: None,
             loot_crossing: None,
             hazard_movement: None,
             last_aim: 0,
@@ -646,6 +649,31 @@ impl Brain {
         decision.movement = Some(shore);
         self.hazard_movement = Some(Arc::new(self.hazardous_grid(grid)));
         Ok(true)
+    }
+    /// Keeping a Break target past walls that come into view can otherwise circle one wall forever.
+    fn expire_cover_attempt(&mut self, v: &PlayerView) {
+        const ATTEMPT_MS: u64 = 20_000;
+        let Goal::Break(id) = self.goal else {
+            self.breaking = None;
+            return;
+        };
+        let Some(hp) = v.objects.iter().find(|o| o.id == id).map(|o| o.hp) else {
+            return;
+        };
+        match self.breaking {
+            Some((kept, seen, until)) if kept == id && hp >= seen && v.time_ms >= until => {
+                self.unreachable.insert(id, v.time_ms + 300_000);
+                self.breaking = None;
+                tracing::info!(
+                    player = v.session.player,
+                    wall = id,
+                    hp,
+                    "autonomous cover attempt expired without damage; set aside"
+                );
+            }
+            Some((kept, seen, _)) if kept == id && hp >= seen => {}
+            _ => self.breaking = Some((id, hp, v.time_ms + ATTEMPT_MS)),
+        }
     }
     fn loot_crossing_step(
         &mut self,
@@ -2374,6 +2402,9 @@ impl Brain {
                         if self.agreement.as_ref().is_some_and(|a| a.waiting.is_some()) {
                             return Ok(decision);
                         }
+                        if matches!(goal, Goal::Hunt(_)) {
+                            self.expire_cover_attempt(v);
+                        }
                         if matches!(goal, Goal::Hunt(_))
                             && let Some(mut clearing) = progression::clear_cover(
                                 v,
@@ -2383,6 +2414,7 @@ impl Brain {
                                 range,
                                 s.passes_cover,
                                 &self.goal,
+                                &self.unreachable,
                             )
                         {
                             clearing.item = decision.item;

@@ -1633,3 +1633,42 @@ fn lava_reflex_resumes_after_crossing_is_interrupted_and_respects_visible_protec
     v.tick += 5;
     assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Dodge);
 }
+
+#[test]
+fn cover_attempt_expires_only_while_the_wall_takes_no_damage() {
+    let (_, mut v) = fixture();
+    v.objects.push(VisibleObject {
+        id: 7,
+        account: None,
+        kind: 0x172,
+        name: String::new(),
+        position: Pos { x: 12.5, y: 10.5 },
+        hp: 100,
+        max_hp: 100,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: true,
+        usable: false,
+        condition_mask: Some(0),
+    });
+    let wall = v.objects.len() - 1;
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    brain.goal = Goal::Break(7);
+    brain.expire_cover_attempt(&v);
+    v.time_ms += 19_000;
+    v.objects[wall].hp = 90;
+    brain.expire_cover_attempt(&v);
+    v.time_ms += 19_000;
+    brain.expire_cover_attempt(&v);
+    assert!(
+        !brain.unreachable.contains_key(&7),
+        "damage refreshes the attempt"
+    );
+    v.time_ms += 1_000;
+    brain.expire_cover_attempt(&v);
+    assert!(
+        brain.unreachable.contains_key(&7),
+        "an undamaged wall is set aside"
+    );
+}

@@ -449,6 +449,7 @@ pub(super) fn quality(v: &PlayerView, content: &Content, kind: i32) -> Result<f3
     Ok(damage + bonuses + item.heal as f32 * 0.1)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn clear_cover(
     v: &PlayerView,
     content: &Content,
@@ -457,6 +458,7 @@ pub(super) fn clear_cover(
     range: f32,
     passes_cover: bool,
     previous: &Goal,
+    abandoned: &BTreeMap<i32, u64>,
 ) -> Option<Decision> {
     if v.character.conditions & crate::content::STUNNED != 0 {
         return None;
@@ -464,7 +466,13 @@ pub(super) fn clear_cover(
     let (wall, movement, _) = v
         .objects
         .iter()
-        .filter(|o| o.blocks && o.hp > 0 && content.objects[&o.kind].destructible && vulnerable(o))
+        .filter(|o| {
+            o.blocks
+                && o.hp > 0
+                && content.objects[&o.kind].destructible
+                && vulnerable(o)
+                && !abandoned.contains_key(&o.id)
+        })
         .filter_map(|wall| {
             let kept = *previous == Goal::Break(wall.id);
             let clear = sight(v, grid, wall.position, passes_cover, Some(wall.id));
