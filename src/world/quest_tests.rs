@@ -1,7 +1,6 @@
 use super::*;
 
-#[test]
-fn quest_selection_keeps_level_distance_identity_and_eligibility_separate() {
+fn quest_fixture() -> (World, i32, i32, i32) {
     let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
     let map = Map {
         width: 64,
@@ -30,6 +29,12 @@ fn quest_selection_keeps_level_distance_identity_and_eligibility_separate() {
     let ent = w
         .spawn_entity(0x91f, Pos { x: 48.5, y: 8.5 }, vec![])
         .unwrap();
+    (w, player, lich, ent)
+}
+
+#[test]
+fn quest_selection_keeps_level_distance_identity_and_eligibility_separate() {
+    let (mut w, player, lich, ent) = quest_fixture();
     assert_eq!(w.content.objects[&0x91b].quest_level, Some(9));
     assert_eq!(w.content.objects[&0x91f].quest_level, Some(11));
     assert_eq!(w.quest_target(player), Some(lich));
@@ -62,4 +67,61 @@ fn quest_selection_keeps_level_distance_identity_and_eligibility_separate() {
     assert_eq!(w.quest_target(player), Some(malphas));
     w.safe = true;
     assert_eq!(w.quest_target(player), None);
+}
+
+#[test]
+fn autonomous_quest_target_keeps_the_selected_arrow_across_a_distance_tie() {
+    let (mut w, player, lich, ent) = quest_fixture();
+    assert_eq!(w.quest_target(player), Some(lich));
+    let mut inputs = bot_inputs::Inputs::default();
+    inputs.preferred_quest = Some(lich);
+    w.players.get_mut(&player).unwrap().inputs = Some(inputs);
+    w.players.get_mut(&player).unwrap().pos.x = 29.5;
+    assert_eq!(
+        w.quest_target(player),
+        Some(ent),
+        "native arrow must switch"
+    );
+    w.players.get_mut(&player).unwrap().controller = Controller::Autonomous;
+    assert_eq!(
+        w.quest_target(player),
+        Some(lich),
+        "the chosen quest is still close"
+    );
+    w.players.get_mut(&player).unwrap().pos.x = 41.5;
+    assert_eq!(
+        w.quest_target(player),
+        Some(ent),
+        "the other quest is clearly closer"
+    );
+    let p = w.players.get_mut(&player).unwrap();
+    p.pos.x = 27.5;
+    p.inputs
+        .as_mut()
+        .unwrap()
+        .unreachable_targets
+        .insert(lich, 10);
+    assert_eq!(
+        w.quest_target(player),
+        Some(ent),
+        "the closest quest is unreachable"
+    );
+    w.now = 10;
+    assert_eq!(
+        w.quest_target(player),
+        Some(lich),
+        "route exclusion expired"
+    );
+    w.entities.get_mut(&lich).unwrap().hp = 0;
+    assert_eq!(
+        w.quest_target(player),
+        Some(ent),
+        "a dead quest cannot be kept"
+    );
+    w.remove_entity(lich);
+    assert_eq!(
+        w.quest_target(player),
+        Some(ent),
+        "a vanished quest cannot be kept"
+    );
 }

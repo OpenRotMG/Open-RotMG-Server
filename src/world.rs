@@ -4091,6 +4091,18 @@ impl World {
         }
         let player = &self.players[&id];
         let level = player.character.level;
+        let inputs = (player.controller == Controller::Autonomous)
+            .then_some(player.inputs.as_ref())
+            .flatten();
+        let eligible = |e: &Entity| {
+            let (min, max) = self.content.objects[&e.kind].quest_window;
+            e.hp > 0
+                && e.accessible(player.character.account)
+                && (i32::from(min)..=i32::from(max)).contains(&level)
+                && inputs
+                    .and_then(|inputs| inputs.unreachable_targets.get(&e.id))
+                    .is_none_or(|until| self.now >= *until)
+        };
         let mut lower = self
             .quests_by_level
             .range(Some(i32::MIN)..=Some(level))
@@ -4127,12 +4139,7 @@ impl World {
             // Equally suitable levels on both sides must compete on distance, not iteration order.
             for id in ids {
                 let e = self.entities.get(id).expect("indexed quest missing");
-                let (min, max) = self.content.objects[&e.kind].quest_window;
-                if e.hp <= 0
-                    || !e.accessible(player.character.account)
-                    || level < i32::from(min)
-                    || level > i32::from(max)
-                {
+                if !eligible(e) {
                     continue;
                 }
                 if best.is_none_or(|b| {
@@ -4147,7 +4154,18 @@ impl World {
                 }
             }
         }
-        best.map(|e| e.id)
+        let nearest = best?;
+        // A detour across the distance tie should not reassign a bot's chosen journey.
+        if let Some(preferred) = inputs
+            .and_then(|inputs| inputs.preferred_quest)
+            .and_then(|id| self.entities.get(&id))
+            && eligible(preferred)
+            && self.quest_target_level(preferred).is_some()
+            && preferred.pos.distance(player.pos) <= nearest.pos.distance(player.pos) + 24.
+        {
+            return Some(preferred.id);
+        }
+        Some(nearest.id)
     }
     fn broadcast_text(&self, name: &str, text: &str) -> usize {
         let packet = chat::text_packet(name, -1, 0, text);

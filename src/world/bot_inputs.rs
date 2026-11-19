@@ -34,6 +34,10 @@ pub(crate) struct Inputs {
     pub cursor: Option<Pos>,
     pub fire: bool,
     #[serde(skip)]
+    pub(crate) preferred_quest: Option<i32>,
+    #[serde(skip)]
+    pub(crate) unreachable_targets: BTreeMap<i32, u64>,
+    #[serde(skip)]
     waypoint: Option<Pos>,
     #[serde(skip)]
     anchor: Option<Pos>,

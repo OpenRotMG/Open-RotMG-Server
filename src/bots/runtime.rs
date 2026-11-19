@@ -1229,9 +1229,20 @@ pub(super) async fn launch(
                     let movement = decision.journey.is_none().then_some(decision.movement).flatten();
                     let aim = decision.journey.is_none().then_some(decision.aim).flatten();
                     let item = decision.journey.is_none().then_some(decision.item).flatten();
+                    let preferred_quest = view.quest.filter(|quest| {
+                        brain.unreachable.get(quest).is_none_or(|until| view.time_ms >= *until)
+                            && (matches!(brain.goal, Goal::Hunt(id) | Goal::Fight(id) if id == *quest)
+                                || view.inputs.as_ref().is_some_and(|inputs| inputs.preferred_quest == Some(*quest)))
+                    });
+                    let unreachable_targets = brain.unreachable.clone();
                     match server::inventory(&app, id, move |w| {
                         let movement = movement.and_then(|goal| held_movement(&input_grid, w.players[&id].pos, goal, held_distance));
-                        execute_inputs(w, input_session, movement, aim, item, profile.reaction)
+                        let plan = execute_inputs(w, input_session, movement, aim, item, profile.reaction)?;
+                        let inputs = w.players.get_mut(&id).expect("controller input owner").inputs.as_mut()
+                            .expect("accepted controller inputs");
+                        inputs.preferred_quest = preferred_quest;
+                        inputs.unreachable_targets = unreachable_targets;
+                        Ok(plan)
                     }).await? {
                         Ok(true) => {
                             let after = app.world.player_view(id).await?;
