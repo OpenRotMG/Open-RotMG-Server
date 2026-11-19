@@ -5,12 +5,14 @@ use crate::world::view::{VisibleObject, VisibleProjectile};
 pub(super) struct Perception {
     step: f32,
     directions: usize,
+    pub(super) burst_risk: bool,
 }
 impl Perception {
-    pub(super) fn of(cognition: &pursuits::Cognition) -> Self {
+    pub(super) fn of(cognition: &pursuits::Cognition, burst_risk: bool) -> Self {
         Self {
             step: cognition.velocity_step,
             directions: cognition.directions,
+            burst_risk,
         }
     }
     pub(super) fn velocity(&self, v: Pos) -> Pos {
@@ -105,8 +107,11 @@ pub(super) fn incoming(v: &PlayerView) -> i32 {
         .iter()
         .filter(|b| hostile(v, b.owner))
         .filter(|b| {
-            (0..=10).any(|step| {
-                predicted(b, step as f32 * 0.05).is_some_and(|p| p.distance(v.position) < 0.6)
+            (0..=20).any(|step| {
+                // The server checks a square, including its corners, not a centered radius.
+                predicted(b, step as f32 * 0.025).is_some_and(|p| {
+                    (p.x - v.position.x).abs() <= 0.55 && (p.y - v.position.y).abs() <= 0.55
+                })
             })
         })
         .map(|b| cost(v, b.damage, b.armor_piercing));
@@ -117,6 +122,36 @@ pub(super) fn incoming(v: &PlayerView) -> i32 {
         .map(|t| cost(v, t.damage, false));
     bullets.chain(bombs).sum()
 }
+pub(super) fn health_potion(v: &PlayerView, c: &Content) -> Option<(usize, i32)> {
+    if v.character.conditions & crate::condition::bit(crate::condition::SICK) != 0 {
+        return None;
+    }
+    v.character
+        .items
+        .iter()
+        .enumerate()
+        .skip(4)
+        .filter(|(_, kind)| **kind >= 0)
+        .find_map(|(slot, kind)| {
+            let item = &c.objects[&(*kind as u16)];
+            (item.activate == "Heal").then_some((slot, item.heal))
+        })
+}
+
+pub(super) fn selected_heal(v: &PlayerView, c: &Content, action: Option<&Action>) -> i32 {
+    if let Some(Action::Use { slot, .. }) = action
+        && v.character.conditions & crate::condition::bit(crate::condition::SICK) == 0
+        && let Ok(kind) = u16::try_from(v.character.items[*slot])
+        && matches!(c.objects[&kind].activate.as_str(), "Heal" | "HealNova")
+    {
+        c.objects[&kind]
+            .heal
+            .min(v.character.stats[0] - v.character.hp)
+    } else {
+        0
+    }
+}
+
 /// Inside a pending bomb's landing circle, with half a tile for the player's own size.
 pub(super) fn bombed(t: &crate::world::view::VisibleThrow, p: Pos) -> bool {
     t.position.distance(p) < t.radius + 0.5
@@ -445,20 +480,31 @@ pub(super) fn movement(
             .iter()
             .map(|t| (t.radius + 0.5 - t.position.distance(point)).max(0.) * -20.)
             .sum();
-        let separation = enemies
-            .iter()
-            .map(|e| point.distance(e.position))
-            .fold(20., f32::min);
+        let mut separation = 20_f32;
+        let mut crowding = 0.;
+        for enemy in enemies {
+            let distance = point.distance(enemy.position);
+            separation = separation.min(distance);
+            if perception.burst_risk {
+                crowding += (5. - distance).max(0.);
+            }
+        }
+        // Keep one opponent in weapon reach without stepping into overlapping close-range fans.
+        if perception.burst_risk {
+            crowding -= (5. - separation).max(0.);
+        }
         let spacing = if retreat {
             separation.min(OUT_OF_REACH) * 3.
         } else {
+            let reach = if perception.burst_risk { 0.9 } else { 0.8 };
             target.map_or(0., |(p, range)| {
-                -(point.distance(p) - range * 0.8).abs() * 3.
+                -(point.distance(p) - range * reach).abs() * 3.
             })
         };
         // Retain safe steering, not physical inertia; urgent avoidance stays first: https://www.red3d.com/cwr/steer/gdc99/
         let continuity = steering.map_or(0., |s| (direction - s.heading).cos() * 3.);
-        let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing + continuity + bombs;
+        let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing + continuity + bombs
+            - crowding * 5.;
         if best.is_none_or(|(prior, _)| score > prior) {
             best = Some((score, point));
         }
@@ -485,6 +531,37 @@ mod tests {
             speed(&v),
             (4. + 5.6 * v.character.stats[4] as f32 / 75.) * scanned.ground_speed
         );
+    }
+
+    #[test]
+    fn godlands_spacing_keeps_one_enemy_in_range_without_stepping_into_a_second() {
+        let (_, mut v) = quest_tests::fixture();
+        v.objects[0].position = Pos { x: 14.5, y: 10.5 };
+        let mut second = quest_tests::fixture().1.objects.remove(0);
+        second.position = Pos { x: 11.5, y: 14.75 };
+        v.objects.push(second);
+        let enemies: Vec<_> = v.objects.iter().collect();
+        let primary = v.objects[0].position;
+        let perception = Perception {
+            step: 0.5,
+            directions: 8,
+            burst_risk: true,
+        };
+        let step = movement(
+            &v,
+            &Grid::terrain(&v),
+            &enemies,
+            Some((primary, 4.5)),
+            false,
+            &perception,
+            None,
+        )
+        .unwrap();
+        assert!(
+            step.y < v.position.y && step.distance(primary) < 4.5,
+            "{step:?}"
+        );
+        assert!(step.distance(v.objects[1].position) > 5.);
     }
 
     #[test]

@@ -18,7 +18,7 @@ fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
         nearest: enemies.last().copied(),
         quarry: enemies.last().copied(),
         enemies,
-        perception: combat::Perception::of(&brain.mind.cognition),
+        perception: combat::Perception::of(&brain.mind.cognition, false),
         inspecting: false,
         range: 6.,
         passes_cover: false,
@@ -745,6 +745,58 @@ fn bot_escapes_a_volley_that_would_kill_it_before_its_health_looks_low() {
             .iter()
             .any(|e| e.reason == "lethal_volley")
     );
+}
+
+#[test]
+fn godlands_bot_escapes_before_a_second_volley_when_a_potion_cannot_cover_it() {
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.character.level = 20;
+    v.objects[0].kind = 0x659;
+    v.objects[0].position = Pos { x: 16.5, y: 10.5 };
+    v.character.items[4] = 0xa22;
+    v.projectiles.push(crate::world::view::VisibleProjectile {
+        owner: 2,
+        id: 1,
+        start: v.objects[0].position,
+        position: Pos { x: 12.5, y: 10.5 },
+        angle: std::f32::consts::PI,
+        speed: 50.,
+        lifetime_ms: 2700.,
+        amplitude: 0.,
+        frequency: 0.,
+        passes_cover: false,
+        damage: 120,
+        armor_piercing: false,
+    });
+    // Each visible hit does 110, leaving room for one potion at 260 HP, but not at 200 HP.
+    for (hp, sick, escape) in [(200, false, true), (260, true, true), (260, false, false)] {
+        v.character.hp = hp;
+        v.character.conditions = if sick {
+            crate::condition::bit(crate::condition::SICK)
+        } else {
+            0
+        };
+        let mut brain = Brain::new(ARCHETYPES[1], &v);
+        let d = brain.decide(&v, &c).unwrap();
+        assert_eq!(d.goal, Goal::Recover);
+        assert_eq!(matches!(d.journey, Some(Journey::Nexus)), escape);
+        if escape {
+            assert!(
+                brain
+                    .plan
+                    .events
+                    .iter()
+                    .any(|e| e.reason == "volley_margin")
+            );
+        } else {
+            assert!(matches!(d.item, Some(Action::Use { slot: 4, .. })));
+            assert!(
+                d.movement
+                    .is_some_and(|p| p.distance(v.objects[0].position) > 6.)
+            );
+        }
+    }
 }
 
 #[test]

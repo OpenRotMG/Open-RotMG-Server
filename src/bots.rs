@@ -905,7 +905,6 @@ impl Brain {
         }
         let reserved = self.mind.market.reserves_stock();
         let inspecting = self.mind.inspecting(v, content);
-        let perception = combat::Perception::of(&self.mind.cognition);
         let equipment = if decision.item.is_none() && !reserved {
             self.mind.assess(v, content)?
         } else {
@@ -932,6 +931,14 @@ impl Brain {
                     && !(o.kind == crate::dungeon::manor::KAGE && o.hp >= o.max_hp)
             })
             .collect();
+        let burst_risk = v.map.name == "Realm"
+            && v.character.level == 20
+            && enemies.iter().any(|e| {
+                let kind = &content.objects[&e.kind];
+                (kind.god && kind.terrain == 1 || e.kind == 0xd51)
+                    && e.position.distance(v.position) < 15.
+            });
+        let perception = combat::Perception::of(&self.mind.cognition, burst_risk);
         let nearest = enemies.iter().min_by(|a, b| {
             a.position
                 .distance(v.position)
@@ -1573,6 +1580,13 @@ impl Brain {
             return Ok(true);
         }
         if retreat || threatened {
+            let hp = v.character.hp;
+            let incoming = combat::incoming(v);
+            let burst = perception.burst_risk && (incoming > 0 || retreat);
+            let reserve = if burst { 2 * s.hit } else { 0 };
+            let risk = incoming + reserve;
+            let urgent = burst && risk >= hp;
+            let retreat = retreat || urgent;
             let emergency = retreat || remedy.is_some();
             // Live: 32 of 32 sampled Recover frames never fired. A 2012 player backing off kept shooting.
             let opponent = combat::target(v, content, grid, enemies, range, s.passes_cover);
@@ -1611,26 +1625,39 @@ impl Brain {
                     None,
                 );
             }
-            let held_heal = v
-                .character
-                .items
-                .iter()
-                .filter(|kind| **kind >= 0)
-                .any(|kind| content.objects[&(*kind as u16)].activate == "Heal");
-            let incoming = combat::incoming(v);
-            // A Nexus exit restarts the whole journey, so only a lethal hit or real overmatch justifies it.
+            let potion = combat::health_potion(v, content);
+            let mut healing = combat::selected_heal(v, content, decision.item.as_ref());
+            // Volleys can overlap during the time it takes to leave the Realm. An inventory action is not a heal.
+            if urgent
+                && hp + healing <= risk
+                && let Some((slot, heal)) = potion
+                && hp + heal.min(v.character.stats[0] - hp) > risk
+            {
+                decision.item = Some(Action::Use {
+                    slot,
+                    x: v.position.x,
+                    y: v.position.y,
+                });
+                healing = heal.min(v.character.stats[0] - hp);
+            }
             let escape =
                 if outmatched && nearest.is_some_and(|e| e.position.distance(v.position) < 4.) {
                     Some("near_outmatched")
-                } else if incoming >= v.character.hp {
-                    Some("lethal_volley")
-                } else if !held_heal && v.character.hp <= s.hit {
+                } else if risk >= hp && (!burst || hp + healing <= risk) {
+                    Some(if incoming >= hp {
+                        "lethal_volley"
+                    } else if incoming > 0 {
+                        "volley_margin"
+                    } else {
+                        "under_fire_low_health"
+                    })
+                } else if potion.is_none() && hp <= s.hit && !urgent {
                     Some("next_hit_lethal")
                 } else {
                     None
                 };
             if let Some(reason) = escape
-                && decision.item.is_none()
+                && (burst || decision.item.is_none())
                 && v.map.name != "Nexus"
             {
                 tracing::info!(
@@ -1640,6 +1667,8 @@ impl Brain {
                     max_hp = v.character.stats[0],
                     incoming,
                     hit = s.hit,
+                    reserve,
+                    healing,
                     reason,
                     "autonomous recovery escape selected"
                 );
@@ -1648,28 +1677,16 @@ impl Brain {
                 decision.journey = Some(Journey::Nexus);
                 return Ok(true);
             }
-            if retreat {
-                for (slot, kind) in v
-                    .character
-                    .items
-                    .iter()
-                    .enumerate()
-                    .skip(4)
-                    .filter(|(_, k)| **k >= 0)
-                {
-                    let item = content.get(*kind as u16)?;
-                    if decision.item.is_none()
-                        && item.activate == "Heal"
-                        && v.character.stats[0] - v.character.hp >= (item.heal as f32 * 0.35) as i32
-                    {
-                        decision.item = Some(Action::Use {
-                            slot,
-                            x: v.position.x,
-                            y: v.position.y,
-                        });
-                        break;
-                    }
-                }
+            if retreat
+                && decision.item.is_none()
+                && let Some((slot, heal)) = potion
+                && v.character.stats[0] - hp >= (heal as f32 * 0.35) as i32
+            {
+                decision.item = Some(Action::Use {
+                    slot,
+                    x: v.position.x,
+                    y: v.position.y,
+                });
             }
             if retreat
                 && decision.item.is_none()
