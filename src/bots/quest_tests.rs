@@ -526,6 +526,72 @@ fn band_edge_journeys_do_not_preempt_each_other() {
 }
 
 #[test]
+fn loot_approach_crosses_a_venture_band_edge_and_collects_the_chest() {
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.character.level = 11;
+    v.position = Pos {
+        x: 56.5465,
+        y: 42.5,
+    };
+    let observed = &mut v.objects[0];
+    observed.kind = c
+        .objects
+        .values()
+        .find(|o| o.enemy && bands::tier(o.terrain) == 2)
+        .unwrap()
+        .kind;
+    observed.position = Pos {
+        x: 71.8853,
+        y: 52.6978,
+    };
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.crowd.bands.observe(
+        &v,
+        &c,
+        &mut brain.mind.godlands,
+        false,
+        brain.profile.identity,
+    );
+    let chest = &mut v.objects[0];
+    chest.kind = 0x501;
+    chest.hp = 0;
+    chest.position = Pos { x: 49.5, y: 59.5 };
+    chest.contents = vec![0xa22];
+    let geometry = crate::navigation::Geometry::new(
+        (128, 128),
+        (0..128 * 128)
+            .map(|i| match (i % 128, i / 128) {
+                (56, 43) | (60, 45) | (55, 46) => 255,
+                _ => 1,
+            })
+            .collect(),
+        &BTreeMap::from([(1, 1.), (255, 0.)]),
+    );
+    v.tiles = Arc::new(crate::navigation::Tiles::new(
+        geometry,
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    assert!(brain.crowd.bands.venture(&v).is_none());
+    for step in 0..20 {
+        let d = adventure(&mut brain, &v, &c);
+        assert_eq!(d.goal, Goal::Loot(2), "step {step} at {:?}", v.position);
+        if matches!(d.item, Some(Action::Swap { from, .. }) if from.object == 2) {
+            return;
+        }
+        v.position = d.movement.expect("approach continues until the swap");
+        if step == 0 {
+            assert_eq!(tile(v.position), (55, 42));
+            assert!(brain.crowd.bands.venture(&v).is_some());
+        }
+        brain.goal = d.goal;
+        v.time_ms += 250;
+        v.tick += 5;
+    }
+    panic!("never reached the chest from the band edge");
+}
+
+#[test]
 fn unreachable_hunt_is_travel_that_aborts_not_engagement() {
     let (c, mut v) = fixture();
     let mut brain = Brain::new(ARCHETYPES[0], &v);

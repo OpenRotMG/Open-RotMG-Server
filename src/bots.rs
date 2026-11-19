@@ -2078,11 +2078,13 @@ impl Brain {
         for (score, goal, _) in &mut choices {
             *score += intentions.bonus(v, goal);
         }
-        // A chosen journey is kept: no other journey replaces it before arrival, route failure or deadline.
+        const LOOT_REACH: f32 = 1.4;
+        // A chosen journey is kept until arrival, route failure or deadline.
         let travel = |goal: &Goal, p: Pos| match goal {
             Goal::Venture | Goal::Revisit(..) | Goal::Explore(..) => true,
             Goal::Survey(..) => p.distance(v.position) > 8.,
             Goal::Hunt(_) | Goal::Fight(_) => p.distance(v.position) >= range,
+            Goal::Loot(_) => p.distance(v.position) >= LOOT_REACH,
             _ => false,
         };
         // Live: a Venture trip kept a destination it had already reached, and the bot wandered around it.
@@ -2105,7 +2107,7 @@ impl Brain {
             let offered = choices.iter().find(|(_, g, _)| *g == kept).map(|c| c.2);
             if v.time_ms >= deadline {
                 self.travel = None;
-                if let Goal::Hunt(id) | Goal::Fight(id) = kept {
+                if let Goal::Hunt(id) | Goal::Fight(id) | Goal::Loot(id) = kept {
                     self.unreachable.insert(id, v.time_ms + 300_000);
                 }
                 if let Some(p) = offered {
@@ -2118,9 +2120,12 @@ impl Brain {
                     "travel deadline passed".into(),
                 );
             } else if offered.is_some() || matches!(kept, Goal::Explore(..)) {
-                // A worthwhile quest is the reason to travel, not one more journey waiting its turn.
+                // Loot can interrupt a trip, but committing to the approach prevents Venture reclaiming it at band edges.
                 choices.retain(|(_, g, p)| {
-                    *g == kept || !travel(g, *p) || Some(g) == realm_quest.as_ref()
+                    *g == kept
+                        || !travel(g, *p)
+                        || matches!(g, Goal::Loot(_)) && !matches!(kept, Goal::Loot(_))
+                        || Some(g) == realm_quest.as_ref()
                 });
             }
         }
@@ -2274,7 +2279,7 @@ impl Brain {
                     movement
                 }
                 Goal::Follow(_) if v.position.distance(destination) < 4.5 => None,
-                Goal::Loot(id) if v.position.distance(destination) < 1.4 => {
+                Goal::Loot(id) if v.position.distance(destination) < LOOT_REACH => {
                     let bag = v
                         .objects
                         .iter()
@@ -2334,7 +2339,8 @@ impl Brain {
                             return Ok(clearing);
                         }
                         // An unreachable trip stays set aside long enough for the bot to do something else.
-                        let aside = if travel(&goal, destination) {
+                        let aside = if travel(&goal, destination) && !matches!(goal, Goal::Loot(_))
+                        {
                             6000
                         } else {
                             100
