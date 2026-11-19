@@ -108,11 +108,13 @@ impl Brain {
         {
             return None;
         }
+        let farmer = self.farms_godlands(v);
         let eligible = v
             .objects
             .iter()
             .filter(|p| {
                 p.usable
+                    && (!farmer || p.kind != 0x718)
                     && !self.blocked.contains_key(&tile(p.position))
                     && crate::dungeon::DUNGEONS
                         .iter()

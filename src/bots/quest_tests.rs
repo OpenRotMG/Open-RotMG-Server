@@ -254,7 +254,11 @@ pub(super) fn fixture() -> (Content, PlayerView) {
             layout: None,
             godlands: Arc::default(),
             // Godlands sightings anywhere on this small fixture count as the Godlands.
-            godland_squares: Arc::new((0..6).flat_map(|x| (0..6).map(move |y| (x, y))).collect()),
+            godland_tiles: Arc::new(
+                (0..128)
+                    .flat_map(|x| (0..128).map(move |y| (x, y)))
+                    .collect(),
+            ),
         },
         character: OwnCharacter {
             conditions: 0,
@@ -1047,6 +1051,7 @@ fn level_twenty_heads_for_its_remembered_godlands_past_lower_enemies() {
     });
     let godlands = Pos { x: 100.5, y: 100.5 };
     v.map.godlands = Arc::new(vec![godlands]);
+    v.map.godland_tiles = Arc::new(BTreeSet::from([tile(godlands)]));
     // Live: 76% of Realm entries remembered nothing; a veteran knows a map it has played before.
     let geared = v.character.items[0];
     // Live: a level 20 with a tier-3 weapon never set out, though its own band lies on the way to the Godlands.
@@ -1143,6 +1148,7 @@ fn dodging_keeps_the_trip_and_still_makes_progress() {
     v.objects.clear();
     v.map.layout = Some("classic-world-02-reconstruction".into());
     let godlands = Pos { x: 100.5, y: 100.5 };
+    v.map.godland_tiles = Arc::new(BTreeSet::from([tile(godlands)]));
     v.projectiles.push(crate::world::view::VisibleProjectile {
         owner: 2,
         id: 1,
@@ -1287,6 +1293,7 @@ fn a_venture_keeps_the_destination_it_started_with() {
     v.position = Pos { x: 64.5, y: 64.5 };
     v.map.layout = Some("classic-world-02-reconstruction".into());
     let (west, east) = (Pos { x: 20.5, y: 64.5 }, Pos { x: 110.5, y: 64.5 });
+    v.map.godland_tiles = Arc::new(BTreeSet::from([tile(west), tile(east)]));
     let mut brain = Brain::new(ARCHETYPES[0], &v);
     brain.mind.godlands.insert(
         "classic-world-02-reconstruction".into(),
@@ -1317,6 +1324,7 @@ fn a_venture_trip_ends_at_its_destination() {
     v.position = Pos { x: 64.5, y: 64.5 };
     v.map.layout = Some("classic-world-02-reconstruction".into());
     let (reached, next) = (Pos { x: 65.5, y: 64.5 }, Pos { x: 110.5, y: 64.5 });
+    v.map.godland_tiles = Arc::new(BTreeSet::from([tile(next)]));
     let mut brain = Brain::new(ARCHETYPES[0], &v);
     brain.mind.godlands.insert(
         "classic-world-02-reconstruction".into(),
@@ -1407,12 +1415,45 @@ fn level_20s_shoot_realm_event_bosses_and_back_off_out_of_reach() {
 }
 
 #[test]
+fn godlands_farmer_keeps_going_past_a_snake_pit() {
+    let (c, mut v) = fixture();
+    let destination = (70, 70);
+    v.quest = None;
+    v.character.level = 20;
+    v.map.layout = Some("layout".into());
+    v.map.godlands = Arc::new(vec![center(destination)]);
+    v.map.godland_tiles = Arc::new(BTreeSet::from([destination]));
+    v.objects[0].kind = 0x718;
+    v.objects[0].position = center((11, 10));
+    v.objects[0].usable = true;
+    assert!(progression::ready(&v, &c, 0x718));
+    for (identity, enters) in [("Bayleaf", false), ("Gnosis", true)] {
+        let mut profile = ARCHETYPES[0];
+        profile.identity = identity;
+        let mut brain = Brain::new(profile, &v);
+        brain
+            .crowd
+            .bands
+            .observe(&v, &c, &mut brain.mind.godlands, true, identity);
+        let decision = brain.decide(&v, &c).unwrap();
+        assert!(brain.mind.intentions.as_ref().unwrap().speed());
+        if enters {
+            assert!(matches!(decision.journey, Some(Journey::Portal(2))));
+        } else {
+            assert!(decision.journey.is_none());
+            assert_eq!(decision.goal, Goal::Venture);
+        }
+    }
+}
+
+#[test]
 fn nine_in_ten_level_20s_farm_the_godlands_in_ordinary_gear() {
     let (c, mut v) = fixture();
     v.character.level = 20;
     v.map.layout = Some("classic-world-02-reconstruction".into());
     let godlands = Pos { x: 100.5, y: 100.5 };
     v.map.godlands = Arc::new(vec![godlands]);
+    v.map.godland_tiles = Arc::new(BTreeSet::from([tile(godlands)]));
     let staff = c.objects[&(v.character.items[0] as u16)].slot_type;
     v.character.items[0] = c
         .objects

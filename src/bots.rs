@@ -857,20 +857,34 @@ impl Brain {
     fn ambitious(&self) -> bool {
         self.profile.recovery < 0.45
     }
+    fn prefers_godlands(&self, v: &PlayerView) -> bool {
+        v.character.level == 20
+            && self.crowd.bands.limit == 4
+            && !quests::hunts_quests(&self.profile)
+    }
+    fn farms_godlands(&self, v: &PlayerView) -> bool {
+        v.map.name == "Realm" && self.prefers_godlands(v)
+    }
     fn quest_appeal(
         &self,
         v: &PlayerView,
         content: &Content,
         quest: &crate::world::view::VisibleObject,
     ) -> Option<quests::Appeal> {
-        (v.map.name == "Realm" && v.character.level == 20 && v.quest == Some(quest.id)).then(|| {
-            quests::appeal(
-                &self.profile,
-                content,
-                quest.kind,
-                self.crowd.near(v, quest.position),
-            )
-        })
+        (v.map.name == "Realm"
+            && v.character.level == 20
+            && v.quest == Some(quest.id)
+            && (!self.farms_godlands(v)
+                || bands::in_godlands(v, quest.position)
+                || quest.position.distance(v.position) <= 40.))
+            .then(|| {
+                quests::appeal(
+                    &self.profile,
+                    content,
+                    quest.kind,
+                    self.crowd.near(v, quest.position),
+                )
+            })
     }
     fn set_activity(&mut self, v: &PlayerView, activity: Activity) {
         if activity != self.activity {
@@ -1726,7 +1740,9 @@ impl Brain {
             let (x, y) = tile(area);
             choices.push((97., Goal::Survey(x, y), area));
         }
-        let speed = self.mind.intentions.as_ref().is_some_and(|i| i.speed());
+        let farmer = self.farms_godlands(v);
+        let approaching_godlands = farmer && !bands::in_godlands(v, v.position);
+        let speed = !farmer && self.mind.intentions.as_ref().is_some_and(|i| i.speed());
         // Level 20s weigh whether a Realm quest is worth it; lower levels keep following their leveling quests.
         let veteran_realm = v.map.name == "Realm" && v.character.level == 20;
         let realm_quest = if let Some(quest) = enemies.iter().find(|e| v.quest == Some(e.id))
@@ -1809,8 +1825,10 @@ impl Brain {
             let protected = !progression::vulnerable(enemy);
             // Travellers shoot what is below their band in passing instead of stopping for it.
             let passing = heading
-                && content.objects[&enemy.kind].terrain != 0
-                && bands::tier(content.objects[&enemy.kind].terrain) < self.crowd.bands.limit;
+                && (approaching_godlands && !bands::in_godlands(v, enemy.position)
+                    || content.objects[&enemy.kind].terrain != 0
+                        && bands::tier(content.objects[&enemy.kind].terrain)
+                            < self.crowd.bands.limit);
             let score = 45. - d * 2.
                 + if d < range
                     && !passing
@@ -1832,6 +1850,7 @@ impl Brain {
             if v.map.name == "Realm"
                 && content.objects[&enemy.kind].god
                 && content.objects[&enemy.kind].terrain == 1
+                && (!farmer || bands::in_godlands(v, enemy.position))
                 && self.crowd.bands.survivable(v, enemy.position)
             {
                 choices.push((
@@ -1934,6 +1953,7 @@ impl Brain {
                 "Wine Cellar" | "Mad Lab" => matches!(p.kind, 0x71d | 0x712),
                 "Realm" => {
                     progression::ready(v, content, p.kind)
+                        && (!farmer || p.kind != 0x718 || self.group.is_some())
                         && self.group.as_ref().is_none_or(|g| {
                             p.kind == 0x890 || !g.finished && g.purpose.portal() == p.kind
                         })
@@ -2017,6 +2037,33 @@ impl Brain {
             }
         }
         self.crowd.observe_gathering(v, &self.goal);
+        if approaching_godlands
+            && realm_quest.is_none()
+            && !committed
+            && !s.threatened
+            && peaceful
+            && health >= 0.9
+            && decision.item.is_none()
+            && v.time_ms >= self.next_teleport
+            && !choices.iter().any(|(score, _, _)| *score >= 95.)
+            && let Some(marker) = self.crowd.godlands(v, |p| {
+                !self.blocked.contains_key(&tile(p))
+                    && enemies.iter().all(|e| e.position.distance(p) > 12.)
+            })
+        {
+            tracing::info!(
+                account = v.session.account,
+                character = v.session.character,
+                target = marker.id,
+                distance = v.position.distance(marker.position),
+                "autonomous godlands teleport"
+            );
+            self.next_teleport = v.time_ms + 10_000;
+            self.travel = None;
+            decision.goal = Goal::Venture;
+            decision.journey = Some(Journey::Regroup(marker.id));
+            return Ok(decision);
+        }
         // Players go where the people are; exploring alone is what is left when nobody suitable is on the minimap.
         if !committed
             // Approaching the quest's fight is the quest logic's job, landing well outside it.
@@ -2028,12 +2075,14 @@ impl Brain {
                     || self.crowd.bands.known(position).is_some_and(|band| band >= 3);
                 !self.blocked.contains_key(&tile(position))
                     && quest.is_none_or(|q| q.position.distance(position) >= 20.)
+                    && (!farmer || realm_quest.is_some() || bands::in_godlands(v, position))
                     && veteran_ground
             })
         {
             let score = 55. + 5. * crowd.min(6) as f32 + self.profile.companions;
             let distance = marker.position.distance(v.position);
-            if !choices.iter().any(|(s, _, _)| *s > score)
+            if !farmer
+                && !choices.iter().any(|(s, _, _)| *s > score)
                 && crowd >= 2
                 && peaceful
                 && health >= 0.75
@@ -2400,6 +2449,7 @@ impl Brain {
                 }
             }
             if let Goal::Follow(id) = goal
+                && (!farmer || committed)
                 && v.position.distance(destination) > 8.
                 && v.time_ms >= self.next_teleport
                 && decision.item.is_none()

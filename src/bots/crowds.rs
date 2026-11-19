@@ -129,6 +129,33 @@ impl Crowd {
                     .total_cmp(&b.position.distance(objective))
             })
     }
+    pub fn godlands<'a>(
+        &self,
+        v: &'a PlayerView,
+        clear: impl Fn(Pos) -> bool,
+    ) -> Option<&'a PlayerMarker> {
+        if !self.knows_minimap || !v.map.allow_teleport {
+            return None;
+        }
+        v.player_markers
+            .iter()
+            .filter(|p| {
+                let (x, y) = tile(p.position);
+                p.position.distance(v.position) > 24.
+                    && self.bands.teleportable(v, p.position)
+                    && clear(p.position)
+                    // The destination can move before teleport is processed; leave room on safe Godlands ground.
+                    && (x - 3..=x + 3).all(|x| {
+                        (y - 3..=y + 3).all(|y| v.map.godland_tiles.contains(&(x, y)))
+                    })
+            })
+            .min_by(|a, b| {
+                a.position
+                    .distance(v.position)
+                    .total_cmp(&b.position.distance(v.position))
+                    .then(a.id.cmp(&b.id))
+            })
+    }
     pub fn shortcut<'a>(&self, v: &'a PlayerView, objective: Pos) -> Option<&'a PlayerMarker> {
         if !v.map.allow_teleport || matches!(v.map.name.as_str(), "Realm" | "Nexus") {
             return None;

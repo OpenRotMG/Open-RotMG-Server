@@ -37,10 +37,8 @@ fn suitable(v: &PlayerView, identity: &str) -> u8 {
         _ => 1,
     }
 }
-fn in_godlands(v: &PlayerView, p: Pos) -> bool {
-    v.map
-        .godland_squares
-        .contains(&((p.x / 24.) as i32, (p.y / 24.) as i32))
+pub(super) fn in_godlands(v: &PlayerView, p: Pos) -> bool {
+    v.map.godland_tiles.contains(&tile(p))
 }
 fn region(p: Pos) -> TilePoint {
     ((p.x / REGION).floor() as i16, (p.y / REGION).floor() as i16)
@@ -93,8 +91,19 @@ impl Bands {
                     }
                 }
                 let remembered = godlands.get(layout).map_or(0, BTreeSet::len);
-                for t in godlands.get(layout).into_iter().flatten() {
-                    self.regions.insert(region(center(*t)), (4, center(*t)));
+                let sightings = godlands
+                    .get(layout)
+                    .into_iter()
+                    .flatten()
+                    .map(|t| center(*t));
+                let landmarks = v
+                    .map
+                    .godlands
+                    .iter()
+                    .copied()
+                    .filter(|_| veteran && v.character.level == 20);
+                for p in sightings.chain(landmarks) {
+                    self.regions.insert(region(p), (4, p));
                 }
                 tracing::info!(
                     account = v.session.account,
@@ -176,7 +185,18 @@ impl Bands {
     }
     /// Where to farm next: back out of a band above this character, or up toward its suitable band.
     pub fn venture(&self, v: &PlayerView) -> Option<Pos> {
-        let (here, goal) = (self.known(v.position), self.limit);
+        let goal = self.limit;
+        let farming_godlands = goal == 4 && v.character.level == 20;
+        // Sightings across a band edge must not end a trip before the player reaches the Godlands.
+        let here = if farming_godlands {
+            if in_godlands(v, v.position) {
+                Some(4)
+            } else {
+                self.known(v.position).map(|band| band.min(3))
+            }
+        } else {
+            self.known(v.position)
+        };
         if here == Some(goal) {
             return None;
         }
@@ -186,7 +206,7 @@ impl Bands {
                 *tier <= goal
                     && (here > Some(goal) || Some(*tier) > here)
                     && self.known(*p) <= Some(goal)
-                    && p.distance(v.position) > 8.
+                    && (p.distance(v.position) > 8. || farming_godlands && *tier == 4)
             })
             .max_by(|(a, p), (b, q)| {
                 a.cmp(b)
@@ -257,6 +277,24 @@ mod tests {
     }
 
     #[test]
+    fn godlands_venture_uses_the_nearer_landmark_and_crosses_the_band_edge() {
+        let (c, mut v) = quest_tests::fixture();
+        let (destination, remembered) = ((17, 10), (85, 85));
+        v.character.level = 20;
+        v.map.layout = Some("layout".into());
+        v.map.godlands = Arc::new(vec![center(destination)]);
+        v.map.godland_tiles = Arc::new(BTreeSet::from([destination, remembered]));
+        v.objects.clear();
+        let mut memory = BTreeMap::from([("layout".into(), BTreeSet::from([remembered]))]);
+        let mut bands = Bands::default();
+        bands.observe(&v, &c, &mut memory, true, "Bayleaf");
+        assert_eq!(bands.known(v.position), Some(4));
+        assert_eq!(bands.venture(&v).map(tile), Some(destination));
+        v.position = center(destination);
+        assert!(bands.venture(&v).is_none());
+    }
+
+    #[test]
     fn a_god_wandering_outside_the_godlands_is_not_the_godlands() {
         let (c, mut v) = quest_tests::fixture();
         let mut god = v.objects.remove(0);
@@ -269,7 +307,7 @@ mod tests {
         (god.hp, god.position) = (100, Pos { x: 90.5, y: 90.5 });
         v.objects.push(god);
         v.map.layout = Some("layout".into());
-        v.map.godland_squares = Arc::new(BTreeSet::from([(0, 0)]));
+        v.map.godland_tiles = Arc::new(BTreeSet::from([(10, 10)]));
         let mut memory =
             BTreeMap::from([("layout".to_owned(), BTreeSet::from([(10, 10), (91, 91)]))]);
         let mut bands = Bands::default();

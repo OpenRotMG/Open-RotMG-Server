@@ -25,7 +25,7 @@ impl Objective {
     fn how(&self) -> &'static str {
         match self {
             Self::Reach20 => "Farm XP in the most demanding observed band suitable for this level",
-            Self::Speed => "Hunt observed Snake Pit sources and clear Snake Pits for Speed potions",
+            Self::Speed => "Collect Speed potions in the Realm or Snake Pits",
             Self::Fame => "Farm XP in the most demanding observed band suitable for this gear",
             Self::Item { .. } => {
                 "Collect the target from loot or save tradeable surplus and buy it"

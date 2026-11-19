@@ -200,7 +200,13 @@ impl Society {
             }
             o.answer_started = true;
             self.cooldown.insert(v.session.account, now + 90000);
-            return Some(Plan::Answer(o.clone()));
+            let plan = Plan::Answer(o.clone());
+            if o.purpose == Purpose::Speed && brain.prefers_godlands(v) {
+                let owner = o.to.clone();
+                self.apply(owner, plan, false, None, now);
+                return None;
+            }
+            return Some(plan);
         }
         if now < self.next_call
             || self
@@ -233,7 +239,8 @@ impl Society {
             Purpose::Equipment
         } else if v.character.level < 14 {
             Purpose::Experience
-        } else if progression::ready(v, content, 0x718)
+        } else if !brain.prefers_godlands(v)
+            && progression::ready(v, content, 0x718)
             && v.character.base_stats[4] < content.classes[&v.character.class].caps[4]
         {
             Purpose::Speed
@@ -454,6 +461,52 @@ impl Society {
         peers
     }
 }
+#[cfg(test)]
+#[test]
+fn godlands_farmer_does_not_start_or_accept_a_speed_outing() {
+    let (c, mut v) = quest_tests::fixture();
+    v.character.level = 20;
+    v.character.items[2] = 2656;
+    let target = &mut v.objects[0];
+    target.kind = v.character.class;
+    target.position = center((12, 10));
+    target.account = Some(2);
+    target.level = Some(20);
+    target.hp = 500;
+    target.max_hp = 500;
+    target.equipped.clone_from(&v.character.items);
+    let mut society = Society::default();
+    society.actors.extend([1, 2]);
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain.crowd.bands.observe(
+        &v,
+        &c,
+        &mut brain.mind.godlands,
+        true,
+        brain.profile.identity,
+    );
+    assert!(progression::ready(&v, &c, 0x718));
+    assert!(society.next(&brain, &v, &c, false).is_none());
+    society.apply(
+        Member {
+            account: 2,
+            name: "Peer".into(),
+        },
+        Plan::Invite {
+            peer: Member {
+                account: 1,
+                name: "Farmer".into(),
+            },
+            purpose: Purpose::Speed,
+        },
+        false,
+        None,
+        v.elapsed_ms,
+    );
+    assert!(society.next(&brain, &v, &c, false).is_none());
+    assert!(society.offers.is_empty() && society.trips.is_empty());
+}
+
 pub(super) fn ready(v: &PlayerView, content: &Content) -> bool {
     v.character.level >= 1
         && matches!(v.map.name.as_str(), "Realm" | "Nexus")

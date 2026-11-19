@@ -797,8 +797,8 @@ pub struct World {
     pub(crate) realm_layout: Option<String>,
     /// Where this Realm map's Godlands lie, as a veteran who played it before remembers.
     pub(crate) godlands: Arc<Vec<Pos>>,
-    /// Every 24-tile square that is mostly Godlands, so a god seen elsewhere is not mistaken for them.
-    pub(crate) godland_squares: Arc<BTreeSet<(i32, i32)>>,
+    /// The terrain tag alone does not make a tile safe for a Godlands landing.
+    pub(crate) godland_tiles: Arc<BTreeSet<(i16, i16)>>,
     performance: std::cell::RefCell<crate::performance::Window>,
     pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
@@ -1360,12 +1360,6 @@ impl Directory {
                 ids.clone(),
             )?;
             world.realm_layout = source.as_ref().map(|source| source.name().to_owned());
-            world.godlands = Arc::new(godlands(&world.map, &world.content));
-            world.godland_squares = Arc::new(
-                godland_cells(&world.map, &world.content)
-                    .into_keys()
-                    .collect(),
-            );
             world.clock = clock.clone();
             world.attack_epoch = clock.now();
             world.new_tick_at = clock.now();
@@ -1420,6 +1414,15 @@ impl Directory {
                 let crystal = world.place_named_setpiece(0x935, &[1])?;
                 world.spawn_entity(0x935, crystal, vec![])?;
                 world.reserve_realm_events()?;
+                let godland_cells = godland_cells(&world.map, &world.content);
+                world.godlands = Arc::new(godlands(&godland_cells, &world.map.spawns));
+                world.godland_tiles = Arc::new(
+                    godland_cells
+                        .into_values()
+                        .flatten()
+                        .map(|p| (p.x as i16, p.y as i16))
+                        .collect(),
+                );
                 tracing::info!(
                     layout = world.realm_layout,
                     entities = world.entities.len(),
@@ -3138,7 +3141,7 @@ impl World {
             navigation_geometry: Box::default(),
             realm_layout: None,
             godlands: Arc::default(),
-            godland_squares: Arc::default(),
+            godland_tiles: Arc::default(),
             timed_ids: BTreeSet::new(),
             quest_ids: BTreeSet::new(),
             gun_ids,
@@ -4207,7 +4210,12 @@ impl World {
     fn player_markers(&self, id: i32) -> impl Iterator<Item = (i32, &Player)> {
         self.players
             .iter()
-            .filter(move |(peer, _)| **peer != id && self.players[&id].known.contains(peer))
+            .filter(move |(peer, player)| {
+                **peer != id
+                    && self.players[&id].known.contains(peer)
+                    && player.active()
+                    && player.character.hp > 0
+            })
             .map(|(peer, player)| (*peer, player))
     }
     pub fn updates(&mut self, id: i32, initial: bool) -> Result<()> {
@@ -8314,7 +8322,10 @@ mod map_tests;
 fn godland_cells(map: &Map, content: &Content) -> BTreeMap<(i32, i32), Vec<Pos>> {
     let mut squares: BTreeMap<(i32, i32), Vec<Pos>> = BTreeMap::new();
     for (i, cell) in map.cells.iter().enumerate() {
-        if cell.terrain == 1 && content.grounds[&cell.ground] > 0. {
+        if cell.terrain == 1
+            && content.grounds[&cell.ground] > 0.
+            && !content.hazards.contains_key(&cell.ground)
+        {
             let (x, y) = (i as i32 % map.width, i as i32 / map.width);
             let pos = Pos {
                 x: x as f32 + 0.5,
@@ -8323,14 +8334,13 @@ fn godland_cells(map: &Map, content: &Content) -> BTreeMap<(i32, i32), Vec<Pos>>
             squares.entry((x / 24, y / 24)).or_default().push(pos);
         }
     }
-    squares.retain(|_, cells| cells.len() >= 150);
     squares
 }
 
-/// The biggest Mountains areas, one spot per 24-tile square, at most as many as a bot remembers.
-fn godlands(map: &Map, content: &Content) -> Vec<Pos> {
-    let mut spots: Vec<_> = godland_cells(map, content)
-        .into_values()
+fn godlands(squares: &BTreeMap<(i32, i32), Vec<Pos>>, spawns: &[(f32, f32)]) -> Vec<Pos> {
+    let mut spots: Vec<_> = squares
+        .values()
+        .filter(|cells| cells.len() >= 150)
         .map(|cells| {
             let n = cells.len() as f32;
             let middle = Pos {
@@ -8345,10 +8355,19 @@ fn godlands(map: &Map, content: &Content) -> Vec<Pos> {
         })
         .collect();
     spots.sort_by(|a, b| b.0.cmp(&a.0));
-    spots
-        .into_iter()
+    let mut seen = BTreeSet::new();
+    // The largest squares cluster; otherwise a veteran can walk past a closer entrance to the same band.
+    spawns
+        .iter()
+        .filter_map(|&(x, y)| {
+            let spawn = Pos { x, y };
+            spots
+                .iter()
+                .min_by(|(_, p), (_, q)| p.distance(spawn).total_cmp(&q.distance(spawn)))
+        })
+        .chain(&spots)
+        .filter_map(|(_, p)| seen.insert((p.x as i16, p.y as i16)).then_some(*p))
         .take(crate::bots::REMEMBERED_GODLANDS)
-        .map(|(_, p)| p)
         .collect()
 }
 
@@ -8734,6 +8753,23 @@ mod prepared_native_transition_tests {
 
 #[cfg(test)]
 #[test]
+fn godlands_landmarks_include_the_route_from_the_shore() {
+    let squares = (0..=16)
+        .map(|x| {
+            let p = Pos {
+                x: 100.5 + 24. * x as f32,
+                y: 100.5,
+            };
+            ((x, 0), vec![p; if x == 0 { 150 } else { 576 }])
+        })
+        .collect();
+    let spots = godlands(&squares, &[(10.5, 100.5)]);
+    assert_eq!(spots.len(), crate::bots::REMEMBERED_GODLANDS);
+    assert_eq!(spots[0].x, 100.5);
+}
+
+#[cfg(test)]
+#[test]
 fn both_live_realm_maps_have_godlands_spots() {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     for layout in [
@@ -8742,7 +8778,7 @@ fn both_live_realm_maps_have_godlands_spots() {
     ] {
         let bytes = std::fs::read(format!("data/realms/{layout}.wmap")).unwrap();
         let map = Map::decode_realm_cells(&bytes, &content, [2100, 2100]).unwrap();
-        let spots = godlands(&map, &content);
+        let spots = godlands(&godland_cells(&map, &content), &map.spawns);
         assert!(spots.len() >= 4, "{layout}: {spots:?}");
         for p in spots {
             assert_eq!(map.cell(p.x, p.y).unwrap().terrain, 1, "{layout} {p:?}");

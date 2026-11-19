@@ -119,7 +119,7 @@ pub struct MapInfo {
     #[serde(skip)]
     pub godlands: Arc<Vec<Pos>>,
     #[serde(skip)]
-    pub godland_squares: Arc<BTreeSet<(i32, i32)>>,
+    pub godland_tiles: Arc<BTreeSet<(i16, i16)>>,
 }
 #[derive(Serialize)]
 pub struct OwnCharacter {
@@ -385,7 +385,7 @@ impl World {
                 allow_teleport: w.allow_teleport(),
                 layout: w.realm_layout.clone(),
                 godlands: w.godlands.clone(),
-                godland_squares: w.godland_squares.clone(),
+                godland_tiles: w.godland_tiles.clone(),
             },
             character: OwnCharacter {
                 conditions: p.conditions(w.now) | if p.paused { 1 << 20 } else { 0 },
@@ -499,6 +499,26 @@ mod tests {
         assert_eq!(seen(&world), vec![near]);
         world.remove_entity(near);
         assert!(seen(&world).is_empty());
+    }
+
+    #[test]
+    fn bot_minimap_stops_offering_a_dead_peer() {
+        let (mut world, observer) = super::super::movement_tests::fixture(0x18, false);
+        let mut character = world.players[&observer].character.clone();
+        character.id += 1;
+        character.account += 1;
+        let target = world.enter(character, None).unwrap();
+        world.updates(observer, true).unwrap();
+        let sees_target = |w: &World| {
+            w.player_view(1, observer, 0)
+                .unwrap()
+                .player_markers
+                .iter()
+                .any(|p| p.id == target)
+        };
+        assert!(sees_target(&world));
+        world.players.get_mut(&target).unwrap().character.hp = 0;
+        assert!(!sees_target(&world));
     }
 
     #[tokio::test]

@@ -118,6 +118,40 @@ fn nearby_solo_gathering_finishes_the_approach_without_reacquiring() {
 }
 
 #[test]
+fn godlands_farmer_teleports_to_one_interior_marker_on_the_ordinary_cooldown() {
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    let destination = marker(4, 70.5, 70.5);
+    let edge = marker(3, 67.5, 67.5);
+    v.quest = None;
+    v.objects.clear();
+    v.character.level = 20;
+    v.map.layout = Some("layout".into());
+    v.map.godlands = Arc::new(vec![destination.position]);
+    v.map.godland_tiles = Arc::new(
+        (67..=73)
+            .flat_map(|x| (67..=73).map(move |y| (x, y)))
+            .collect(),
+    );
+    v.player_markers = vec![edge, destination];
+    let mut b = Brain::new(ARCHETYPES[0], &v);
+    b.crowd
+        .bands
+        .observe(&v, &c, &mut b.mind.godlands, true, b.profile.identity);
+    v.character.hp = v.character.stats[0] * 4 / 5;
+    assert!(b.decide(&v, &c).unwrap().journey.is_none());
+    v.character.hp = v.character.stats[0];
+    v.tick += 10;
+    v.time_ms += 500;
+    assert!(matches!(
+        b.decide(&v, &c).unwrap().journey,
+        Some(Journey::Regroup(4))
+    ));
+    v.tick += 10;
+    v.time_ms += 500;
+    assert!(b.decide(&v, &c).unwrap().journey.is_none());
+}
+
+#[test]
 fn ambitious_low_level_joins_a_fame_train_but_a_cautious_one_does_not() {
     let train = || {
         (3..6)
