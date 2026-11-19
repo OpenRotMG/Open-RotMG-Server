@@ -274,8 +274,10 @@ struct Brain {
     /// The kept journey and its distance-proportional deadline (ms).
     /// The trip being followed: its goal, deadline and the destination chosen when it started.
     travel: Option<(Goal, u64, Pos)>,
-    /// Hunt/Fight targets whose approach failed, until a time (ms); moving targets defeat tile exclusion.
+    /// Targets whose approach failed, until a time (ms); moving enemies defeat tile exclusion.
     unreachable: BTreeMap<i32, u64>,
+    loot_crossing: Option<i32>,
+    hazard_movement: Option<Arc<Grid>>,
     last_aim: u64,
     previous: Pos,
     stationary: u64,
@@ -314,6 +316,9 @@ struct Brain {
     last_encounter: u64,
     navigation: Option<Arc<Grid>>,
     navigation_version: Option<(u64, u64)>,
+    ground_hazards: BTreeMap<TilePoint, i32>,
+    ground_protection: BTreeSet<TilePoint>,
+    crossable_hazards: BTreeSet<TilePoint>,
     navigation_blockers: BTreeSet<TilePoint>,
     navigation_removed: BTreeSet<TilePoint>,
     navigation_rebuilds: u64,
@@ -363,6 +368,8 @@ impl Brain {
             steering: None,
             travel: None,
             unreachable: BTreeMap::new(),
+            loot_crossing: None,
+            hazard_movement: None,
             last_aim: 0,
             previous: view.position,
             stationary: view.tick,
@@ -399,6 +406,9 @@ impl Brain {
             last_encounter: view.time_ms,
             navigation: None,
             navigation_version: None,
+            ground_hazards: BTreeMap::new(),
+            ground_protection: BTreeSet::new(),
+            crossable_hazards: BTreeSet::new(),
             navigation_blockers: BTreeSet::new(),
             navigation_removed: BTreeSet::new(),
             navigation_rebuilds: 0,
@@ -493,8 +503,6 @@ impl Brain {
                 }
             }
         }
-        // Live: lava killed 16 level 20s a day; bots routed through it like ordinary slow ground.
-        blockers.extend(hazards_near(v, content, 12).filter(|p| *p != tile(v.position)));
         if self.mind.events.knows_blue && v.map.name == "Mad Lab" {
             for pool in v.objects.iter().filter(|p| {
                 p.kind == crate::dungeon::lab::HEXXER
@@ -512,6 +520,27 @@ impl Brain {
         }
         let version = v.tiles.version();
         let terrain_changed = self.navigation_version != Some(version);
+        if terrain_changed {
+            self.ground_hazards = v
+                .tiles
+                .iter()
+                .filter_map(|t| Some(((t.x, t.y), content.hazards.get(&t.ground)?.max)))
+                .collect();
+        }
+        self.ground_protection = v
+            .objects
+            .iter()
+            .filter(|o| content.objects[&o.kind].protects_ground)
+            .map(|o| tile(o.position))
+            .collect();
+        let here = tile(v.position);
+        self.crossable_hazards = self
+            .ground_hazards
+            .keys()
+            .filter(|p| **p != here && !self.ground_protection.contains(p) && !blockers.contains(p))
+            .copied()
+            .collect();
+        blockers.extend(&self.crossable_hazards);
         let obstacles_changed = self.navigation_blockers != blockers;
         let terrain_reusable = self
             .navigation
@@ -587,6 +616,78 @@ impl Brain {
         self.navigation = Some(grid.clone());
         grid
     }
+    fn hazardous_grid(&self, grid: &Grid) -> Grid {
+        let mut grid = grid.clone();
+        for point in self
+            .crossable_hazards
+            .intersection(&self.navigation_removed)
+        {
+            grid.walkable.insert(*point);
+        }
+        grid
+    }
+    fn leave_hazard(
+        &mut self,
+        v: &PlayerView,
+        grid: &Grid,
+        decision: &mut Decision,
+    ) -> Result<bool> {
+        let (x, y) = tile(v.position);
+        if !self.ground_hazards.contains_key(&(x, y)) || self.ground_protection.contains(&(x, y)) {
+            return Ok(false);
+        }
+        let shore = (x - 8..=x + 8)
+            .flat_map(|x| (y - 8..=y + 8).map(move |y| (x, y)))
+            .filter(|p| *p != (x, y) && grid.walkable.contains(p))
+            .map(center)
+            .min_by(|a, b| a.distance(v.position).total_cmp(&b.distance(v.position)))
+            .context("standing in damaging ground with no known safe tile within 8")?;
+        decision.goal = Goal::Dodge;
+        decision.movement = Some(shore);
+        self.hazard_movement = Some(Arc::new(self.hazardous_grid(grid)));
+        Ok(true)
+    }
+    fn loot_crossing_step(
+        &mut self,
+        v: &PlayerView,
+        grid: &Grid,
+        bag: i32,
+        to: Pos,
+    ) -> Option<Pos> {
+        let hazardous = self.hazardous_grid(grid);
+        let path = hazardous.path(tile(v.position), tile(to));
+        let (hazard_tiles, expected_damage) = path
+            .iter()
+            .flatten()
+            .filter(|p| !self.ground_protection.contains(p))
+            .filter_map(|p| self.ground_hazards.get(p))
+            .fold((0, 0), |(tiles, damage), max| (tiles + 1, damage + max));
+        let affordable = hazard_tiles > 0 && v.character.hp - expected_damage >= half_hp(v);
+        let step = path
+            .filter(|_| affordable)
+            .and_then(|path| hazardous.path_step(v.position, *path.last()?));
+        if step.is_none() || self.loot_crossing != Some(bag) {
+            tracing::info!(
+                player = v.session.player,
+                bag,
+                hazard_tiles,
+                expected_damage,
+                hp = v.character.hp,
+                max_hp = v.character.stats[0],
+                outcome = if step.is_some() {
+                    "started"
+                } else {
+                    "declined"
+                },
+                "autonomous loot hazard crossing"
+            );
+        }
+        if step.is_some() {
+            self.loot_crossing = Some(bag);
+            self.hazard_movement = Some(Arc::new(hazardous));
+        }
+        step
+    }
     fn decide(&mut self, v: &PlayerView, content: &Content) -> Result<Decision> {
         ensure!(
             self.session == (v.session.world, v.session.player, v.session.character),
@@ -615,6 +716,10 @@ impl Brain {
             "projectile trajectory cannot be inferred from observation"
         );
         self.last_tick = Some(v.tick);
+        self.hazard_movement = None;
+        if v.character.hp < half_hp(v) {
+            self.loot_crossing = None;
+        }
         if v.time_ms >= self.nexus_until {
             self.nexus_spot = None;
         }
@@ -674,6 +779,12 @@ impl Brain {
         if activity != Activity::Adventure {
             self.steering = None;
             self.travel = None;
+        }
+        if self
+            .loot_crossing
+            .is_some_and(|id| decision.goal != Goal::Loot(id))
+        {
+            self.loot_crossing = None;
         }
         if decision.aim.is_some() {
             self.last_aim = v.time_ms;
@@ -961,6 +1072,14 @@ impl Brain {
         }
         let (activity, mut decision) =
             self.choose(v, content, &s, decision, now, reserved, equipping)?;
+        if self
+            .loot_crossing
+            .is_some_and(|id| decision.goal != Goal::Loot(id))
+            && decision.journey.is_none()
+            && self.leave_hazard(v, &s.grid, &mut decision)?
+        {
+            return Ok((Activity::Survive, decision));
+        }
         self.tactics(v, content, &s, &mut decision)?;
         Ok((activity, decision))
     }
@@ -984,6 +1103,7 @@ impl Brain {
             Some(enemy) => Some((enemy.position, s.range)),
             None => decision.movement.map(|step| (step, 0.)),
         };
+        self.hazard_movement = None;
         decision.movement =
             combat::movement(v, &s.grid, &s.enemies, pull, false, &s.perception, None);
         if decision.aim.is_none()
@@ -1445,20 +1565,11 @@ impl Brain {
             *remedy,
         );
         let (grid, perception) = (&s.grid, &s.perception);
-        let here = tile(v.position);
-        if hazards_near(v, content, 0).next().is_some() {
-            let hazards: BTreeSet<_> = hazards_near(v, content, 8).collect();
-            let shore = (here.0 - 8..=here.0 + 8)
-                .flat_map(|x| (here.1 - 8..=here.1 + 8).map(move |y| (x, y)))
-                .filter(|p| grid.walkable.contains(p) && !hazards.contains(p))
-                .min_by(|a, b| {
-                    center(*a)
-                        .distance(v.position)
-                        .total_cmp(&center(*b).distance(v.position))
-                })
-                .context("standing in damaging ground with no known safe tile within 8")?;
-            decision.goal = Goal::Dodge;
-            decision.movement = Some(center(shore));
+        if !self
+            .loot_crossing
+            .is_some_and(|id| v.objects.iter().any(|o| o.id == id))
+            && self.leave_hazard(v, grid, decision)?
+        {
             return Ok(true);
         }
         if retreat || threatened {
@@ -2182,7 +2293,10 @@ impl Brain {
                 _ => match if matches!(goal, Goal::Hunt(_) | Goal::Venture | Goal::Survey(..)) {
                     grid.towards_kept(v.position, destination, &mut self.edge)
                 } else {
-                    grid.next(v.position, destination)
+                    grid.next(v.position, destination).or_else(|| match goal {
+                        Goal::Loot(id) => self.loot_crossing_step(v, grid, id, destination),
+                        _ => None,
+                    })
                 } {
                     Some(pos) => Some(pos),
                     None => {
@@ -2209,7 +2323,6 @@ impl Brain {
                             100
                         };
                         self.blocked.insert(tile(destination), v.tick + aside);
-                        // Live: bots shuttled 12 tiles from a lava-ringed chest for an hour, retrying every 5 seconds.
                         if let Goal::Loot(id) = &goal {
                             self.unreachable.insert(*id, v.time_ms + 300_000);
                             tracing::info!(
@@ -2422,20 +2535,8 @@ fn own(v: &PlayerView, slot: usize) -> Slot {
     }
 }
 type TilePoint = (i16, i16);
-/// Known damaging tiles within `radius` of the player, which a 2012 player sees as lava.
-fn hazards_near<'a>(
-    v: &'a PlayerView,
-    content: &'a Content,
-    radius: i16,
-) -> impl Iterator<Item = TilePoint> + 'a {
-    let (x, y) = tile(v.position);
-    (x - radius..=x + radius)
-        .flat_map(move |x| (y - radius..=y + radius).map(move |y| (x, y)))
-        .filter(|p| {
-            v.tiles
-                .ground(*p)
-                .is_some_and(|g| content.hazards.contains_key(&g))
-        })
+fn half_hp(v: &PlayerView) -> i32 {
+    (v.character.stats[0] + 1) / 2
 }
 mod movement;
 use movement::Grid;

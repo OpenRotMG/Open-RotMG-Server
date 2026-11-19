@@ -1216,14 +1216,12 @@ fn nine_in_ten_level_20s_farm_the_godlands_in_ordinary_gear() {
     );
 }
 
-#[test]
-fn a_chest_inside_lava_is_set_aside_instead_of_approached_again_and_again() {
-    // Live: bots shuttled 12 tiles from a Red Demon chest for an hour; lava was avoided only within 12 tiles.
+fn lava_chest() -> (Content, PlayerView) {
     let (c, mut v) = fixture();
     v.quest = None;
+    v.character.level = 20;
     let chest_at = Pos { x: 60.5, y: 60.5 };
-    let lava =
-        |x: i16, y: i16| (55..=65).contains(&x) && (55..=65).contains(&y) && (x, y) != (60, 60);
+    let lava = |x: i16, y: i16| (58..=62).contains(&x) && (58..=62).contains(&y);
     let geometry = crate::navigation::Geometry::new(
         (128, 128),
         (0..128 * 128)
@@ -1244,28 +1242,122 @@ fn a_chest_inside_lava_is_set_aside_instead_of_approached_again_and_again() {
     let chest = &mut v.objects[0];
     (chest.id, chest.kind, chest.hp, chest.position) = (3, 0x501, 0, chest_at);
     chest.contents = vec![0xa22, -1, -1, -1, -1, -1, -1, -1];
-    let mut brain = Brain::new(ARCHETYPES[0], &v);
-    let step = |brain: &mut Brain, v: &mut PlayerView, y: f32| {
-        v.position = Pos { x: 60.5, y };
+    v.objects.push(VisibleObject {
+        id: 4,
+        account: None,
+        kind: 0x153,
+        name: String::new(),
+        position: chest_at,
+        hp: 0,
+        max_hp: 0,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    });
+    (c, v)
+}
+
+#[test]
+fn healthy_bot_crosses_lava_and_picks_up_from_the_chest_at_both_distances() {
+    let (c, mut v) = lava_chest();
+    for distance in [30., 53.] {
+        v.position = Pos {
+            x: 60.5,
+            y: 60.5 - distance,
+        };
+        v.character.hp = v.character.stats[0];
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        let mut lava_entries = 0;
+        let pickup = (0..55).find_map(|_| {
+            v.tick += 5;
+            v.time_ms += 250;
+            v.elapsed_ms += 250;
+            let d = brain.decide(&v, &c).unwrap();
+            assert_eq!(d.goal, Goal::Loot(3), "{distance} tiles, {:?}", v.position);
+            brain.goal = d.goal;
+            if let Some(Action::Swap { from, .. }) = d.item {
+                return Some((from.object, from.kind));
+            }
+            let next = d.movement.expect("move to the chest before picking up");
+            if tile(next) != tile(v.position) && v.tiles.ground(tile(next)) == Some(0xf4) {
+                lava_entries += 1;
+                v.character.hp -= c.hazards[&0xf4].max;
+            }
+            v.position = next;
+            None
+        });
+        assert_eq!(pickup, Some((3, 0xa22)));
+        assert_eq!(lava_entries, 2);
+        assert!(
+            brain
+                .navigation
+                .as_ref()
+                .unwrap()
+                .walkable
+                .contains(&(60, 60))
+        );
+        assert!(
+            !brain
+                .navigation
+                .as_ref()
+                .unwrap()
+                .walkable
+                .contains(&(61, 61))
+        );
+    }
+}
+
+#[test]
+fn hurt_bot_sets_the_lava_chest_aside_at_both_distances() {
+    let (c, mut v) = lava_chest();
+    for distance in [30., 53.] {
+        v.position = Pos {
+            x: 60.5,
+            y: 60.5 - distance,
+        };
+        v.character.hp = 340;
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        let d = brain.decide(&v, &c).unwrap();
+        assert_ne!(d.goal, Goal::Loot(3));
+        assert!(d.item.is_none());
+        assert_eq!(brain.unreachable.get(&3), Some(&(v.time_ms + 300_000)));
+        v.character.hp = 500;
+        v.tick += 200;
+        v.time_ms += 10_000;
+        assert_ne!(brain.decide(&v, &c).unwrap().goal, Goal::Loot(3));
+    }
+}
+
+#[test]
+fn lava_reflex_resumes_after_crossing_is_interrupted_and_respects_visible_protection() {
+    let (c, mut v) = lava_chest();
+    for loses_health in [true, false] {
+        v.position = Pos { x: 60.5, y: 57.5 };
+        v.character.hp = 500;
+        let mut brain = Brain::new(ARCHETYPES[0], &v);
+        let first = brain.decide(&v, &c).unwrap();
+        assert_eq!(first.goal, Goal::Loot(3));
+        brain.goal = first.goal;
+        v.position = first.movement.expect("step into lava");
+        let chest = if loses_health {
+            v.character.hp = 249;
+            None
+        } else {
+            Some(v.objects.remove(0))
+        };
         v.tick += 5;
-        v.time_ms += 250;
-        v.elapsed_ms += 250;
-        brain.decide(v, &c).unwrap().goal
-    };
-    assert_eq!(
-        step(&mut brain, &mut v, 30.5),
-        Goal::Loot(3),
-        "lava beyond sight is not yet known to block"
-    );
-    assert_ne!(
-        step(&mut brain, &mut v, 53.5),
-        Goal::Loot(3),
-        "lava all around blocks every route"
-    );
-    v.tick += 200;
-    assert_ne!(
-        step(&mut brain, &mut v, 30.5),
-        Goal::Loot(3),
-        "an unreachable chest stays set aside"
-    );
+        assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Dodge);
+        if let Some(chest) = chest {
+            v.objects.insert(0, chest);
+        }
+    }
+    v.position = v.objects[0].position;
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    assert_ne!(brain.decide(&v, &c).unwrap().goal, Goal::Dodge);
+    v.objects.pop();
+    v.tick += 5;
+    assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Dodge);
 }

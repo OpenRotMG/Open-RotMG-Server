@@ -339,6 +339,43 @@ impl Grid {
             "searches":self.searches.load(Ordering::Relaxed),"cache_hits":self.cache_hits.load(Ordering::Relaxed),
             "reachable_nodes_visited":self.reachable_nodes.load(Ordering::Relaxed),"route_nodes_visited":self.route_nodes.load(Ordering::Relaxed)})
     }
+    /// Shortest walkable tile path, finish first, excluding the start.
+    pub(super) fn path(&self, start: TilePoint, finish: TilePoint) -> Option<Vec<TilePoint>> {
+        if !self.walkable.contains(&finish) {
+            return None;
+        }
+        // A sealed destination can be ruled out without flooding all reachable terrain from the player.
+        let measuring = crate::performance::Measure::start();
+        let mut queue = VecDeque::from([finish]);
+        let mut parent = HashMap::from([(finish, finish)]);
+        let mut visited = 0;
+        while let Some((x, y)) = queue.pop_front() {
+            visited += 1;
+            if (x, y) == start {
+                break;
+            }
+            for next in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                if (next == start || self.walkable.contains(&next)) && !parent.contains_key(&next) {
+                    parent.insert(next, (x, y));
+                    queue.push_back(next);
+                }
+            }
+        }
+        self.route_nodes.fetch_add(visited, Ordering::Relaxed);
+        {
+            let mut p = self.performance.lock().expect("bot timings poisoned");
+            p.count("route_nodes", visited);
+            p.work("routing", measuring);
+        }
+        let mut path = vec![];
+        let mut next = start;
+        while next != finish {
+            next = *parent.get(&next)?;
+            path.push(next);
+        }
+        path.reverse();
+        Some(path)
+    }
     pub(super) fn next(&self, from: Pos, to: Pos) -> Option<Pos> {
         let start = tile(from);
         let finish = tile(to);
@@ -357,32 +394,10 @@ impl Grid {
         if start == finish {
             return None;
         }
-        let measuring = crate::performance::Measure::start();
-        let mut queue = VecDeque::from([start]);
-        let mut parent = HashMap::from([(start, start)]);
-        let mut visited = 0;
-        while let Some((x, y)) = queue.pop_front() {
-            visited += 1;
-            if (x, y) == finish {
-                break;
-            }
-            for next in [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)] {
-                if self.walkable.contains(&next) && !parent.contains_key(&next) {
-                    parent.insert(next, (x, y));
-                    queue.push_back(next);
-                }
-            }
-        }
-        self.route_nodes.fetch_add(visited, Ordering::Relaxed);
-        {
-            let mut p = self.performance.lock().expect("bot timings poisoned");
-            p.count("route_nodes", visited);
-            p.work("routing", measuring);
-        }
-        let mut next = finish;
-        while *parent.get(&next)? != start {
-            next = *parent.get(&next)?;
-        }
+        self.path_step(from, *self.path(start, finish)?.last()?)
+    }
+    pub(super) fn path_step(&self, from: Pos, next: TilePoint) -> Option<Pos> {
+        let start = tile(from);
         let target = center(next);
         if self.segment(from, target) {
             return Some(target);

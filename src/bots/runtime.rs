@@ -1224,7 +1224,7 @@ pub(super) async fn launch(
                     brain.destination = decision.movement;
                     let diagnostic = format!("movement={:?} cursor={:?} item={:?}", decision.movement, decision.aim, decision.item);
                     let input_session = (id, account, view.session.character);
-                    let input_grid = brain.navigation.clone().context("virtual input navigation missing")?;
+                    let input_grid = brain.hazard_movement.take().or_else(|| brain.navigation.clone()).context("virtual input navigation missing")?;
                     let held_distance = (combat::speed(&view) * profile.reaction as f32 * 0.05).max(0.5);
                     let movement = decision.journey.is_none().then_some(decision.movement).flatten();
                     let aim = decision.journey.is_none().then_some(decision.aim).flatten();
