@@ -1917,15 +1917,15 @@ impl Brain {
         } else {
             None
         };
+        if let Some((id, position)) = realm {
+            choices.push((95., Goal::Portal(id), position));
+        }
         for portal in v
             .objects
             .iter()
             .filter(|p| p.usable)
             .filter(|p| match v.map.name.as_str() {
-                "Nexus" => {
-                    matches!(p.kind, 0x704 | 0x70e | 0x71c)
-                        || p.kind == 0x712 && Some(p.id) == realm
-                }
+                "Nexus" => matches!(p.kind, 0x704 | 0x70e | 0x71c),
                 // The committed exit is public even when a straggler missed personal clear credit.
                 "Pirate Cave" => p.kind == 0x704,
                 "Snake Pit" => matches!(p.kind, 0x704 | 0x71d),
@@ -2422,13 +2422,17 @@ impl Brain {
                     "autonomous follow selected"
                 );
             }
-            self.travel = travel(&goal, destination).then(|| match self.travel.take() {
-                Some(kept) if kept.0 == goal => kept,
-                _ => (
-                    goal.clone(),
-                    v.time_ms + 10_000 + (destination.distance(v.position) * 1000.) as u64,
-                    destination,
-                ),
+            let approaching_realm =
+                realm.is_some_and(|(id, _)| goal == Goal::Portal(id) && movement.is_some());
+            self.travel = (travel(&goal, destination) || approaching_realm).then(|| {
+                match self.travel.take() {
+                    Some(kept) if kept.0 == goal => kept,
+                    _ => (
+                        goal.clone(),
+                        v.time_ms + 10_000 + (destination.distance(v.position) * 1000.) as u64,
+                        destination,
+                    ),
+                }
             });
             decision.goal = goal;
             decision.movement = movement;

@@ -34,7 +34,20 @@ fn population(name: &str) -> Result<usize> {
 }
 
 impl Brain {
-    pub(super) fn realm_portal(&mut self, v: &PlayerView, grid: &Grid) -> Result<Option<i32>> {
+    pub(super) fn realm_portal(
+        &mut self,
+        v: &PlayerView,
+        grid: &Grid,
+    ) -> Result<Option<(i32, Pos)>> {
+        // The Nexus hedge route can leave sight of a portal before turning back toward it.
+        if let Some((Goal::Portal(id), until, position)) = self.travel
+            && self.goal == Goal::Portal(id)
+            && v.time_ms < until
+            && position.distance(v.position) >= crate::world::PLAYER_VIEW_RADIUS
+            && !self.blocked.contains_key(&tile(position))
+        {
+            return Ok(Some((id, position)));
+        }
         let choices = v
             .objects
             .iter()
@@ -55,11 +68,15 @@ impl Brain {
         if choices.is_empty() {
             return Ok(None);
         }
-        if let Goal::Portal(id) = self.goal
-            && choices.iter().any(|(candidate, _)| *candidate == id)
-        {
-            return Ok(Some(id));
-        }
-        choose(v.session.account, &choices, &mut self.rng).map(Some)
+        let id = match self.goal {
+            Goal::Portal(id) if choices.iter().any(|(candidate, _)| *candidate == id) => id,
+            _ => choose(v.session.account, &choices, &mut self.rng)?,
+        };
+        let portal = v
+            .objects
+            .iter()
+            .find(|p| p.id == id)
+            .context("selected Realm portal missing")?;
+        Ok(Some((id, portal.position)))
     }
 }

@@ -728,7 +728,7 @@ pub struct Slot {
 }
 // Ordinary entrances last a minute in the June 2012 guide; keys share that window: https://web.archive.org/web/20120609023836/http://forums.wildshadow.com/wiki/realm-mad-god/dungeons
 const DUNGEON_PORTAL_TICKS: u64 = 60_000 / 50;
-const PLAYER_VIEW_RADIUS: f32 = 20.;
+pub(crate) const PLAYER_VIEW_RADIUS: f32 = 20.;
 
 #[derive(Clone, Copy)]
 pub struct PortalPlan {

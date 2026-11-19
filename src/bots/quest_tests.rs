@@ -147,6 +147,55 @@ fn portal_callers_wait_instead_of_entering_on_the_calling_decision() {
     assert!(callers > 0 && silent > 0);
 }
 
+#[test]
+fn nexus_realm_portal_approach_survives_a_detour_out_of_sight() {
+    let (c, mut v) = fixture();
+    v.map.name = "Nexus".into();
+    v.position = center((21, 24));
+    v.quest = None;
+    let portal = &mut v.objects[0];
+    portal.kind = 0x712;
+    portal.name = "Medusa (20/85)".into();
+    portal.position = center((40, 24));
+    portal.usable = true;
+    let mut ground = vec![255; 128 * 128];
+    for (x, y) in
+        (20..=40)
+            .map(|x| (x, 22))
+            .chain([(20, 23), (20, 24), (21, 24), (40, 23), (40, 24)])
+    {
+        ground[y * 128 + x] = 1;
+    }
+    v.tiles = Arc::new(crate::navigation::Tiles::new(
+        crate::navigation::Geometry::new((128, 128), ground, &BTreeMap::from([(1, 1.), (255, 0.)])),
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    brain.goal = Goal::Explore(40, 22);
+    brain.travel = Some((brain.goal.clone(), v.time_ms + 30_000, center((40, 22))));
+    let selected = adventure(&mut brain, &v, &c);
+    assert_eq!(selected.goal, Goal::Portal(2));
+    assert_eq!(selected.movement.map(tile), Some((20, 24)));
+    brain.goal = selected.goal;
+
+    v.position = selected.movement.unwrap();
+    let portal = v.objects.pop().unwrap();
+    let detour = adventure(&mut brain, &v, &c);
+    assert_eq!(detour.goal, Goal::Portal(2));
+    assert_eq!(detour.movement.map(tile), Some((20, 23)));
+    assert!(detour.journey.is_none());
+
+    v.position = center((40, 23));
+    let disappeared = adventure(&mut brain, &v, &c);
+    assert_ne!(disappeared.goal, Goal::Portal(2));
+    assert!(disappeared.journey.is_none());
+    v.objects.push(portal);
+    assert!(matches!(
+        adventure(&mut brain, &v, &c).journey,
+        Some(Journey::Portal(2))
+    ));
+}
+
 pub(super) fn fixture() -> (Content, PlayerView) {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     let geometry = crate::navigation::Geometry::new(
