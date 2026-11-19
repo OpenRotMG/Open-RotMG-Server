@@ -196,6 +196,30 @@ fn nexus_realm_portal_approach_survives_a_detour_out_of_sight() {
     ));
 }
 
+#[test]
+fn nexus_explore_enters_its_target_tile_before_retargeting() {
+    let (c, mut v) = fixture();
+    v.map.name = "Nexus".into();
+    v.position = Pos {
+        x: 114.17,
+        y: 49.40,
+    };
+    v.quest = None;
+    v.objects.clear();
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    let target = (113, 49);
+    brain.goal = Goal::Explore(target.0, target.1);
+
+    let approach = adventure(&mut brain, &v, &c);
+    assert_eq!(approach.goal, Goal::Explore(target.0, target.1));
+    v.position = approach.movement.expect("exploration still has a step");
+    assert_eq!(tile(v.position), target);
+
+    let onward = adventure(&mut brain, &v, &c);
+    assert!(matches!(onward.goal, Goal::Explore(..)));
+    assert_ne!(onward.goal, approach.goal);
+}
+
 pub(super) fn fixture() -> (Content, PlayerView) {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     let geometry = crate::navigation::Geometry::new(

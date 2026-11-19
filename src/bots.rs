@@ -2148,11 +2148,12 @@ impl Brain {
                 None
             };
             let reachable = grid.nearby_reachable(v.position, retained);
-            if let Goal::Explore(x, y) = self.goal {
-                let pos = center((x, y));
-                if pos.distance(v.position) > 0.7 && reachable.contains(&(x, y)) {
-                    choices.push((12., self.goal.clone(), pos));
-                }
+            if let Goal::Explore(x, y) = self.goal
+                && tile(v.position) != (x, y)
+                && reachable.contains(&(x, y))
+            {
+                // An adjacent position never records a visit to the target tile.
+                choices.push((12., self.goal.clone(), center((x, y))));
             }
             if !choices
                 .iter()
