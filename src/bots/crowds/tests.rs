@@ -79,6 +79,45 @@ fn midlands_player_teleports_to_a_crowd_in_its_own_area_instead_of_exploring() {
 }
 
 #[test]
+fn nearby_solo_gathering_finishes_the_approach_without_reacquiring() {
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    v.quest = None;
+    v.character.level = 11;
+    v.player_markers = vec![marker(3, 18.5, 10.5)];
+    let mut profile = ARCHETYPES[0];
+    profile.knows_minimap = true;
+    let mut brain = Brain::new(profile, &v);
+    let spots = [v.position, v.player_markers[0].position];
+    observe(&mut brain, &mut v, &c, 6, &spots);
+    for (x, peer, following) in [
+        (10.5, 18.5, true),
+        (12.5, 18.5, true),
+        (14.5, 18.5, false),
+        (10.5, 18.5, false),
+        (10.5, 60.5, false),
+        (10.5, 18.5, true),
+    ] {
+        v.tick += 5;
+        v.time_ms += 250;
+        v.position.x = x;
+        v.player_markers[0].position.x = peer;
+        let decision = brain.decide(&v, &c).unwrap();
+        if following {
+            assert_eq!(decision.goal, Goal::Follow(3), "x={x}, peer={peer}");
+            assert!(decision.movement.unwrap().x > x);
+        } else {
+            assert!(
+                matches!(decision.goal, Goal::Explore(..)),
+                "{:?} at x={x}, peer={peer}",
+                decision.goal
+            );
+        }
+        brain.goal = decision.goal;
+        brain.destination = decision.movement;
+    }
+}
+
+#[test]
 fn ambitious_low_level_joins_a_fame_train_but_a_cautious_one_does_not() {
     let train = || {
         (3..6)

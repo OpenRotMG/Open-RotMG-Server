@@ -2016,10 +2016,11 @@ impl Brain {
                 choices.push((score, Goal::Follow(player.id), player.position));
             }
         }
+        self.crowd.observe_gathering(v, &self.goal);
         // Players go where the people are; exploring alone is what is left when nobody suitable is on the minimap.
         if !committed
             // Approaching the quest's fight is the quest logic's job, landing well outside it.
-            && let Some((marker, crowd)) = self.crowd.gathering(v, self.ambitious(), |position| {
+            && let Some((marker, crowd)) = self.crowd.gathering(v, &self.goal, self.ambitious(), |position| {
                 let quest = enemies.iter().find(|e| v.quest == Some(e.id));
                 // Live: level 20s joined lowland crowds on unseen ground and farmed Hobbit Mages in groups of eight.
                 let veteran_ground = v.character.level < 20
@@ -2276,7 +2277,7 @@ impl Brain {
                         movement.map(|p| (target, (p.y - v.position.y).atan2(p.x - v.position.x)));
                     movement
                 }
-                Goal::Follow(_) if v.position.distance(destination) < 4.5 => None,
+                Goal::Follow(_) if v.position.distance(destination) < crowds::FOLLOW_REACH => None,
                 Goal::Loot(id) if v.position.distance(destination) < LOOT_REACH => {
                     let bag = v
                         .objects

@@ -4,15 +4,20 @@ use crate::world::view::PlayerMarker;
 #[cfg(test)]
 mod tests;
 
+pub(super) const FOLLOW_REACH: f32 = 4.5;
+const SOLO_GATHER_RANGE: f32 = 40.;
+
 pub(super) struct Crowd {
     pub knows_minimap: bool,
     pub bands: bands::Bands,
+    gathered_peer: Option<i32>,
 }
 impl Crowd {
     pub fn new(knows_minimap: bool) -> Self {
         Self {
             knows_minimap,
             bands: bands::Bands::default(),
+            gathered_peer: None,
         }
     }
     /// Other players this player can locate: the whole minimap for those who read it, otherwise the screen.
@@ -28,11 +33,29 @@ impl Crowd {
             .filter(|p| p.position.distance(position) < 12.)
             .count()
     }
+    pub fn observe_gathering(&mut self, v: &PlayerView, goal: &Goal) {
+        if self.gathered_peer.is_some_and(|id| {
+            !self
+                .markers(v)
+                .any(|p| p.id == id && p.position.distance(v.position) <= SOLO_GATHER_RANGE)
+        }) {
+            self.gathered_peer = None;
+        }
+        // Leaving a nearby solo peer to explore shouldn't immediately start the same approach again.
+        if let Goal::Follow(id) = goal
+            && self
+                .markers(v)
+                .any(|p| p.id == *id && p.position.distance(v.position) < FOLLOW_REACH)
+        {
+            self.gathered_peer = Some(*id);
+        }
+    }
     /// The crowd worth joining and its size. Cautious players only teleport where they know they can survive;
     /// ambitious ones trust any crowd of three, which is how fame trains drew in players below their level.
     pub fn gathering<'a>(
         &self,
         v: &'a PlayerView,
+        goal: &Goal,
         ambitious: bool,
         eligible: impl Fn(Pos) -> bool,
     ) -> Option<(&'a PlayerMarker, usize)> {
@@ -56,8 +79,10 @@ impl Crowd {
                 let crowded = *crowd >= 2;
                 // A crowd nearby is usually in the player's own area, even on ground it has not seen.
                 let own_area = crowded && distance <= 60. && self.bands.survivable(v, p.position);
-                distance > 7.
-                    && (crowded || distance <= 40.)
+                let approaching = *goal == Goal::Follow(p.id) && distance >= FOLLOW_REACH;
+                (approaching || distance > 7.)
+                    && (crowded
+                        || distance <= SOLO_GATHER_RANGE && self.gathered_peer != Some(p.id))
                     && eligible(p.position)
                     && self.bands.worthwhile(p.position)
                     && (self.bands.teleportable(v, p.position)
