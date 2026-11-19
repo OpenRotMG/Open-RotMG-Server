@@ -5,14 +5,12 @@ use crate::world::view::{VisibleObject, VisibleProjectile};
 pub(super) struct Perception {
     step: f32,
     directions: usize,
-    pub(super) burst_risk: bool,
 }
 impl Perception {
-    pub(super) fn of(cognition: &pursuits::Cognition, burst_risk: bool) -> Self {
+    pub(super) fn of(cognition: &pursuits::Cognition) -> Self {
         Self {
             step: cognition.velocity_step,
             directions: cognition.directions,
-            burst_risk,
         }
     }
     pub(super) fn velocity(&self, v: Pos) -> Pos {
@@ -485,20 +483,15 @@ pub(super) fn movement(
         for enemy in enemies {
             let distance = point.distance(enemy.position);
             separation = separation.min(distance);
-            if perception.burst_risk {
-                crowding += (5. - distance).max(0.);
-            }
+            crowding += (5. - distance).max(0.);
         }
         // Keep one opponent in weapon reach without stepping into overlapping close-range fans.
-        if perception.burst_risk {
-            crowding -= (5. - separation).max(0.);
-        }
+        crowding -= (5. - separation).max(0.);
         let spacing = if retreat {
             separation.min(OUT_OF_REACH) * 3.
         } else {
-            let reach = if perception.burst_risk { 0.9 } else { 0.8 };
             target.map_or(0., |(p, range)| {
-                -(point.distance(p) - range * reach).abs() * 3.
+                -(point.distance(p) - range * 0.9).abs() * 3.
             })
         };
         // Retain safe steering, not physical inertia; urgent avoidance stays first: https://www.red3d.com/cwr/steer/gdc99/
@@ -534,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn godlands_spacing_keeps_one_enemy_in_range_without_stepping_into_a_second() {
+    fn movement_keeps_one_enemy_in_range_without_stepping_into_a_second() {
         let (_, mut v) = quest_tests::fixture();
         v.objects[0].position = Pos { x: 14.5, y: 10.5 };
         let mut second = quest_tests::fixture().1.objects.remove(0);
@@ -545,7 +538,6 @@ mod tests {
         let perception = Perception {
             step: 0.5,
             directions: 8,
-            burst_risk: true,
         };
         let step = movement(
             &v,

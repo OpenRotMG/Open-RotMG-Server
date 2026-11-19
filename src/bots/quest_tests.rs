@@ -18,7 +18,7 @@ fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
         nearest: enemies.last().copied(),
         quarry: enemies.last().copied(),
         enemies,
-        perception: combat::Perception::of(&brain.mind.cognition, false),
+        perception: combat::Perception::of(&brain.mind.cognition),
         inspecting: false,
         range: 6.,
         passes_cover: false,
@@ -814,13 +814,13 @@ fn bot_escapes_a_volley_that_would_kill_it_before_its_health_looks_low() {
 }
 
 #[test]
-fn godlands_bot_escapes_before_a_second_volley_when_a_potion_cannot_cover_it() {
+fn bots_escape_before_a_second_volley_when_a_potion_cannot_cover_it() {
     let (c, mut v) = fixture();
     v.quest = None;
-    v.character.level = 20;
-    v.objects[0].kind = 0x659;
     v.objects[0].position = Pos { x: 16.5, y: 10.5 };
+    v.character.mp = 0;
     v.character.items[4] = 0xa22;
+    v.character.items[5] = 0xa23;
     v.projectiles.push(crate::world::view::VisibleProjectile {
         owner: 2,
         id: 1,
@@ -835,34 +835,74 @@ fn godlands_bot_escapes_before_a_second_volley_when_a_potion_cannot_cover_it() {
         damage: 120,
         armor_piercing: false,
     });
-    // Each visible hit does 110, leaving room for one potion at 260 HP, but not at 200 HP.
-    for (hp, sick, escape) in [(200, false, true), (260, true, true), (260, false, false)] {
-        v.character.hp = hp;
-        v.character.conditions = if sick {
-            crate::condition::bit(crate::condition::SICK)
-        } else {
-            0
-        };
-        let mut brain = Brain::new(ARCHETYPES[1], &v);
-        let d = brain.decide(&v, &c).unwrap();
-        assert_eq!(d.goal, Goal::Recover);
-        assert_eq!(matches!(d.journey, Some(Journey::Nexus)), escape);
-        if escape {
-            assert!(
-                brain
-                    .plan
-                    .events
-                    .iter()
-                    .any(|e| e.reason == "volley_margin")
+    for (world, level, enemy) in [
+        ("Realm", 8, 0x650),
+        ("Snake Pit", 14, 0x225),
+        ("Realm", 20, 0x659),
+    ] {
+        v.map.name = world.into();
+        v.character.level = level;
+        v.objects[0].kind = enemy;
+        // Each hit does 110, so a potion can buy a safe retreat at 260 HP, but not at 200 HP.
+        for (hp, sick, escape) in [(200, false, true), (260, true, true), (260, false, false)] {
+            v.character.hp = hp;
+            v.character.conditions = if sick {
+                crate::condition::bit(crate::condition::SICK)
+            } else {
+                0
+            };
+            let mut brain = Brain::new(ARCHETYPES[1], &v);
+            let d = brain.decide(&v, &c).unwrap();
+            assert_eq!(d.goal, Goal::Recover);
+            assert_eq!(
+                matches!(d.journey, Some(Journey::Nexus)),
+                escape,
+                "{world} level {level}"
             );
-        } else {
-            assert!(matches!(d.item, Some(Action::Use { slot: 4, .. })));
-            assert!(
-                d.movement
-                    .is_some_and(|p| p.distance(v.objects[0].position) > 6.)
-            );
+            if escape {
+                assert!(matches!(d.item, Some(Action::Use { slot: 5, .. })));
+                assert!(
+                    brain
+                        .plan
+                        .events
+                        .iter()
+                        .any(|e| e.reason == "volley_margin")
+                );
+            } else {
+                assert!(matches!(d.item, Some(Action::Use { slot: 4, .. })));
+                assert!(
+                    d.movement
+                        .is_some_and(|p| p.distance(v.objects[0].position) > 6.)
+                );
+            }
         }
     }
+}
+
+#[test]
+fn low_health_requires_an_attacker_nearby_to_use_the_reserve() {
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.character.level = 8;
+    v.character.hp = 35;
+    v.objects[0].kind = 0x650;
+    v.objects[0].position = Pos { x: 16.5, y: 10.5 };
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(matches!(d.journey, Some(Journey::Nexus)));
+    assert!(
+        brain
+            .plan
+            .events
+            .iter()
+            .any(|e| e.reason == "under_fire_low_health")
+    );
+
+    v.objects[0].position.x = 30.5;
+    v.tick += 5;
+    v.time_ms += 250;
+    let d = brain.decide(&v, &c).unwrap();
+    assert!(d.journey.is_none(), "a remembered hit is not a volley");
 }
 
 #[test]

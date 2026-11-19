@@ -931,14 +931,7 @@ impl Brain {
                     && !(o.kind == crate::dungeon::manor::KAGE && o.hp >= o.max_hp)
             })
             .collect();
-        let burst_risk = v.map.name == "Realm"
-            && v.character.level == 20
-            && enemies.iter().any(|e| {
-                let kind = &content.objects[&e.kind];
-                (kind.god && kind.terrain == 1 || e.kind == 0xd51)
-                    && e.position.distance(v.position) < 15.
-            });
-        let perception = combat::Perception::of(&self.mind.cognition, burst_risk);
+        let perception = combat::Perception::of(&self.mind.cognition);
         let nearest = enemies.iter().min_by(|a, b| {
             a.position
                 .distance(v.position)
@@ -1582,10 +1575,16 @@ impl Brain {
         if retreat || threatened {
             let hp = v.character.hp;
             let incoming = combat::incoming(v);
-            let burst = perception.burst_risk && (incoming > 0 || retreat);
-            let reserve = if burst { 2 * s.hit } else { 0 };
+            let reachable =
+                nearest.is_some_and(|e| e.position.distance(v.position) < combat::OUT_OF_REACH);
+            // The next shots can land before the Nexus transfer commits, even after dodging the first volley.
+            let reserve = if incoming > 0 || retreat && reachable {
+                2 * s.hit
+            } else {
+                0
+            };
             let risk = incoming + reserve;
-            let urgent = burst && risk >= hp;
+            let urgent = risk >= hp;
             let retreat = retreat || urgent;
             let emergency = retreat || remedy.is_some();
             // Live: 32 of 32 sampled Recover frames never fired. A 2012 player backing off kept shooting.
@@ -1599,9 +1598,6 @@ impl Brain {
                     Goal::Remedy(remedy.expect("emergency remedy").id)
                 };
             }
-            // Live: wounded melee bots stood still beside a Cube God for 15 minutes, never out of reach or in range.
-            let reachable =
-                nearest.is_some_and(|e| e.position.distance(v.position) < combat::OUT_OF_REACH);
             if retreat && reachable || remedy.is_some() && pressured {
                 let focus = if retreat {
                     nearest.map(|e| e.position)
@@ -1643,7 +1639,7 @@ impl Brain {
             let escape =
                 if outmatched && nearest.is_some_and(|e| e.position.distance(v.position) < 4.) {
                     Some("near_outmatched")
-                } else if risk >= hp && (!burst || hp + healing <= risk) {
+                } else if urgent && hp + healing <= risk {
                     Some(if incoming >= hp {
                         "lethal_volley"
                     } else if incoming > 0 {
@@ -1657,12 +1653,14 @@ impl Brain {
                     None
                 };
             if let Some(reason) = escape
-                && (burst || decision.item.is_none())
+                && (urgent || decision.item.is_none())
                 && v.map.name != "Nexus"
             {
                 tracing::info!(
                     account = v.session.account,
                     character = v.session.character,
+                    world = %v.map.name,
+                    level = v.character.level,
                     hp = v.character.hp,
                     max_hp = v.character.stats[0],
                     incoming,
