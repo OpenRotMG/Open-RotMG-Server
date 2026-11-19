@@ -1,6 +1,133 @@
 use super::*;
 
 #[test]
+fn snake_pit_breaks_reachable_cover_before_chasing_distant_cover() {
+    use crate::{
+        content::{Cell, Map},
+        world::{Controller, World, view::VisibleObject},
+    };
+    let (content, mut view) = super::super::quest_tests::fixture();
+    let (near, other, far) = (center((10, 13)), center((7, 10)), center((16, 10)));
+    let target = center((18, 10));
+    let mut cells = vec![
+        Cell {
+            ground: 1,
+            object: None,
+            config: String::new(),
+            terrain: 0,
+            region: 0
+        };
+        128 * 128
+    ];
+    for p in [near, other, far] {
+        let (x, y) = tile(p);
+        cells[y as usize * 128 + x as usize].object = Some(0x172);
+    }
+    for x in [2, 18] {
+        cells[10 * 128 + x].ground = 255;
+    }
+    view.tiles = Arc::new(crate::navigation::Tiles::new(
+        crate::navigation::Geometry::new(
+            (128, 128),
+            cells.iter().map(|cell| cell.ground).collect(),
+            &content.grounds,
+        ),
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    let content = Arc::new(content);
+    let mut world = World::new(
+        content.clone(),
+        Arc::new(Map {
+            width: 128,
+            height: 128,
+            cells,
+            spawns: vec![(view.position.x, view.position.y)],
+        }),
+    )
+    .unwrap();
+    let mut character = Character::fresh(content.get(0x31d).unwrap()).unwrap();
+    character.id = 1;
+    character.account = 1;
+    character.items[0] = 0xa01;
+    let player = world.enter(character, None).unwrap();
+    world.players.get_mut(&player).unwrap().controller = Controller::Autonomous;
+    view.session.player = player;
+    view.character.class = 0x31d;
+    view.character.items[..4].copy_from_slice(&world.players[&player].character.items[..4]);
+    view.map.name = "Snake Pit".into();
+    view.objects[0].id = -10;
+    view.objects[0].kind = 0x917;
+    view.objects[0].position = target;
+    view.objects[0].condition_mask = Some(crate::condition::bit(crate::condition::INVULNERABLE));
+    view.quest = Some(-10);
+    let walls: Vec<_> = [near, other, far]
+        .into_iter()
+        .map(|pos| {
+            let wall = world
+                .entities
+                .values()
+                .find(|e| tile(e.pos) == tile(pos) && e.kind == 0x172)
+                .unwrap();
+            VisibleObject {
+                id: wall.id,
+                account: None,
+                kind: wall.kind,
+                name: String::new(),
+                position: pos,
+                hp: wall.hp,
+                max_hp: wall.hp,
+                level: None,
+                equipped: vec![],
+                contents: vec![],
+                blocks: true,
+                usable: false,
+                condition_mask: Some(0),
+            }
+        })
+        .collect();
+    let (first, second, distant) = (walls[0].id, walls[1].id, walls[2].id);
+    view.objects.extend(walls);
+    let mut brain = Brain::new(ARCHETYPES[1], &view);
+    let chosen = brain.decide(&view, &content).unwrap();
+    assert_eq!(chosen.goal, Goal::Break(first));
+    assert_eq!(chosen.aim.map(tile), Some(tile(near)));
+    brain.goal = chosen.goal;
+
+    // A moving quest should not pull fire off cover that can still be broken.
+    view.objects[0].position = center((2, 10));
+    view.tick += 5;
+    view.time_ms += 250;
+    let kept = brain.decide(&view, &content).unwrap();
+    assert_eq!(kept.goal, Goal::Break(first));
+    assert_eq!(kept.aim.map(tile), Some(tile(near)));
+    execute_inputs(
+        &mut world,
+        (player, 1, 1),
+        kept.movement,
+        kept.aim,
+        None,
+        40,
+    )
+    .unwrap();
+    for _ in 0..40 {
+        world.step();
+    }
+    assert!(
+        world.entities.get(&first).is_none(),
+        "held fire should destroy the chosen wall"
+    );
+    assert_eq!(world.entities[&second].hp, 100);
+    assert_eq!(world.entities[&distant].hp, 100);
+    view.objects.retain(|object| object.id != first);
+    view.tick += 5;
+    view.time_ms += 250;
+    assert_eq!(
+        brain.decide(&view, &content).unwrap().goal,
+        Goal::Break(second)
+    );
+}
+
+#[test]
 fn off_axis_known_corner_admits_actual_safe_keys_and_makes_progress() {
     use crate::{
         content::{Cell, Map},

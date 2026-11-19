@@ -2382,6 +2382,7 @@ impl Brain {
                                 destination,
                                 range,
                                 s.passes_cover,
+                                &self.goal,
                             )
                         {
                             clearing.item = decision.item;

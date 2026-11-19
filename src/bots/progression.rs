@@ -456,41 +456,40 @@ pub(super) fn clear_cover(
     destination: Pos,
     range: f32,
     passes_cover: bool,
+    previous: &Goal,
 ) -> Option<Decision> {
     if v.character.conditions & crate::content::STUNNED != 0 {
         return None;
     }
-    let (wall, movement) = v
+    let (wall, movement, _) = v
         .objects
         .iter()
-        .filter(|o| {
-            o.blocks
-                && o.hp > 0
-                && content.objects[&o.kind].destructible
-                && sight(v, grid, o.position, passes_cover, Some(o.id))
-        })
+        .filter(|o| o.blocks && o.hp > 0 && content.objects[&o.kind].destructible && vulnerable(o))
         .filter_map(|wall| {
-            // Fully discovered rooms have no walkable frontier until their tunnel cover is broken.
-            let movement = if v.position.distance(wall.position) < range {
+            let kept = *previous == Goal::Break(wall.id);
+            let clear = sight(v, grid, wall.position, passes_cover, Some(wall.id));
+            let movement = if clear && v.position.distance(wall.position) < range {
                 None
-            } else {
+            } else if clear || kept {
                 let (x, y) = tile(wall.position);
-                Some(
-                    [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-                        .into_iter()
-                        .filter_map(|point| grid.next(v.position, center(point)))
-                        .min_by(|a, b| {
-                            a.distance(wall.position)
-                                .total_cmp(&b.distance(wall.position))
-                        })?,
-                )
+                let mut spots = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)].map(center);
+                // Rank firing positions, not first steps that can lead around to the far side of the wall.
+                spots.sort_by(|a, b| a.distance(v.position).total_cmp(&b.distance(v.position)));
+                Some(spots.into_iter().find_map(|p| grid.next(v.position, p))?)
+            } else {
+                return None;
             };
-            Some((wall, movement))
+            Some((wall, movement, kept))
         })
-        .min_by(|(a, _), (b, _)| {
-            a.position
-                .distance(destination)
-                .total_cmp(&b.position.distance(destination))
+        .min_by(|(a, a_step, a_kept), (b, b_step, b_kept)| {
+            // Switching to every wall that comes into view can prevent reaching any firing position.
+            (!a_kept, a_step.is_some())
+                .cmp(&(!b_kept, b_step.is_some()))
+                .then_with(|| {
+                    a.position
+                        .distance(destination)
+                        .total_cmp(&b.position.distance(destination))
+                })
         })?;
     Some(Decision {
         goal: Goal::Break(wall.id),
