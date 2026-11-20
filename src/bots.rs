@@ -2196,10 +2196,14 @@ impl Brain {
                     "travel deadline passed".into(),
                 );
             } else if offered.is_some() || matches!(kept, Goal::Explore(..)) {
+                // A travelling hunter can shoot a side enemy without giving up the quest route.
+                let approaching_quest = v.map.name == "Realm"
+                    && matches!(kept, Goal::Hunt(id) if Some(id) == v.quest || Some(&kept) == realm_quest.as_ref())
+                    && offered.is_some_and(|p| travel(&kept, p));
                 // Loot can interrupt a trip, but committing to the approach prevents Venture reclaiming it at band edges.
                 choices.retain(|(_, g, p)| {
                     *g == kept
-                        || !travel(g, *p)
+                        || !(travel(g, *p) || approaching_quest && matches!(g, Goal::Fight(_)))
                         || matches!(g, Goal::Loot(_)) && !matches!(kept, Goal::Loot(_))
                         || Some(g) == realm_quest.as_ref()
                 });

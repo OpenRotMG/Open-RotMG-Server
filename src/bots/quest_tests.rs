@@ -249,6 +249,42 @@ fn explore_prefers_local_ground_over_the_far_side_of_a_hairpin() {
     assert!(decision.movement.is_some_and(|p| p.y > v.position.y));
 }
 
+#[test]
+fn travelling_realm_hunter_shoots_passing_enemy_without_changing_course() {
+    let (c, mut v) = fixture();
+    v.objects[0].position = center((28, 10));
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    let first = adventure(&mut brain, &v, &c);
+    assert_eq!(first.goal, Goal::Hunt(2));
+    brain.goal = first.goal;
+    v.position = first.movement.expect("quest approach started");
+    v.tick += 5;
+    v.time_ms += 250;
+    let kind = 0x223;
+    v.objects.push(VisibleObject {
+        id: 3,
+        account: None,
+        kind,
+        name: c.objects[&kind].name.clone(),
+        position: Pos {
+            x: v.position.x - 3.,
+            y: v.position.y,
+        },
+        hp: c.objects[&kind].hp,
+        max_hp: c.objects[&kind].hp,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: false,
+        condition_mask: Some(0),
+    });
+    let passing = adventure(&mut brain, &v, &c);
+    assert_eq!(passing.goal, Goal::Hunt(2));
+    assert!(passing.movement.is_some_and(|p| p.x > v.position.x));
+    assert!(passing.aim.is_some_and(|p| p.x < v.position.x));
+}
+
 pub(super) fn fixture() -> (Content, PlayerView) {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     let geometry = crate::navigation::Geometry::new(
