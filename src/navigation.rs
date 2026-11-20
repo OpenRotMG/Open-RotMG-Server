@@ -164,9 +164,6 @@ impl<P: Page> Bits<P> {
     pub(crate) fn len(&self) -> usize {
         self.len
     }
-    pub(crate) fn is_empty(&self) -> bool {
-        self.len == 0
-    }
     pub(crate) fn points(&self) -> impl Iterator<Item = Point> + '_ {
         // Column words retain the observation API's x/y ordering without sorting snapshots.
         let tall = (self.dimensions.1 as usize).div_ceil(SIDE).max(1);

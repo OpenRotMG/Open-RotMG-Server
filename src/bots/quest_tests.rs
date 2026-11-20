@@ -220,6 +220,35 @@ fn nexus_explore_enters_its_target_tile_before_retargeting() {
     assert_ne!(onward.goal, approach.goal);
 }
 
+#[test]
+fn explore_prefers_local_ground_over_the_far_side_of_a_hairpin() {
+    let (c, mut v) = fixture();
+    v.map.name = "Nexus".into();
+    v.quest = None;
+    v.objects.clear();
+    let mut ground = vec![255; 128 * 128];
+    for y in 10..=35 {
+        ground[y * 128 + 10] = 1;
+        ground[y * 128 + 14] = 1;
+    }
+    ground[35 * 128 + 10..=35 * 128 + 14].fill(1);
+    v.tiles = Arc::new(crate::navigation::Tiles::new(
+        crate::navigation::Geometry::new((128, 128), ground, &BTreeMap::from([(1, 1.), (255, 0.)])),
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    brain.heading = std::f32::consts::FRAC_PI_4;
+    for y in 10..=34 {
+        brain.visits.insert((10, y), v.tick);
+    }
+    let decision = adventure(&mut brain, &v, &c);
+    let Goal::Explore(x, y) = decision.goal else {
+        panic!("expected local exploration, got {:?}", decision.goal);
+    };
+    assert_eq!(x, 10, "picked a target around the hairpin: ({x}, {y})");
+    assert!(decision.movement.is_some_and(|p| p.y > v.position.y));
+}
+
 pub(super) fn fixture() -> (Content, PlayerView) {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     let geometry = crate::navigation::Geometry::new(

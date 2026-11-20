@@ -9,7 +9,6 @@ use std::{
 };
 struct LocalReach {
     start: TilePoint,
-    extra: Option<TilePoint>,
     tiles: Arc<BTreeSet<TilePoint>>,
 }
 #[derive(Default)]
@@ -162,87 +161,50 @@ impl Grid {
             .fetch_add(reached.len() as u64, Ordering::Relaxed);
         reached
     }
-    pub(super) fn nearby_reachable(
-        &self,
-        from: Pos,
-        extra: Option<TilePoint>,
-    ) -> Arc<BTreeSet<TilePoint>> {
+    pub(super) fn exploration_tiles(&self, from: Pos) -> Arc<BTreeSet<TilePoint>> {
+        const MAX_EXPLORE_STEPS: u8 = 23;
         let start = tile(from);
-        let extra = extra
-            .filter(|p| {
-                (i32::from(p.0) - i32::from(start.0)).abs() > 24
-                    || (i32::from(p.1) - i32::from(start.1)).abs() > 24
-            })
-            .filter(|p| self.walkable.contains(p));
         let mut cache = self
             .local_reached
             .lock()
             .expect("local navigation cache poisoned");
         if let Some(old) = &*cache
             && old.start == start
-            && old.extra == extra
         {
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
+            self.candidates
+                .fetch_add(old.tiles.len() as u64, Ordering::Relaxed);
             return old.tiles.clone();
         }
         let measuring = crate::performance::Measure::start();
-        let mut targets = Scratch::new(self.dimensions);
-        for x in start.0.saturating_sub(24)..=start.0.saturating_add(24) {
-            for y in start.1.saturating_sub(24)..=start.1.saturating_add(24) {
-                if self.walkable.contains(&(x, y)) {
-                    targets.insert((x, y));
-                }
-            }
-        }
-        targets.insert(start);
-        if let Some(point) = extra {
-            targets.insert(point);
-        }
-        let mut remaining = targets.clone();
-        remaining.remove(&start);
         let mut visited = Scratch::new(self.dimensions);
         visited.insert(start);
-        let mut queue = VecDeque::from([start]);
-        // Stop only when every requested tile is proven reachable, or the entire component is exhausted.
-        while !remaining.is_empty()
-            && let Some((x, y)) = queue.pop_front()
-        {
+        let mut queue = VecDeque::from([(start, 0)]);
+        while let Some(((x, y), steps)) = queue.pop_front() {
+            // A tile across a barrier may be close on the map but take a long detour to visit.
+            if steps == MAX_EXPLORE_STEPS {
+                continue;
+            }
             for next in [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)] {
                 if self.walkable.contains(&next) && visited.insert(next) {
-                    remaining.remove(&next);
-                    queue.push_back(next);
+                    queue.push_back((next, steps + 1));
                 }
             }
         }
-        let nodes = visited.len();
-        let tiles: Arc<BTreeSet<_>> =
-            Arc::new(targets.points().filter(|p| visited.contains(p)).collect());
+        let nodes = visited.len() as u64;
+        let tiles: Arc<BTreeSet<_>> = Arc::new(visited.points().collect());
         *cache = Some(LocalReach {
             start,
-            extra,
             tiles: tiles.clone(),
         });
         drop(cache);
         self.searches.fetch_add(1, Ordering::Relaxed);
-        self.reachable_nodes
-            .fetch_add(nodes as u64, Ordering::Relaxed);
+        self.reachable_nodes.fetch_add(nodes, Ordering::Relaxed);
+        self.candidates.fetch_add(nodes, Ordering::Relaxed);
         let mut performance = self.performance.lock().expect("bot timings poisoned");
-        performance.count("local_reachability_nodes", nodes as u64);
+        performance.count("local_reachability_nodes", nodes);
         performance.work("local_reachability", measuring);
         tiles
-    }
-    pub(super) fn nearby<'a>(
-        &'a self,
-        reachable: &'a BTreeSet<TilePoint>,
-        from: Pos,
-    ) -> impl Iterator<Item = TilePoint> + 'a {
-        let (x, y) = tile(from);
-        (x.saturating_sub(24)..=x.saturating_add(24))
-            .flat_map(move |x| (y.saturating_sub(24)..=y.saturating_add(24)).map(move |y| (x, y)))
-            .filter(move |t| {
-                self.candidates.fetch_add(1, Ordering::Relaxed);
-                reachable.contains(t)
-            })
     }
     pub(super) fn frontier(&self, (x, y): TilePoint, width: i32, height: i32) -> bool {
         assert_eq!(

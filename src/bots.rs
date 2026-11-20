@@ -2219,31 +2219,22 @@ impl Brain {
                 && !self.blocked.contains_key(&tile(*position))
                 && grid.segment(v.position, *position)
         }) {
-            let retained = if let Goal::Explore(x, y) = self.goal {
-                Some((x, y))
-            } else {
-                None
-            };
-            let reachable = grid.nearby_reachable(v.position, retained);
             if let Goal::Explore(x, y) = self.goal
                 && tile(v.position) != (x, y)
-                && reachable.contains(&(x, y))
+                && grid.walkable.contains(&(x, y))
+                && !self.blocked.contains_key(&(x, y))
             {
                 // An adjacent position never records a visit to the target tile.
                 choices.push((12., self.goal.clone(), center((x, y))));
-            }
-            if !choices
-                .iter()
-                .any(|(_, g, _)| matches!(g, Goal::Explore(..)))
-            {
+            } else {
                 let next = grid
-                    .nearby(&reachable, v.position)
+                    .exploration_tiles(v.position)
+                    .iter()
+                    .copied()
                     .filter(|t| {
-                        !self.blocked.contains_key(t) && self.crowd.bands.survivable(v, center(*t))
-                    })
-                    .filter(|t| {
-                        center(*t).distance(v.position) > 3.
-                            && center(*t).distance(v.position) < 24.
+                        !self.blocked.contains_key(t)
+                            && self.crowd.bands.survivable(v, center(*t))
+                            && center(*t).distance(v.position) > 3.
                     })
                     .max_by(|a, b| {
                         let frontier = |t| grid.frontier(t, v.map.width, v.map.height);
