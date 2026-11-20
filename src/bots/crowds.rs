@@ -5,6 +5,7 @@ use crate::world::view::PlayerMarker;
 mod tests;
 
 pub(super) const FOLLOW_REACH: f32 = 4.5;
+const CROWD_RANGE: f32 = 12.;
 const SOLO_GATHER_RANGE: f32 = 40.;
 
 pub(super) struct Crowd {
@@ -30,7 +31,7 @@ impl Crowd {
     /// Players gathered around a position.
     pub fn near(&self, v: &PlayerView, position: Pos) -> usize {
         self.markers(v)
-            .filter(|p| p.position.distance(position) < 12.)
+            .filter(|p| p.position.distance(position) < CROWD_RANGE)
             .count()
     }
     pub fn observe_gathering(&mut self, v: &PlayerView, goal: &Goal) {
@@ -41,7 +42,7 @@ impl Crowd {
         }) {
             self.gathered_peer = None;
         }
-        // Leaving a nearby solo peer to explore shouldn't immediately start the same approach again.
+        // Reaching a peer finishes the approach to their crowd, not just to that marker.
         if let Goal::Follow(id) = goal
             && self
                 .markers(v)
@@ -64,12 +65,14 @@ impl Crowd {
         }
         let here = self.bands.known(v.position);
         let markers: Vec<_> = self.markers(v).collect();
+        let gathered = markers.iter().find(|p| Some(p.id) == self.gathered_peer);
+        let following = |p: &PlayerMarker| *goal == Goal::Follow(p.id);
         markers
             .iter()
             .map(|p| {
                 let crowd = markers
                     .iter()
-                    .filter(|q| q.position.distance(p.position) < 12.)
+                    .filter(|q| q.position.distance(p.position) < CROWD_RANGE)
                     .count();
                 (*p, crowd)
             })
@@ -79,10 +82,12 @@ impl Crowd {
                 let crowded = *crowd >= 2;
                 // A crowd nearby is usually in the player's own area, even on ground it has not seen.
                 let own_area = crowded && distance <= 60. && self.bands.survivable(v, p.position);
-                let approaching = *goal == Goal::Follow(p.id) && distance >= FOLLOW_REACH;
+                let approaching = following(p) && distance >= FOLLOW_REACH;
                 (approaching || distance > 7.)
-                    && (crowded
-                        || distance <= SOLO_GATHER_RANGE && self.gathered_peer != Some(p.id))
+                    && (crowded || distance <= SOLO_GATHER_RANGE)
+                    && gathered.is_none_or(|q| {
+                        q.position.distance(p.position) >= CROWD_RANGE + FOLLOW_REACH
+                    })
                     && eligible(p.position)
                     && self.bands.worthwhile(p.position)
                     && (self.bands.teleportable(v, p.position)
@@ -100,7 +105,11 @@ impl Crowd {
                         }
                         - p.position.distance(v.position) / 20.
                 };
-                score(a, *x).total_cmp(&score(b, *y)).then(b.id.cmp(&a.id))
+                // Moving peers can trade first place every tick while both are worth joining.
+                following(a)
+                    .cmp(&following(b))
+                    .then_with(|| score(a, *x).total_cmp(&score(b, *y)))
+                    .then(b.id.cmp(&a.id))
             })
     }
     /// Players heading for a Realm quest teleport to someone outside the fight, then walk in.

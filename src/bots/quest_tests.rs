@@ -221,6 +221,54 @@ fn nexus_explore_enters_its_target_tile_before_retargeting() {
 }
 
 #[test]
+fn nexus_explore_leaves_the_hedge_courtyard_in_one_bounded_leg() {
+    let (c, mut v) = fixture();
+    let map = crate::content::Map::load(std::path::Path::new("data/nexus.wmap"), &c).unwrap();
+    v.map.name = "Nexus".into();
+    (v.map.width, v.map.height) = (map.width, map.height);
+    v.position = center((74, 75));
+    v.quest = None;
+    v.objects.clear();
+    let ground = map
+        .cells
+        .into_iter()
+        .map(|cell| {
+            if cell.object.is_some_and(|kind| c.objects[&kind].blocks) {
+                255
+            } else {
+                cell.ground
+            }
+        })
+        .collect();
+    let known = (0..map.width as i16)
+        .flat_map(|x| (0..map.height as i16).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            [(74, 75), (76, 73)]
+                .into_iter()
+                .any(|(a, b)| (x - a).pow(2) + (y - b).pow(2) <= 400)
+        });
+    v.tiles = Arc::new(crate::navigation::Tiles::new(
+        crate::navigation::Geometry::new((map.width, map.height), ground, &c.grounds),
+        known,
+    ));
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    brain.heading = 2.14;
+    let decision = adventure(&mut brain, &v, &c);
+    let Goal::Explore(x, y) = decision.goal else {
+        panic!("expected Nexus exploration, got {:?}", decision.goal);
+    };
+    assert!(y < 69, "selected another courtyard tile ({x}, {y})");
+    assert_eq!(
+        Grid::terrain(&v)
+            .path(tile(v.position), (x, y))
+            .unwrap()
+            .len(),
+        23
+    );
+    assert!(decision.movement.is_some_and(|p| p.y < v.position.y));
+}
+
+#[test]
 fn explore_prefers_local_ground_over_the_far_side_of_a_hairpin() {
     let (c, mut v) = fixture();
     v.map.name = "Nexus".into();

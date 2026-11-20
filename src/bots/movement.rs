@@ -1,5 +1,6 @@
 use super::{PlayerView, Pos, TilePoint, center, tile};
 use crate::navigation::{Scratch, Tiles, Walkable};
+use anyhow::{Context, Result};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::{
@@ -7,6 +8,8 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
+const MAX_EXPLORE_STEPS: usize = 23;
+
 struct LocalReach {
     start: TilePoint,
     tiles: Arc<BTreeSet<TilePoint>>,
@@ -161,8 +164,13 @@ impl Grid {
             .fetch_add(reached.len() as u64, Ordering::Relaxed);
         reached
     }
+    pub(super) fn exploration_waypoint(&self, from: Pos, target: TilePoint) -> Result<TilePoint> {
+        let start = tile(from);
+        self.path(start, target)
+            .and_then(|path| path.into_iter().rev().take(MAX_EXPLORE_STEPS).next_back())
+            .with_context(|| format!("no exploration step from {start:?} to {target:?}"))
+    }
     pub(super) fn exploration_tiles(&self, from: Pos) -> Arc<BTreeSet<TilePoint>> {
-        const MAX_EXPLORE_STEPS: u8 = 23;
         let start = tile(from);
         let mut cache = self
             .local_reached

@@ -2231,14 +2231,22 @@ impl Brain {
                 // An adjacent position never records a visit to the target tile.
                 choices.push((12., self.goal.clone(), center((x, y))));
             } else {
-                let next = grid
-                    .exploration_tiles(v.position)
+                // Nexus hedges can put the frontier outside a short leg; choosing only local tiles keeps bots inside the courtyard.
+                let nexus = v.map.name == "Nexus";
+                let reachable = if nexus {
+                    grid.reachable(v.position)
+                } else {
+                    grid.exploration_tiles(v.position)
+                };
+                let next = reachable
                     .iter()
                     .copied()
                     .filter(|t| {
+                        let distance = center(*t).distance(v.position);
                         !self.blocked.contains_key(t)
                             && self.crowd.bands.survivable(v, center(*t))
-                            && center(*t).distance(v.position) > 3.
+                            && distance > 3.
+                            && (!nexus || distance < 24.)
                     })
                     .max_by(|a, b| {
                         let frontier = |t| grid.frontier(t, v.map.width, v.map.height);
@@ -2260,7 +2268,12 @@ impl Brain {
                         };
                         value(*a).total_cmp(&value(*b))
                     });
-                if let Some((x, y)) = next {
+                if let Some(objective) = next {
+                    let (x, y) = if nexus {
+                        grid.exploration_waypoint(v.position, objective)?
+                    } else {
+                        objective
+                    };
                     choices.push((12., Goal::Explore(x, y), center((x, y))));
                 }
             }

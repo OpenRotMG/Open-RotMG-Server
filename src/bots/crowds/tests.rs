@@ -118,6 +118,48 @@ fn nearby_solo_gathering_finishes_the_approach_without_reacquiring() {
 }
 
 #[test]
+fn reaching_a_crowd_does_not_start_an_approach_to_its_other_side() {
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    v.quest = None;
+    v.character.level = 11;
+    v.position.x = 11.5;
+    v.player_markers = vec![
+        marker(3, 20.5, 10.5),
+        marker(4, 6.5, 10.5),
+        marker(5, 13.5, 10.5),
+    ];
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    assert!(brain.crowd.knows_minimap);
+    let spots: Vec<_> = v.player_markers.iter().map(|p| p.position).collect();
+    observe(&mut brain, &mut v, &c, 6, &spots);
+    let approach = brain.decide(&v, &c).unwrap();
+    assert_eq!(approach.goal, Goal::Follow(3));
+    assert!(approach.movement.is_some_and(|p| p.x > v.position.x));
+    brain.goal = approach.goal;
+    brain.destination = approach.movement;
+
+    v.position.x = 14.5;
+    v.player_markers.push(marker(6, 6.5, 12.5));
+    v.tick += 10;
+    v.time_ms += 500;
+    let kept = brain.decide(&v, &c).unwrap();
+    assert_eq!(kept.goal, Goal::Follow(3));
+    assert!(kept.movement.is_some_and(|p| p.x > v.position.x));
+    brain.goal = kept.goal;
+    brain.destination = kept.movement;
+
+    v.position.x = 16.5;
+    v.tick += 10;
+    v.time_ms += 500;
+    let arrived = brain.decide(&v, &c).unwrap();
+    assert!(
+        matches!(arrived.goal, Goal::Explore(..)),
+        "{:?}",
+        arrived.goal
+    );
+}
+
+#[test]
 fn godlands_farmer_teleports_to_one_interior_marker_on_the_ordinary_cooldown() {
     let (c, mut v) = crate::bots::quest_tests::fixture();
     let destination = marker(4, 70.5, 70.5);
