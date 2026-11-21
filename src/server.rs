@@ -3149,6 +3149,8 @@ async fn script(State(a): State<App>, headers: HeaderMap, Json(input): Json<Scri
 #[derive(Deserialize)]
 struct MapView {
     player: Option<i32>,
+    #[serde(default)]
+    entity_summary: bool,
 }
 async fn map(State(a): State<App>, headers: HeaderMap, Query(view): Query<MapView>) -> Response {
     let world = match view.player {
@@ -3157,7 +3159,9 @@ async fn map(State(a): State<App>, headers: HeaderMap, Query(view): Query<MapVie
     };
     let result: Result<Vec<u8>> = async {
         control(&a, &headers)?;
-        world.call(move |w| w.inspect_map(view.player)).await
+        world
+            .call(move |w| w.inspect_map(view.player, view.entity_summary))
+            .await
     }
     .await;
     match result {
