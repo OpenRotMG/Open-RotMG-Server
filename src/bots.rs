@@ -1809,6 +1809,13 @@ impl Brain {
         }
         let farmer = self.farms_godlands(v);
         let approaching_godlands = farmer && !bands::in_godlands(v, v.position);
+        let reaction_distance = combat::held_distance(v, self.profile.reaction);
+        let fighting_nearby = matches!(self.goal, Goal::Fight(id) if enemies.iter().any(|enemy| {
+            enemy.id == id
+                && enemy.position.distance(v.position) < range + reaction_distance
+                && progression::can_fight(v, content, enemy)
+                && progression::vulnerable(enemy)
+        }));
         let speed = !farmer && self.mind.intentions.as_ref().is_some_and(|i| i.speed());
         // Level 20s weigh whether a Realm quest is worth it; lower levels keep following their leveling quests.
         let veteran_realm = v.map.name == "Realm" && v.character.level == 20;
@@ -1862,9 +1869,13 @@ impl Brain {
         {
             self.travel = None;
         }
+        // A short kite off the fringe shouldn't reopen a completed Godlands trip.
+        let fringe_fight =
+            approaching_godlands && fighting_nearby && bands::near_godlands(v, reaction_distance);
         // A quest worth following is where this player goes; otherwise it heads for its own band, a level 20's Godlands.
         if v.map.name == "Realm"
             && realm_quest.is_none()
+            && !fringe_fight
             && health >= (self.profile.recovery + 0.1).max(0.75)
         {
             // Touching a fringe tile can stop offering Venture before the bot reaches its destination.

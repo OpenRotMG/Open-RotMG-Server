@@ -40,6 +40,17 @@ fn suitable(v: &PlayerView, identity: &str) -> u8 {
 pub(super) fn in_godlands(v: &PlayerView, p: Pos) -> bool {
     v.map.godland_tiles.contains(&tile(p))
 }
+pub(super) fn near_godlands(v: &PlayerView, distance: f32) -> bool {
+    let (x, y) = tile(v.position);
+    let tiles = distance.ceil() as i16;
+    (x - tiles..=x + tiles).any(|x| {
+        v.map
+            .godland_tiles
+            .range((x, y - tiles)..=(x, y + tiles))
+            .next()
+            .is_some()
+    })
+}
 fn region(p: Pos) -> TilePoint {
     ((p.x / REGION).floor() as i16, (p.y / REGION).floor() as i16)
 }

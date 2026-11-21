@@ -1748,6 +1748,47 @@ fn realm_venture_crosses_the_band_edge_without_reversing_into_a_fight() {
 }
 
 #[test]
+fn a_godlands_fringe_fight_does_not_restart_an_arrived_venture() {
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.quest = None;
+    v.map.layout = Some("classic-world-05-reconstruction".into());
+    let fringe = center((17, 10));
+    v.map.godland_tiles = Arc::new(BTreeSet::from([tile(fringe)]));
+    v.map.godlands = Arc::new(vec![fringe]);
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain
+        .crowd
+        .bands
+        .observe(&v, &c, &mut brain.mind.godlands, true, "Bayleaf");
+    let venture = brain.decide(&v, &c).unwrap();
+    assert_eq!(venture.goal, Goal::Venture);
+    brain.goal = venture.goal;
+
+    v.position = fringe;
+    v.objects[0].kind = 0x642;
+    v.objects[0].position = center((15, 10));
+    v.tick += 6;
+    v.time_ms += 300;
+    let fight = brain.decide(&v, &c).unwrap();
+    assert_eq!(fight.goal, Goal::Fight(2));
+    brain.goal = fight.goal;
+
+    // Kiting across the fringe should not start the same trip back to it.
+    v.position = center((16, 10));
+    v.tick += 6;
+    v.time_ms += 300;
+    let fight = brain.decide(&v, &c).unwrap();
+    assert_eq!(fight.goal, Goal::Fight(2));
+    assert!(fight.aim.is_some());
+
+    v.objects.clear();
+    v.tick += 6;
+    v.time_ms += 300;
+    assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Venture);
+}
+
+#[test]
 fn a_venture_trip_ends_at_its_destination() {
     // Live snapshot: a bot about a tile from its kept Venture destination kept wandering around it.
     let (c, mut v) = fixture();
