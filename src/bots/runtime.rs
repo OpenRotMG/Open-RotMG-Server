@@ -185,10 +185,14 @@ fn execute_inputs(
             .as_ref()
             .is_none_or(|i| i.composition.phase == 0)
     });
-    let item = if let Some(Action::Use { slot: 1, x, y }) = item {
+    if let Some(Action::Use { slot: 1, x, y }) = item {
         use crate::content::Ability;
         let p = &w.players[&session.0];
         let ability = w.content.get(p.character.items[1] as u16)?;
+        let trap = ability
+            .abilities
+            .iter()
+            .any(|a| matches!(a, Ability::Trap { .. }));
         let aimed = ability.abilities.iter().any(|a| {
             !matches!(
                 a,
@@ -215,14 +219,28 @@ fn execute_inputs(
         } else {
             Pos { x, y }
         };
-        Some(Action::Use {
+        // The tracked cursor can still be over blocked ground even when the selected target isn't.
+        if trap && !w.walkable(point) {
+            tracing::debug!(
+                player = session.0,
+                ?point,
+                "autonomous trap waiting for a walkable cursor"
+            );
+            return Ok(None);
+        }
+        let action = Action::Use {
             slot: 1,
             x: point.x,
             y: point.y,
-        })
-    } else {
-        item
-    };
+        };
+        return match w.autonomous_action(session.0, action) {
+            Err(error) if error.downcast_ref::<CloseReason>() == Some(&CloseReason::Controller) => {
+                tracing::warn!(player = session.0, %error, ?point, "autonomous ability rejected; movement retained");
+                Ok(None)
+            }
+            result => result,
+        };
+    }
     item.map(|action| w.autonomous_action(session.0, action))
         .transpose()
         .map(Option::flatten)

@@ -429,6 +429,76 @@ fn mouse_aimed_spell_uses_actual_cursor_and_tome_does_not_move_it() {
     }
 }
 
+#[test]
+fn trap_cast_waits_for_walkable_cursor_without_releasing_movement() {
+    use crate::{
+        content::{Cell, Map},
+        world::{Controller, World},
+    };
+    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let mut cells = vec![
+        Cell {
+            ground: 1,
+            object: None,
+            config: String::new(),
+            terrain: 0,
+            region: 0,
+        };
+        16 * 16
+    ];
+    cells[10 * 16 + 12].ground = 255;
+    let mut w = World::new(
+        content.clone(),
+        Arc::new(Map {
+            width: 16,
+            height: 16,
+            cells,
+            spawns: vec![(10.5, 10.5)],
+        }),
+    )
+    .unwrap();
+    let mut ch = Character::fresh(content.get(0x322).unwrap()).unwrap();
+    ch.id = 1;
+    ch.account = 1;
+    let id = w.enter(ch, None).unwrap();
+    w.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+    let session = (id, 1, 1);
+    let (blocked, desired) = (center((12, 10)), center((14, 10)));
+    let movement = Some(center((10, 13)));
+    let cast = || {
+        Some(Action::Use {
+            slot: 1,
+            x: desired.x,
+            y: desired.y,
+        })
+    };
+    execute_inputs(&mut w, session, None, Some(blocked), None, 1).unwrap();
+    w.step();
+    assert!(!w.walkable(w.players[&id].inputs.as_ref().unwrap().cursor.unwrap()));
+    assert!(w.walkable(desired));
+
+    let mana = w.players[&id].character.mp;
+    let start = w.players[&id].pos;
+    execute_inputs(&mut w, session, movement, None, cast(), 1).unwrap();
+    assert_eq!(w.players[&id].character.mp, mana);
+    w.step();
+    assert!(w.players[&id].pos.y > start.y);
+    execute_inputs(&mut w, session, movement, None, cast(), 1).unwrap();
+    assert!(
+        w.players[&id].character.mp < mana,
+        "legal cursor casts the trap"
+    );
+
+    let start = w.players[&id].pos;
+    w.players.get_mut(&id).unwrap().character.mp = 0;
+    execute_inputs(&mut w, session, movement, None, cast(), 1).unwrap();
+    w.step();
+    assert!(
+        w.players[&id].pos.y > start.y,
+        "cast refusal keeps movement"
+    );
+}
+
 #[tokio::test]
 async fn virtual_inputs_execute_held_diagonal_and_actual_cursor_between_decisions() {
     let (dir, app) = server::test_app();
