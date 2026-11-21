@@ -2274,7 +2274,10 @@ impl Brain {
             Goal::Hunt(id) | Goal::Fight(id) => {
                 !self.unreachable.contains_key(id) || !travel(g, *p)
             }
-            Goal::Loot(id) => !self.unreachable.contains_key(id),
+            // A single kite past weapon range is not a disengagement; pick up nearby loot without a detour.
+            Goal::Loot(id) => {
+                !self.unreachable.contains_key(id) && (!fighting_nearby || !travel(g, *p))
+            }
             _ => true,
         });
         let mut explore_objective = None;

@@ -909,6 +909,52 @@ fn phoenix_guarded_chest_is_left_until_the_guard_moves_away() {
 }
 
 #[test]
+fn a_fight_just_outside_weapon_range_does_not_restart_distant_loot() {
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.character.level = 20;
+    v.character.items[1] = -1;
+    let projectile = &c.objects[&(v.character.items[0] as u16)].projectiles[&0];
+    let range = projectile.speed * projectile.lifetime / 10000.;
+    v.objects[0].position = Pos {
+        x: v.position.x + range - 0.25,
+        y: v.position.y,
+    };
+    let bag = center((10, 13));
+    v.objects.push(VisibleObject {
+        id: 3,
+        kind: 0x500,
+        position: bag,
+        hp: 0,
+        max_hp: 0,
+        name: c.objects[&0x500].name.clone(),
+        equipped: vec![],
+        contents: vec![0xa22],
+        ..v.objects[0]
+    });
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    let fight = brain.decide(&v, &c).unwrap();
+    assert_eq!(fight.goal, Goal::Fight(2));
+    assert!(fight.aim.is_some());
+    brain.goal = fight.goal;
+
+    v.position.x -= 0.5;
+    v.tick += 6;
+    v.time_ms += 300;
+    let fight = brain.decide(&v, &c).unwrap();
+    assert_eq!(fight.goal, Goal::Fight(2));
+    assert!(fight.movement.is_some_and(|p| p.x > v.position.x));
+    assert!(fight.item.is_none());
+
+    v.position = bag;
+    v.tick += 6;
+    v.time_ms += 300;
+    let nearby = brain.decide(&v, &c).unwrap();
+    assert_eq!(nearby.goal, Goal::Loot(3));
+    assert!(matches!(nearby.item, Some(Action::Swap { from, .. }) if from.object == 3));
+}
+
+#[test]
 fn loot_approach_crosses_a_venture_band_edge_and_collects_the_chest() {
     let (c, mut v) = fixture();
     v.quest = None;
