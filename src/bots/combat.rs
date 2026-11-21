@@ -105,7 +105,8 @@ fn cost(v: &PlayerView, raw: i32, piercing: bool) -> i32 {
 fn forecast_projectiles(v: &PlayerView) -> impl Iterator<Item = (u16, i32)> {
     v.projectiles
         .iter()
-        .filter(|b| hostile(v, b.owner))
+        // MultiHit shots stay visible for other targets after damaging this one.
+        .filter(|b| !b.already_hit_player && hostile(v, b.owner))
         .filter(|b| {
             (0..=20).any(|step| {
                 // The server checks a square, including its corners, not a centered radius.

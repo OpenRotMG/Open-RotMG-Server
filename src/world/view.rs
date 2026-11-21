@@ -204,6 +204,8 @@ pub struct VisibleThrow {
 pub struct VisibleProjectile {
     #[serde(skip)]
     pub(crate) source_kind: u16,
+    #[serde(skip)]
+    pub(crate) already_hit_player: bool,
     pub owner: i32,
     pub id: u8,
     pub start: Pos,
@@ -348,6 +350,7 @@ impl World {
             })
             .map(|b| VisibleProjectile {
                 source_kind: b.source_kind,
+                already_hit_player: b.hit.contains(&id),
                 owner: b.owner,
                 id: b.id,
                 start: b.start,

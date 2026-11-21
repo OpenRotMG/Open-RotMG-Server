@@ -132,6 +132,7 @@ fn aftermath_quiet_no_audience_hazards_and_useful_loot_precede_idle_reports() {
     v.objects.pop();
     v.projectiles.push(VisibleProjectile {
         source_kind: 0x654,
+        already_hit_player: false,
         owner: 2,
         id: 1,
         start: v.position,

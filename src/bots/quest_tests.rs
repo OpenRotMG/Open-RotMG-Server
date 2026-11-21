@@ -435,6 +435,7 @@ fn realm_hunt_keeps_a_route_that_already_dodges_the_shot() {
 
     let shot = crate::world::view::VisibleProjectile {
         source_kind: 0x654,
+        already_hit_player: false,
         owner: 2,
         id: 1,
         start: center((10, 7)),
@@ -1046,6 +1047,7 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
     v.objects.push(bag);
     v.projectiles.push(crate::world::view::VisibleProjectile {
         source_kind: 0x654,
+        already_hit_player: false,
         owner: 2,
         id: 1,
         start: Pos { x: 13.5, y: 10.5 },
@@ -1171,6 +1173,7 @@ fn bot_escapes_a_volley_that_would_kill_it_before_its_health_looks_low() {
     v.character.hp = 300;
     v.projectiles.push(crate::world::view::VisibleProjectile {
         source_kind: 0x654,
+        already_hit_player: false,
         owner: 2,
         id: 1,
         start: Pos { x: 13.5, y: 10.5 },
@@ -1206,6 +1209,7 @@ fn bots_escape_before_a_second_volley_when_a_potion_cannot_cover_it() {
     v.character.items[5] = 0xa23;
     v.projectiles.push(crate::world::view::VisibleProjectile {
         source_kind: 0x659,
+        already_hit_player: false,
         owner: 2,
         id: 1,
         start: v.objects[0].position,
@@ -1284,6 +1288,7 @@ fn escape_forecast_ranks_threat_kinds_by_damage_and_counts_projectiles() {
     {
         v.projectiles.push(crate::world::view::VisibleProjectile {
             source_kind,
+            already_hit_player: false,
             owner: 20,
             id: id as u8,
             start: v.position,
@@ -1310,6 +1315,34 @@ fn escape_forecast_ranks_threat_kinds_by_damage_and_counts_projectiles() {
         combat::forecast_threats(&v, &content),
         [("Medusa", 0, 90), ("Lizard God", 2, 60), ("Djinn", 1, 50),]
     );
+}
+
+#[test]
+fn escape_forecast_counts_djinn_projectiles_only_once_per_player() {
+    let (content, mut v) = fixture();
+    let kind = 0x91a;
+    let shot = &content.objects[&kind].projectiles[&0];
+    assert!(shot.multi_hit);
+    for id in 1..=2 {
+        v.projectiles.push(crate::world::view::VisibleProjectile {
+            source_kind: kind,
+            already_hit_player: id == 1,
+            owner: 20,
+            id,
+            start: v.position,
+            position: v.position,
+            angle: 0.,
+            speed: shot.speed,
+            lifetime_ms: shot.lifetime,
+            amplitude: shot.amplitude,
+            frequency: shot.frequency,
+            passes_cover: shot.passes_cover,
+            damage: shot.max,
+            armor_piercing: shot.armor_piercing,
+        });
+    }
+    assert_eq!(combat::incoming(&v), 50);
+    assert_eq!(combat::forecast_threats(&v, &content), [("Djinn", 1, 50)]);
 }
 
 #[test]
@@ -1508,6 +1541,7 @@ fn dodging_keeps_the_trip_and_still_makes_progress() {
     v.map.godland_tiles = Arc::new(BTreeSet::from([tile(godlands)]));
     v.projectiles.push(crate::world::view::VisibleProjectile {
         source_kind: 0x654,
+        already_hit_player: false,
         owner: 2,
         id: 1,
         start: Pos { x: 13.5, y: 10.5 },
