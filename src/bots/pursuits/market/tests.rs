@@ -189,7 +189,10 @@ fn maxed_liquid_loot_can_replace_junk_but_not_reserved_cash_or_locked_quotes() {
     let mut bag = v.objects.remove(0);
     v.objects.clear();
     v.character.base_stats[4] = c.classes[&v.character.class].caps[4];
-    v.character.items[4..].copy_from_slice(&[DEFENSE, DEFENSE, 2613, 2692, 2692, 2692, 2692, 2692]);
+    let junk = 2620;
+    assert!(progression::junk(&v, &c, junk, None).unwrap());
+    v.character.items[4..].fill(junk);
+    v.character.items[4..7].copy_from_slice(&[DEFENSE, DEFENSE, 2613]);
     bag.kind = 0x500;
     bag.contents = vec![SPEED];
     let mut m = Market::default();
@@ -201,7 +204,7 @@ fn maxed_liquid_loot_can_replace_junk_but_not_reserved_cash_or_locked_quotes() {
     );
     let action = progression::pickup(&v, &c, &bag, None, Some(&m)).unwrap();
     assert!(
-        matches!(action, Some(Action::Swap { from, to }) if from.kind == SPEED && to.kind == 2692)
+        matches!(action, Some(Action::Swap { from, to }) if from.kind == SPEED && to.kind == junk)
     );
     let quote = [goods(DEFENSE, 1), goods(SPEED, 3)];
     m.quote = Some(quote.clone());
@@ -215,6 +218,36 @@ fn maxed_liquid_loot_can_replace_junk_but_not_reserved_cash_or_locked_quotes() {
         progression::pickup(&v, &c, &bag, None, Some(&m))
             .unwrap()
             .is_none()
+    );
+}
+
+#[test]
+fn pickup_does_not_exchange_identical_or_equally_useful_market_rings() {
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    let mut bag = v.objects.remove(0);
+    let health = 2749;
+    let defense = 2744;
+    v.character.items[3] = health;
+    bag.kind = 0x500;
+    let mut m = Market::default();
+    m.observe_goal(&v, &c, None, Some(2705)).unwrap();
+    for (carried, dropped) in [(health, health), (health, defense), (defense, health)] {
+        v.character.items[4..].fill(carried);
+        bag.contents = vec![dropped];
+        assert!(m.gathers(&c, dropped));
+        assert!(m.can_use(&v, &c, None, carried).unwrap());
+        let action = progression::pickup(&v, &c, &bag, None, Some(&m)).unwrap();
+        assert!(
+            action.is_none(),
+            "no gain from exchanging rings: {action:?}"
+        );
+    }
+    bag.contents = vec![defense];
+    v.character.items[4] = -1;
+    assert!(
+        matches!(progression::pickup(&v, &c, &bag, None, Some(&m)).unwrap(),
+            Some(Action::Swap { from, to }) if from.kind == defense && to.slot == 4 && to.kind == -1),
+        "another copy can still increase market stock"
     );
 }
 

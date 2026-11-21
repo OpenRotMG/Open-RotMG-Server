@@ -86,15 +86,20 @@ pub(super) fn pickup(
     future: Option<u16>,
     market: Option<&pursuits::market::Market>,
 ) -> Result<Option<Action>> {
-    let mut best = None;
-    for (slot, kind) in bag.contents.iter().enumerate().filter(|(_, k)| **k >= 0) {
-        let value = priority(v, content, *kind, false, future)?.max(
-            if market.is_some_and(|m| m.gathers(content, *kind)) {
+    let score = |kind, held| -> Result<i32> {
+        let value = priority(v, content, kind, held, future)?;
+        // Market stock doesn't gain value just by moving from the backpack to a bag.
+        Ok(
+            if kind >= 0 && value < 80 && market.is_some_and(|m| m.gathers(content, kind)) {
                 80
             } else {
-                0
+                value
             },
-        );
+        )
+    };
+    let mut best = None;
+    for (slot, kind) in bag.contents.iter().enumerate().filter(|(_, k)| **k >= 0) {
+        let value = score(*kind, false)?;
         // Owner, 2012: a poor player takes nearly anything; a rich one only what it needs or the best bags.
         if value == 0
             || value < 60 && market.is_some_and(|m| m.beneath(v, content, *kind))
@@ -109,7 +114,7 @@ pub(super) fn pickup(
             {
                 continue;
             }
-            let held = priority(v, content, v.character.items[to], true, future)?;
+            let held = score(v.character.items[to], true)?;
             if value > held && best.as_ref().is_none_or(|(gain, _)| value - held > *gain) {
                 best = Some((
                     value - held,
