@@ -1707,6 +1707,46 @@ fn a_venture_keeps_the_destination_it_started_with() {
 }
 
 #[test]
+fn realm_venture_crosses_the_band_edge_without_reversing_into_a_fight() {
+    let (c, mut v) = fixture();
+    v.character.level = 20;
+    v.character.class = 0x307;
+    v.character.items[..3].copy_from_slice(&[0xb02, -1, 0xaf9]);
+    v.quest = None;
+    v.position = center((30, 30));
+    v.map.layout = Some("classic-world-05-reconstruction".into());
+    let fringe = center((25, 26));
+    let destination = center((17, 24));
+    v.map.godland_tiles = Arc::new(BTreeSet::from([tile(fringe), tile(destination)]));
+    v.map.godlands = Arc::new(vec![destination]);
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    brain
+        .crowd
+        .bands
+        .observe(&v, &c, &mut brain.mind.godlands, true, "Tester");
+    let first = brain.decide(&v, &c).unwrap();
+    assert_eq!(first.goal, Goal::Venture);
+    brain.goal = first.goal;
+
+    // Kryz reached a thin Godlands fringe, turned back to an Ogre Mage, then restarted the trip.
+    v.position = fringe;
+    v.objects[0].kind = 0x642;
+    v.objects[0].position = center((30, 27));
+    v.tick += 5;
+    v.time_ms += 250;
+    let crossing = brain.decide(&v, &c).unwrap();
+    assert_eq!(crossing.goal, Goal::Venture);
+    assert!(crossing.movement.is_some_and(|p| p.x < v.position.x));
+    assert!(crossing.aim.is_some_and(|p| p.x > v.position.x));
+
+    v.position = destination;
+    v.objects[0].position = center((20, 24));
+    v.tick += 5;
+    v.time_ms += 250;
+    assert_eq!(brain.decide(&v, &c).unwrap().goal, Goal::Fight(2));
+}
+
+#[test]
 fn a_venture_trip_ends_at_its_destination() {
     // Live snapshot: a bot about a tile from its kept Venture destination kept wandering around it.
     let (c, mut v) = fixture();

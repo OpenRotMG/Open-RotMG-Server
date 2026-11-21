@@ -1850,17 +1850,32 @@ impl Brain {
         } else {
             None
         };
+        // A Venture trip kept past arrival can circle a destination it has already reached.
+        if self
+            .travel
+            .as_ref()
+            .is_some_and(|(kept, _, to)| *kept == Goal::Venture && to.distance(v.position) < 4.)
+        {
+            self.travel = None;
+        }
         // A quest worth following is where this player goes; otherwise it heads for its own band, a level 20's Godlands.
         if v.map.name == "Realm"
             && realm_quest.is_none()
             && health >= (self.profile.recovery + 0.1).max(0.75)
         {
+            // Touching a fringe tile can stop offering Venture before the bot reaches its destination.
+            let kept_godlands = self.travel.as_ref().and_then(|(kept, _, to)| {
+                (farmer && *kept == Goal::Venture && bands::in_godlands(v, *to)).then_some(*to)
+            });
             let snakes = self
                 .crowd
                 .bands
                 .snake_source
                 .filter(|p| speed && self.crowd.bands.survivable(v, *p));
-            if let Some(ground) = snakes.or_else(|| self.crowd.bands.venture(v)) {
+            if let Some(ground) = kept_godlands
+                .or(snakes)
+                .or_else(|| self.crowd.bands.venture(v))
+            {
                 choices.push((60. + self.profile.resources, Goal::Venture, ground));
             }
         }
@@ -2202,14 +2217,6 @@ impl Brain {
             Goal::Loot(_) => p.distance(v.position) >= LOOT_REACH,
             _ => false,
         };
-        // Live: a Venture trip kept a destination it had already reached, and the bot wandered around it.
-        if self
-            .travel
-            .as_ref()
-            .is_some_and(|(kept, _, to)| *kept == Goal::Venture && to.distance(v.position) < 4.)
-        {
-            self.travel = None;
-        }
         if let Some((kept, deadline, to)) = self.travel.clone() {
             // Live: Venture's destination was re-chosen every decision from the current 8-tile region and flipped
             // at region edges, so bots walked back and forth; a trip keeps the destination it started with.
@@ -2235,14 +2242,13 @@ impl Brain {
                     "travel deadline passed".into(),
                 );
             } else if offered.is_some() || matches!(kept, Goal::Explore(..)) {
-                // A travelling hunter can shoot a side enemy without giving up the route.
-                let approaching_hunt = v.map.name == "Realm"
-                    && matches!(kept, Goal::Hunt(_))
+                // A traveller can shoot a side enemy without giving up the route at a band edge.
+                let approaching = v.map.name == "Realm"
+                    && matches!(kept, Goal::Hunt(_) | Goal::Venture)
                     && offered.is_some_and(|p| travel(&kept, p));
-                // Loot can interrupt a trip, but committing to the approach prevents Venture reclaiming it at band edges.
                 choices.retain(|(_, g, p)| {
                     *g == kept
-                        || !(travel(g, *p) || approaching_hunt && matches!(g, Goal::Fight(_)))
+                        || !(travel(g, *p) || approaching && matches!(g, Goal::Fight(_)))
                         || matches!(g, Goal::Loot(_)) && !matches!(kept, Goal::Loot(_))
                         || Some(g) == realm_quest.as_ref()
                 });
