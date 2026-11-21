@@ -354,6 +354,52 @@ fn wts(q: &[Goods; 2], c: &Content) -> String {
 }
 
 #[test]
+fn nexus_market_spaces_unchanged_ads_without_delaying_changed_terms() {
+    let first = [goods(2585, 1), goods(SPEED, 1)];
+    let changed = [goods(2571, 1), goods(SPEED, 1)];
+    let (c, mut v) = nexus_peer([first[0].kind, -1, -1, -1, -1, -1, -1, -1]);
+    let mut market = Market {
+        name: "Trader".into(),
+        session: Some(MarketSession {
+            anchor: tile(v.position),
+            until: 60_000,
+            next_move: 60_000,
+            destination: None,
+        }),
+        quote: Some(first.clone()),
+        ..Market::default()
+    };
+    let grid = Grid::terrain(&v);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(1);
+    let mut ad_at = |market: &mut Market, v: &mut PlayerView, elapsed_ms| {
+        v.elapsed_ms = elapsed_ms;
+        let decision = market
+            .decide(v, &c, None, &grid, &mut rng)
+            .unwrap()
+            .expect("the funded trader remains in the market");
+        assert_eq!(decision.goal, Goal::Wait);
+        market.outgoing.take().map(|ad| {
+            assert_eq!(ad.channel, Channel::Local);
+            parse_quote(&ad.text, &c).expect("advertisement has real trade terms")
+        })
+    };
+
+    assert_eq!(ad_at(&mut market, &mut v, 0), Some(first.clone()));
+    assert_eq!(
+        ad_at(&mut market, &mut v, 9_000),
+        None,
+        "unchanged terms should not repeat at this trader's normal posting interval"
+    );
+    assert_eq!(ad_at(&mut market, &mut v, 26_999), None);
+    assert_eq!(ad_at(&mut market, &mut v, 27_000), Some(first));
+
+    v.character.items[4] = changed[0].kind;
+    market.quote = Some(changed.clone());
+    assert_eq!(ad_at(&mut market, &mut v, 35_999), None);
+    assert_eq!(ad_at(&mut market, &mut v, 36_000), Some(changed));
+}
+
+#[test]
 fn fair_non_mirrored_peer_quote_opens_trade_and_overpay_is_refused() {
     let (c, v) = nexus_peer([SPEED; 8]);
     let objective = bounded_quote(&goods(SPEED, 8), &goods(DEFENSE, 8), &c).unwrap();

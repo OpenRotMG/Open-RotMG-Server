@@ -132,7 +132,7 @@ pub(crate) struct Market {
     #[serde(default, rename = "next_ad")]
     legacy_next_ad: u64,
     #[serde(skip)]
-    next_ad: u64,
+    last_queued_ad: Option<([Goods; 2], u64)>,
     #[serde(skip)]
     pub(in crate::bots) outgoing: Option<Message>,
     #[serde(skip)]
@@ -221,7 +221,7 @@ impl Market {
         self.pending_trade = None;
         self.outgoing = None;
         self.trade = None;
-        self.next_ad = 0;
+        self.last_queued_ad = None;
         self.revoke_trade = false;
         self.next_request_ms = 0;
         if let Some(b) = &mut self.bargain {
@@ -1559,7 +1559,14 @@ impl Market {
             .destination
             .map(center)
             .filter(|p| v.position.distance(*p) > 0.2 && grid.segment(v.position, *p));
-        if v.elapsed_ms >= self.next_ad && self.outgoing.is_none() {
+        let ad_interval = 6_000 + u64::from(style(&self.name) % 7) * 1_000;
+        if self.outgoing.is_none()
+            && self.last_queued_ad.as_ref().is_none_or(|(terms, at)| {
+                // Leave room for other chat without delaying a new offer.
+                let repeat = if terms == &quote { 3 } else { 1 };
+                v.elapsed_ms >= at + repeat * ad_interval
+            })
+        {
             let ad = format!(
                 "wts {} for {}",
                 goods_text(&quote[0], c)?,
@@ -1570,7 +1577,7 @@ impl Market {
                 "unresolvable market quote: {ad}"
             );
             self.queue(ad, Channel::Local);
-            self.next_ad = v.elapsed_ms + 6_000 + u64::from(style(&self.name) % 7) * 1_000;
+            self.last_queued_ad = Some((quote, v.elapsed_ms));
         }
         Ok(Some(d))
     }
