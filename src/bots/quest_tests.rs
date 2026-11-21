@@ -2067,6 +2067,52 @@ fn lava_reflex_resumes_after_crossing_is_interrupted_and_respects_visible_protec
 }
 
 #[test]
+fn snake_pit_cover_attempt_expires_across_interrupting_hunts() {
+    let (c, mut v) = fixture();
+    v.map.name = "Snake Pit".into();
+    v.objects[0].kind = 0x917;
+    v.objects[0].condition_mask = Some(crate::condition::bit(crate::condition::INVULNERABLE));
+    let (blocked_quest, reachable_quest) = (center((24, 10)), center((23, 10)));
+    let mut grounds = vec![1; 128 * 128];
+    grounds[10 * 128 + 24] = 255;
+    v.tiles = Arc::new(crate::navigation::Tiles::new(
+        crate::navigation::Geometry::new((128, 128), grounds, &c.grounds),
+        (0..128).flat_map(|x| (0..128).map(move |y| (x, y))),
+    ));
+    v.objects.push(VisibleObject {
+        id: 7,
+        kind: 0x172,
+        name: String::new(),
+        position: center((10, 13)),
+        hp: 100,
+        max_hp: 100,
+        equipped: vec![],
+        contents: vec![],
+        blocks: true,
+        condition_mask: Some(0),
+        ..v.objects[0]
+    });
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    for step in 0..22 {
+        let (position, goal) = if step % 2 == 0 {
+            (blocked_quest, Goal::Break(7))
+        } else {
+            (reachable_quest, Goal::Hunt(2))
+        };
+        v.objects[0].position = position;
+        let decision = adventure(&mut brain, &v, &c);
+        assert_eq!(decision.goal, goal, "at second {step}");
+        brain.goal = decision.goal;
+        v.time_ms += 1_000;
+        v.elapsed_ms += 1_000;
+        v.tick += 20;
+    }
+    v.objects[0].position = blocked_quest;
+    assert_ne!(adventure(&mut brain, &v, &c).goal, Goal::Break(7));
+    assert!(brain.unreachable.contains_key(&7));
+}
+
+#[test]
 fn cover_attempt_expires_only_while_the_wall_takes_no_damage() {
     let (_, mut v) = fixture();
     v.objects.push(VisibleObject {

@@ -657,7 +657,10 @@ impl Brain {
     fn expire_cover_attempt(&mut self, v: &PlayerView) {
         const ATTEMPT_MS: u64 = 20_000;
         let Goal::Break(id) = self.goal else {
-            self.breaking = None;
+            // Hunt steps and brief upkeep pauses can interrupt attempts at the same wall.
+            if !matches!(self.goal, Goal::Hunt(_) | Goal::Wait) {
+                self.breaking = None;
+            }
             return;
         };
         let Some(hp) = v.objects.iter().find(|o| o.id == id).map(|o| o.hp) else {
@@ -1794,6 +1797,7 @@ impl Brain {
         s: &Scene,
         mut decision: Decision,
     ) -> Result<Decision> {
+        self.expire_cover_attempt(v);
         let steering = self.steering.take();
         let (enemies, grid, perception) = (&s.enemies, &s.grid, &s.perception);
         let (nearest, quarry, range, health) = (s.nearest, s.quarry, s.range, s.health);
@@ -2464,9 +2468,6 @@ impl Brain {
                     None => {
                         if self.agreement.as_ref().is_some_and(|a| a.waiting.is_some()) {
                             return Ok(decision);
-                        }
-                        if matches!(goal, Goal::Hunt(_)) {
-                            self.expire_cover_attempt(v);
                         }
                         if matches!(goal, Goal::Hunt(_))
                             && let Some(mut clearing) = progression::clear_cover(
