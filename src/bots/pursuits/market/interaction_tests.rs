@@ -614,3 +614,252 @@ fn vault_trip_keeps_the_nexus_market_visit_until_an_outing() {
     reloaded.observe(&v);
     assert!(reloaded.session.is_none() && !reloaded.session_used);
 }
+
+#[tokio::test]
+async fn funded_bots_settle_through_native_exchange() {
+    let (dir, app) = crate::server::test_app();
+    app.world.clock.set_paused(true);
+    let (ring, staff) = (2749, 2719);
+    let (seller_owner, seller, mut seller_packets, mut seller_brain) =
+        crate::bots::runtime::tests::actor(
+            &app,
+            "native-market-seller",
+            "Seller",
+            [ring, ring, staff, staff, -1, -1, -1, -1],
+        )
+        .await;
+    let (buyer_owner, buyer, mut buyer_packets, mut buyer_brain) =
+        crate::bots::runtime::tests::actor(
+            &app,
+            "native-market-buyer",
+            "Buyer",
+            [SPEED, SPEED, -1, -1, -1, -1, -1, -1],
+        )
+        .await;
+    let goods = |kind| Goods { kind, quantity: 1 };
+    seller_brain.mind.market.quote = Some([goods(ring), goods(SPEED)]);
+    let clock_at = app.world.clock.now();
+    app.world
+        .directory(move |d| {
+            let w = d.worlds.get_mut(&-2).unwrap();
+            w.players.get_mut(&buyer).unwrap().pos = w.players[&seller].pos;
+            w.updates(seller, true)?;
+            w.updates(buyer, true)?;
+            d.chat(
+                seller,
+                "wts Ring of Superior Health for spd".into(),
+                clock_at,
+            )
+        })
+        .await
+        .unwrap();
+
+    let mut packets = [0; 4];
+    let actors = [seller, buyer];
+    let before = [
+        app.world.player_view(seller).await.unwrap(),
+        app.world.player_view(buyer).await.unwrap(),
+    ];
+    app.world.clock.set_paused(false);
+    let mut offers_settled = false;
+    for _ in 0..12 {
+        for (id, output, brain) in [
+            (buyer, &mut buyer_packets, &mut buyer_brain),
+            (seller, &mut seller_packets, &mut seller_brain),
+        ] {
+            let view = app.world.player_view(id).await.unwrap();
+            while let Ok(packet) = output.try_recv() {
+                match packet.id {
+                    61 => packets[0] += 1,
+                    67 => packets[1] += 1,
+                    23 => packets[2] += 1,
+                    12 => {
+                        assert_eq!(Reader::new(&packet.body).i32().unwrap(), 0);
+                        packets[3] += 1;
+                    }
+                    _ => {}
+                }
+                crate::bots::social::receive_market(&app, brain, &packet, &view)
+                    .await
+                    .unwrap();
+            }
+            crate::bots::social::market(&app, brain, &view)
+                .await
+                .unwrap();
+        }
+        if packets[3] == 2 {
+            break;
+        }
+        // Both native endpoints must actually publish their offers before the settling delay.
+        if packets[2] == 2 && !offers_settled {
+            tokio::time::sleep(Duration::from_millis(3150)).await;
+            offers_settled = true;
+        }
+    }
+    assert_eq!(
+        packets,
+        [1, 2, 2, 2],
+        "requests, window endpoints, offer updates, successful endpoints"
+    );
+    for (i, id) in actors.into_iter().enumerate() {
+        let after = app.world.player_view(id).await.unwrap();
+        let saved = app
+            .store
+            .load(after.session.account, after.session.character)
+            .await
+            .unwrap();
+        assert_eq!(
+            after.character.inventory_revision,
+            before[i].character.inventory_revision + 1
+        );
+        assert_eq!(saved.revision, after.character.inventory_revision);
+        assert_eq!(saved.items, after.character.items);
+        assert_eq!(saved.items[4], [SPEED, ring][i]);
+    }
+    let view = app.world.player_view(buyer).await.unwrap();
+    assert!(
+        buyer_brain
+            .mind
+            .market
+            .accepts(
+                &view,
+                &app.content,
+                None,
+                &[goods(staff), goods(SPEED)],
+                None
+            )
+            .unwrap(),
+        "buyer still qualifies for a different fair sale"
+    );
+    let clock_at = app.world.clock.now();
+    app.world
+        .directory(move |d| d.chat(seller, "wts Staff of Horror for spd".into(), clock_at))
+        .await
+        .unwrap();
+    while let Ok(packet) = buyer_packets.try_recv() {
+        crate::bots::social::receive_market(&app, &mut buyer_brain, &packet, &view)
+            .await
+            .unwrap();
+    }
+    assert!(
+        buyer_brain.mind.market.incoming.is_none(),
+        "recent peers are excluded before requesting"
+    );
+    let session = [view.session.world, buyer, view.session.character];
+    let seller_account = before[0].session.account;
+    let repeated = app
+        .world
+        .for_player(buyer)
+        .call(move |w| {
+            w.autonomous_incoming_trade(
+                buyer,
+                session,
+                seller,
+                (seller_account, "Seller".into()),
+                crate::world::TradeAction::Request {
+                    name: "Seller".into(),
+                },
+                Some([goods(SPEED), goods(staff)]),
+            )
+            .map(|_| ())
+        })
+        .await;
+    assert_eq!(
+        repeated.unwrap_err().to_string(),
+        "autonomous market pair has a recent committed exchange"
+    );
+    drop((seller_owner, buyer_owner, app));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn vault_funds_preserve_the_sellers_fair_exact_price() {
+    let (c, mut v) = crate::bots::quest_tests::fixture();
+    v.map.name = "Nexus".into();
+    v.session.world = -2;
+    let mut seller = v.objects.remove(0);
+    seller.account = Some(2);
+    seller.name = "Seller".into();
+    seller.equipped = vec![0xa97, -1, -1, -1];
+    seller.position = v.position;
+    let seller_id = seller.id;
+    let portal = crate::world::view::VisibleObject {
+        id: seller_id + 1,
+        account: None,
+        kind: 0x720,
+        name: "Vault Portal".into(),
+        position: v.position,
+        hp: 0,
+        max_hp: 0,
+        level: None,
+        equipped: vec![],
+        contents: vec![],
+        blocks: false,
+        usable: true,
+        condition_mask: None,
+    };
+    v.objects = vec![seller, portal];
+    let mut vault = vec![DEFENSE; 4];
+    vault.resize(8, -1);
+    let mut market = Market {
+        vault: Some(vault.clone()),
+        ..Default::default()
+    };
+    let mut packet = Writer::new();
+    packet
+        .utf("Seller")
+        .i32(seller_id)
+        .i32(0)
+        .u8(5)
+        .utf("")
+        .utf("wts Staff of Astral Knowledge for 4 def")
+        .utf("");
+    let ad = Packet {
+        id: wire::TEXT,
+        body: packet.0,
+    };
+    assert!(market.receive(&ad, &v, &c, None).unwrap());
+    assert!(
+        market.incoming.is_none(),
+        "Vault memory is not a funded match"
+    );
+    let mut rng = rand::rngs::StdRng::seed_from_u64(744);
+    let grid = Grid::terrain(&v);
+    let to_vault = market
+        .decide(&v, &c, None, &grid, &mut rng)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(to_vault.journey, Some(Journey::Portal(_))));
+    v.map.name = "Vault".into();
+    let seller = v.objects.remove(0);
+    let mut chest = v.objects.pop().unwrap();
+    chest.kind = 0x504;
+    chest.contents = vault;
+    v.objects = vec![chest];
+    for expected in 0..4 {
+        let withdraw = market
+            .decide(&v, &c, None, &grid, &mut rng)
+            .unwrap()
+            .unwrap();
+        let Some(Action::Swap { from, to }) = withdraw.item else {
+            panic!("must withdraw all four at the advertised price; only withdrew {expected}");
+        };
+        assert_eq!(from.kind, DEFENSE);
+        v.character.items[to.slot] = from.kind;
+        v.objects[0].contents[from.slot] = -1;
+    }
+    assert!(matches!(
+        market
+            .decide(&v, &c, None, &grid, &mut rng)
+            .unwrap()
+            .unwrap()
+            .journey,
+        Some(Journey::Nexus)
+    ));
+    v.map.name = "Nexus".into();
+    v.objects = vec![seller];
+    assert!(market.receive(&ad, &v, &c, None).unwrap());
+    assert!(
+        matches!(market.incoming_action(&v, &c, None).unwrap(), Some(crate::world::TradeAction::Request { name }) if name == "Seller")
+    );
+}

@@ -497,6 +497,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
         clock_at: std::time::Instant::now(),
         bot_damage_3s: 0,
         volley_margin_ms: Arc::default(),
+        recent_market_peers: vec![],
         elapsed_ms: 5000,
         position: Pos { x: 10.5, y: 10.5 },
         quest: Some(2),

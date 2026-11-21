@@ -98,6 +98,8 @@ pub struct PlayerView {
     pub(crate) bot_damage_3s: i32,
     #[serde(skip)]
     pub(crate) volley_margin_ms: Arc<AtomicU64>,
+    #[serde(skip)]
+    pub(crate) recent_market_peers: Vec<i32>,
     pub elapsed_ms: u64,
     pub position: Pos,
     pub quest: Option<i32>,
@@ -396,6 +398,20 @@ impl World {
                 .map(|(_, damage)| damage)
                 .sum(),
             volley_margin_ms: p.volley_margin_ms.clone(),
+            recent_market_peers: w
+                .recent_market_pairs
+                .iter()
+                .filter(|(_, until)| **until > w.now)
+                .filter_map(|([a, b], _)| {
+                    if *a == p.character.account {
+                        Some(*b)
+                    } else if *b == p.character.account {
+                        Some(*a)
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
             elapsed_ms,
             position: p.pos,
             quest: p.quest.filter(|quest| p.known.contains(quest)),

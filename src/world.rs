@@ -899,6 +899,7 @@ pub struct World {
     closed_vaults: BTreeMap<i32, i32>,
     trades: BTreeMap<i32, trade::Trade>,
     trade_requests: BTreeMap<i32, (i32, u64)>,
+    recent_market_pairs: BTreeMap<[i32; 2], u64>,
 }
 fn allocate_id(ids: &AtomicI32) -> Result<i32> {
     let mut id = ids.load(Ordering::Relaxed);
@@ -3251,6 +3252,7 @@ impl World {
             closed_vaults: BTreeMap::new(),
             trades: BTreeMap::new(),
             trade_requests: BTreeMap::new(),
+            recent_market_pairs: BTreeMap::new(),
         };
         world.jungle_initialize()?;
         world.tomb_bindings()?;

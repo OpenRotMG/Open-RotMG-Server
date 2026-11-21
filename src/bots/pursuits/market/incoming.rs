@@ -44,7 +44,8 @@ impl Market {
         }
         if let Some(p) = v.objects.iter().find(|p| {
             p.name == name
-                && p.account.is_some()
+                && p.account
+                    .is_some_and(|a| !v.recent_market_peers.contains(&a))
                 && p.hp > 0
                 && !p.equipped.is_empty()
                 && v.position.distance(p.position) < 2.
@@ -80,6 +81,7 @@ impl Market {
             && super::super::settled(v)
             && v.elapsed_ms < g.until
             && v.character.hp * 4 >= v.character.stats[0] * 3
+            && !v.recent_market_peers.contains(&g.account)
             && !self.reserved_bargain();
         let peer = v.objects.iter().find(|p| {
             p.id == g.player && p.account == Some(g.account) && p.name == g.name && p.hp > 0

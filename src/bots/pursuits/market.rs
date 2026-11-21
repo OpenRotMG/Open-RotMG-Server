@@ -633,13 +633,16 @@ impl Market {
         {
             return Ok(None);
         }
-        let quotes = self.quotes(v, c, future)?;
-        // Preserve a still-funded intention instead of oscillating between researched offers.
+        // A seller's fair exact ask can be above our cheapest researched basket.
         if let Some(previous) = &self.quote
-            && quotes.contains(previous)
+            && (money(c, previous[0].kind) || money(c, previous[1].kind))
+            && fair(previous, c)
+            && self.spare(v, c, future, previous[0].kind)? >= previous[0].quantity
+            && self.wanted(v, c, future, previous[1].kind)? >= previous[1].quantity
         {
             return Ok(Some(previous.clone()));
         }
+        let quotes = self.quotes(v, c, future)?;
         if quotes.is_empty() {
             tracing::debug!(
                 account = v.session.account,
@@ -830,7 +833,12 @@ impl Market {
         let Some(ad) = ad else {
             return Ok(false);
         };
-        if v.map.name != "Nexus" || self.locked() {
+        if v.map.name != "Nexus"
+            || self.locked()
+            || peer
+                .account
+                .is_some_and(|a| v.recent_market_peers.contains(&a))
+        {
             return Ok(true);
         }
         let objective = self.quote(v, c, future)?;
@@ -866,6 +874,12 @@ impl Market {
                     name,
                     [q[1].clone(), q[0].clone()],
                 ));
+                tracing::info!(
+                    account = v.session.account,
+                    peer = account,
+                    ?q,
+                    "market funded counterparty matched"
+                );
                 return Ok(true);
             }
         }
@@ -901,8 +915,14 @@ impl Market {
                 .copied()
                 .filter(|k| *k >= 0 && money(c, *k))
                 .collect();
-            let mut funds = None;
+            let mut funds = (self.target.is_none()
+                && saved.contains(&q[1].kind)
+                && self.spare(v, c, future, q[1].kind)? >= q[1].quantity)
+                .then(|| [q[1].clone(), q[0].clone()]);
             for kind in saved {
+                if funds.is_some() {
+                    break;
+                }
                 let quantity = u8::try_from(self.count(v, kind).min(8))?;
                 if let Some(offer) = bounded_quote(&Goods { kind, quantity }, &q[0], c) {
                     funds = Some(offer);
@@ -1329,12 +1349,9 @@ impl Market {
                 .filter(|k| **k == q[0].kind)
                 .count();
             let free = v.character.items.iter().skip(4).filter(|k| **k < 0).count();
-            // Personal keeps must travel too: the live chest is no longer funding evidence in Nexus.
-            let keep = if self.target.is_some() {
-                Self::keep(v, c, future, q[0].kind)?
-            } else {
-                0
-            };
+            // The buyer can only spend surplus that will remain verifiable after leaving the Vault.
+            let keep = Self::keep(v, c, future, q[0].kind)?;
+            let required = keep + usize::from(q[0].quantity);
             let carried_surplus = carried.saturating_sub(keep);
             let need_stock = carried_surplus < usize::from(q[0].quantity);
             let need_space = (need_stock && free == 0)
@@ -1343,7 +1360,9 @@ impl Market {
             else {
                 return Ok(Some(d));
             };
-            let transfer = if keep + usize::from(q[0].quantity) > v.character.items.len() - 4 {
+            let transfer = if required > v.character.items.len() - 4
+                || Self::verified_count(v, q[0].kind) < required
+            {
                 None
             } else if need_space {
                 chest

@@ -61,7 +61,7 @@ pub(super) async fn incoming(
                     if opening {
                         tracing::info!(
                             account = v.session.account,
-                            "market native exchange opened; WINDOW offers remain authoritative"
+                            "market native request submitted; WINDOW offers remain authoritative"
                         );
                     }
                 }

@@ -17,6 +17,7 @@ pub(super) struct Trade {
 pub struct TradePlan {
     pub transaction: String,
     pub(crate) delivery: Option<Delivery>,
+    market_pair: Option<[i32; 2]>,
     key: i32,
     pub plans: [InventoryPlan; 2],
 }
@@ -406,6 +407,18 @@ impl World {
                 && q.character.name == binding.1,
             "incoming trade observed contact/world changed"
         );
+        let market_pair = (q.controller == Controller::Autonomous).then(|| {
+            let mut accounts = [p.character.account, q.character.account];
+            accounts.sort_unstable();
+            accounts
+        });
+        ensure!(
+            market_pair.is_none_or(|pair| self
+                .recent_market_pairs
+                .get(&pair)
+                .is_none_or(|until| self.now >= *until)),
+            "autonomous market pair has a recent committed exchange"
+        );
         let quote = quote.context("incoming exchange has no inventory-bound quote")?;
         ensure!(
             quote
@@ -466,6 +479,14 @@ impl World {
                         ),
                     "window goods differ from inventory-bound market quote"
                 );
+                ensure!(
+                    market_pair.is_none()
+                        || t.items[1 - side]
+                            .iter()
+                            .zip(theirs)
+                            .all(|(kind, selected)| !selected || *kind != quote[0].kind),
+                    "autonomous market exchange cannot give and receive the same goods"
+                );
                 let inventories = exchanged_items(&t.items, &t.offers)?;
                 let witness = crate::store::TradeWitness {
                     transaction: t.transaction.clone(),
@@ -484,8 +505,12 @@ impl World {
                         })
                         .collect(),
                 };
+                let mut plan = self.accept_trade(id, mine, theirs)?;
+                if let Some(plan) = &mut plan {
+                    plan.market_pair = market_pair;
+                }
                 return Ok(IncomingTradeOutcome {
-                    plan: self.accept_trade(id, mine, theirs)?,
+                    plan,
                     witness: Some(witness),
                 });
             }
@@ -782,6 +807,7 @@ impl World {
             plans,
             transaction,
             delivery,
+            market_pair: None,
         }))
     }
     pub fn finish_trade(&mut self, plan: TradePlan, result: Result<Vec<i32>>) -> Result<()> {
@@ -833,6 +859,20 @@ impl World {
             let mut out = Writer::new();
             out.i32(0).utf("Trade successful.");
             send(&self.players[&player], 12, out.0);
+        }
+        if let Some(pair) = plan.market_pair {
+            self.recent_market_pairs
+                .retain(|_, until| *until > self.now);
+            self.recent_market_pairs
+                .insert(pair, self.now + 60 * 60_000);
+            let goods = [0, 1].map(|side| {
+                trade.items[side]
+                    .iter()
+                    .zip(trade.offers[side])
+                    .filter_map(|(kind, selected)| selected.then_some(*kind))
+                    .collect::<Vec<_>>()
+            });
+            tracing::info!(?pair, players=?trade.players, ?goods, "autonomous market exchange committed");
         }
         tracing::info!(players=?trade.players,revisions=?revisions,"two-owner inventory exchange committed");
         Ok(())
@@ -1194,6 +1234,52 @@ mod community_tests {
         assert!(gift(&mut w, 0xa97, true, Change { offer: mine }).is_err());
         assert!(accept(&mut w, 0xa97, true, mine, empty).is_err());
         assert_eq!(w.trades[&key].deliveries[0], Some(delivery));
+    }
+
+    #[tokio::test]
+    async fn autonomous_market_rejects_same_kind_currency_on_both_sides() {
+        use crate::bots::pursuits::market::Goods;
+        let (mut w, _, ids, _) = fixture().await;
+        w.name = "Nexus".into();
+        let [id, peer] = ids;
+        let mut speed = [false; 12];
+        speed[4..8].fill(true);
+        for id in ids {
+            let player = w.players.get_mut(&id).unwrap();
+            player.controller = Controller::Autonomous;
+            player.character.items[4..8].fill(0xa21);
+        }
+        w.updates(id, true).unwrap();
+        start(&mut w, ids);
+        for id in ids {
+            w.change_trade(id, speed).unwrap();
+        }
+        let s = [-2, id, w.players[&id].character.id];
+        let seller = &w.players[&peer].character;
+        let result = w.autonomous_incoming_trade(
+            id,
+            s,
+            peer,
+            (seller.account, seller.name.clone()),
+            TradeAction::Accept {
+                mine: speed,
+                theirs: speed,
+            },
+            Some([
+                Goods {
+                    kind: 0xa21,
+                    quantity: 4,
+                },
+                Goods {
+                    kind: 0xa20,
+                    quantity: 1,
+                },
+            ]),
+        );
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "autonomous market exchange cannot give and receive the same goods"
+        );
     }
 
     #[tokio::test]
