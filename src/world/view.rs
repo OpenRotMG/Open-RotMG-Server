@@ -94,6 +94,10 @@ pub struct PlayerView {
     pub time_ms: u64,
     #[serde(skip)]
     pub(crate) clock_at: Instant,
+    #[serde(skip)]
+    pub(crate) bot_damage_3s: i32,
+    #[serde(skip)]
+    pub(crate) volley_margin_ms: Arc<AtomicU64>,
     pub elapsed_ms: u64,
     pub position: Pos,
     pub quest: Option<i32>,
@@ -189,6 +193,8 @@ pub struct VisibleObject {
 /// A lobbed bomb's landing circle, shown to 2012 players by the throw effect before it lands.
 #[derive(Clone, Serialize)]
 pub struct VisibleThrow {
+    #[serde(skip)]
+    pub(crate) source_kind: u16,
     pub position: Pos,
     pub radius: f32,
     pub damage: i32,
@@ -196,6 +202,8 @@ pub struct VisibleThrow {
 }
 #[derive(Serialize)]
 pub struct VisibleProjectile {
+    #[serde(skip)]
+    pub(crate) source_kind: u16,
     pub owner: i32,
     pub id: u8,
     pub start: Pos,
@@ -339,6 +347,7 @@ impl World {
                         .is_some_and(|since| b.born > *since)
             })
             .map(|b| VisibleProjectile {
+                source_kind: b.source_kind,
                 owner: b.owner,
                 id: b.id,
                 start: b.start,
@@ -358,6 +367,7 @@ impl World {
             .iter()
             .filter(|g| g.position.distance(p.pos) < 20.)
             .map(|g| VisibleThrow {
+                source_kind: g.kind,
                 position: g.position,
                 radius: g.radius,
                 damage: g.damage,
@@ -375,6 +385,14 @@ impl World {
             tick: w.tick,
             time_ms: w.now,
             clock_at: w.clock.now(),
+            bot_damage_3s: p
+                .bot_damage
+                .iter()
+                .rev()
+                .take_while(|(at, _)| w.now - *at < 3000)
+                .map(|(_, damage)| damage)
+                .sum(),
+            volley_margin_ms: p.volley_margin_ms.clone(),
             elapsed_ms,
             position: p.pos,
             quest: p.quest.filter(|quest| p.known.contains(quest)),

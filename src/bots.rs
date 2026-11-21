@@ -1725,14 +1725,22 @@ impl Brain {
                 && (urgent || decision.item.is_none())
                 && v.map.name != "Nexus"
             {
+                if reason == "volley_margin" {
+                    v.volley_margin_ms
+                        .store(v.time_ms + 1, std::sync::atomic::Ordering::Relaxed);
+                }
                 tracing::info!(
                     account = v.session.account,
                     character = v.session.character,
+                    player = v.session.player,
                     world = %v.map.name,
+                    world_ms = v.time_ms,
                     level = v.character.level,
                     hp = v.character.hp,
                     max_hp = v.character.stats[0],
                     incoming,
+                    threats = ?combat::forecast_threats(v, content),
+                    damage_taken_3s = v.bot_damage_3s,
                     hit = s.hit,
                     reserve,
                     healing,

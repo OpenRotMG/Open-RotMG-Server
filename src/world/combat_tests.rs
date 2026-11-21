@@ -21,6 +21,27 @@ pub(super) fn shot(w: &World, owner: i32, kind: u16, index: u8) -> Bullet {
 }
 
 #[test]
+fn autonomous_view_reports_committed_damage_for_three_seconds_despite_healing() {
+    let (mut w, id) = fixture(0x18, false);
+    w.players.get_mut(&id).unwrap().controller = Controller::Autonomous;
+    let mut b = shot(&w, 999, 0x654, 0);
+    b.damage = 50;
+    w.now = 50;
+    for _ in 0..2 {
+        w.damage_player(id, &b, false).unwrap();
+    }
+    let p = w.players.get_mut(&id).unwrap();
+    p.character.hp = 200;
+    w.now = 3000;
+    w.area_damage(0x654, b.pos, 4., 25).unwrap();
+    assert_eq!(w.player_view(1, id, 3000).unwrap().bot_damage_3s, 125);
+    w.now = 3050;
+    assert_eq!(w.player_view(1, id, 3050).unwrap().bot_damage_3s, 25);
+    w.now = 6000;
+    assert_eq!(w.player_view(1, id, 6000).unwrap().bot_damage_3s, 0);
+}
+
+#[test]
 fn native_hits_keep_effects_separate_from_hp_protection_and_consume_once() {
     for (flags, paused, affected, damaged) in [
         (0, false, true, true),

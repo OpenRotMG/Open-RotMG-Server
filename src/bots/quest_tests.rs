@@ -434,6 +434,7 @@ fn realm_hunt_keeps_a_route_that_already_dodges_the_shot() {
     v.time_ms += 300;
 
     let shot = crate::world::view::VisibleProjectile {
+        source_kind: 0x654,
         owner: 2,
         id: 1,
         start: center((10, 7)),
@@ -493,6 +494,8 @@ pub(super) fn fixture() -> (Content, PlayerView) {
         tick: 100,
         time_ms: 5000,
         clock_at: std::time::Instant::now(),
+        bot_damage_3s: 0,
+        volley_margin_ms: Arc::default(),
         elapsed_ms: 5000,
         position: Pos { x: 10.5, y: 10.5 },
         quest: Some(2),
@@ -991,6 +994,7 @@ fn threatened_bot_beside_health_bag_handles_the_threat_instead_of_leaving() {
     bag.position = Pos { x: 11.5, y: 10.5 };
     v.objects.push(bag);
     v.projectiles.push(crate::world::view::VisibleProjectile {
+        source_kind: 0x654,
         owner: 2,
         id: 1,
         start: Pos { x: 13.5, y: 10.5 },
@@ -1115,6 +1119,7 @@ fn bot_escapes_a_volley_that_would_kill_it_before_its_health_looks_low() {
     v.objects.clear();
     v.character.hp = 300;
     v.projectiles.push(crate::world::view::VisibleProjectile {
+        source_kind: 0x654,
         owner: 2,
         id: 1,
         start: Pos { x: 13.5, y: 10.5 },
@@ -1149,6 +1154,7 @@ fn bots_escape_before_a_second_volley_when_a_potion_cannot_cover_it() {
     v.character.items[4] = 0xa22;
     v.character.items[5] = 0xa23;
     v.projectiles.push(crate::world::view::VisibleProjectile {
+        source_kind: 0x659,
         owner: 2,
         id: 1,
         start: v.objects[0].position,
@@ -1186,6 +1192,11 @@ fn bots_escape_before_a_second_volley_when_a_potion_cannot_cover_it() {
                 escape,
                 "{world} level {level}"
             );
+            assert_eq!(
+                v.volley_margin_ms
+                    .swap(0, std::sync::atomic::Ordering::Relaxed),
+                if escape { v.time_ms + 1 } else { 0 }
+            );
             if escape {
                 assert!(matches!(d.item, Some(Action::Use { slot: 5, .. })));
                 assert!(
@@ -1204,6 +1215,50 @@ fn bots_escape_before_a_second_volley_when_a_potion_cannot_cover_it() {
             }
         }
     }
+}
+
+#[test]
+fn escape_forecast_ranks_threat_kinds_by_damage_and_counts_projectiles() {
+    let (content, mut v) = fixture();
+    v.character.stats[3] = 0;
+    for (id, (source_kind, damage)) in [
+        (0x659, 10),
+        (0x659, 10),
+        (0x91a, 50),
+        (0x650, 30),
+        (0x650, 30),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        v.projectiles.push(crate::world::view::VisibleProjectile {
+            source_kind,
+            owner: 20,
+            id: id as u8,
+            start: v.position,
+            position: v.position,
+            angle: 0.,
+            speed: 100.,
+            lifetime_ms: 500.,
+            amplitude: 0.,
+            frequency: 0.,
+            passes_cover: false,
+            damage,
+            armor_piercing: false,
+        });
+    }
+    v.throws.push(crate::world::view::VisibleThrow {
+        source_kind: 0x654,
+        position: v.position,
+        radius: 4.,
+        damage: 90,
+        lands_ms: v.time_ms + 200,
+    });
+    assert_eq!(combat::incoming(&v), 220);
+    assert_eq!(
+        combat::forecast_threats(&v, &content),
+        [("Medusa", 0, 90), ("Lizard God", 2, 60), ("Djinn", 1, 50),]
+    );
 }
 
 #[test]
@@ -1265,6 +1320,7 @@ fn bot_standing_in_lava_steps_out_and_dodges_a_shown_bomb() {
     v.quest = None;
     v.objects.clear();
     v.throws.push(crate::world::view::VisibleThrow {
+        source_kind: 0x654,
         position: Pos { x: 11.5, y: 10.5 },
         radius: 4.,
         damage: 150,
@@ -1400,6 +1456,7 @@ fn dodging_keeps_the_trip_and_still_makes_progress() {
     let godlands = Pos { x: 100.5, y: 100.5 };
     v.map.godland_tiles = Arc::new(BTreeSet::from([tile(godlands)]));
     v.projectiles.push(crate::world::view::VisibleProjectile {
+        source_kind: 0x654,
         owner: 2,
         id: 1,
         start: Pos { x: 13.5, y: 10.5 },

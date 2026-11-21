@@ -82,6 +82,7 @@ impl World {
                 .retain(|_, previous| time.saturating_sub(*previous) < 1000);
             p.ground_hits.insert(i, time);
             p.character.hp = (p.character.hp - damage).max(0);
+            p.record_bot_damage(self.now, hp_before);
             if p.character.hp == 0 {
                 p.death_pending = true;
                 p.killer = hazard.name;

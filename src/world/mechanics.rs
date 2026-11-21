@@ -2,7 +2,7 @@ use super::*;
 use crate::{condition, encounter};
 
 pub(super) struct Grenade {
-    kind: u16,
+    pub(super) kind: u16,
     pub(super) position: Pos,
     pub(super) radius: f32,
     pub(super) damage: i32,
@@ -570,6 +570,7 @@ impl World {
             let p = self.players.get_mut(&id).unwrap();
             let hp_before = p.character.hp;
             p.character.hp = (p.character.hp - damage).max(0);
+            p.record_bot_damage(self.now, hp_before);
             if p.character.hp == 0 {
                 p.death_pending = true;
                 p.killer = self.content.objects[&kind].name.clone();

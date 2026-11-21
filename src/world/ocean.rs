@@ -792,6 +792,7 @@ impl World {
             } else {
                 let hp_before = p.character.hp;
                 p.character.hp = (p.character.hp - 10).max(0);
+                p.record_bot_damage(self.now, hp_before);
                 p.audit_hp(*id, &self.name, self.now, "suffocation", hp_before);
                 if p.character.hp == 0 {
                     p.death_pending = true;

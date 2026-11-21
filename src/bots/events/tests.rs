@@ -131,6 +131,7 @@ fn aftermath_quiet_no_audience_hazards_and_useful_loot_precede_idle_reports() {
     assert!(decide(&mut e, &v, &c, p).is_none());
     v.objects.pop();
     v.projectiles.push(VisibleProjectile {
+        source_kind: 0x654,
         owner: 2,
         id: 1,
         start: v.position,

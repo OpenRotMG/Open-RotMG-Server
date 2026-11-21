@@ -305,6 +305,22 @@ impl World {
         let hp_before = p.character.hp;
         let drained = damage.min(p.character.hp).max(0);
         p.character.hp = (p.character.hp - damage).max(0);
+        p.record_bot_damage(self.now, hp_before);
+        if let Some(forecast_ms) = p.volley_margin_ms.load(Ordering::Relaxed).checked_sub(1)
+            && self.now - forecast_ms < 3000
+        {
+            tracing::info!(
+                player = id,
+                character = p.character.id,
+                world = %self.name,
+                world_ms = self.now,
+                forecast_ms,
+                source_kind = b.source_kind,
+                damage = drained,
+                hp = p.character.hp,
+                "autonomous projectile hit after volley margin forecast"
+            );
+        }
         if p.character.hp == 0 {
             p.death_pending = true;
             p.killer = self.content.objects[&b.source_kind].name.clone();

@@ -102,10 +102,8 @@ pub(super) fn clearance(v: &PlayerView, destination: Pos) -> f32 {
 fn cost(v: &PlayerView, raw: i32, piercing: bool) -> i32 {
     crate::condition::damage(raw, v.character.stats[3], v.character.conditions, piercing)
 }
-/// Damage from visible bullets and bombs that reach this spot within half a second if the player stands still.
-pub(super) fn incoming(v: &PlayerView) -> i32 {
-    let bullets = v
-        .projectiles
+fn forecast_projectiles(v: &PlayerView) -> impl Iterator<Item = (u16, i32)> {
+    v.projectiles
         .iter()
         .filter(|b| hostile(v, b.owner))
         .filter(|b| {
@@ -116,13 +114,44 @@ pub(super) fn incoming(v: &PlayerView) -> i32 {
                 })
             })
         })
-        .map(|b| cost(v, b.damage, b.armor_piercing));
-    let bombs = v
-        .throws
+        .map(|b| (b.source_kind, cost(v, b.damage, b.armor_piercing)))
+}
+
+fn forecast_bombs(v: &PlayerView) -> impl Iterator<Item = (u16, i32)> {
+    v.throws
         .iter()
         .filter(|t| t.lands_ms <= v.time_ms + 500 && bombed(t, v.position))
-        .map(|t| cost(v, t.damage, false));
-    bullets.chain(bombs).sum()
+        .map(|t| (t.source_kind, cost(v, t.damage, false)))
+}
+
+/// Damage from visible bullets and bombs that reach this spot within half a second if the player stands still.
+pub(super) fn incoming(v: &PlayerView) -> i32 {
+    forecast_projectiles(v)
+        .chain(forecast_bombs(v))
+        .map(|(_, damage)| damage)
+        .sum()
+}
+
+pub(super) fn forecast_threats<'a>(
+    v: &PlayerView,
+    content: &'a Content,
+) -> Vec<(&'a str, usize, i32)> {
+    let mut totals = BTreeMap::<_, (usize, i32)>::new();
+    for (kind, damage) in forecast_projectiles(v) {
+        let total = totals.entry(kind).or_default();
+        total.0 += 1;
+        total.1 += damage;
+    }
+    for (kind, damage) in forecast_bombs(v) {
+        totals.entry(kind).or_default().1 += damage;
+    }
+    let mut ranked: Vec<_> = totals.into_iter().collect();
+    ranked.sort_by_key(|&(kind, (_, damage))| (std::cmp::Reverse(damage), kind));
+    ranked
+        .into_iter()
+        .take(3)
+        .map(|(kind, (shots, damage))| (content.objects[&kind].name.as_str(), shots, damage))
+        .collect()
 }
 pub(super) fn health_potion(v: &PlayerView, c: &Content) -> Option<(usize, i32)> {
     if v.character.conditions & crate::condition::bit(crate::condition::SICK) != 0 {

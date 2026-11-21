@@ -11,7 +11,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         Arc,
-        atomic::{AtomicI32, AtomicU8, Ordering},
+        atomic::{AtomicI32, AtomicU8, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -384,6 +384,8 @@ pub struct Player {
     overlaps: VecDeque<(u64, Bullet)>,
     predicted_deaths: BTreeMap<i32, (u8, Option<u64>)>,
     ground_hits: BTreeMap<usize, i32>,
+    bot_damage: VecDeque<(u64, i32)>,
+    volley_margin_ms: Arc<AtomicU64>,
     oxygen: i32,
     tiles: BTreeSet<(i16, i16)>,
     tile_updates: Vec<(i16, i16, u8)>,
@@ -431,6 +433,19 @@ pub struct Player {
     ability_shot: Option<(u16, i32, bool, i32)>,
 }
 impl Player {
+    fn record_bot_damage(&mut self, now: u64, hp_before: i32) {
+        let damage = hp_before - self.character.hp;
+        if self.controller != Controller::Autonomous || damage <= 0 {
+            return;
+        }
+        self.bot_damage.retain(|(at, _)| now - *at < 3000);
+        if let Some((_, total)) = self.bot_damage.back_mut().filter(|(at, _)| *at == now) {
+            *total += damage;
+        } else {
+            self.bot_damage.push_back((now, damage));
+        }
+    }
+
     fn audit_fact(
         &self,
         id: i32,
@@ -3760,6 +3775,8 @@ impl World {
                 overlaps: VecDeque::new(),
                 predicted_deaths: BTreeMap::new(),
                 ground_hits: BTreeMap::new(),
+                bot_damage: VecDeque::new(),
+                volley_margin_ms: Arc::default(),
                 oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
                 tiles: BTreeSet::new(),
                 tile_updates: vec![],
@@ -7814,7 +7831,9 @@ impl World {
                 p.hp_fraction = 0.;
             }
             if flags & crate::condition::bit(crate::condition::BLEEDING) != 0 {
+                let before_bleed = p.character.hp;
                 p.character.hp = (p.character.hp - 1).max(1);
+                p.record_bot_damage(self.now, before_bleed);
             }
             p.audit_hp(
                 *id,
