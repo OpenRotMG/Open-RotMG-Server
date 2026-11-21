@@ -380,6 +380,49 @@ fn travelling_realm_hunter_shoots_passing_enemy_without_changing_course() {
 }
 
 #[test]
+fn realm_god_hunt_keeps_its_approach_when_a_construct_crosses_range() {
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.character.level = 20;
+    v.objects = [(2, 0x905), (3, 0x906)]
+        .into_iter()
+        .map(|(id, kind)| VisibleObject {
+            id,
+            kind,
+            name: c.objects[&kind].name.clone(),
+            hp: c.objects[&kind].hp,
+            max_hp: c.objects[&kind].hp,
+            equipped: vec![],
+            contents: vec![],
+            ..v.objects[0]
+        })
+        .collect();
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    let decisions = [(9.5, 8.9), (9.5, 8.), (9.5, 8.9), (6., 8.)].map(|(rock, wood)| {
+        v.objects[0].position = Pos {
+            x: v.position.x + rock,
+            y: v.position.y,
+        };
+        v.objects[1].position = Pos {
+            x: v.position.x,
+            y: v.position.y + wood,
+        };
+        v.tick += 4;
+        v.time_ms += 200;
+        let decision = brain.decide(&v, &c).unwrap();
+        brain.goal = decision.goal.clone();
+        decision
+    });
+    assert_eq!(
+        decisions.each_ref().map(|d| d.goal.clone()),
+        [Goal::Hunt(2), Goal::Hunt(2), Goal::Hunt(2), Goal::Fight(2)]
+    );
+    let passing = &decisions[1];
+    assert!(passing.movement.is_some_and(|p| p.x > v.position.x));
+    assert!(passing.aim.is_some_and(|p| p.y > v.position.y));
+}
+
+#[test]
 fn realm_hunt_keeps_a_route_that_already_dodges_the_shot() {
     let (c, mut v) = fixture();
     v.objects[0].position = center((28, 10));
