@@ -220,13 +220,15 @@ fn nexus_explore_enters_its_target_tile_before_retargeting() {
     assert_ne!(onward.goal, approach.goal);
 }
 
-#[test]
-fn nexus_explore_leaves_the_hedge_courtyard_in_one_bounded_leg() {
+fn nexus_explore_fixture(
+    start: TilePoint,
+    known: impl Fn(TilePoint) -> bool,
+) -> (Content, PlayerView) {
     let (c, mut v) = fixture();
     let map = crate::content::Map::load(std::path::Path::new("data/nexus.wmap"), &c).unwrap();
     v.map.name = "Nexus".into();
     (v.map.width, v.map.height) = (map.width, map.height);
-    v.position = center((74, 75));
+    v.position = center(start);
     v.quest = None;
     v.objects.clear();
     let ground = map
@@ -240,17 +242,61 @@ fn nexus_explore_leaves_the_hedge_courtyard_in_one_bounded_leg() {
             }
         })
         .collect();
-    let known = (0..map.width as i16)
-        .flat_map(|x| (0..map.height as i16).map(move |y| (x, y)))
-        .filter(|&(x, y)| {
-            [(74, 75), (76, 73)]
-                .into_iter()
-                .any(|(a, b)| (x - a).pow(2) + (y - b).pow(2) <= 400)
-        });
     v.tiles = Arc::new(crate::navigation::Tiles::new(
         crate::navigation::Geometry::new((map.width, map.height), ground, &c.grounds),
-        known,
+        (0..map.width as i16)
+            .flat_map(|x| (0..map.height as i16).map(move |y| (x, y)))
+            .filter(|&p| known(p)),
     ));
+    (c, v)
+}
+
+#[test]
+fn nexus_explore_follows_the_frontier_past_the_first_hedge_waypoint() {
+    let start = (42, 31);
+    let (c, mut v) = nexus_explore_fixture(start, |(x, y)| {
+        // Both ends of the hedge are known, but just a few tiles into each arm.
+        x == 42 && (31..=51).contains(&y)
+            || y == 31 && (42..=45).contains(&x)
+            || y == 51 && (42..=48).contains(&x)
+    });
+    let mut brain = Brain::new(ARCHETYPES[1], &v);
+    brain.heading = 0.;
+    let waypoint = (45, 51);
+    let frontier = (48, 51);
+    for (leg, limit) in [(waypoint, 23), (frontier, 3)] {
+        let grid = Grid::terrain(&v);
+        assert_eq!(grid.path(tile(v.position), leg).unwrap().len(), limit);
+        for _ in 0..limit {
+            if tile(v.position) == leg {
+                break;
+            }
+            brain.visits.insert(tile(v.position), v.tick);
+            let decision = adventure(&mut brain, &v, &c);
+            assert_eq!(
+                decision.goal,
+                Goal::Explore(leg.0, leg.1),
+                "wrong leg from {:?}; returning to {start:?} would reverse the route",
+                tile(v.position),
+            );
+            brain.goal = decision.goal;
+            v.position = decision
+                .movement
+                .expect("exploration leg must make progress");
+            v.tick += 1;
+            v.time_ms += 100;
+        }
+        assert_eq!(tile(v.position), leg);
+    }
+}
+
+#[test]
+fn nexus_explore_leaves_the_hedge_courtyard_in_one_bounded_leg() {
+    let (c, v) = nexus_explore_fixture((74, 75), |(x, y)| {
+        [(74, 75), (76, 73)]
+            .into_iter()
+            .any(|(a, b)| (x - a).pow(2) + (y - b).pow(2) <= 400)
+    });
     let mut brain = Brain::new(ARCHETYPES[1], &v);
     brain.heading = 2.14;
     let decision = adventure(&mut brain, &v, &c);

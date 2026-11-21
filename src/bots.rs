@@ -274,6 +274,8 @@ struct Brain {
     /// The kept journey and its distance-proportional deadline (ms).
     /// The trip being followed: its goal, deadline and the destination chosen when it started.
     travel: Option<(Goal, u64, Pos)>,
+    // The far target can outlive the bounded waypoint in Goal::Explore.
+    nexus_explore_objective: Option<TilePoint>,
     /// Targets whose approach failed, until a time (ms); moving enemies defeat tile exclusion.
     unreachable: BTreeMap<i32, u64>,
     /// The kept cover wall, its last seen HP and when the attempt expires unless that HP drops.
@@ -369,6 +371,7 @@ impl Brain {
             heading,
             steering: None,
             travel: None,
+            nexus_explore_objective: None,
             unreachable: BTreeMap::new(),
             breaking: None,
             loot_crossing: None,
@@ -787,7 +790,11 @@ impl Brain {
         }
         self.snapshot_stalled_travel(v);
         self.previous = v.position;
-        self.visits.insert(tile(v.position), v.tick);
+        let here = tile(v.position);
+        self.visits.insert(here, v.tick);
+        if self.nexus_explore_objective == Some(here) {
+            self.nexus_explore_objective = None;
+        }
         let decision = Decision {
             goal: Goal::Wait,
             movement: None,
@@ -2217,6 +2224,7 @@ impl Brain {
             Goal::Loot(id) => !self.unreachable.contains_key(id),
             _ => true,
         });
+        let mut explore_objective = None;
         // Exploration's maximum score is 20; a clear higher-ranked route makes its full-map search irrelevant.
         if !choices.iter().any(|(score, goal, position)| {
             score + if *goal == self.goal { 8. } else { 0. } > 20.
@@ -2238,42 +2246,51 @@ impl Brain {
                 } else {
                     grid.exploration_tiles(v.position)
                 };
-                let next = reachable
-                    .iter()
-                    .copied()
-                    .filter(|t| {
-                        let distance = center(*t).distance(v.position);
-                        !self.blocked.contains_key(t)
-                            && self.crowd.bands.survivable(v, center(*t))
-                            && distance > 3.
-                            && (!nexus || distance < 24.)
-                    })
-                    .max_by(|a, b| {
-                        let frontier = |t| grid.frontier(t, v.map.width, v.map.height);
-                        let priority = frontier(*a)
-                            .cmp(&frontier(*b))
-                            .then_with(|| self.visits.get(b).cmp(&self.visits.get(a)));
-                        if !priority.is_eq() {
-                            return priority;
-                        }
-                        let value = |t| {
-                            let p = center(t);
-                            quarry.map_or_else(
-                                || {
-                                    (p.x - v.position.x) * self.heading.cos()
-                                        + (p.y - v.position.y) * self.heading.sin()
-                                },
-                                |enemy| -p.distance(enemy.position),
-                            )
-                        };
-                        value(*a).total_cmp(&value(*b))
-                    });
+                self.nexus_explore_objective = self.nexus_explore_objective.filter(|t| {
+                    nexus
+                        && *t != tile(v.position)
+                        && !self.blocked.contains_key(t)
+                        && reachable.contains(t)
+                });
+                let next = self.nexus_explore_objective.or_else(|| {
+                    reachable
+                        .iter()
+                        .copied()
+                        .filter(|t| {
+                            let distance = center(*t).distance(v.position);
+                            !self.blocked.contains_key(t)
+                                && self.crowd.bands.survivable(v, center(*t))
+                                && distance > 3.
+                                && (!nexus || distance < 24.)
+                        })
+                        .max_by(|a, b| {
+                            let frontier = |t| grid.frontier(t, v.map.width, v.map.height);
+                            let priority = frontier(*a)
+                                .cmp(&frontier(*b))
+                                .then_with(|| self.visits.get(b).cmp(&self.visits.get(a)));
+                            if !priority.is_eq() {
+                                return priority;
+                            }
+                            let value = |t| {
+                                let p = center(t);
+                                quarry.map_or_else(
+                                    || {
+                                        (p.x - v.position.x) * self.heading.cos()
+                                            + (p.y - v.position.y) * self.heading.sin()
+                                    },
+                                    |enemy| -p.distance(enemy.position),
+                                )
+                            };
+                            value(*a).total_cmp(&value(*b))
+                        })
+                });
                 if let Some(objective) = next {
                     let (x, y) = if nexus {
                         grid.exploration_waypoint(v.position, objective)?
                     } else {
                         objective
                     };
+                    explore_objective = nexus.then_some(objective);
                     choices.push((12., Goal::Explore(x, y), center((x, y))));
                 }
             }
@@ -2527,6 +2544,9 @@ impl Brain {
                     ),
                 }
             });
+            if let (Goal::Explore(..), Some(objective)) = (&goal, explore_objective) {
+                self.nexus_explore_objective = Some(objective);
+            }
             decision.goal = goal;
             decision.movement = movement;
             if (self.agreement.is_some()
