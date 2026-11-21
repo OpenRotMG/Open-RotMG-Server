@@ -1965,6 +1965,10 @@ impl Brain {
                 .iter()
                 .filter(|o| content.objects[&o.kind].class == "Container")
             {
+                // Kiting out of weapon range does not make the guarded chest safe to approach.
+                if v.map.name == "Realm" && bag.kind == 0x501 && !peaceful(enemies, bag.position) {
+                    continue;
+                }
                 if progression::pickup(
                     v,
                     content,

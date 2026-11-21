@@ -856,6 +856,57 @@ fn band_edge_journeys_do_not_preempt_each_other() {
 }
 
 #[test]
+fn phoenix_guarded_chest_is_left_until_the_guard_moves_away() {
+    let (c, mut v) = fixture();
+    v.quest = None;
+    v.character.level = 20;
+    let chest = center((20, 10));
+    let phoenix = &c.objects[&0x675];
+    v.objects[0].kind = phoenix.kind;
+    v.objects[0].name.clone_from(&phoenix.name);
+    v.objects[0].hp = phoenix.hp;
+    v.objects[0].max_hp = phoenix.hp;
+    v.objects[0].position = chest;
+    v.objects.push(VisibleObject {
+        id: 3,
+        kind: 0x501,
+        position: chest,
+        hp: 0,
+        max_hp: 0,
+        name: c.objects[&0x501].name.clone(),
+        equipped: vec![],
+        contents: vec![0xa22],
+        ..v.objects[0]
+    });
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    let goals = [10, 13, 10].map(|x| {
+        v.position = center((x, 10));
+        v.tick += 5;
+        v.time_ms += 250;
+        let d = brain.decide(&v, &c).unwrap();
+        brain.goal = d.goal.clone();
+        d.goal
+    });
+    assert!(!goals.contains(&Goal::Loot(3)), "{goals:?}");
+    assert_eq!(goals[1], Goal::Fight(2));
+
+    v.objects[0].position = center((32, 10));
+    for x in [15, 19] {
+        v.position = center((x, 10));
+        v.tick += 5;
+        v.time_ms += 250;
+        let d = brain.decide(&v, &c).unwrap();
+        assert_eq!(d.goal, Goal::Loot(3));
+        brain.goal = d.goal;
+        if x == 15 {
+            assert!(d.movement.is_some_and(|p| p.distance(chest) < 5.));
+        } else {
+            assert!(matches!(d.item, Some(Action::Swap { from, .. }) if from.object == 3));
+        }
+    }
+}
+
+#[test]
 fn loot_approach_crosses_a_venture_band_edge_and_collects_the_chest() {
     let (c, mut v) = fixture();
     v.quest = None;
