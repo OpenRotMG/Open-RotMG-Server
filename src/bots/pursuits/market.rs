@@ -96,6 +96,7 @@ struct MarketSession {
     until: u64,
     next_move: u64,
     destination: Option<TilePoint>,
+    unsold_quote: Option<[Goods; 2]>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Market {
@@ -122,6 +123,8 @@ pub(crate) struct Market {
     next_request_ms: u64,
     #[serde(default)]
     quote: Option<[Goods; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_unsold_kind: Option<i32>,
     #[serde(default)]
     preparing: bool,
     contacts: Vec<Contact>,
@@ -183,6 +186,9 @@ impl Market {
         ensure!(
             self.contacts.len() <= 32
                 && self.history.len() <= 8
+                && self
+                    .last_unsold_kind
+                    .is_none_or(|kind| (0..=65535).contains(&kind))
                 && self.vault.as_ref().is_none_or(|v| {
                     // One remembered slice of 8 per owned chest.
                     v.len().is_multiple_of(8)
@@ -651,9 +657,15 @@ impl Market {
             );
             return Ok(None);
         }
-        Ok(Some(
-            quotes[style(&self.name) as usize % quotes.len()].clone(),
-        ))
+        let Some(last) = self.last_unsold_kind else {
+            return Ok(Some(
+                quotes[style(&self.name) as usize % quotes.len()].clone(),
+            ));
+        };
+        Ok(quotes.into_iter().min_by_key(|q| {
+            let kind = merchandise_kind(q, c);
+            (kind <= last, kind)
+        }))
     }
     fn quotes(&self, v: &PlayerView, c: &Content, future: Option<u16>) -> Result<Vec<[Goods; 2]>> {
         let stock = self.stock(v, c, future)?;
@@ -1086,6 +1098,16 @@ impl Market {
             .as_ref()
             .is_some_and(|vault| vault.iter().filter(|k| **k < 0).count() <= 1)
     }
+    fn expire_session(&mut self, v: &PlayerView, c: &Content) {
+        if self.target.is_none()
+            && let Some(q) = self.session.as_ref().and_then(|s| s.unsold_quote.as_ref())
+            && self.quote.as_ref() == Some(q)
+        {
+            self.last_unsold_kind = Some(merchandise_kind(q, c));
+            self.quote = None;
+        }
+        self.end_session(v, "elapsed");
+    }
     fn end_session(&mut self, v: &PlayerView, reason: &str) {
         self.preparing = false;
         if let Some(s) = self.session.take() {
@@ -1458,7 +1480,7 @@ impl Market {
                 .as_ref()
                 .is_some_and(|s| v.elapsed_ms >= s.until)
         {
-            self.end_session(v, "elapsed");
+            self.expire_session(v, c);
             return Ok(None);
         }
         let Some(quote) = self.quote(v, c, future)? else {
@@ -1518,6 +1540,7 @@ impl Market {
                     .context("market session deadline overflow")?,
                 next_move: v.elapsed_ms + 10_000,
                 destination: None,
+                unsold_quote: None,
             });
             tracing::info!(account=v.session.account,elapsed_ms=v.elapsed_ms,duration_ms,session=?self.session,?quote,values=%serde_json::to_string(&quote.each_ref().map(|g| c.item_values.get(g.kind)))?,"market intentional session started");
         }
@@ -1554,7 +1577,7 @@ impl Market {
             return Ok(None);
         };
         if v.elapsed_ms >= s.until {
-            self.end_session(v, "elapsed");
+            self.expire_session(v, c);
             return Ok(None);
         }
         if v.position.distance(center(s.anchor)) > 1.5 {
@@ -1595,6 +1618,7 @@ impl Market {
                 parse_quote(&ad, c).as_ref() == Some(&quote),
                 "unresolvable market quote: {ad}"
             );
+            s.unsold_quote = Some(quote.clone());
             self.queue(ad, Channel::Local);
             self.last_queued_ad = Some((quote, v.elapsed_ms));
         }
@@ -1722,6 +1746,9 @@ fn money(c: &Content, kind: i32) -> bool {
         || c.objects
             .get(&(kind as u16))
             .is_some_and(|o| o.stat_increase.is_some())
+}
+fn merchandise_kind(q: &[Goods; 2], c: &Content) -> i32 {
+    q[usize::from(money(c, q[0].kind))].kind
 }
 fn bounded_quote(give: &Goods, want: &Goods, c: &Content) -> Option<[Goods; 2]> {
     // Nobody offered ordinary gear as payment for other gear.
@@ -1966,6 +1993,7 @@ mod current_message_tests {
             until: v.elapsed_ms + 60000,
             next_move: 0,
             destination: None,
+            unsold_quote: None,
         });
         let q = market.quote(&v, &app.content, None).unwrap().unwrap();
         let message = Message {

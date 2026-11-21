@@ -98,6 +98,61 @@ async fn live_quote_uses_only_actual_spare_inventory_and_shared_values() {
 }
 
 #[test]
+fn unsold_visit_exposes_a_different_held_kind_next_visit() {
+    let (c, mut v) = nexus_peer([2749, 2749, 2585, -1, -1, -1, -1, -1]);
+    let initial_stock = v.character.items.clone();
+    let grid = Grid::terrain(&v);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(73);
+    let mut market = Market {
+        name: "Trader".into(),
+        trader: true,
+        ..Market::default()
+    };
+    let ad = |market: &mut Market, v: &mut PlayerView, rng: &mut rand::rngs::StdRng| {
+        market.decide(v, &c, None, &grid, rng).unwrap();
+        v.position = center(market.session.as_ref().unwrap().anchor);
+        market.decide(v, &c, None, &grid, rng).unwrap();
+        let message = market.outgoing.take().expect("visit publishes a quote");
+        assert!(market.message_current(&message, v, &c, None).unwrap());
+        let q = parse_quote(&message.text, &c).unwrap();
+        assert!(fair(&q, &c));
+        assert!(market.spare(v, &c, None, q[0].kind).unwrap() >= q[0].quantity);
+        q
+    };
+    let first = ad(&mut market, &mut v, &mut rng);
+    v.elapsed_ms += 40_000;
+    assert_eq!(
+        ad(&mut market, &mut v, &mut rng),
+        first,
+        "no rotation within a visit"
+    );
+    v.elapsed_ms = market.session.as_ref().unwrap().until;
+    assert!(
+        market
+            .decide(&v, &c, None, &grid, &mut rng)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        market
+            .decide(&v, &c, None, &grid, &mut rng)
+            .unwrap()
+            .is_none()
+    );
+
+    let mut next: Market = serde_json::from_value(serde_json::to_value(&market).unwrap()).unwrap();
+    next.name.clone_from(&market.name);
+    next.trader = true;
+    next.bind();
+    let second = ad(&mut next, &mut v, &mut rng);
+    assert_eq!(
+        BTreeSet::from([first[0].kind, second[0].kind]),
+        BTreeSet::from([2585, 2749])
+    );
+    assert_eq!(v.character.items, initial_stock);
+}
+
+#[test]
 fn item_funds_ignore_cached_vault_and_prepare_only_live_owned_stock() {
     let (c, mut v) = crate::bots::quest_tests::fixture();
     let mut chest = v.objects.remove(0);
@@ -141,11 +196,21 @@ fn item_funds_ignore_cached_vault_and_prepare_only_live_owned_stock() {
     assert!(matches!(d.journey, Some(Journey::Nexus)));
     v.map.name = "Nexus".into();
     v.objects.clear();
-    assert_eq!(m.quote(&v, &c, None).unwrap(), Some(buy));
+    assert_eq!(m.quote(&v, &c, None).unwrap(), Some(buy.clone()));
     assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some());
     assert!(
         m.session.is_some() && !m.trader,
         "funded purpose bypasses random persona admission"
+    );
+    v.position = center(m.session.as_ref().unwrap().anchor);
+    m.decide(&v, &c, None, &grid, &mut rng).unwrap();
+    assert!(m.outgoing.is_some());
+    v.elapsed_ms = m.session.as_ref().unwrap().until;
+    assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_none());
+    assert_eq!(m.quote(&v, &c, None).unwrap(), Some(buy));
+    assert!(
+        m.last_unsold_kind.is_none(),
+        "exact acquisition never rotates"
     );
     v.character.items[6] = -1;
     assert!(
@@ -365,6 +430,7 @@ fn nexus_market_spaces_unchanged_ads_without_delaying_changed_terms() {
             until: 60_000,
             next_move: 60_000,
             destination: None,
+            unsold_quote: None,
         }),
         quote: Some(first.clone()),
         ..Market::default()
@@ -597,6 +663,7 @@ fn a_buyer_fetches_saved_potions_from_its_vault_for_a_wanted_item() {
             until: u64::MAX,
             next_move: 0,
             destination: None,
+            unsold_quote: None,
         }),
         ..Market::default()
     };

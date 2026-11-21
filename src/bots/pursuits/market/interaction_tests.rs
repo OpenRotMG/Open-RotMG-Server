@@ -597,6 +597,7 @@ fn vault_trip_keeps_the_nexus_market_visit_until_an_outing() {
             until: u64::MAX,
             next_move: 0,
             destination: None,
+            unsold_quote: None,
         }),
         session_used: true,
         ..Market::default()

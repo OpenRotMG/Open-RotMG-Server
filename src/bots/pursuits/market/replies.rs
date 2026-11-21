@@ -244,6 +244,9 @@ impl Market {
             return Ok(());
         }
         self.pending_trade = None;
+        if let Some(session) = &mut self.session {
+            session.unsold_quote = None;
+        }
         tracing::info!(
             account = v.session.account,
             peer = p.contact.account,
