@@ -148,7 +148,7 @@ async fn decide_before_social(
     Ok((!held).then_some(decision))
 }
 
-fn held_movement(grid: &Grid, from: Pos, goal: Pos, distance: f32) -> Option<Pos> {
+pub(super) fn held_movement(grid: &Grid, from: Pos, goal: Pos, distance: f32) -> Option<Pos> {
     let length = from.distance(goal).min(distance);
     // Short key holds fit corners where no full reaction-length octant fits.
     (0..4)
@@ -1225,7 +1225,7 @@ pub(super) async fn launch(
                     let diagnostic = format!("movement={:?} cursor={:?} item={:?}", decision.movement, decision.aim, decision.item);
                     let input_session = (id, account, view.session.character);
                     let input_grid = brain.hazard_movement.take().or_else(|| brain.navigation.clone()).context("virtual input navigation missing")?;
-                    let held_distance = (combat::speed(&view) * profile.reaction as f32 * 0.05).max(0.5);
+                    let held_distance = combat::held_distance(&view, profile.reaction);
                     let movement = decision.journey.is_none().then_some(decision.movement).flatten();
                     let aim = decision.journey.is_none().then_some(decision.aim).flatten();
                     let item = decision.journey.is_none().then_some(decision.item).flatten();

@@ -379,6 +379,54 @@ fn travelling_realm_hunter_shoots_passing_enemy_without_changing_course() {
     assert!(passing.aim.is_some_and(|p| p.x < v.position.x));
 }
 
+#[test]
+fn realm_hunt_keeps_a_route_that_already_dodges_the_shot() {
+    let (c, mut v) = fixture();
+    v.objects[0].position = center((28, 10));
+    let mut brain = Brain::new(ARCHETYPES[0], &v);
+    let first = brain.decide(&v, &c).unwrap();
+    assert_eq!(first.goal, Goal::Hunt(2));
+    brain.goal = first.goal;
+    v.tick += 6;
+    v.time_ms += 300;
+
+    let shot = crate::world::view::VisibleProjectile {
+        owner: 2,
+        id: 1,
+        start: center((10, 7)),
+        position: center((10, 7)),
+        angle: std::f32::consts::FRAC_PI_2,
+        speed: 80.,
+        lifetime_ms: 2000.,
+        amplitude: 0.,
+        frequency: 0.,
+        passes_cover: false,
+        damage: 20,
+        armor_piercing: false,
+    };
+    v.projectiles.push(shot);
+    let continuing = brain.decide(&v, &c).unwrap();
+    assert_eq!(continuing.goal, Goal::Hunt(2));
+    let route = first.movement.expect("the hunter started toward the quest");
+    let step = continuing.movement.expect("the hunter keeps moving");
+    assert!(
+        step.distance(route) < 0.01,
+        "route {route:?} already dodges, got {step:?}"
+    );
+
+    v.tick += 6;
+    v.time_ms += 300;
+    v.projectiles[0].start = center((14, 10));
+    v.projectiles[0].position = center((14, 10));
+    v.projectiles[0].angle = std::f32::consts::PI;
+    let dodging = brain.decide(&v, &c).unwrap();
+    assert_eq!(dodging.goal, Goal::Hunt(2));
+    let dodge = dodging
+        .movement
+        .expect("the hunter dodges across the route");
+    assert!(combat::clearance(&v, dodge) > combat::clearance(&v, route) + 0.5);
+}
+
 pub(super) fn fixture() -> (Content, PlayerView) {
     let content = Content::load(std::path::Path::new("data")).unwrap();
     let geometry = crate::navigation::Geometry::new(

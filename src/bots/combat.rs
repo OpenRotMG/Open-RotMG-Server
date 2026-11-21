@@ -70,6 +70,10 @@ pub(super) fn speed(v: &PlayerView) -> f32 {
     speed * ground
 }
 
+pub(super) fn held_distance(v: &PlayerView, reaction: u64) -> f32 {
+    (speed(v) * reaction as f32 * 0.05).max(0.5)
+}
+
 pub(super) fn clearance(v: &PlayerView, destination: Pos) -> f32 {
     let speed = speed(v);
     let distance = v.position.distance(destination);

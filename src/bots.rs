@@ -1143,6 +1143,26 @@ impl Brain {
         if !s.threatened {
             return Ok(());
         }
+        // Standing still can be threatened even when the hunter's held route already dodges the shot.
+        if v.map.name == "Realm"
+            && matches!(decision.goal, Goal::Hunt(_))
+            && self
+                .travel
+                .as_ref()
+                .is_some_and(|(goal, _, _)| *goal == decision.goal)
+            && v.throws.is_empty()
+            && let Some(step) = decision.movement.and_then(|waypoint| {
+                runtime::held_movement(
+                    &s.grid,
+                    v.position,
+                    waypoint,
+                    combat::held_distance(v, self.profile.reaction),
+                )
+            })
+            && combat::clearance(v, step) >= self.mind.cognition.pickup_clearance
+        {
+            return Ok(());
+        }
         // Near the planned fight, keep weapon range from it; otherwise keep making way toward the plan.
         let engaged = s.enemies.iter().find(|e| {
             matches!(decision.goal, Goal::Fight(id) | Goal::Hunt(id) if id == e.id)
