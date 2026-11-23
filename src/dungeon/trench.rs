@@ -142,8 +142,15 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         map.cells[index(64 + dx, 76 + dy)].object = Some(VENT);
     }
     map.cells[index(64, 76)].object = Some(THESSAL);
-    map.cells[index(12, 12)].object = Some(VENT);
-    map.cells[index(12, 10)].object = Some(0x703);
+    // FSoD oceantrench.jm fills the Spawn region with 21 vents: a 5x5 block without its corners.
+    for dy in -2..=2i32 {
+        for dx in -2..=2i32 {
+            if dx.abs() + dy.abs() < 4 {
+                map.cells[index(12 + dx, 12 + dy)].object = Some(VENT);
+            }
+        }
+    }
+    map.cells[index(12, 9)].object = Some(0x703);
     map.cells[index(12, 12)].region = 1;
     for c in &map.cells {
         ensure!(
@@ -196,7 +203,20 @@ mod tests {
         // A scenery fix must not reshuffle geometry, vents or encounter spawns.
         assert_eq!(
             fingerprint,
-            "56488cc7153604a260eea0f9fa930f3f97e7f41e2d622eeec87be742fa48a3ac"
+            "71a9a55baf027e38e8ccc1346c37eff73b4710b87b62daa9d62db51f0fbd4261"
         );
+    }
+
+    #[test]
+    fn spawn_room_holds_the_reference_vent_cluster() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        for seed in (0..16).chain([12351, u64::MAX]) {
+            let map = generate(&content, seed).unwrap();
+            let vents = (10..=14)
+                .flat_map(|y| (10..=14).map(move |x| (x, y)))
+                .filter(|&(x, y)| map.cells[y * 110 + x].object == Some(VENT))
+                .count();
+            assert!(vents >= 21, "{vents} vents at spawn, seed {seed}");
+        }
     }
 }
