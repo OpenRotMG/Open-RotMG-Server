@@ -508,6 +508,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
             allow_teleport: true,
             layout: None,
             godlands: Arc::default(),
+            godland_route: Arc::default(),
             // Godlands sightings anywhere on this small fixture count as the Godlands.
             godland_tiles: Arc::new(
                 (0..128)

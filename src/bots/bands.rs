@@ -51,6 +51,21 @@ pub(super) fn near_godlands(v: &PlayerView, distance: f32) -> bool {
             .is_some()
     })
 }
+/// Where a restless farmer walks next: the Godlands spot furthest along its course, turning round only at a dead end.
+pub(super) fn leg(v: &PlayerView, course: f32, open: impl Fn(Pos) -> bool) -> Option<Pos> {
+    let along = |p: &Pos| (p.x - v.position.x) * course.cos() + (p.y - v.position.y) * course.sin();
+    let furthest = |reach: f32| {
+        v.map
+            .godland_route
+            .iter()
+            .filter(|p| (40. ..=reach).contains(&p.distance(v.position)) && open(**p))
+            .max_by(|a, b| along(a).total_cmp(&along(b)))
+            .copied()
+    };
+    let ahead = |reach| furthest(reach).filter(|p| along(p) > 0.);
+    // Live: one Realm's Godlands lies in two pieces 145 tiles apart.
+    ahead(64.).or_else(|| ahead(200.)).or_else(|| furthest(64.))
+}
 fn region(p: Pos) -> TilePoint {
     ((p.x / REGION).floor() as i16, (p.y / REGION).floor() as i16)
 }
@@ -330,5 +345,19 @@ mod tests {
         );
         assert_eq!(bands.known(Pos { x: 90.5, y: 90.5 }), Some(3));
         assert_eq!(bands.known(Pos { x: 10.5, y: 10.5 }), Some(4));
+    }
+
+    #[test]
+    fn a_godlands_leg_keeps_its_course_crosses_a_gap_and_turns_only_at_the_end() {
+        let (_, mut v) = quest_tests::fixture();
+        let spot = |x: f32| Pos { x, y: 100.5 };
+        v.map.godland_route = Arc::new([52.5, 124.5, 148.5, 252.5, 300.5].map(spot).to_vec());
+        v.position = spot(100.5);
+        let x = |leg: Option<Pos>| leg.map(|p| p.x);
+        assert_eq!(x(leg(&v, 0., |_| true)), Some(148.5));
+        assert_eq!(x(leg(&v, std::f32::consts::PI, |_| true)), Some(52.5));
+        assert_eq!(x(leg(&v, 0., |p| p.x != 148.5)), Some(300.5));
+        v.position = spot(300.5);
+        assert_eq!(x(leg(&v, 0., |_| true)), Some(252.5));
     }
 }

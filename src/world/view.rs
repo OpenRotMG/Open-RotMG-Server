@@ -125,6 +125,8 @@ pub struct MapInfo {
     #[serde(skip)]
     pub godlands: Arc<Vec<Pos>>,
     #[serde(skip)]
+    pub godland_route: Arc<Vec<Pos>>,
+    #[serde(skip)]
     pub godland_tiles: Arc<BTreeSet<(i16, i16)>>,
 }
 #[derive(Serialize)]
@@ -422,6 +424,7 @@ impl World {
                 allow_teleport: w.allow_teleport(),
                 layout: w.realm_layout.clone(),
                 godlands: w.godlands.clone(),
+                godland_route: w.godland_route.clone(),
                 godland_tiles: w.godland_tiles.clone(),
             },
             character: OwnCharacter {

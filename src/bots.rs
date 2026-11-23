@@ -270,6 +270,10 @@ struct Brain {
     goal: Goal,
     rng: rand::rngs::StdRng,
     heading: f32,
+    /// The way this farmer travels the Godlands, kept between legs and taken from those it follows.
+    course: f32,
+    /// When this player last fought, looted or followed someone.
+    engaged: u64,
     steering: Option<(i32, f32)>,
     /// The kept journey and its distance-proportional deadline (ms).
     /// The trip being followed: its goal, deadline and the destination chosen when it started.
@@ -369,6 +373,8 @@ impl Brain {
             goal: Goal::Wait,
             rng,
             heading,
+            course: heading,
+            engaged: view.time_ms,
             steering: None,
             travel: None,
             nexus_explore_objective: None,
@@ -1869,6 +1875,18 @@ impl Brain {
         {
             self.travel = None;
         }
+        if matches!(
+            self.goal,
+            Goal::Fight(_) | Goal::Hunt(_) | Goal::Loot(_) | Goal::Follow(_)
+        ) {
+            self.engaged = v.time_ms;
+        }
+        // An emptied spot bores the experienced first; they walk on and the rest follow, which is all a train's leader is.
+        let leg = (farmer && !approaching_godlands)
+            .then(|| bands::leg(v, self.course, |p| !self.blocked.contains_key(&tile(p))))
+            .flatten();
+        let restless =
+            v.time_ms >= self.engaged + 1000 + self.profile.reaction.saturating_sub(3) * 2500;
         // A short kite off the fringe shouldn't reopen a completed Godlands trip.
         let fringe_fight =
             approaching_godlands && fighting_nearby && bands::near_godlands(v, reaction_distance);
@@ -1890,6 +1908,7 @@ impl Brain {
             if let Some(ground) = kept_godlands
                 .or(snakes)
                 .or_else(|| self.crowd.bands.venture(v))
+                .or(leg.filter(|_| restless))
             {
                 choices.push((60. + self.profile.resources, Goal::Venture, ground));
             }
@@ -2143,6 +2162,8 @@ impl Brain {
             && decision.item.is_none()
             && v.time_ms >= self.next_teleport
             && !choices.iter().any(|(score, _, _)| *score >= 95.)
+            // Live: farmers a few steps off the narrow Godlands teleported back into the pile once a minute.
+            && !bands::near_godlands(v, 24.)
             && let Some(marker) = self.crowd.godlands(v, |p| {
                 !self.blocked.contains_key(&tile(p))
                     && enemies.iter().all(|e| e.position.distance(p) > 12.)
@@ -2161,15 +2182,19 @@ impl Brain {
             decision.journey = Some(Journey::Regroup(marker.id));
             return Ok(decision);
         }
+        // A farmer under way is not called back by the crowd it left.
+        let leading = farmer && self.travel.as_ref().is_some_and(|t| t.0 == Goal::Venture);
         // Players go where the people are; exploring alone is what is left when nobody suitable is on the minimap.
         if !committed
             // Approaching the quest's fight is the quest logic's job, landing well outside it.
-            && let Some((marker, crowd)) = self.crowd.gathering(v, &self.goal, self.ambitious(), |position| {
+            && let Some((marker, crowd)) = self.crowd.gathering(v, &self.goal, self.ambitious(), leading, |position| {
                 let quest = enemies.iter().find(|e| v.quest == Some(e.id));
                 // Live: level 20s joined lowland crowds on unseen ground and farmed Hobbit Mages in groups of eight.
                 let veteran_ground = v.character.level < 20
                     || quest.is_some_and(|q| q.position.distance(position) < 45.)
-                    || self.crowd.bands.known(position).is_some_and(|band| band >= 3);
+                    || self.crowd.bands.known(position).is_some_and(|band| band >= 3)
+                    // A train walks onto Godlands it has not fought on yet.
+                    || bands::in_godlands(v, position);
                 !self.blocked.contains_key(&tile(position))
                     && quest.is_none_or(|q| q.position.distance(position) >= 20.)
                     && (!farmer || realm_quest.is_some() || bands::in_godlands(v, position))
@@ -2178,6 +2203,9 @@ impl Brain {
         {
             let score = 55. + 5. * crowd.min(6) as f32 + self.profile.companions;
             let distance = marker.position.distance(v.position);
+            if let Some(u) = self.crowd.walking(marker.id) {
+                self.course = u.y.atan2(u.x);
+            }
             if !farmer
                 && !choices.iter().any(|(s, _, _)| *s > score)
                 && crowd >= 2
@@ -2258,11 +2286,15 @@ impl Brain {
                 );
             } else if offered.is_some() || matches!(kept, Goal::Explore(..)) {
                 // A traveller can shoot a side enemy without giving up the route at a band edge.
+                // Inside the Godlands a farmer's leg stops for every god; that is what it walks on to find.
+                let farming = farmer && !approaching_godlands && kept == Goal::Venture;
                 let approaching = v.map.name == "Realm"
                     && matches!(kept, Goal::Hunt(_) | Goal::Venture)
+                    && !farming
                     && offered.is_some_and(|p| travel(&kept, p));
                 choices.retain(|(_, g, p)| {
                     *g == kept
+                        || farming && matches!(g, Goal::Fight(_) | Goal::Hunt(_))
                         || !(travel(g, *p) || approaching && matches!(g, Goal::Fight(_)))
                         || matches!(g, Goal::Loot(_)) && !matches!(kept, Goal::Loot(_))
                         || Some(g) == realm_quest.as_ref()
@@ -2282,11 +2314,14 @@ impl Brain {
         });
         let mut explore_objective = None;
         // Exploration's maximum score is 20; a clear higher-ranked route makes its full-map search irrelevant.
-        if !choices.iter().any(|(score, goal, position)| {
-            score + if *goal == self.goal { 8. } else { 0. } > 20.
-                && !self.blocked.contains_key(&tile(*position))
-                && grid.segment(v.position, *position)
-        }) {
+        // A farmer with ground ahead waits where it stands; wandering would lead those who follow walkers nowhere.
+        if leg.is_none()
+            && !choices.iter().any(|(score, goal, position)| {
+                score + if *goal == self.goal { 8. } else { 0. } > 20.
+                    && !self.blocked.contains_key(&tile(*position))
+                    && grid.segment(v.position, *position)
+            })
+        {
             if let Goal::Explore(x, y) = self.goal
                 && tile(v.position) != (x, y)
                 && grid.walkable.contains(&(x, y))
@@ -2583,6 +2618,22 @@ impl Brain {
                     target = id,
                     world = v.session.world,
                     "autonomous follow selected"
+                );
+            }
+            if goal == Goal::Venture
+                && leg.is_some_and(|p| tile(p) == tile(destination))
+                && self.travel.as_ref().is_none_or(|t| t.0 != goal)
+            {
+                self.course = angle(v.position, destination);
+                tracing::info!(
+                    account = v.session.account,
+                    character = v.session.character,
+                    world = v.session.world,
+                    from = ?tile(v.position),
+                    to = ?tile(destination),
+                    idle_ms = v.time_ms - self.engaged,
+                    followers = self.crowd.near(v, v.position),
+                    "autonomous godlands leg started"
                 );
             }
             let approaching_realm =
