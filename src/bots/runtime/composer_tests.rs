@@ -33,6 +33,9 @@ async fn composer_types_before_public_chat_v2_is_atomic_and_owned_ads_really_pas
         (initial.composition.phase, initial.composition.text.as_str()),
         (1, "")
     );
+    let said = |p: &wire::Packet| {
+        p.id == wire::TEXT && p.body.windows(text.len()).any(|w| w == text.as_bytes())
+    };
     let mut observed = Vec::new();
     for _ in 0..32 {
         app.world
@@ -80,8 +83,9 @@ async fn composer_types_before_public_chat_v2_is_atomic_and_owned_ads_really_pas
         assert_eq!(draft.u8().unwrap(), 1);
         assert_eq!(draft.utf().unwrap(), input.composition.text);
         draft.done().unwrap();
+        // Nearby NPC speech (e.g. a Sheep's "baa") is not the composer's chat.
         while let Ok(packet) = output.try_recv() {
-            assert_ne!(packet.id, wire::TEXT, "typing cannot publish chat");
+            assert!(!said(&packet), "typing cannot publish chat");
         }
         if brain
             .compose(&app, &view, Source::Call, text)
@@ -99,7 +103,7 @@ async fn composer_types_before_public_chat_v2_is_atomic_and_owned_ads_really_pas
         .await
         .unwrap();
     brain.close_composition(&app, true).await.unwrap();
-    assert!(std::iter::from_fn(|| output.try_recv().ok()).any(|p| p.id == wire::TEXT));
+    assert!(std::iter::from_fn(|| output.try_recv().ok()).any(|p| said(&p)));
     let closed = app
         .world
         .spectator_inputs(

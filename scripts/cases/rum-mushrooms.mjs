@@ -1,4 +1,6 @@
-import {writeFile} from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {connect} from '../../scripts/record-demo.mjs';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 export const fixture={class:0x30e,level:20,seed:886,world:'pirate-cave',position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0xa50,0xa51,0xc25,0xc25,0xa50,0xa51,0xc25,0xa47],stats:null};
@@ -21,14 +23,38 @@ export async function run(game){
   await act({keys:[],duration_ms:2000},{name:'sober',when:v=>v.game_ms>initial.game_ms+500});
   await act({keys:['2'],duration_ms:2000},{name:'mushroom',when:v=>Boolean(v.character.conditions&hallucinating)});
   game.check('Mushroom alone applies Hallucinating',samples.some(v=>v.character.conditions===hallucinating));
-  await act([step(['1'],100),step(['3'],100),step(['4'],100)]);
+  await act({keys:['1'],duration_ms:100});
+  const config=JSON.parse(await readFile(join(process.env.QA_RESULTS_DIR,'native/native.json'),'utf8'));
+  const cdp=await connect({...config.native.find(n=>n.actor===game.actor),url:config.origin+'/',helper:config.browserTools});
+  try{
+    const action=act({keys:[],duration_ms:2000});
+    const input=(async()=>{
+      const waitFor=async (predicate,message)=>{
+        const deadline=Date.now()+5000;
+        for(;;){const v=await game.observe();if(predicate(v))return v;assert(Date.now()<deadline,message);await delay(35);}
+      };
+      const press=async digit=>{
+        const event={key:digit,code:`Digit${digit}`,windowsVirtualKeyCode:Number(digit)+48};
+        try{await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',...event});}
+        finally{await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',...event});}
+      };
+      await waitFor(v=>!v.paused,'Ghost Rum action must resume');
+      await press('3');
+      const first=await waitFor(v=>v.character.items[6]===-1&&Boolean(v.character.conditions&invisible),'First Ghost Rum must apply');
+      const refresh=await waitFor(v=>v.game_ms>first.game_ms+550,'Ghost Rum refresh must remain in one action');
+      assert(!refresh.paused&&(refresh.character.conditions&invisible),'Refresh must occur before invisibility expires');
+      await press('4');
+      await waitFor(v=>v.character.items[7]===-1,'Second Ghost Rum must commit');
+    })();
+    for(const result of await Promise.allSettled([action,input]))if(result.status==='rejected')throw result.reason;
+  }finally{cdp.close();}
   game.check('Rum and Ghost Rum coexist with Mushroom',samples.some(v=>v.character.conditions===(drunk|hallucinating|invisible)));
   game.check('second Ghost Rum is used while the first invisibility is active',useIndex(7)>0&&Boolean(samples[useIndex(7)-1].character.conditions&invisible)&&used(7).game_ms-used(6).game_ms>500);
   await until(used(7).game_ms+5000);
   bracket(7,invisible,4000,'refreshed Ghost Invisible expiration');
-  await until(used(4).game_ms+18000);
+  await until(used(4).game_ms+10000);
   game.check('short Ghost Rum does not truncate the longer Drunk',Boolean((await game.observe()).character.conditions&drunk));
-  await act([step(['5'],100),step(['6'],100),step([],1000)]);
+  await act([step(['6'],100),step(['5'],100),step([],1000)]);
   for(const [slot,mask] of [[8,drunk],[9,hallucinating]])game.check('30-second condition refresh occurs while active in slot '+slot,Boolean(samples[useIndex(slot)-1].character.conditions&mask));
   await until(Math.max(used(8).game_ms,used(9).game_ms)+32000);
   for(const [first,second,mask,name] of [[4,8,drunk,'Drunk'],[5,9,hallucinating,'Hallucinating']]){

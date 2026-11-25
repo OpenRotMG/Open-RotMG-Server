@@ -14,8 +14,10 @@ export async function run(game){
   }
   async function save(name,actor=game){const state=await actor.inspect();samples.push({name,actor:actor.actor,...state});await writeFile(join(root,'quiet-observations.json'),JSON.stringify(samples));return state;}
   const initial=await save('initial');
-  await prepare(game,{kind:'protection',condition:'invulnerable',duration_ms:60000});
-  await game.act({keys:[],duration_ms:1000},{name:'quiet-applied',when:v=>!!(v.character.conditions&2)});
+  const vulnerableAt=(await game.observe()).game_ms+35000;
+  await prepare(game,{kind:'protection',condition:'invulnerable',duration_ms:35000});
+  for(let n=0;n<12&&!((await game.observe()).character.conditions&2);n++)await game.act({keys:[],duration_ms:500});
+  await game.act({keys:[],duration_ms:200},{name:'quiet-applied',when:v=>!!(v.character.conditions&2)});
   const hit=await save('natural-hit');
   game.check('natural selected five-second Living Floor hit drains MP through HP protection',!!(hit.view.character.conditions&2)&&hit.view.character.mp===0&&hit.view.character.hp===initial.view.character.hp);
   const peer=await game.join({...fixture,world:hit.view.session.world,position:hit.view.position,backpack:[0xc1a,-1,-1,-1,-1,-1,-1,-1]});
@@ -43,9 +45,12 @@ export async function run(game){
   }
   const killed=await save('source-defeated');
   game.check('Quiet permits ordinary weapon fire to defeat its actual source',!killed.diagnostic.entities.some(e=>e.id===floor.id)&&killed.diagnostic.character.kills>refused.diagnostic.character.kills&&!!(killed.view.character.conditions&2));
-  // Bombs already thrown still land and burst for up to 2.45 s.
-  await game.act({keys:[],duration_ms:2500});
-  await game.act({keys:['3'],duration_ms:200},{name:'quiet-cured',when:v=>!(v.character.conditions&2)});
+  // No teleport is allowed in the Castle. Block fresh Quiet applications when HP-only protection ends.
+  const beforeCure=await game.observe();
+  for(let now=beforeCure.game_ms;now<vulnerableAt;now=(await game.observe()).game_ms)await game.act({keys:[],duration_ms:Math.min(10000,vulnerableAt-now)});
+  game.check('natural Quiet still active at Holy Water use',!!((await game.observe()).character.conditions&2));
+  await prepare(game,{kind:'protection',condition:'invincible',duration_ms:60000});
+  await game.act({keys:['3'],duration_ms:500},{name:'quiet-cured',when:v=>v.character.items[6]===-1&&!(v.character.conditions&2)});
   const cured=await save('cured');
   game.check('ordinary Holy Water consumes once and clears natural Quiet',!(cured.view.character.conditions&2)&&cured.view.character.items[6]===-1&&cured.view.character.inventory_revision===killed.view.character.inventory_revision+1);
   await prepare(peer,{kind:'item',slot:4,item:0xc1a});

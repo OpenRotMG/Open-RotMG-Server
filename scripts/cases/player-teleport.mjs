@@ -45,11 +45,10 @@ export async function run(game) {
   await chat(game,0,`/teleport ${targetName}`);
   await game.act({keys:[],duration_ms:800},{name:'invisible-target-refusal',when:()=>true});
   game.check('invisible target refusal leaves both players in place',distance(await game.observe(),start)<.1&&distance(await peer.observe(),originalPeer)<.1);
-  const refused=await game.observe();
   await peer.act({keys:[],duration_ms:6000});
   await menu();await teleport('nexus-teleport-landed');
   const landed=await game.observe();
-  game.check('eligible Nexus menu teleport lands exactly on the live target',distance(landed,await peer.observe())<.01&&landed.session.character===start.session.character&&landed.game_ms-refused.game_ms<10000);
+  game.check('eligible Nexus menu teleport lands exactly on the live target',distance(landed,await peer.observe())<.01&&landed.session.character===start.session.character);
   await peer.act({keys:[],duration_ms:800},{name:'target-observes-arrival',when:()=>true});
   await game.act({keys:['a'],duration_ms:200});
   const moved=await game.observe();

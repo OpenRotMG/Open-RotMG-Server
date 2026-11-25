@@ -22,7 +22,7 @@ pub(super) fn fields(status: &[u8]) -> BTreeMap<u8, i32> {
 
 #[tokio::test]
 async fn legends_glow_initial_wire_and_guild_refresh_preserve_account_membership() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let legend = store.list("glow-legend".into()).await.unwrap().id;
     let ordinary = store.list("glow-ordinary".into()).await.unwrap().id;

@@ -21,6 +21,18 @@ export async function run(game){
   await game.act({keys:[],duration_ms:2000});
   await game.act({keys:[],duration_ms:600},{name:'huntress-before',when:()=>true});
   const start=await game.observe();
+  async function castApproach(){
+    for(let n=0;n<28;n++){
+      const s=await game.inspect(),target=s.diagnostic.entities.find(e=>e.id===boss.id);assert(target,'Stheno left the native trap test');
+      const dx=target.pos.x-s.view.position.x,dy=target.pos.y-s.view.position.y,distance=Math.hypot(dx,dy);
+      if(distance<2.4&&!(target.condition&(1<<24)))return s;
+      // Native aim clamps to the central canvas; the trap lands later and needs an enemy inside half its radius (src/world/abilities.rs:1070–1096).
+      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
+      if(distance>=2.4){if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');}
+      await game.act({keys,duration_ms:Math.max(100,Math.min(350,Math.round(distance*80)))});
+    }
+    throw Error('Native Huntress could not reach a vulnerable Stheno before the cast');
+  }
   for(const [index,item,effect,duration,cost] of [[-1,0xab1,4,3000,40],[0,0xab6,4,5500,140],[1,0xb2c,4,6000,140],[2,0xc1c,14,3500,130]]){
     if(index>=0)await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*index,y:428},to:{x:678,y:385}}});
     const equipped=(await game.inspect()).view.character;
@@ -28,12 +40,13 @@ export async function run(game){
     game.check(item+' applies only its equipment stat bonuses',JSON.stringify(equipped.stats.slice(4))===JSON.stringify(item===0xb2c?[50,50,42,52]:item===0xc1c?[52,52,40,50]:[50,50,40,50]));
     await cheat({kind:'vitals',hp:700,mp:252});
     await game.act({keys:[],duration_ms:600});
-    const before=await game.inspect();
+    const before=await castApproach();
     await game.act({keys:[' '],duration_ms:100,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:false}});
     const thrown=await game.inspect();
     game.check(item+' spends one mana cost',thrown.view.character.mp>=before.view.character.mp-cost&&thrown.view.character.mp<before.view.character.mp-cost+10);
     await game.act({keys:[],duration_ms:2100},{name:'trap-'+item,when:view=>view.game_ms>=thrown.view.time_ms+1700});
     const hit=await game.inspect(),target=hit.diagnostic.entities.find(e=>e.id===boss.id),status=target?.statuses[String(effect)];
+    await writeFile(join(root,'last-trap.json'),JSON.stringify({item,before,thrown,hit}));
     game.check(item+' applies the selected condition and exact duration',status&&status[1]-status[0]===duration&&status[1]>hit.view.time_ms&&(hit.view.objects.find(e=>e.id===boss.id)?.condition_mask&(1<<(effect-1))));
     game.check(item+' detonates and removes its placed trap',!hit.diagnostic.entities.some(e=>e.kind===0x711));
     await game.act({keys:[],duration_ms:duration+100});

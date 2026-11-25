@@ -1,6 +1,8 @@
 use super::*;
-use crate::endgame::{CASTLE, CELLAR, HEROES, INCANTATION, LOCKED_CELLAR, RealmCycle, RealmStage};
-use rand::seq::IteratorRandom;
+use crate::content::game::SiteRole;
+#[cfg(test)]
+use crate::endgame::HEROES;
+use crate::endgame::{CASTLE, RealmCycle, RealmStage};
 
 // Gameplay documentation specifies two minutes, unlike modified forks' 20s: https://wikiwiki.jp/rmd/イベント#jded12e1
 pub(super) const REMAINING_TAUNT_MS: u64 = 120_000;
@@ -150,14 +152,48 @@ impl Directory {
         tracing::info!(origin, player, %name, "Realm closure started by a Discord token");
         Ok(name)
     }
+    pub(super) fn check_portal_catalog(&self, origin: i32) -> Result<()> {
+        let world = self.worlds.get(&origin).context("portal origin missing")?;
+        world.xml_check_catalog()?;
+        ensure!(
+            Arc::ptr_eq(
+                world
+                    .content
+                    .game
+                    .as_ref()
+                    .context("portal origin catalog absent")?,
+                self.content
+                    .game
+                    .as_ref()
+                    .context("Directory catalog absent")?
+            ),
+            "portal Directory owning catalog changed"
+        );
+        Ok(())
+    }
     pub fn stage_unlock(&mut self, plan: InventoryPlan) -> Result<InventoryPlan> {
         let Some(portal) = plan.unlock else {
             return Ok(plan);
         };
-        let PortalPlan { locked, opened } = portal;
+        let PortalPlan { locked, opened, .. } = portal;
         ensure!(!self.portals.contains_key(&opened), "portal already staged");
         let origin = self.location(plan.player)?;
         let w = &self.worlds[&origin];
+        let template = match self
+            .check_portal_catalog(origin)
+            .and_then(|_| w.validate_portal_inventory_at(&plan, portal, None))
+        {
+            Ok(template) => template.to_owned(),
+            Err(error) => {
+                let w = self.worlds.get_mut(&origin).unwrap();
+                w.discard_unlock(locked, opened)?;
+                w.players
+                    .get_mut(&plan.player)
+                    .context("portal owner disappeared")?
+                    .pending = false;
+                return Err(error);
+            }
+        };
         let p = &w.players[&plan.player];
         ensure!(
             p.pending
@@ -171,34 +207,17 @@ impl Directory {
             .get(&opened)
             .context("staged portal missing")?
             .kind;
-        let template = if let Some(locked) = locked {
-            ensure!(
-                w.entities
-                    .get(&locked)
-                    .is_some_and(|e| e.kind == LOCKED_CELLAR && e.reserved && e.published),
-                "locked portal reservation missing"
-            );
-            ensure!(kind == 0x700, "Incantation staged the wrong portal");
-            Some(CELLAR)
-        } else {
-            crate::dungeon::DUNGEONS
-                .iter()
-                .chain(crate::endgame::DUNGEONS)
-                .find(|(portal, _, _, _)| *portal == kind)
-                .map(|(_, template, _, _)| *template)
-        };
-        ensure!(
-            w.entities
-                .get(&opened)
-                .is_some_and(|e| e.kind == kind && e.reserved && !e.published),
-            "unpublished portal missing"
-        );
-        let destination = match template
-            .map(|template| {
-                let route = self.dungeon_return_from(origin)?;
-                self.instance(template, None, Some(route))
+        let expires = portal
+            .lifetime()
+            .map(|lifetime| {
+                self.tick
+                    .checked_add(lifetime)
+                    .context("portal binding deadline overflow")
             })
-            .transpose()
+            .transpose()?;
+        let destination = match self
+            .dungeon_return_from(origin)
+            .and_then(|route| self.instance(&template, None, Some(route)))
         {
             Ok(destination) => destination,
             Err(error) => {
@@ -212,8 +231,8 @@ impl Directory {
             opened,
             Portal {
                 origin,
-                destination,
-                expires: self.tick + portal.lifetime(),
+                destination: Some(destination),
+                expires,
             },
         );
         tracing::info!(
@@ -227,15 +246,25 @@ impl Directory {
         );
         Ok(plan)
     }
-    pub fn finish_inventory(&mut self, mut plan: InventoryPlan, result: Result<i32>) -> Result<()> {
+    #[cfg(test)]
+    pub fn finish_inventory(&mut self, plan: InventoryPlan, result: Result<i32>) -> Result<()> {
+        self.finish_inventory_receipt(plan, result, None)
+    }
+    fn finish_inventory_receipt(
+        &mut self,
+        mut plan: InventoryPlan,
+        result: Result<i32>,
+        receipt: Option<&crate::store::world_events::Event>,
+    ) -> Result<()> {
         let Some(portal) = plan.unlock.take() else {
             return self
                 .resolve(Target::Player(plan.player))?
                 .finish_inventory(plan, result);
         };
-        let PortalPlan { locked, opened } = portal;
+        let PortalPlan { locked, opened, .. } = portal;
         let player = plan.player;
         let origin = self.location(player)?;
+        self.check_portal_catalog(origin)?;
         let w = &self.worlds[&origin];
         let p = &w.players[&player];
         ensure!(
@@ -246,13 +275,16 @@ impl Directory {
             "stale or foreign portal completion"
         );
         ensure!(
-            locked.is_none_or(|id| w
+            locked.is_none_or(|id| {
+                w.unlock_rule().is_some_and(|rule| {
+                    w.entities
+                        .get(&id)
+                        .is_some_and(|e| e.reserved && e.kind == rule.locked)
+                })
+            }) && w
                 .entities
-                .get(&id)
-                .is_some_and(|e| e.reserved && e.kind == LOCKED_CELLAR))
-                && w.entities
-                    .get(&opened)
-                    .is_some_and(|e| e.reserved && !e.published),
+                .get(&opened)
+                .is_some_and(|e| e.reserved && !e.published),
             "portal reservation lost or already published"
         );
         let binding = self
@@ -261,27 +293,67 @@ impl Directory {
             .context("staged portal binding lost")?;
         ensure!(binding.origin == origin, "staged portal origin changed");
         let destination = binding.destination;
-        if result.is_err() {
+        if result.is_err()
+            || receipt.is_none()
+                && portal.locked.is_some_and(|id| {
+                    w.xml_terminal_pending(id)
+                        || w.xml_portal_expiry(id).is_some_and(|at| at <= w.now)
+                })
+        {
+            let outcome = if result.is_err() {
+                "unknown_commit"
+            } else {
+                "committed_after_source_expiry"
+            };
+            let evidence = format!(
+                "phase4 portal inventory reconciliation required: outcome={outcome} account={} character={} revision={} committed_revision={:?} world={} source_slot={} source_item={} locked={:?} opened={} deadline={:?} now={} input={}; reservations retained; original full inventory event and outcome require shared durable reconciliation",
+                plan.account,
+                plan.character,
+                plan.revision,
+                result.as_ref().ok(),
+                portal.world,
+                portal.source.slot,
+                portal.source.kind,
+                portal.locked,
+                opened,
+                portal.locked.and_then(|id| w.xml_portal_expiry(id)),
+                w.now,
+                w.xml_game().fingerprint
+            );
+            tracing::error!(account=plan.account,character=plan.character,revision=plan.revision,world=portal.world,locked=?portal.locked,opened,source_slot=portal.source.slot,source_item=portal.source.kind,deadline=?portal.locked.and_then(|id|w.xml_portal_expiry(id)),now=w.now,input=%w.xml_game().fingerprint,outcome,%evidence,"portal completion quarantined; no refund, publication or retry authorization");
             self.worlds
                 .get_mut(&origin)
                 .unwrap()
-                .discard_unlock(locked, opened)?;
-            self.portals.remove(&opened);
-            if let Some(destination) = destination {
-                ensure!(
-                    self.worlds[&destination].players.is_empty()
-                        && !self.grants.values().any(|g| g.destination == destination),
-                    "unpublished dungeon acquired a participant"
-                );
-                self.worlds.remove(&destination);
-                self.idle.remove(&destination);
-            }
-            return self
-                .worlds
-                .get_mut(&origin)
-                .unwrap()
-                .finish_inventory(plan, result);
+                .poison(player, evidence.clone())?;
+            return Err(match result {
+                Err(error) => error.context(evidence),
+                Ok(_) => anyhow::anyhow!(evidence),
+            });
         }
+        let accepted = receipt
+            .map(|event| -> Result<u64> {
+                let payload = event.native_payload()?;
+                let at = payload["origin"]["accepted_at"]
+                    .as_u64()
+                    .context("journal accepted time absent")?;
+                if let Some(deadline) = payload["portal"]["locked_deadline"].as_u64() {
+                    ensure!(
+                        at < deadline,
+                        "journal request was not accepted before source deadline"
+                    );
+                }
+                Ok(at)
+            })
+            .transpose()?;
+        w.validate_portal_inventory_at(&plan, portal, accepted)?;
+        let expires = portal
+            .lifetime()
+            .map(|lifetime| {
+                self.tick
+                    .checked_add(lifetime)
+                    .context("portal binding deadline overflow")
+            })
+            .transpose()?;
         self.worlds
             .get_mut(&origin)
             .unwrap()
@@ -302,7 +374,8 @@ impl Directory {
         e.published = true;
         let kind = e.kind;
         let dungeon = e.name.clone();
-        self.portals.get_mut(&opened).unwrap().expires = self.tick + portal.lifetime();
+        w.xml_activate_portal(opened)?;
+        self.portals.get_mut(&opened).unwrap().expires = expires;
         let name = &w.players[&player].character.name;
         if locked.is_some() {
             // Period unlock feedback belongs after commit, never reservation: https://www.youtube.com/watch?v=H44UToO5faY&t=9
@@ -331,87 +404,10 @@ impl Directory {
             kind,
             destination,
             origin,
-            expires_tick = self.portals[&opened].expires,
+            expires_tick = ?self.portals[&opened].expires,
             "consumable committed; bound dungeon portal published"
         );
         Ok(())
-    }
-    fn chamber_step(&mut self, ready: &[i32]) {
-        let now = self.tick * 50;
-        let castles: Vec<_> = self
-            .worlds
-            .summaries()
-            .filter(|(id, w)| {
-                (ready.contains(id) || !w.needs_coordinator())
-                    && w.chamber_at.is_some_and(|at| at <= now)
-            })
-            .map(|(id, _)| *id)
-            .collect();
-        let markers: Vec<_> = castles
-            .into_iter()
-            .flat_map(|origin| {
-                self.worlds[&origin]
-                    .entities
-                    .values()
-                    .filter(move |e| e.kind == 0xd7a && e.next_aux <= now)
-                    .map(move |e| (origin, e.id, e.pos))
-            })
-            .collect();
-        let origins: Vec<_> = markers.iter().map(|(origin, _, _)| *origin).collect();
-        for (origin, marker, pos) in markers {
-            let result = (|| -> Result<()> {
-                ensure!(
-                    self.worlds[&origin].walkable(pos),
-                    "authored Chamber entrance position blocked"
-                );
-                let destination = self.instance(crate::endgame::CHAMBER, None, None)?;
-                let portal =
-                    match self
-                        .worlds
-                        .get_mut(&origin)
-                        .unwrap()
-                        .spawn_entity(0xd7b, pos, vec![])
-                    {
-                        Ok(portal) => portal,
-                        Err(error) => {
-                            self.worlds.remove(&destination);
-                            self.idle.remove(&destination);
-                            return Err(error);
-                        }
-                    };
-                self.portals.insert(
-                    portal,
-                    Portal {
-                        origin,
-                        destination: Some(destination),
-                        expires: self.tick + 2400,
-                    },
-                );
-                let w = self.worlds.get_mut(&origin).unwrap();
-                w.remove_entity(marker);
-                w.oryx_notice("You have defeated my Guardians. Face me in my Chamber!");
-                tracing::info!(
-                    origin,
-                    portal,
-                    destination,
-                    "Guardian pair earned its bound Chamber portal"
-                );
-                Ok(())
-            })();
-            if let Err(error) = result {
-                self.worlds
-                    .get_mut(&origin)
-                    .unwrap()
-                    .entities
-                    .get_mut(&marker)
-                    .unwrap()
-                    .next_aux = self.tick * 50 + 5000;
-                tracing::error!(origin,%error,"earned Chamber binding failed; retry scheduled without publishing a portal");
-            }
-        }
-        for origin in origins {
-            self.worlds.release_world(&origin);
-        }
     }
     pub(crate) fn prepare_realm_closure(&mut self, origin: i32) -> Result<(i32, Pos)> {
         ensure!(
@@ -470,7 +466,7 @@ impl Directory {
     pub(super) fn bind_realm_heroes(&mut self, origin: i32, heroes: BTreeSet<i32>) -> Result<()> {
         let world = self.worlds.get(&origin).context("closure Realm missing")?;
         ensure!(
-            world.name == "Realm" && world.admission_open,
+            world.template_id() == Some("realm") && world.admission_open,
             "closure roster requires an open Realm"
         );
         ensure!(
@@ -480,9 +476,7 @@ impl Directory {
         for id in &heroes {
             let hero = world.entities.get(id).context("closure hero missing")?;
             ensure!(
-                (HEROES.contains(&hero.kind)
-                    || crate::quest::root(hero.kind) && hero.quest == Some(*id))
-                    && hero.hp > 0,
+                world.initial_closure_actor(hero) && hero.hp > 0,
                 "closure identity is not a living qualifying hero"
             );
         }
@@ -499,7 +493,6 @@ impl Directory {
         Ok(())
     }
     pub(super) fn endgame_step(&mut self, ready: &[i32]) {
-        self.chamber_step(ready);
         let now = self.tick * 50;
         let due:Vec<_>=self.worlds.summaries().filter(|(id,world)| {
             ready.contains(id) && world.critical || (ready.contains(id) || !world.needs_coordinator()) && self.endgame.realms.get(id).is_some_and(|record| {
@@ -556,9 +549,15 @@ impl Directory {
             }
             if record.enabled && cycle.admits() && now >= record.next_taunt {
                 record.next_taunt = now + REMAINING_TAUNT_MS;
-                if let Some((kind, count, text)) = world.remaining_taunt(&cycle.remaining) {
-                    world.oryx_notice(&text);
-                    tracing::info!(world = origin, time_ms = now, kind, count, %text, "Oryx remaining encounters announced");
+                match world.remaining_taunt(&cycle.remaining) {
+                    Ok(Some((kind, count, text))) => {
+                        world.oryx_notice(&text);
+                        tracing::info!(world = origin, time_ms = now, kind, count, %text, "Oryx remaining encounters announced");
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::error!(world = origin, error = %format_args!("{error:#}"), "Oryx remaining taunt refused")
+                    }
                 }
             }
             while cycle.advance(now) {
@@ -706,7 +705,7 @@ impl Directory {
             );
             let rng_before = self.realm_rng.clone();
             let castle = self.construction(CASTLE, "Oryx's Castle", false, None);
-            let realm = self.construction("realm-shore", "Realm", false, None);
+            let realm = self.construction("realm", "Realm", false, None);
             let realm_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let started = realm_started.clone();
             let result = match self.worlds.prepare_replacement(origin, self.tick, move || {
@@ -945,98 +944,62 @@ impl Directory {
     }
 }
 impl World {
-    pub(super) fn populate_realm_heroes(
-        &mut self,
-        sites: &[crate::terrain::realms::Site],
-    ) -> Result<()> {
-        // GPL-3.0 requested counts, not authenticated 123.5.1 density (data/REALM-SRC-LICENSE):
-        // https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
-        // Unlike its 50-attempt skips, our protected allocator fulfills requests or errors.
-        for (kind, terrains, range) in [(HEROES[0], &[1][..], 3..5), (HEROES[1], &[3, 4][..], 4..7)]
-        {
-            let authored = sites.iter().filter(|site| site.kind == kind).count();
-            let requested: usize = self.rng.gen_range(range);
-            let additional = requested.saturating_sub(authored);
-            tracing::info!(
-                kind,
-                authored,
-                requested,
-                additional,
-                "Realm hero site census"
-            );
-            self.populate_landmark_heroes(kind, terrains, additional)?;
+    fn initial_closure_actor(&self, e: &Entity) -> bool {
+        match self.xml_game().site_role(e.kind) {
+            Some(SiteRole::Hero) => true,
+            Some(SiteRole::Closure | SiteRole::Event) => e.quest == Some(e.id),
+            _ => false,
         }
-        Ok(())
-    }
-    fn populate_landmark_heroes(&mut self, kind: u16, terrains: &[u8], count: usize) -> Result<()> {
-        for _ in 0..count {
-            let pos = self.place_named_setpiece(kind, terrains)?;
-            self.spawn_entity(kind, pos, vec![])?;
-        }
-        tracing::info!(kind, count, "finite landmark heroes placed");
-        Ok(())
     }
     pub(super) fn hero_identities(&self) -> BTreeSet<i32> {
         self.entities
             .values()
-            .filter(|e| {
-                HEROES.contains(&e.kind) || (crate::quest::root(e.kind) && e.quest == Some(e.id))
-            })
+            .filter(|e| self.initial_closure_actor(e))
             .map(|e| e.id)
             .collect()
     }
+    pub(super) fn publish_endgame_exits(&mut self) {
+        if let Some(kind) = self
+            .xml_world_template()
+            .and_then(|t| t.clear.as_ref()?.reveal)
+        {
+            for e in self.entities.matching_mut(|e| e.kind == kind) {
+                e.published = true;
+            }
+        }
+    }
     pub(super) fn prepare_endgame(&mut self) -> Result<()> {
-        if self.name == "Oryx's Castle" {
-            for e in self.entities.matching_mut(|e| e.kind == 0xd7d) {
-                e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
-                e.published = false;
+        if let Some(world) = self.xml_world_template() {
+            for &kind in &world.required_actors {
+                ensure!(
+                    self.entities.values().filter(|e| e.kind == kind).count() == 1,
+                    "World {} requires one selected map actor {kind:#x}",
+                    world.id
+                );
             }
-            // Guardians start as grey statues (selected AltTexture 1).
-            for e in self
-                .entities
-                .matching_mut(|e| crate::endgame::GUARDIANS.contains(&e.kind))
-            {
-                e.extra_stats = vec![(61, 1)];
-            }
+        }
+        if let Some(clear) = self.xml_world_template().and_then(|t| t.clear.clone())
+            && let Some(kind) = clear.reveal
+        {
             ensure!(
-                crate::endgame::GUARDIANS.iter().all(|kind| self
-                    .entities
+                self.entities
                     .values()
-                    .filter(|e| e.kind == *kind)
+                    .filter(|e| e.kind == clear.boss)
                     .count()
-                    == 1),
-                "Castle requires the authored Guardian pair"
+                    == 1,
+                "{} requires one selected clear actor {:#x}",
+                self.name,
+                clear.boss
             );
-            let markers: Vec<_> = self
-                .entities
-                .values()
-                .filter(|e| e.kind == 0xd7a)
-                .map(|e| e.id)
-                .collect();
-            ensure!(
-                markers.len() == 1,
-                "Castle requires one authored Guardian taskmaster"
-            );
-            let e = self.entities.get_mut(&markers[0]).unwrap();
-            e.published = false;
-            e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
-        }
-        if matches!(self.name.as_str(), "Oryx's Chamber" | "Wine Cellar") {
-            let boss = if self.name == "Wine Cellar" {
-                crate::endgame::ORYX2
-            } else {
-                crate::endgame::ORYX
-            };
-            ensure!(
-                self.entities.values().filter(|e| e.kind == boss).count() == 1,
-                "endgame room requires one selected boss"
-            );
-            for e in self.entities.matching_mut(|e| e.kind == 0x71d) {
+            for e in self.entities.matching_mut(|e| e.kind == kind) {
                 e.published = false;
             }
         }
-        if self.name == "Wine Cellar" {
-            // Build 122 added destructible barrels (https://web.archive.org/web/20130605124909/forums.wildshadow.com/node/41768); their room-corner placement is a reconstruction.
+        if let Some(kind) = self
+            .xml_world_template()
+            .and_then(|w| w.corner_placement.as_ref().map(|p| p.kind))
+        {
+            // The occupied cell and the inner diagonal distinguish room corners from doorway edges.
             let open = |x: i32, y: i32| {
                 self.walkable(Pos {
                     x: x as f32 + 0.5,
@@ -1061,17 +1024,132 @@ impl World {
                             })
                 })
                 .collect();
-            ensure!(!corners.is_empty(), "Wine Cellar map has no barrel corners");
+            ensure!(
+                !corners.is_empty(),
+                "World {:?} has no eligible corners for {kind:#x}",
+                self.xml.template
+            );
             for &(x, y) in &corners {
                 let pos = Pos {
                     x: x as f32 + 0.5,
                     y: y as f32 + 0.5,
                 };
-                self.spawn_entity(0xde5, pos, vec![])?;
+                self.spawn_entity(kind, pos, vec![])?;
             }
-            tracing::info!(barrels = corners.len(), "reconstructed Wine Barrels placed");
+            tracing::info!(
+                kind,
+                count = corners.len(),
+                "linked room-corner actors placed"
+            );
         }
         Ok(())
+    }
+    fn validate_portal_inventory_at(
+        &self,
+        plan: &InventoryPlan,
+        portal: PortalPlan,
+        accepted: Option<u64>,
+    ) -> Result<&str> {
+        let p = self
+            .players
+            .get(&plan.player)
+            .context("portal owner missing")?;
+        ensure!(
+            portal.world == self.xml_world_id()
+                && p.pending
+                && p.character.id == plan.character
+                && p.character.account == plan.account
+                && p.character.revision == plan.revision
+                && portal.source.object == plan.player
+                && p.character.items.get(portal.source.slot) == Some(&portal.source.kind),
+            "portal source owner, world, inventory or revision changed"
+        );
+        let mut expected = p.character.items.clone();
+        expected[portal.source.slot] = -1;
+        ensure!(
+            plan.items == expected && plan.bags.is_empty(),
+            "portal inventory publication changed"
+        );
+        let e = self
+            .entities
+            .get(&portal.opened)
+            .context("reserved portal entity absent")?;
+        ensure!(
+            e.reserved && !e.published,
+            "reserved portal already published or released"
+        );
+        let definition = self.xml_portal_definition(e.kind, "reserved portal source binding")?;
+        let lifetime = if definition.native_service == Some(NativeService::Portal) {
+            Some(if portal.locked.is_some() {
+                2400
+            } else {
+                DUNGEON_PORTAL_TICKS
+            })
+        } else {
+            None
+        };
+        ensure!(
+            portal.native_lifetime == lifetime,
+            "reserved portal lifetime authority changed"
+        );
+        let item = self
+            .xml_game()
+            .properties
+            .get(&u16::try_from(portal.source.kind)?)
+            .context("reserved portal selected item absent")?;
+        self.xml_game().admission(
+            item.kind,
+            AdmissionRole::Native(NativeService::Inventory),
+            "reserved portal source item",
+        )?;
+        if let Some(locked) = portal.locked {
+            ensure!(
+                self.unlock_rule().is_some_and(|rule| item.kind == rule.item
+                    && e.kind == rule.opened
+                    && self
+                        .entities
+                        .get(&locked)
+                        .is_some_and(|e| e.kind == rule.locked && e.reserved && e.published)),
+                "reserved Incantation source or locked portal changed"
+            );
+            ensure!(
+                match accepted {
+                    Some(request) => self.xml_portal_expiry(locked).is_none_or(|at| request < at),
+                    None =>
+                        !self.xml_terminal_pending(locked)
+                            && self
+                                .xml_portal_expiry(locked)
+                                .is_none_or(|at| at > self.now),
+                },
+                "Incantation locked source expired or terminal pending: actor={locked} deadline={:?} now={}",
+                self.xml_portal_expiry(locked),
+                self.now
+            );
+        } else {
+            ensure!(
+                item.create_object.as_deref() == Some(self.content.objects[&e.kind].name.as_str())
+                    && self
+                        .xml_game()
+                        .property_dependencies
+                        .get(&item.kind)
+                        .is_some_and(|kinds| kinds.contains(&e.kind)),
+                "reserved key lacks actual compiled portal target edge"
+            );
+        }
+        self.xml_preflight_position(e.kind, e.pos)?;
+        let ignored: Vec<_> = std::iter::once(portal.opened)
+            .chain(portal.locked)
+            .collect();
+        ensure!(
+            self.xml_placeable(e.kind, e.pos, &ignored, None)?,
+            "reserved portal geometry changed"
+        );
+        self.xml_preflight_portal_activation(portal.opened)?;
+        self.xml_game()
+            .portal_instance(e.kind, self.xml.template.as_deref())
+    }
+    fn unlock_rule(&self) -> Option<&crate::content::game::UnlockRule> {
+        self.xml_world_template()?.unlock.as_ref()
     }
     pub(super) fn begin_unlock(
         &mut self,
@@ -1079,42 +1157,56 @@ impl World {
         slot: Slot,
         item: &crate::content::Object,
     ) -> Result<InventoryPlan> {
+        let rule = self
+            .unlock_rule()
+            .filter(|_| self.cleared)
+            .ok_or_else(|| controller("Wine Cellar requires a defeated Oryx"))?;
         ensure!(
-            item.kind == INCANTATION && item.activations == 1,
+            u16::try_from(slot.kind)? == rule.item && item.kind == rule.item,
             "unsupported portal unlock consumable"
         );
-        let (dungeon, locked_name) = item
+        let (locked_kind, opened_kind) = (rule.locked, rule.opened);
+        let name = item
             .unlock_portal
             .as_ref()
-            .context("unlock activation metadata missing")?;
-        ensure!(
-            dungeon == "Wine Cellar" && locked_name == &self.content.get(LOCKED_CELLAR)?.name,
-            "Incantation activation contradicts selected Cellar portal"
-        );
-        ensure!(
-            self.name == "Oryx's Chamber" && self.cleared,
-            controller("Wine Cellar requires a defeated Oryx")
-        );
+            .context("unlock activation metadata missing")?
+            .0
+            .clone();
         let p = &self.players[&id];
         let locked = self
             .entities
             .values()
-            .filter(|e| e.kind == LOCKED_CELLAR && e.published && p.pos.distance(e.pos) <= 3.)
+            .filter(|e| e.kind == locked_kind && e.published && p.pos.distance(e.pos) <= 3.)
             .min_by(|a, b| p.pos.distance(a.pos).total_cmp(&p.pos.distance(b.pos)))
             .ok_or_else(|| controller("no locked Wine Cellar portal nearby"))?;
         ensure!(
             !locked.reserved,
             controller("another Incantation already reserves this portal")
         );
+        ensure!(
+            !self.xml_terminal_pending(locked.id)
+                && self
+                    .xml_portal_expiry(locked.id)
+                    .is_none_or(|at| at > self.now),
+            "Incantation locked source expired or terminal pending: actor={} deadline={:?} now={}",
+            locked.id,
+            self.xml_portal_expiry(locked.id),
+            self.now
+        );
         let (locked, pos) = (locked.id, locked.pos);
-        self.reserve_portal(id, slot, 0x700, Some(locked), pos, dungeon.clone())
+        self.reserve_portal(id, slot, opened_kind, Some(locked), pos, name)
     }
     pub(super) fn begin_create(
         &mut self,
         id: i32,
         slot: Slot,
-        item: &crate::content::Object,
+        _item: &crate::content::Object,
     ) -> Result<InventoryPlan> {
+        let item = self
+            .xml_game()
+            .properties
+            .get(&u16::try_from(slot.kind)?)
+            .context("actual key selected item absent")?;
         ensure!(
             item.consumable && item.activations == 1,
             "invalid dungeon key activation"
@@ -1148,25 +1240,60 @@ impl World {
         pos: Pos,
         name: String,
     ) -> Result<InventoryPlan> {
-        let usable = crate::dungeon::DUNGEONS
-            .iter()
-            .chain(crate::endgame::DUNGEONS)
-            .any(|(portal, _, _, _)| *portal == kind);
+        self.xml_game()
+            .portal_instance(kind, self.xml.template.as_deref())
+            .context("owned portal preflight before inventory reservation")?;
+        ensure!(
+            slot.object == id
+                && self.players[&id].character.items.get(slot.slot) == Some(&slot.kind),
+            "portal reservation is not current owned inventory"
+        );
+        self.xml_game().admission(
+            u16::try_from(slot.kind)?,
+            AdmissionRole::Native(NativeService::Inventory),
+            "actual owned portal item activation",
+        )?;
         let mut items = self.players[&id].character.items.clone();
         items[slot.slot] = -1;
-        let opened = self.spawn_entity(kind, pos, vec![])?;
+        let native_lifetime = if self
+            .xml_portal_definition(kind, "owned portal item lifetime")?
+            .native_service
+            == Some(NativeService::Portal)
+        {
+            Some(if locked.is_some() {
+                2400
+            } else {
+                DUNGEON_PORTAL_TICKS
+            })
+        } else {
+            None
+        };
+        let mut plan = self.plan(id, items, None)?;
+        let opened = self.insert_portal_entity(
+            kind,
+            pos,
+            "actual owned key/Incantation portal reservation",
+        )?;
         let e = self.entities.get_mut(&opened).unwrap();
         e.name = name;
         e.extra_stats.retain(|(stat, _)| *stat != 37);
-        e.extra_stats.push((37, i32::from(usable)));
+        e.extra_stats.push((37, 1));
         e.published = false;
         e.reserved = true;
         if let Some(locked) = locked {
             self.entities.get_mut(&locked).unwrap().reserved = true;
         }
+        self.xml_prepare_portal_actor(opened)
+            .expect("preflighted owned portal program");
+        self.cancel_trade(id, "Trade cancelled by owned portal item activation.");
         self.players.get_mut(&id).unwrap().pending = true;
-        let mut plan = self.plan(id, items, None);
-        plan.unlock = Some(PortalPlan { locked, opened });
+        plan.unlock = Some(PortalPlan {
+            locked,
+            opened,
+            source: slot,
+            world: self.xml_world_id(),
+            native_lifetime,
+        });
         Ok(plan)
     }
     fn discard_unlock(&mut self, locked: Option<i32>, opened: i32) -> Result<()> {
@@ -1186,74 +1313,6 @@ impl World {
         }
         Ok(())
     }
-    fn remaining_taunt(&self, remaining: &BTreeSet<i32>) -> Option<(u16, usize, String)> {
-        let mut families: BTreeMap<u16, BTreeSet<i32>> = BTreeMap::new();
-        for e in self.actors().filter(|e| e.hp > 0) {
-            let family = match e.kind {
-                0x91b | 0x91c => 0x91b,
-                0x91f | 0x920 => 0x91f,
-                0x928 | 0x92d => 0x928,
-                0x675 | 0x6c1 | 0x6c2 => 0x675,
-                kind if HEROES.contains(&kind)
-                    || crate::quest::EVENT_BOSSES.contains(&kind)
-                    || kind == 0x678 =>
-                {
-                    kind
-                }
-                _ => continue,
-            };
-            let tag = match *e.quest {
-                Some(tag) => tag,
-                None => e.id,
-            };
-            if remaining.contains(&tag) {
-                families.entry(family).or_default().insert(tag);
-            }
-        }
-        let (&kind, ids) = families.iter().choose(&mut rand::thread_rng())?;
-        let count = ids.len();
-        let text = match (kind, count == 1) {
-            (0x91b, false) => format!("I am invincible while my {count} Liches still stand!"),
-            (0x91b, true) => "My final Lich will protect me forever!".into(),
-            (0x91f, false) => {
-                format!("Mortal scum! My {count} Ent Ancients will defend me forever!")
-            }
-            (0x91f, true) => "My final Ent Ancient will destroy you all!".into(),
-            (0x928, false) => {
-                format!("My {count} Ghost Kings give me more than enough protection!")
-            }
-            (0x928, true) => "My final Ghost King is untouchable!".into(),
-            (0x675, false) => format!("Maggots! My {count} Phoenix Lords will burn you to ash!"),
-            (0x675, true) => "My final Phoenix Lord will never fall!".into(),
-            (0x678, false) => format!("You have no hope against my {count} Oasis Giants!"),
-            (0x678, true) => "A powerful Oasis Giant still fights for me!".into(),
-            (0x668, false) => format!("Fools! There is no escape from my {count} Red Demons!"),
-            (0x668, true) => "My final Red Demon is unassailable!".into(),
-            (0x67d, false) => format!("Cretins! I have {count} Cyclops Gods to guard me!"),
-            (0x67d, true) => "My last Cyclops God will smash you to pieces!".into(),
-            (0xd56, false) => format!("Imbeciles! My {count} Skull Shrines make me invincible!"),
-            (0xd56, true) => "Pathetic fools! A Skull Shrine guards me!".into(),
-            (0xd59, false) => format!("Filthy vermin! My {count} Cube Gods will exterminate you!"),
-            (0xd59, true) => "Worthless mortals! A mighty Cube God defends me!".into(),
-            (0xd5f, false) => format!("Wretched creatures! {count} Pentaracts remain!"),
-            (0xd5f, true) => "Ignorant fools! A Pentaract guards me still!".into(),
-            (0xd54, false) => format!(
-                "You dull-spirited apes! You shall pose no challenge for {count} Grand Sphinxes!"
-            ),
-            (0xd54, true) => {
-                "Gaze upon the beauty of the Grand Sphinx and feel your last hopes drain away."
-                    .into()
-            }
-            (0xd50, _) => "My Lord of the Lost Lands will make short work of you!".into(),
-            (0xd61, _) => {
-                "My Hermit God's thousand tentacles shall drag you to a watery grave!".into()
-            }
-            (0xe37, _) => "My Ghost Ship will send you to a watery grave.".into(),
-            _ => unreachable!("unsupported Oryx announcement family {kind:#x}"),
-        };
-        Some((kind, count, text))
-    }
-
     pub(super) fn oryx_notice(&self, text: &str) {
         self.broadcast_text("#Oryx the Mad God", text);
     }
@@ -1261,17 +1320,17 @@ impl World {
 
 #[cfg(test)]
 #[tokio::test]
-async fn realm_death_credit_survives_portal_reward_failure() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
+async fn realm_hermit_death_credit_closes_and_replaces_the_realm() {
+    let content = Arc::new(crate::world::test_content());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let account = store.list("closure-error-witness".into()).await.unwrap();
     let character = store
         .create(account.id, content.get(crate::content::WIZARD).unwrap())
         .await
         .unwrap();
-    let mut directory = Directory::prepared(data, content.clone(), 16, 12351, 2).unwrap();
+    let mut directory = Directory::prepared(content.clone(), 16, 12351, 2).unwrap();
     let mut map = Map {
+        elevation: None,
         width: 40,
         height: 40,
         cells: vec![
@@ -1289,6 +1348,7 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     map.cells[20 * 40 + 14].ground = 0x46;
     let mut world = World::with_ids(content, Arc::new(map), directory.ids.clone()).unwrap();
     world.name = "Realm".into();
+    world.xml.template = Some("realm".into());
     world.encounter = true;
     let root = world
         .insert_entity(
@@ -1323,10 +1383,11 @@ async fn realm_death_credit_survives_portal_reward_failure() {
         .unwrap();
     directory.endgame.realms.get_mut(&-3).unwrap().portal = portal;
     let world = directory.worlds.get_mut(&-3).unwrap();
-    let error = world.defeat_entity(root).unwrap_err();
-    assert_eq!(error.to_string(), "Hermit has no reachable reward site");
+    world.defeat_entity(root).unwrap();
+    for _ in 0..8 {
+        crate::world::xml::tests::drain_events(world).unwrap();
+    }
     assert!(!world.entities.contains_key(&root));
-    assert!(world.portal_requests.is_empty());
     directory.endgame_step(&[-3]);
     directory.endgame_step(&[-3]);
     let closed = chat::text_packet(
@@ -1410,21 +1471,7 @@ async fn realm_death_credit_survives_portal_reward_failure() {
     );
     assert!(other_position.distance(replacement_position) >= 4.);
     assert!(!directory.worlds[&replacement].admission_open);
-    assert!(directory.forced_transfer(player).unwrap().is_none());
-    let (owner, progress) = directory
-        .worlds
-        .get_mut(&-3)
-        .unwrap()
-        .pending_progress_where(|id, _| id == player)
-        .pop()
-        .expect("final Hermit XP must settle before transfer");
-    store.progress(progress.clone()).await.unwrap();
-    directory
-        .worlds
-        .get_mut(&-3)
-        .unwrap()
-        .finish_progress(owner, progress)
-        .unwrap();
+    // Hermit XP already settled through the journaled terminal drained above.
     let character = directory.worlds[&-3].players[&player].character.clone();
     let transfer = directory.forced_transfer(player).unwrap().unwrap();
     assert_eq!(transfer.destination, Some(castle));
@@ -1520,9 +1567,8 @@ async fn realm_death_credit_survives_portal_reward_failure() {
 #[cfg(test)]
 #[test]
 fn prepare_realm_closure_preserves_other_cycle_and_refuses_reservations() {
-    let path = std::path::Path::new("data");
-    let content = Arc::new(Content::load(path).unwrap());
-    let mut d = Directory::prepared(path, content, 16, 12351, 2).unwrap();
+    let content = Arc::new(crate::world::test_content());
+    let mut d = Directory::prepared(content, 16, 12351, 2).unwrap();
     d.clock.set_paused(true);
     let other = d.endgame.realms[&1].cycle.remaining.clone();
     let other_spawns = d.worlds[&1].map.spawns.clone();
@@ -1550,9 +1596,8 @@ fn prepare_realm_closure_preserves_other_cycle_and_refuses_reservations() {
 #[cfg(test)]
 #[test]
 fn eight_realm_closures_keep_held_predecessors_across_two_replacement_generations() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
-    let mut d = Directory::prepared(data, content, 16, 1344, 8).unwrap();
+    let content = Arc::new(crate::world::test_content());
+    let mut d = Directory::prepared(content, 16, 1344, 8).unwrap();
     let mut holds = Vec::new();
     for generation in 0..2 {
         let current: Vec<_> = d
@@ -1646,16 +1691,16 @@ fn eight_realm_closures_keep_held_predecessors_across_two_replacement_generation
 #[cfg(test)]
 #[tokio::test]
 async fn realm_close_token_starts_the_ordinary_closure_once() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let account = store.list("realm-close-token".into()).await.unwrap();
     let character = store
         .create(account.id, content.get(crate::content::WIZARD).unwrap())
         .await
         .unwrap();
-    let mut directory = Directory::prepared(data, content.clone(), 16, 12351, 2).unwrap();
+    let mut directory = Directory::prepared(content.clone(), 16, 12351, 2).unwrap();
     let map = Map {
+        elevation: None,
         width: 40,
         height: 40,
         cells: vec![
@@ -1672,6 +1717,7 @@ async fn realm_close_token_starts_the_ordinary_closure_once() {
     };
     let mut world = World::with_ids(content, Arc::new(map), directory.ids.clone()).unwrap();
     world.name = "Realm".into();
+    world.xml.template = Some("realm".into());
     world.encounter = true;
     let hero = world
         .insert_entity(HEROES[0], Pos { x: 30.5, y: 30.5 }, vec![])
@@ -1718,7 +1764,7 @@ async fn realm_close_token_starts_the_ordinary_closure_once() {
 #[test]
 fn pending_event_does_not_block_other_defeats_in_the_realm_cycle() {
     let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut directory = Directory::test_with_seed(data, content.clone(), 85, 787901).unwrap();
     let initial = directory.endgame.realms[&-3].cycle.remaining.clone();
     let other = directory.endgame.realms[&1].cycle.remaining.clone();
@@ -1742,6 +1788,9 @@ fn pending_event_does_not_block_other_defeats_in_the_realm_cycle() {
     }
     for id in &defeated {
         world.defeat_entity(*id).unwrap();
+        for _ in 0..8 {
+            crate::world::xml::tests::drain_events(world).unwrap();
+        }
     }
     // Model an already-earned event while actual player occupancy blocks every reserved site.
     world.event_waiting = Some(defeated[0]);
@@ -1762,12 +1811,134 @@ fn pending_event_does_not_block_other_defeats_in_the_realm_cycle() {
 
 #[cfg(test)]
 #[test]
+fn realm_killer_is_named_once_by_oryx_for_heroes_and_event_bosses() {
+    for event in [false, true] {
+        let content = Arc::new(crate::world::test_content());
+        let mut directory =
+            Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 85, 1344)
+                .unwrap();
+        let mut character = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+        (
+            character.name,
+            character.id,
+            character.account,
+            character.level,
+        ) = ("Slayer".into(), 1, 1, 20);
+        let (packets, mut inbox) = mpsc::channel(4096);
+        let (lost, _) = watch::channel(None);
+        let world = directory.worlds.get_mut(&-3).unwrap();
+        let player = world
+            .enter(
+                character,
+                Some(Output {
+                    trace: None,
+                    packets,
+                    lost,
+                }),
+            )
+            .unwrap();
+        world.players.get_mut(&player).unwrap().lab_conditions =
+            crate::condition::bit(crate::condition::INVINCIBLE);
+        let hero = if event {
+            // Skull Shrine's recovered OryxTaunt killed list names the killer itself.
+            let pos = world.players[&player].pos;
+            let shrine = world.spawn_entity(0xd56, pos, vec![]).unwrap();
+            world.set_quest(shrine, Some(shrine));
+            let cycle = &mut directory.endgame.realms.get_mut(&-3).unwrap().cycle;
+            assert!(cycle.remaining.insert(shrine));
+            shrine
+        } else {
+            *directory.endgame.realms[&-3]
+                .cycle
+                .remaining
+                .iter()
+                .find(|id| HEROES.contains(&directory.worlds[&-3].entities[id].kind))
+                .expect("seeded Realm has a Hero of Oryx")
+        };
+        let world = directory.worlds.get_mut(&-3).unwrap();
+        let kind = world.entities[&hero].kind;
+        world.players.get_mut(&player).unwrap().pos = world.entities[&hero].pos;
+        let e = world.entities.get_mut(&hero).unwrap();
+        (e.hp, e.condition) = (1, 0);
+        while inbox.try_recv().is_ok() {}
+        let _ = world.damage_enemy(player, hero, 1_000_000, true, &[], None);
+        for _ in 0..8 {
+            crate::world::xml::tests::drain_events(world).unwrap();
+        }
+        assert!(!world.entities.contains_key(&hero));
+        assert_eq!(
+            world.critical_killers.get(&hero),
+            Some(&(kind, "Slayer".to_string()))
+        );
+        directory.endgame_step(&[-3]);
+        let named = std::iter::from_fn(|| inbox.try_recv().ok())
+            .filter(|packet| {
+                packet.id == crate::wire::TEXT
+                    && packet.body.windows(6).any(|w| w == b"Slayer")
+                    && packet.body.windows(16).any(|w| w == b"Oryx the Mad God")
+            })
+            .count();
+        assert_eq!(named, 1, "one Oryx notice names the killer (event={event})");
+        assert!(directory.worlds[&-3].critical_killers.is_empty());
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn oryx_remaining_taunts_render_recovered_one_many_lists() {
+    use crate::content::game::TextPart;
+    let content = Arc::new(crate::world::test_content());
+    let directory =
+        Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 85, 1344).unwrap();
+    let world = &directory.worlds[&-3];
+    let game = world.xml_game();
+    let names: BTreeSet<_> = (0..=u16::MAX)
+        .filter_map(super::realm_voice::family_name)
+        .collect();
+    assert_eq!(names.len(), 14);
+    for name in names {
+        let list = game.string_lists.iter().find(|l| l.name == name).unwrap();
+        assert!(list.categories.contains_key("one"), "{name}");
+        assert_eq!(
+            list.categories.contains_key("many"),
+            name != "Ghost Ship",
+            "{name}"
+        );
+    }
+    let (_, count, text) = world
+        .remaining_taunt(&directory.endgame.realms[&-3].cycle.remaining)
+        .unwrap()
+        .unwrap();
+    let rendered = |parts: &Vec<TextPart>| {
+        parts
+            .iter()
+            .map(|p| match p {
+                TextPart::Literal(s) => s.clone(),
+                TextPart::Count => count.to_string(),
+                p => panic!("unbound {p:?}"),
+            })
+            .collect::<String>()
+    };
+    assert!(
+        game.string_lists
+            .iter()
+            .flat_map(|l| [l.categories.get("one"), l.categories.get("many")])
+            .flatten()
+            .flatten()
+            .any(|parts| rendered(parts) == text),
+        "{text}"
+    );
+}
+
+#[cfg(test)]
+#[test]
 fn instant_damage_quest_clear_starts_closure() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut directory =
         Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 85, 1344).unwrap();
     let other = directory.endgame.realms[&1].cycle.remaining.clone();
     let mut character = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
+    character.name = "Closer".into();
     character.id = 1;
     character.account = 1;
     character.level = 20;
@@ -1776,6 +1947,7 @@ fn instant_damage_quest_clear_starts_closure() {
     world.players.get_mut(&player).unwrap().lab_conditions =
         crate::condition::bit(crate::condition::INVINCIBLE);
     // Fixture movement and instant damage isolate actual quest/death accounting from raid navigation.
+    let mut seen = std::collections::BTreeMap::new();
     for _ in 0..100_000 {
         if !directory.endgame.realms[&-3].cycle.admits() {
             assert!(directory.endgame.realms[&-3].cycle.remaining.is_empty());
@@ -1786,6 +1958,13 @@ fn instant_damage_quest_clear_starts_closure() {
         let world = directory.worlds.get_mut(&-3).unwrap();
         let family = world.quest_target(player).map(|id| {
             let root = world.entities[&id].quest.unwrap_or(id);
+            // Kinds of every targeted quest line make a non-closing family diagnosable.
+            for e in world
+                .actors()
+                .filter(|e| e.id == root || e.quest == Some(root))
+            {
+                seen.entry(e.id).or_insert(e.kind);
+            }
             world
                 .actors()
                 .filter(|e| e.id == root || e.quest == Some(root) || e.parent == Some(root))
@@ -1799,6 +1978,7 @@ fn instant_damage_quest_clear_starts_closure() {
                     world
                         .damage_enemy(player, id, 1_000_000, true, &[], None)
                         .unwrap();
+                    crate::world::xml::tests::drain_events(world).unwrap();
                 }
             }
         } else {
@@ -1809,17 +1989,31 @@ fn instant_damage_quest_clear_starts_closure() {
         directory.tick += 1;
         directory.endgame_step(&[-3]);
     }
+    let w = &directory.worlds[&-3];
+    let detail: Vec<_> = directory.endgame.realms[&-3]
+        .cycle
+        .remaining
+        .iter()
+        .map(|id| {
+            let line: Vec<_> = w
+                .entities
+                .values()
+                .filter(|e| *e.quest == Some(*id))
+                .map(|e| (e.id, e.kind, e.hp, e.conditions(w.now)))
+                .collect();
+            (*id, seen.get(id).copied(), line)
+        })
+        .collect();
     panic!(
-        "quest-guided clear never closed Realm; remaining roots: {:?}",
-        directory.endgame.realms[&-3].cycle.remaining
+        "quest-guided clear never closed Realm; remaining (root, first kind, live line): {detail:x?}; target={:?}",
+        w.quest_target(player)
     );
 }
 
 #[cfg(test)]
 #[tokio::test]
 async fn earthquake_sends_marked_players_to_the_nexus_instead_of_the_castle() {
-    let data = std::path::Path::new("data");
-    let mut content = Content::load(data).unwrap();
+    let mut content = crate::world::test_content();
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let mut characters = Vec::new();
     for name in ["quake-cheater", "quake-honest"] {
@@ -1837,8 +2031,9 @@ async fn earthquake_sends_marked_players_to_the_nexus_instead_of_the_castle() {
             reviewed_on: "2026-11-18".into(),
         }]);
     let content = Arc::new(content);
-    let mut directory = Directory::prepared(data, content.clone(), 16, 12351, 2).unwrap();
+    let mut directory = Directory::prepared(content.clone(), 16, 12351, 2).unwrap();
     let map = Map {
+        elevation: None,
         width: 40,
         height: 40,
         cells: vec![
@@ -1855,6 +2050,7 @@ async fn earthquake_sends_marked_players_to_the_nexus_instead_of_the_castle() {
     };
     let mut world = World::with_ids(content, Arc::new(map), directory.ids.clone()).unwrap();
     world.name = "Realm".into();
+    world.xml.template = Some("realm".into());
     world.encounter = true;
     let hero = world
         .insert_entity(HEROES[0], Pos { x: 30.5, y: 30.5 }, vec![])
@@ -1899,4 +2095,212 @@ async fn earthquake_sends_marked_players_to_the_nexus_instead_of_the_castle() {
         Some(-2)
     );
     assert!(!directory.endgame.forced.contains_key(&players[1]));
+}
+
+impl Directory {
+    pub(crate) fn retain_inventory_event(
+        &mut self,
+        plan: InventoryPlan,
+    ) -> Result<crate::store::world_events::Event> {
+        let origin = self.location(plan.player)?;
+        let w = &self.worlds[&origin];
+        let p = w
+            .players
+            .get(&plan.player)
+            .context("journal inventory owner absent")?;
+        ensure!(
+            p.pending
+                && p.character.id == plan.character
+                && p.character.account == plan.account
+                && p.character.revision == plan.revision,
+            "journal inventory owner/reservation changed"
+        );
+        let binding=plan.unlock.map(|portal|->Result<_>{
+            let route=self.portals.get(&portal.opened).context("journal portal route absent")?;
+            Ok(serde_json::json!({"opened":portal.opened,"origin":route.origin,"destination":route.destination,"locked_deadline":portal.locked.and_then(|id|w.xml_portal_expiry(id)),"native_lifetime":portal.native_lifetime}))
+        }).transpose()?;
+        let id = plan.permit.event.clone();
+        ensure!(
+            !self.inventory_events.contains_key(&id),
+            "inventory event already staged: {id}"
+        );
+        let event = crate::store::world_events::Event {
+            id,
+            kind: "inventory".into(),
+            content: w.xml_game().fingerprint.clone(),
+            payload: crate::store::world_events::EventPayload::Inventory(serde_json::json!({
+                "write":crate::store::InventoryWrite{id:plan.character,account:plan.account,revision:plan.revision,items:plan.items.clone()},
+                "reservation":plan,
+                "claims":plan.loot_slot.filter(|_|!plan.entitlement_move).and_then(|(bag,slot)|w.xml.bag_entitlements.get(&(bag,slot)).map(|(event,ordinal,_,_)|serde_json::json!([event,ordinal]))),
+                "bag_deadlines":plan.bags.iter().map(|(bag,_)|(*bag,w.bag_expiry.get(bag).copied())).collect::<Vec<_>>(),
+                "origin":{"directory_world":origin,"instance":w.xml.instance,"world":w.xml_world_id(),"accepted_at":plan.accepted_at},
+                "portal":binding
+            })),
+        };
+        self.inventory_events.insert(
+            event.id.clone(),
+            (
+                plan,
+                false,
+                event.clone(),
+                std::time::Instant::now() + std::time::Duration::from_secs(10),
+                None,
+            ),
+        );
+        Ok(event)
+    }
+    pub(crate) fn inventory_journal_ids(&self) -> Vec<String> {
+        self.inventory_events.keys().cloned().collect()
+    }
+    pub(crate) fn inventory_retries(
+        &mut self,
+    ) -> Vec<(InventoryPlan, crate::store::world_events::Event)> {
+        let now = std::time::Instant::now();
+        self.inventory_events
+            .values_mut()
+            .filter_map(|(plan, _, event, next, _)| {
+                if now < *next {
+                    return None;
+                }
+                *next = now + std::time::Duration::from_secs(10);
+                Some((plan.clone(), event.clone()))
+            })
+            .collect()
+    }
+    pub(crate) fn confirm_lost_journal_origins(
+        &self,
+        // Entry identities never change or reappear; current Directory membership proves absence, not the earlier census.
+        candidates: Vec<(String, String)>,
+    ) -> Vec<(String, String)> {
+        candidates
+            .into_iter()
+            .filter(|(_, origin)| !self.worlds.summaries().any(|(_, w)| w.instance == *origin))
+            .collect()
+    }
+    pub(crate) fn retire_lost_inventory_events(&mut self, ids: Vec<String>) -> Result<()> {
+        for id in ids {
+            if let Some((_, _, event, _, _)) = self.inventory_events.get(&id) {
+                let instance = event.native_payload()?["origin"]["instance"]
+                    .as_str()
+                    .context("retained inventory origin missing")?;
+                ensure!(
+                    !self.worlds.summaries().any(|(_, w)| w.instance == instance),
+                    "cannot retire live origin inventory event {id}"
+                );
+                self.inventory_events.remove(&id);
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn publish_inventory_event(
+        &mut self,
+        event: &crate::store::world_events::Event,
+        result: &serde_json::Value,
+    ) -> Result<Option<(u64, u64)>> {
+        let (plan, published, captured, _, publication) =
+            self.inventory_events.get(&event.id).context(
+                "full inventory plan unavailable; retained journal requires origin reconciliation",
+            )?;
+        ensure!(
+            captured == event,
+            "inventory receipt differs from retained immutable event"
+        );
+        if *published {
+            return Ok(*publication);
+        }
+        let mut plan = plan.clone();
+        ensure!(
+            event.native_payload()?["reservation"] == serde_json::to_value(&plan)?,
+            "inventory journal differs from original full reservation"
+        );
+        let origin = self.location(plan.player)?;
+        ensure!(
+            event.content == self.worlds[&origin].xml_game().fingerprint,
+            "inventory journal owning catalogue changed"
+        );
+        ensure!(
+            event.native_payload()?["origin"]["instance"].as_str()
+                == Some(self.worlds[&origin].xml.instance.as_str()),
+            "inventory journal origin instance changed; retained for reconciliation"
+        );
+        let w = &self.worlds[&origin];
+        let late = event.native_payload()?["portal"]["locked_deadline"]
+            .as_u64()
+            .filter(|deadline| w.now >= *deadline)
+            .map(|deadline| (deadline, w.now));
+        let deadlines: Vec<(i32, Option<u64>)> =
+            serde_json::from_value(event.native_payload()?["bag_deadlines"].clone())?;
+        for (bag, deadline) in deadlines {
+            if !w.entities.contains_key(&bag) {
+                ensure!(
+                    deadline.is_some_and(|deadline| deadline <= w.now),
+                    "native bag {bag} missing without original expiry evidence; event {} retained",
+                    event.id
+                );
+                plan.bags.retain(|(id, _)| *id != bag);
+                if plan.loot_slot.is_some_and(|(id, _)| id == bag) {
+                    plan.loot_slot = None;
+                }
+                if plan
+                    .ground_dye
+                    .as_ref()
+                    .is_some_and(|dye| dye.bag_id() == bag)
+                {
+                    plan.ground_dye = None;
+                }
+            }
+        }
+        if plan.vault_purchase.is_some() {
+            let native = if result.get("rejected") == Some(&serde_json::json!(true)) {
+                None
+            } else {
+                Some(serde_json::from_value(
+                    result
+                        .get("native_result")
+                        .context("vault purchase journal result absent")?
+                        .clone(),
+                )?)
+            };
+            self.worlds
+                .get_mut(&origin)
+                .unwrap()
+                .finish_vault_purchase(plan, Ok(native))?;
+        } else if plan.purchase.is_some() {
+            let native = if result.get("rejected") == Some(&serde_json::json!(true)) {
+                None
+            } else {
+                Some(serde_json::from_value(
+                    result
+                        .get("native_result")
+                        .context("purchase journal result absent")?
+                        .clone(),
+                )?)
+            };
+            self.worlds
+                .get_mut(&origin)
+                .unwrap()
+                .finish_purchase(plan, Ok(native))?;
+        } else {
+            let revision = i32::try_from(
+                result["revision"]
+                    .as_i64()
+                    .context("inventory journal revision absent")?,
+            )?;
+            self.finish_inventory_receipt(plan, Ok(revision), Some(event))?;
+        }
+        let retained = self.inventory_events.get_mut(&event.id).unwrap();
+        retained.1 = true;
+        retained.4 = late;
+        Ok(late)
+    }
+    pub(crate) fn forget_inventory_event(&mut self, id: &str) -> Result<()> {
+        ensure!(
+            self.inventory_events
+                .get(id)
+                .is_some_and(|(_, published, _, _, _)| *published),
+            "cannot retire unpublished inventory event"
+        );
+        self.inventory_events.remove(id);
+        Ok(())
+    }
 }

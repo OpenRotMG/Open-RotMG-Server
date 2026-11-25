@@ -6,9 +6,9 @@ pub(super) fn fixture(ground: u8, wall: bool) -> (World, i32) {
 }
 
 fn fixture_map(ground: u8, wall: Option<(usize, usize)>, size: usize) -> (World, i32) {
-    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
-    let content = Arc::new(Content::load(&data).unwrap());
+    let content = Arc::new(test_content());
     let mut map = Map {
+        elevation: Some(vec![200; size * size].into()),
         width: size as i32,
         height: size as i32,
         cells: vec![
@@ -26,7 +26,12 @@ fn fixture_map(ground: u8, wall: Option<(usize, usize)>, size: usize) -> (World,
     if let Some((x, y)) = wall {
         map.cells[y * size + x].ground = 255;
     }
-    let mut world = World::new(content, Arc::new(map)).unwrap();
+    let mut world = World::in_domain(content, Arc::new(map), WorldDomain::Realm).unwrap();
+    let player = test_player(&mut world);
+    (world, player)
+}
+
+pub(super) fn test_player(world: &mut World) -> i32 {
     let character: Character = serde_json::from_value(serde_json::json!({
         "schema":1,"lifetime":crate::store::FameLifetime::complete(),
         "class":0x300,"base":[200,100,15,0,75,15,15,10],
@@ -41,7 +46,7 @@ fn fixture_map(ground: u8, wall: Option<(usize, usize)>, size: usize) -> (World,
     p.last_move = 1000;
     p.last_move_at = 1000;
     p.movement_credit = 0.78;
-    (world, id)
+    id
 }
 
 fn native(
@@ -85,157 +90,6 @@ fn audit_observation_preserves_work_results_and_mutations() {
 }
 
 #[test]
-fn godlands_gods_stop_at_a_ghost_king_tower() {
-    let (mut world, _) = fixture(0x18, false);
-    let area = realm_setpieces::Area {
-        x: 12,
-        y: 12,
-        width: 8,
-        height: 8,
-    };
-    {
-        let map = Arc::make_mut(&mut world.map);
-        for y in area.y..area.y + area.height {
-            for x in area.x..area.x + area.width {
-                map.cells[(y * map.width + x) as usize].terrain = 1;
-            }
-        }
-    }
-    world.claim_ghost_tower(area);
-    assert_eq!(
-        world.map.cell(15.5, 15.5).unwrap().terrain,
-        4,
-        "tower floor stayed godlands"
-    );
-    let id = world
-        .spawn_entity(0x651, Pos { x: 10.5, y: 15.5 }, vec![])
-        .unwrap();
-    world
-        .move_entity_colliding(id, Pos { x: 16.5, y: 15.5 }, 8., true)
-        .unwrap();
-    let pos = world.entities[&id].pos;
-    assert!(
-        !world.inside_ghost_tower(pos),
-        "god entered the tower at {pos:?}"
-    );
-    assert!(pos.x < 12.);
-}
-
-#[test]
-fn mountains_gods_cannot_walk_into_a_placed_phoenix_pyre() {
-    let (mut world, player) = fixture_map(0x18, None, 160);
-    let character = world.players.remove(&player).unwrap().character;
-    world.name = "Realm".into();
-    world.encounter = true;
-    world.rng = rand::rngs::StdRng::seed_from_u64(1058);
-    for cell in &mut Arc::make_mut(&mut world.map).cells {
-        cell.terrain = 1;
-        cell.config = "pyre-preserved".into();
-    }
-    Arc::make_mut(&mut world.map).cells[100 * 160 + 100].terrain = 2;
-    let original = world.map.clone();
-    let center = world.place_named_setpiece(0x675, &[2]).unwrap();
-    let area = *world.setpieces.last().unwrap();
-    assert_eq!([area.x, area.y, area.width, area.height], [85, 85, 30, 30]);
-    assert_eq!(world.map.cell(center.x, center.y).unwrap().ground, 0xf2);
-    for (before, after) in original.cells.iter().zip(&world.map.cells) {
-        assert_eq!(after.terrain, before.terrain);
-        assert_eq!(after.config, before.config);
-    }
-    let birth = Pos {
-        x: center.x + 1.,
-        y: center.y,
-    };
-    assert_eq!(world.map.cell(birth.x, birth.y).unwrap().terrain, 1);
-    assert!(world.walkable(birth));
-    assert!(
-        !world.family_ground(birth, 1),
-        "ordinary births already exclude walkable Mountains inside Pyres"
-    );
-    let player = world.enter(character, None).unwrap();
-    world.players.get_mut(&player).unwrap().pos = Pos {
-        x: area.x as f32 + 4.25,
-        y: center.y,
-    };
-    let start = Pos {
-        x: 82.5,
-        y: center.y,
-    };
-    let god = world.spawn_entity(0x654, start, vec![]).unwrap();
-    assert!(matches!(
-        world
-            .god_movement(god, world.players[&player].pos, 0)
-            .unwrap()
-            .0,
-        crate::encounter::Motion::Chase { .. }
-    ));
-    for _ in 0..100 {
-        world.now += 50;
-        world.npc_step();
-    }
-    let resolved = world.entities[&god].pos;
-    assert!(world.entities[&god].activated.is_some() && resolved.distance(start) > 1.);
-    eprintln!(
-        "ordinary Medusa chase: start={start:?} player={:?} resolved={resolved:?} area=[85,85,30,30]",
-        world.players[&player].pos
-    );
-    assert!(
-        !area.contains(resolved),
-        "ordinary Medusa chase entered the Pyre at {resolved:?}"
-    );
-    world.remove_entity(god);
-    world.players.clear();
-    for kind in [0x651, 0x654, 0x659, 0x675, 0x603, 0x649] {
-        let mountains_god =
-            world.content.objects[&kind].god && world.content.objects[&kind].terrain == 1;
-        for (start, goal) in [
-            (
-                Pos {
-                    x: 82.5,
-                    y: center.y,
-                },
-                center,
-            ),
-            (
-                Pos {
-                    x: 117.5,
-                    y: center.y,
-                },
-                center,
-            ),
-            (
-                Pos {
-                    x: center.x,
-                    y: 82.5,
-                },
-                center,
-            ),
-            (
-                Pos {
-                    x: center.x,
-                    y: 117.5,
-                },
-                center,
-            ),
-            (Pos { x: 82.5, y: 82.5 }, center),
-        ] {
-            let id = world.spawn_entity(kind, start, vec![]).unwrap();
-            world.move_entity_colliding(id, goal, 40., true).unwrap();
-            let pos = world.entities[&id].pos;
-            eprintln!(
-                "kind={kind:#x} start={start:?} goal={goal:?} resolved={pos:?} area=[85,85,30,30]"
-            );
-            assert_eq!(
-                area.contains(pos),
-                !mountains_god,
-                "kind={kind:#x} at {pos:?}"
-            );
-            world.remove_entity(id);
-        }
-    }
-}
-
-#[test]
 fn lair_slime_children_start_on_the_defeated_parents_floor() {
     for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
         let (mut world, _) = fixture(0x18, true);
@@ -244,73 +98,18 @@ fn lair_slime_children_start_on_the_defeated_parents_floor() {
         assert!(world.walkable(pos));
         let id = world.spawn_entity(parent, pos, vec![]).unwrap();
         world.defeat_entity(id).unwrap();
+        for _ in 0..4 {
+            crate::world::xml::tests::drain_events(&mut world).unwrap();
+        }
         let children: Vec<_> = world.actors().filter(|e| e.kind == child).collect();
         assert_eq!(children.len(), count);
+        // XML MetamorphoseAtDeath keeps each child within its default 0.1-tile posJitter of the corpse.
         assert!(
             children
                 .iter()
-                .all(|e| e.pos.x == pos.x && e.pos.y == pos.y && world.walkable(e.pos))
+                .all(|e| e.pos.distance(pos) <= 0.1 + 1e-4 && world.walkable(e.pos))
         );
     }
-}
-
-#[test]
-fn lair_traps_retire_after_one_volley_and_late_joins_keep_owned_escorts() {
-    for kind in [0xda2, 0xda3] {
-        let (mut world, _) = fixture(0x18, false);
-        world.encounter = true;
-        let trap = world
-            .spawn_entity(kind, Pos { x: 10.5, y: 8.5 }, vec![])
-            .unwrap();
-        world.npc_step();
-        let volley = world.bullets.iter().filter(|b| b.owner == trap).count();
-        assert!(volley > 0);
-        assert_eq!(*world.entities[&trap].expires, Some(world.now + 50));
-        world.step();
-        assert!(!world.entities.contains_key(&trap));
-        assert_eq!(
-            world.bullets.iter().filter(|b| b.owner == trap).count(),
-            volley
-        );
-    }
-    let (mut world, _) = fixture(0x18, false);
-    world.encounter = true;
-    let boss = world
-        .spawn_entity(0xd90, Pos { x: 14.5, y: 8.5 }, vec![])
-        .unwrap();
-    world.npc_step();
-    let activated = world.entities[&boss].activated;
-    assert!(activated.is_some());
-    assert_eq!(world.actors().filter(|e| e.parent == Some(boss)).count(), 9);
-    world.now += 42000;
-    world
-        .encounter_mechanics(boss, Some(Pos { x: 8.5, y: 8.5 }), 42000)
-        .unwrap();
-    let escorts: Vec<_> = world
-        .actors()
-        .filter(|e| e.parent == Some(boss))
-        .map(|e| e.id)
-        .collect();
-    assert_eq!(escorts.len(), 15);
-    let mut character =
-        Character::fresh(world.content.get(crate::content::WIZARD).unwrap()).unwrap();
-    character.id = 2;
-    character.account = 2;
-    world.enter(character, None).unwrap();
-    world.npc_step();
-    assert_eq!(world.entities[&boss].activated, activated);
-    assert_eq!(world.entities[&boss].stage, Some(3));
-    assert_eq!(
-        world
-            .actors()
-            .filter(|e| e.parent == Some(boss))
-            .map(|e| e.id)
-            .collect::<Vec<_>>(),
-        escorts
-    );
-    world.remove_entity(boss);
-    world.step();
-    assert!(escorts.iter().all(|id| !world.entities.contains_key(id)));
 }
 
 #[test]
@@ -359,282 +158,6 @@ fn native_entry_uses_ingress_time_and_keeps_monotonic_moves() {
     let character = world.players.remove(&id).unwrap().character;
     let id = world.enter(character, None).unwrap();
     assert_eq!(world.players[&id].last_move_at, 1050);
-}
-
-#[test]
-fn hobbit_mage_wakes_inside_twelve_tiles_and_emits_three_offset_rings() {
-    let (mut world, player) = fixture(0x18, false);
-    world.encounter = true;
-    let mage = world
-        .spawn_entity(0x617, Pos { x: 20.5, y: 8.5 }, vec![])
-        .unwrap();
-    world.npc_step();
-    assert!(world.entities[&mage].activated.is_none());
-    world.players.get_mut(&player).unwrap().pos.x = 9.;
-    world.npc_step();
-    assert!(world.entities[&mage].activated.is_some());
-    for (age, index) in [(0, 0), (400, 1), (800, 2), (1200, 0)] {
-        let shots = crate::encounter::attacks::schedule(0x617, 200, age)
-            .unwrap()
-            .snapshot(1.);
-        assert_eq!(shots.len(), 15);
-        for (i, (projectile, angle)) in shots.into_iter().enumerate() {
-            assert_eq!(projectile, index);
-            assert!((angle.to_degrees() - (i as f32 * 24. + index as f32 * 8.)).abs() < 0.001);
-        }
-    }
-}
-
-#[test]
-fn goblin_attacks_keep_independent_channels_and_phase_prediction() {
-    use crate::encounter::attacks::Prediction;
-    for (hp, stage, intervals, prediction) in [
-        (280, 0, [1050, 1350], 0.35),
-        (182, 0, [1050, 1350], 0.35),
-        (181, 1, [1050, 1050], 0.25),
-    ] {
-        assert_eq!(crate::encounter::stage(0x614, hp, 0), stage);
-        let schedule = crate::encounter::attacks::schedule(0x614, hp, 0).unwrap();
-        assert_eq!(schedule.state, stage);
-        for (attack, interval) in schedule.attacks.iter().zip(intervals) {
-            assert_eq!(attack.interval, Some(interval));
-            assert_eq!(attack.range, 8.);
-            assert!(matches!(attack.predict, Prediction::Lead(p) if p == prediction));
-        }
-    }
-    let (mut world, player) = fixture(0x18, false);
-    let target = world.players[&player].pos;
-    let previous = Pos {
-        x: target.x,
-        y: target.y - 0.5,
-    };
-    world
-        .players
-        .get_mut(&player)
-        .unwrap()
-        .white_demon_aim_history = [previous, target];
-    let pos = Pos {
-        x: target.x - 4.,
-        y: target.y,
-    };
-    let mage = world.spawn_entity(0x614, pos, vec![]).unwrap();
-    for (hp, factor) in [(280, 0.35), (181, 0.25)] {
-        let schedule = crate::encounter::attacks::schedule(0x614, hp, 0).unwrap();
-        let shots = world
-            .scheduled_attacks(mage, Some(target), &schedule)
-            .unwrap();
-        assert_eq!(shots.len(), 2);
-        for (index, angle) in shots {
-            let expected = -(previous.y - pos.y).atan2(previous.x - pos.x) / 0.1
-                * (world.content.objects[&0x614].projectiles[&index].speed / 100.)
-                * factor;
-            assert!((angle - expected).abs() < 0.00001);
-        }
-    }
-    for (age, count) in [(0, 2), (1050, 1), (1350, 1), (2100, 1)] {
-        assert_eq!(
-            crate::encounter::phased_attacks(0x614, 280, 0., age).len(),
-            count
-        );
-    }
-}
-
-#[test]
-fn goblin_birth_budget_survives_escort_deaths_and_parent_loss() {
-    let (mut world, player) = fixture(0x18, false);
-    for cell in &mut Arc::make_mut(&mut world.map).cells {
-        cell.terrain = 10;
-    }
-    let family = super::population::FAMILIES
-        .iter()
-        .find(|f| f.leader == 0x614)
-        .unwrap();
-    let center = Pos { x: 16.5, y: 8.5 };
-    let positions = world.family_layout(center, family, &[]).unwrap();
-    world.place_camp(family, positions).unwrap();
-    let mage = world.camp_members(0).find(|e| e.kind == 0x614).unwrap().id;
-    let mut born: BTreeSet<_> = world.camp_members(0).map(|e| e.id).collect();
-    for turn in 1..=6 {
-        for kind in [0x612, 0x613] {
-            let victim = world.camp_members(0).find(|e| e.kind == kind).unwrap().id;
-            world.remove_entity(victim);
-        }
-        world.now = turn * 12000;
-        world.repopulate_families().unwrap();
-        born.extend(world.camp_members(0).map(|e| e.id));
-    }
-    assert_eq!(
-        born.len(),
-        15,
-        "Mage plus seven lifetime births of each escort"
-    );
-    assert_eq!(crate::encounter::stage(0x614, 182, 0), 0);
-    let escort = world.camp_members(0).find(|e| e.kind == 0x612).unwrap().id;
-    assert!(matches!(
-        world
-            .family_movement(escort, Some(world.players[&player].pos), 0)
-            .unwrap()
-            .0,
-        crate::encounter::Motion::Protect { .. } | crate::encounter::Motion::Wander
-    ));
-    assert!(matches!(
-        world
-            .family_movement(escort, Some(world.players[&player].pos), 1200)
-            .unwrap()
-            .0,
-        crate::encounter::Motion::Orbit { radius: 7., .. }
-    ));
-    world.entities.get_mut(&mage).unwrap().hp = 181;
-    assert!(matches!(
-        world
-            .family_movement(escort, Some(world.players[&player].pos), 1200)
-            .unwrap()
-            .0,
-        crate::encounter::Motion::Chase { stop: 1.5, .. }
-    ));
-    world.remove_entity(mage);
-    let survivors: BTreeSet<_> = world.camp_members(0).map(|e| e.id).collect();
-    world.now += 12000;
-    world.repopulate_families().unwrap();
-    assert_eq!(
-        world.camp_members(0).map(|e| e.id).collect::<BTreeSet<_>>(),
-        survivors
-    );
-}
-
-#[test]
-fn undead_hobbit_mage_has_separate_ring_activation_and_aimed_shot_ranges() {
-    let (mut world, player) = fixture(0x18, false);
-    world.encounter = true;
-    let mage = world
-        .spawn_entity(0x61a, Pos { x: 20.5, y: 8.5 }, vec![])
-        .unwrap();
-    world.npc_step();
-    assert!(world.entities[&mage].activated.is_none());
-    for (age, distance, aimed) in [(0, 11., false), (1000, 9., true), (2000, 11., false)] {
-        world.now = age;
-        let pos = world.entities[&mage].pos;
-        let target = Pos {
-            x: pos.x - distance,
-            y: pos.y,
-        };
-        let schedule = crate::encounter::attacks::schedule(0x61a, 270, age).unwrap();
-        let shots = world
-            .scheduled_attacks(mage, Some(target), &schedule)
-            .unwrap();
-        assert_eq!(
-            shots.iter().filter(|(p, _)| *p == 3).count(),
-            usize::from(aimed)
-        );
-        if age == 0 {
-            assert_eq!(shots.iter().filter(|(p, _)| *p == 0).count(), 15);
-        }
-    }
-    world.players.get_mut(&player).unwrap().pos.x = 9.;
-    world.npc_step();
-    assert!(world.entities[&mage].activated.is_some());
-}
-
-#[test]
-fn sand_phantom_proximity_cycle_preserves_credit_without_a_death() {
-    use crate::encounter::Motion;
-    let (mut world, player) = fixture(0x18, false);
-    let pos = Pos { x: 12.5, y: 8.5 };
-    let phantom = world.spawn_entity(0x6c5, pos, vec![]).unwrap();
-    let xp = world.players[&player].character.exp;
-    let old = world.entities.get_mut(&phantom).unwrap();
-    old.hp = 17;
-    old.damage.insert(player, 50);
-    let far = Pos { x: 7.5, y: 8.5 };
-    world.fauna_mechanics(phantom, Some(far), 50000).unwrap();
-    assert_eq!(world.entities[&phantom].hp, 17);
-    world.fauna_mechanics(phantom, None, 50000).unwrap();
-    let near = Pos { x: 9.5, y: 8.5 };
-    world.fauna_mechanics(phantom, Some(near), 0).unwrap();
-    assert!(!world.entities.contains_key(&phantom));
-    let wisp = world
-        .entities
-        .values()
-        .find(|e| e.kind == 0x7f22)
-        .unwrap()
-        .id;
-    assert_eq!(world.entities[&wisp].hp, 150);
-    assert_eq!(world.entities[&wisp].damage[&player], 50);
-    for age in [0, 799, 1600] {
-        assert_eq!(
-            world.fauna_movement(wisp, Some(near), age).unwrap(),
-            (
-                Motion::Retreat { distance: 5. },
-                crate::encounter::nr_speed(0.6)
-            )
-        );
-    }
-    for (target, age) in [(Some(near), 800), (Some(far), 0), (None, 0)] {
-        assert_eq!(
-            world.fauna_movement(wisp, target, age).unwrap(),
-            (Motion::Wander, crate::encounter::nr_speed(0.9))
-        );
-    }
-    world.fauna_mechanics(wisp, None, 6499).unwrap();
-    assert!(world.entities.contains_key(&wisp));
-    world.now = 6500;
-    world.fauna_mechanics(wisp, None, 6500).unwrap();
-    assert!(!world.entities.contains_key(&wisp));
-    let returned = world.entities.values().find(|e| e.kind == 0x6c5).unwrap();
-    assert_eq!(returned.hp, 230);
-    assert_eq!(returned.damage[&player], 50);
-    assert_eq!((returned.pos.x, returned.pos.y), (pos.x, pos.y));
-    assert_eq!((returned.home.x, returned.home.y), (pos.x, pos.y));
-    assert_eq!(returned.activated, Some(6500));
-    assert_eq!(
-        world
-            .entities
-            .values()
-            .filter(|e| matches!(e.kind, 0x6c5 | 0x7f22))
-            .count(),
-        1
-    );
-    assert_eq!(world.players[&player].character.exp, xp);
-}
-
-#[test]
-fn swarm_directed_shots_use_constant_angular_prediction_and_cooldown() {
-    let (mut world, player) = fixture(0x18, false);
-    let target = world.players[&player].pos;
-    let previous = Pos {
-        x: target.x,
-        y: target.y - 0.5,
-    };
-    world
-        .players
-        .get_mut(&player)
-        .unwrap()
-        .white_demon_aim_history = [previous, target];
-    let start = Pos {
-        x: target.x - 3.,
-        y: target.y,
-    };
-    let swarm = world.spawn_entity(0x955, start, vec![]).unwrap();
-    let heading = (target.y - start.y).atan2(target.x - start.x);
-    let expected = heading
-        + (heading - (previous.y - start.y).atan2(previous.x - start.x)) / 0.1 * (65. / 100.) * 0.1;
-    let mut fired = vec![];
-    for age in (0..3000).step_by(50) {
-        world.now = age;
-        let schedule = crate::encounter::fauna::schedule(0x955, 360, age);
-        for (projectile, angle) in world
-            .scheduled_attacks(swarm, Some(target), &schedule)
-            .unwrap()
-        {
-            assert_eq!(projectile, 0);
-            assert!(
-                (angle - expected).abs() < 0.00001,
-                "age={age}: {angle} != {expected}"
-            );
-            fired.push(age);
-        }
-    }
-    assert_eq!(fired, [0, 550, 1100, 1650, 2200, 2750]);
 }
 
 #[test]
@@ -706,15 +229,17 @@ fn native_berserk_shots_survive_position_correction() {
 #[test]
 fn ocean_trench_advertises_player_teleports_without_enabling_restricted_worlds() {
     let (mut world, _) = fixture(0x18, false);
-    for (name, allowed) in [
-        ("Ocean Trench", true),
-        ("Spider Den", true),
-        ("Tomb of the Ancients", true),
-        ("Vault", false),
-        ("Tutorial", false),
+    for (template, allowed) in [
+        ("ocean-trench", true),
+        ("spider-den", true),
+        ("tomb-of-the-ancients", true),
+        ("vault", false),
+        ("tutorial", false),
     ] {
+        world.xml.template = Some(template.into());
+        let name = "Renamed world";
         world.name = name.into();
-        assert_eq!(world.allow_teleport(), allowed, "{name}");
+        assert_eq!(world.allow_teleport(), allowed, "{template}");
         let packet = world.map_info();
         let mut r = wire::Reader::new(&packet);
         r.i32().unwrap();
@@ -976,11 +501,7 @@ fn ordinary_reproduction_waits_until_the_parent_is_out_of_view() {
         world.rng = rand::rngs::StdRng::seed_from_u64(42);
         let center = Pos { x: 64.5, y: 64.5 };
         let parent = world.place_population_solo(kind, center).unwrap();
-        let entry = population::REPRODUCTION
-            .iter()
-            .position(|r| r.0 == kind)
-            .unwrap();
-        world.reproduction.insert((parent, entry), 0);
+        world.reproduction.insert((parent, 0), 0);
         let p = world.players.get_mut(&player).unwrap();
         p.pos = Pos {
             x: center.x + 19.99,
@@ -992,7 +513,7 @@ fn ordinary_reproduction_waits_until_the_parent_is_out_of_view() {
             .unwrap();
         world.reproduce(parent, 1).unwrap();
         assert_eq!(world.population.len(), 1, "watched {kind:#x} reproduced");
-        assert_eq!(world.reproduction[&(parent, entry)], 60000);
+        assert_eq!(world.reproduction[&(parent, 0)], 60000);
         world.players.get_mut(&player).unwrap().pos.x = center.x + 30.;
         world.reproduce(parent, 60000).unwrap();
         assert_eq!(
@@ -1039,11 +560,7 @@ fn ordinary_reproduction_cannot_enter_any_players_view() {
                 y: center.y + 21. * angle.sin(),
             };
         }
-        let entry = population::REPRODUCTION
-            .iter()
-            .position(|r| r.0 == kind)
-            .unwrap();
-        world.reproduction.insert((parent, entry), 0);
+        world.reproduction.insert((parent, 0), 0);
         world.reproduce(parent, 1).unwrap();
         assert_eq!(
             world.population.len(),
@@ -1066,11 +583,7 @@ fn reproduced_families_keep_their_entire_footprint_out_of_view() {
             .place_population_solo(0x652, Pos { x: 64.5, y: 64.5 })
             .unwrap();
         world.players.get_mut(&player).unwrap().pos = Pos { x: 85., y: 64.5 };
-        let entry = population::REPRODUCTION
-            .iter()
-            .position(|r| r.0 == 0x652)
-            .unwrap();
-        world.reproduction.insert((parent, entry), 0);
+        world.reproduction.insert((parent, 0), 0);
         world.reproduce(parent, 1).unwrap();
         births += world.population.len() - 1;
         assert!(
@@ -1104,7 +617,7 @@ fn snakes_reproduce_back_to_kithio_density() {
     let pass = |world: &mut World| {
         for _ in 0..20 {
             world.now += 50;
-            world.reproduce_active();
+            world.reproduce_active().unwrap();
         }
     };
     let cycle = |world: &mut World| {
@@ -1139,89 +652,49 @@ fn oryx_culls_excess_away_from_players() {
 }
 
 #[test]
-fn far_npc_clocks_pause_until_a_player_returns() {
-    let (mut world, _) = fixture(0x18, false);
-    for cell in &mut Arc::make_mut(&mut world.map).cells {
-        cell.terrain = 11;
-    }
-    let snake = world
-        .place_population_solo(0x602, Pos { x: 30.5, y: 30.5 })
-        .unwrap();
-    let e = world.entities.get_mut(&snake).unwrap();
-    e.activated = Some(0);
-    e.next_shot = 1000;
-    let far = [Pos { x: 4.5, y: 4.5 }];
-    assert!(!world.npc_candidates(&far).contains(&snake));
-    world.now += 5000;
-    assert!(!world.npc_candidates(&far).contains(&snake));
-    assert!(
-        world
-            .npc_candidates(&[Pos { x: 25.5, y: 25.5 }])
-            .contains(&snake)
-    );
-    assert_eq!(world.entities[&snake].next_shot, 6000);
-    assert_eq!(world.entities[&snake].activated, Some(5000));
-}
-
-#[test]
 fn oryx_counts_family_members_once_summoned() {
-    let (mut world, _) = fixture(0x18, false);
-    for cell in &mut Arc::make_mut(&mut world.map).cells {
-        cell.terrain = 11;
-    }
-    let family = super::population::FAMILIES
-        .iter()
-        .find(|f| f.leader == 0x601)
-        .unwrap();
-    let positions = world
-        .family_layout(Pos { x: 24.5, y: 24.5 }, family, &[])
-        .unwrap();
-    world.place_camp(family, positions).unwrap();
-    assert_eq!(world.oryx_counted(11).len(), 1, "inactive leader only");
-    assert_eq!(world.oryx_counts()[11], world.oryx_counted(11).len());
-    let leader = world.camp_members(0).find(|e| e.kind == 0x601).unwrap().id;
+    // Metal Golem's eager Gray Satellites 1-2 are camp members its XML does not spawn.
+    let (mut world, _) = super::population::camp_fixture(0x62d);
+    assert_eq!(world.oryx_counted(7).len(), 1, "inactive leader only");
+    assert_eq!(world.oryx_counts()[7], world.oryx_counted(7).len());
+    let leader = world.camp_members(0).find(|e| e.kind == 0x62d).unwrap().id;
     world.entities.get_mut(&leader).unwrap().activated = Some(0);
-    assert_eq!(world.oryx_counted(11).len(), 3, "active leader summoned");
-    assert_eq!(world.oryx_counts()[11], world.oryx_counted(11).len());
+    assert_eq!(world.oryx_counted(7).len(), 3, "active leader summoned");
+    assert_eq!(world.oryx_counts()[7], world.oryx_counted(7).len());
     world.remove_entity(leader);
-    assert_eq!(world.oryx_counted(11).len(), 2, "orphans still count");
-    assert_eq!(world.oryx_counts()[11], world.oryx_counted(11).len());
+    assert_eq!(world.oryx_counted(7).len(), 2, "orphans still count");
+    assert_eq!(world.oryx_counts()[7], world.oryx_counted(7).len());
 }
 
 #[test]
-fn walls_never_wait_in_the_per_tick_npc_scan() {
-    let (mut world, player) = fixture(0x18, false);
-    let pos = world.players[&player].pos;
-    let wall = world
-        .content
-        .objects
-        .values()
-        .find(|o| o.class == "Wall" && !o.passive_destructible())
-        .unwrap()
-        .kind;
-    let wall = world
-        .spawn_entity(
-            wall,
-            Pos {
-                x: pos.x + 2.,
-                y: pos.y,
-            },
-            vec![],
-        )
-        .unwrap();
-    let snake = world
-        .spawn_entity(
-            0x602,
-            Pos {
-                x: pos.x - 2.,
-                y: pos.y,
-            },
-            vec![],
-        )
-        .unwrap();
-    assert!(world.actor_ids.contains(&wall));
-    assert!(!world.npc_global_ids.contains(&wall));
-    let selected = world.npc_candidates(&[pos]);
-    assert!(selected.contains(&snake) && !selected.contains(&wall));
-    assert!(!world.npc_global_ids.contains(&wall));
+fn server_driven_players_never_wait_for_native_goto_acknowledgements() {
+    for controller in [Controller::Human, Controller::Autonomous, Controller::Qa] {
+        let (mut world, id) = fixture(0x18, false);
+        let (packets, mut receiver) = tokio::sync::mpsc::channel(4);
+        let (lost, _) = tokio::sync::watch::channel(None);
+        let p = world.players.get_mut(&id).unwrap();
+        p.controller = controller;
+        p.tx = Some(Output {
+            packets,
+            lost,
+            trace: None,
+        });
+        p.death_pending = true;
+        for own in [false, true] {
+            reconciliation::goto(p, own, vec![1]);
+        }
+        if controller == Controller::Human {
+            assert_eq!(receiver.try_recv().unwrap().id, wire::GOTO);
+            assert_eq!(receiver.try_recv().unwrap().id, wire::GOTO);
+            assert_eq!(
+                p.goto_acks.iter().map(|(own, _)| *own).collect::<Vec<_>>(),
+                [false, true]
+            );
+        } else {
+            assert!(receiver.try_recv().is_err());
+            assert!(p.goto_acks.is_empty());
+            world.expire_goto_acks();
+            assert!(!world.players[&id].departing);
+        }
+    }
 }

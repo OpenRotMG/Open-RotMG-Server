@@ -61,7 +61,7 @@ impl Adventure {
     pub(super) fn phase(&self, v: &PlayerView) -> Phase {
         if self.finished {
             Phase::Finished
-        } else if matches!(v.map.name.as_str(), "Nexus" | "Vault") {
+        } else if matches!(v.map.template.as_deref(), Some("nexus") | Some("vault")) {
             Phase::Preparing
         } else if self.members.iter().any(|m| {
             m.account != v.session.account
@@ -509,7 +509,7 @@ fn godlands_farmer_does_not_start_or_accept_a_speed_outing() {
 
 pub(super) fn ready(v: &PlayerView, content: &Content) -> bool {
     v.character.level >= 1
-        && matches!(v.map.name.as_str(), "Realm" | "Nexus")
+        && matches!(v.map.template.as_deref(), Some("realm") | Some("nexus"))
         && v.character.hp * 4 >= v.character.stats[0] * 3
         && v.character.mp * 3 >= v.character.stats[1]
         && !v.objects.iter().any(|o| {

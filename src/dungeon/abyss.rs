@@ -1,14 +1,15 @@
+use crate::content::game::{BehaviorKind, Field, Value, geometry::Geometry};
 use crate::content::{Cell, Content, Map};
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use std::collections::BTreeSet;
+type StampBounds = ([i32; 2], [i32; 2]);
+type Layout = (Vec<Room>, Vec<Edge>, i32, [i32; 2]);
 type PillarOffsets = &'static [(i32, i32)];
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 
 pub const MALPHAS: u16 = 0x90a;
 pub const IDOL: u16 = 0xe1d;
-pub const ROSTER: &[u16] = &[
-    0x66d, 0x66e, 0x66f, 0x670, 0x671, 0x672, 0x908, 0x909, MALPHAS, 0x90b, IDOL,
-];
+const IDOL_OFFSET: i32 = 7;
 pub const LAVA: u8 = 0x70;
 pub const FLOOR: u8 = 0x3c;
 pub const BRIDGE: u16 = 0x153;
@@ -169,7 +170,7 @@ fn path(map: &mut Map, mut a: (i32, i32), b: (i32, i32), protected: &mut BTreeSe
 }
 
 // Keep the shrine dry until activation: legacy reconstruction (creepylava, 2015), https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/DungeonGen/Templates/Abyss/template.jm
-fn treasure_room(map: &mut Map, room: Room) {
+fn treasure_room(map: &mut Map, room: Room, idol: u16) {
     for y in 0..21 {
         for x in 0..15 {
             let chamber = match y {
@@ -213,8 +214,8 @@ fn treasure_room(map: &mut Map, room: Room) {
         let i = index(map, room.x + x, room.y + y);
         map.cells[i].object = Some(if x == 5 && y >= 16 { 0x183 } else { 0x17e });
     }
-    let i = index(map, room.x + 7, room.y + 7);
-    map.cells[i].object = Some(IDOL);
+    let i = index(map, room.x + IDOL_OFFSET, room.y + IDOL_OFFSET);
+    map.cells[i].object = Some(idol);
 }
 
 fn room_candidates(rooms: &[Room], size: (i32, i32, u8)) -> Vec<(Room, Edge)> {
@@ -343,7 +344,7 @@ fn place_scenery(
     Ok(())
 }
 
-fn layout(seed: u64, rng: &mut impl Rng) -> Result<(Vec<Room>, Vec<Edge>, i32)> {
+fn layout(seed: u64, rng: &mut impl Rng, content: &Content) -> Result<Layout> {
     let mut rooms = vec![Room {
         x: 0,
         y: 0,
@@ -372,8 +373,23 @@ fn layout(seed: u64, rng: &mut impl Rng) -> Result<(Vec<Room>, Vec<Edge>, i32)> 
         rooms.push(r);
         edges.push(edge);
     }
-    let min_x = rooms.iter().map(|r| r.x).min().unwrap() - 3;
-    let min_y = rooms.iter().map(|r| r.y).min().unwrap() - 3;
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    for r in &rooms {
+        min_x = min_x.min(r.x - 3);
+        min_y = min_y.min(r.y - 3);
+        max_x = max_x.max(r.x + r.w + 3);
+        max_y = max_y.max(r.y + r.h + 3);
+    }
+    // The legacy shrine footprint does not include the entire anchored PlaceMap overlay.
+    for (anchor, [w, h]) in idol_stamps(content)? {
+        for r in rooms.iter().filter(|r| r.tag >= 16) {
+            let (x, y) = (r.x + IDOL_OFFSET - anchor[0], r.y + IDOL_OFFSET - anchor[1]);
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x + w);
+            max_y = max_y.max(y + h);
+        }
+    }
     for r in &mut rooms {
         r.x -= min_x;
         r.y -= min_y;
@@ -384,14 +400,18 @@ fn layout(seed: u64, rng: &mut impl Rng) -> Result<(Vec<Room>, Vec<Edge>, i32)> 
         e.a.1 -= min_y;
         e.b.1 -= min_y;
     }
-    Ok((rooms, edges, treasures))
+    Ok((rooms, edges, treasures, [max_x - min_x, max_y - min_y]))
 }
 
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    let [boss, guard, idol, retreat] = generator.placements("landmarks")?;
+    let demons = generator.placements::<6>("demons")?;
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let (rooms, edges, treasures) = layout(seed, &mut rng)?;
-    let width = rooms.iter().map(|r| r.x + r.w).max().unwrap() + 3;
-    let height = rooms.iter().map(|r| r.y + r.h).max().unwrap() + 3;
+    let (rooms, edges, treasures, [width, height]) = layout(seed, &mut rng, content)?;
     ensure!(
         width <= 1024 && height <= 1024,
         "Abyss seed {seed} exceeds bounded map dimensions"
@@ -404,6 +424,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         region: 0,
     };
     let mut map = Map {
+        elevation: None,
         width,
         height,
         cells: vec![empty; (width * height) as usize],
@@ -449,7 +470,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             }
         }
         if room.tag >= 16 {
-            treasure_room(&mut map, *room);
+            treasure_room(&mut map, *room, idol);
         }
     }
     // The reference leaves broken tiles on part of the lava so it can be crossed.
@@ -512,7 +533,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 }
             }
             let i = index(&map, px, py);
-            map.cells[i].object = Some(0x703);
+            map.cells[i].object = Some(retreat);
             map.cells[i].region = 1;
             map.spawns.push((px as f32 + 0.5, py as f32 + 0.5));
             path(&mut map, (px, py), (cx, cy), &mut protected);
@@ -522,7 +543,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 let y = rng.gen_range(room.y..room.y + room.h);
                 let i = index(&map, x, y);
                 if map.cells[i].ground != LAVA && map.cells[i].object.is_none() {
-                    map.cells[i].object = Some(rng.gen_range(0x66d..=0x672));
+                    map.cells[i].object = Some(demons[usize::from(rng.gen_range(0_u16..=5))]);
                 }
             }
             for _ in 0..2 {
@@ -540,13 +561,13 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let (cx, cy) = rooms[0].center();
     let i = index(&map, cx, cy);
     map.cells[i].ground = 0x69;
-    map.cells[i].object = Some(MALPHAS);
+    map.cells[i].object = Some(boss);
     for (dx, dy) in [(-4, -9), (5, -9), (-9, 0), (10, 0), (-4, 8), (5, 8)]
         .into_iter()
         .take(rng.gen_range(3..=6))
     {
         let i = index(&map, cx + dx, cy + dy);
-        map.cells[i].object = Some(0x651);
+        map.cells[i].object = Some(guard);
     }
     place_scenery(&mut map, &rooms, &protected, seed)?;
     let mut walls = vec![];
@@ -587,81 +608,72 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     Ok(map)
 }
 
-pub fn initial_condition(kind: u16) -> i32 {
-    if kind == MALPHAS {
-        crate::condition::bit(crate::condition::INVULNERABLE)
-    } else {
-        0
-    }
+fn idol_stamps(content: &Content) -> Result<Vec<StampBounds>> {
+    let game = content
+        .game
+        .as_ref()
+        .context("Abyss Idol geometry needs GameData")?;
+    let idol = game
+        .definitions
+        .get(&IDOL)
+        .context("Abyss Idol definition missing")?;
+    let stamps = idol
+        .states
+        .iter()
+        .flat_map(|state| &state.behaviors)
+        .filter(|behavior| behavior.kind == BehaviorKind::PlaceMap)
+        .map(|behavior| {
+            let Some(Value::Map(id)) = behavior.fields.get(&Field::Map) else {
+                return Err(anyhow!("Abyss Idol PlaceMap has no linked map"));
+            };
+            let binding = game
+                .maps
+                .get(*id as usize)
+                .context("Abyss Idol PlaceMap binding missing")?;
+            let Geometry::Template(template) = &binding.geometry else {
+                return Err(anyhow!(
+                    "Abyss Idol PlaceMap {} is not a template",
+                    binding.name
+                ));
+            };
+            let anchor = template
+                .anchor
+                .with_context(|| format!("Abyss Idol PlaceMap {} needs an anchor", binding.name))?;
+            Ok((
+                anchor.map(|n| n as i32),
+                template.dimensions.map(|n| n as i32),
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(!stamps.is_empty(), "Abyss Idol has no PlaceMap overlays");
+    Ok(stamps)
 }
 
-pub fn profile(kind: u16) -> crate::encounter::Profile {
-    use crate::encounter::{Anchor, Motion::*, Profile};
-    let (motion, speed, interval, range) = match kind {
-        0x66d => (Wander, 12., 1000, 20.),
-        0x66e..=0x670 => (
-            Chase {
-                sight: 11.,
-                stop: 5.,
-            },
-            16.,
-            1000,
-            15.,
-        ),
-        0x671 | 0x672 => (
-            Chase {
-                sight: 11.,
-                stop: 1.,
-            },
-            16.,
-            500,
-            4.8,
-        ),
-        0x908 => (
-            Orbit {
-                anchor: Anchor::Parent,
-                radius: 9.,
-            },
-            6.,
-            1200,
-            5.,
-        ),
-        0x909 => (
-            Chase {
-                sight: 20.,
-                stop: 0.,
-            },
-            6.,
-            100,
-            100.,
-        ),
-        0x90b => (
-            Chase {
-                sight: 15.,
-                stop: 1.,
-            },
-            6.,
-            200,
-            4.,
-        ),
-        MALPHAS | IDOL => (Stationary, 0., 100, 20.),
-        _ => unreachable!("unregistered Abyss enemy"),
-    };
-    Profile {
-        motion,
-        speed,
-        interval,
-        range,
+#[cfg(test)]
+#[test]
+fn generated_abyss_idol_sites_fit_place_map_templates() {
+    let content = crate::world::test_content();
+    let stamps = idol_stamps(&content).unwrap();
+    let mut sites = 0;
+    for seed in 0..128 {
+        let map = crate::dungeon::generate_selected(&content, "abyss-of-demons", seed).unwrap();
+        for (i, _) in map
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| cell.object == Some(IDOL))
+        {
+            sites += 1;
+            for &([ax, ay], [w, h]) in &stamps {
+                let (x, y) = (i as i32 % map.width - ax, i as i32 / map.width - ay);
+                assert!(
+                    x >= 0 && y >= 0 && x + w <= map.width && y + h <= map.height,
+                    "Abyss seed {seed}, Idol cell {i}: {w}x{h} overlay at ({x},{y}) outside {}x{}",
+                    map.width,
+                    map.height
+                );
+            }
+        }
     }
-}
-pub fn phase(elapsed: u64) -> u64 {
-    match elapsed % 50200 {
-        0..9000 => 0,
-        9000..11500 => 1,
-        11500..23500 => 2,
-        23500..36500 => 3,
-        36500..39000 => 4,
-        39000..47000 => 5,
-        _ => 6,
-    }
+    assert!(sites >= 20, "expected many natural Idol sites, saw {sites}");
 }

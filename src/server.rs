@@ -728,11 +728,51 @@ fn slot(r: &mut Reader<'_>) -> Result<Slot> {
     })
 }
 async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
+    let event = plan.event_id().to_owned();
+    tokio::time::timeout(std::time::Duration::from_secs(10),persist_inventory_event(a,plan)).await.with_context(||format!("inventory event {event} deadline unresolved; original reservation and plan retained, no refund/replay"))?
+}
+async fn persist_inventory_event(a: &App, plan: InventoryPlan) -> Result<()> {
+    lifecycle::stage(Stage::Reservation);
+    let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
+    let retained = plan.clone();
+    let event = a
+        .world
+        .directory(move |d| d.retain_inventory_event(retained))
+        .await?;
+    persist_journaled_inventory(a, plan, event).await
+}
+async fn persist_journaled_inventory(
+    a: &App,
+    plan: InventoryPlan,
+    event: crate::store::world_events::Event,
+) -> Result<()> {
     lifecycle::stage(Stage::Store);
-    if let Some(purchase) = &plan.vault_purchase {
-        let _gold = a.gold_updates.lock().await;
-        let result = a
-            .store
+    a.store.prepare_world_event(event.clone()).await?;
+    let existing = a
+        .store
+        .world_event(event.id.clone())
+        .await?
+        .context("prepared inventory event disappeared")?;
+    if matches!(existing.status, 1 | 2) {
+        return publish_committed_inventory(
+            a,
+            event,
+            existing
+                .result
+                .context("committed inventory receipt absent")?,
+            plan.collected.as_ref().map(|_| plan.account),
+        )
+        .await;
+    }
+    let store = a.store.for_world_event(event.clone())?;
+    let _gold = if plan.vault_purchase.is_some() || plan.purchase.is_some() {
+        Some(a.gold_updates.lock().await)
+    } else {
+        None
+    };
+    let collector = plan.collected.as_ref().map(|_| plan.account);
+    let result = if let Some(purchase) = &plan.vault_purchase {
+        store
             .purchase_vault(
                 InventoryWrite {
                     id: plan.character,
@@ -742,19 +782,10 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 },
                 purchase.chest,
             )
-            .await;
-        lifecycle::stage(Stage::Publication);
-        a.world
-            .for_player(plan.player)
-            .call(move |w| w.finish_vault_purchase(plan, result))
-            .await?;
-        lifecycle::stage(Stage::Settled);
-        return Ok(());
-    }
-    if let Some((_, purchase)) = &plan.purchase {
-        let _gold = a.gold_updates.lock().await;
-        let result = a
-            .store
+            .await
+            .map(|_| ())
+    } else if let Some((_, purchase)) = &plan.purchase {
+        store
             .purchase(
                 InventoryWrite {
                     id: plan.character,
@@ -764,21 +795,10 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 },
                 purchase.clone(),
             )
-            .await;
-        lifecycle::stage(Stage::Publication);
-        a.world
-            .for_player(plan.player)
-            .call(move |w| w.finish_purchase(plan, result))
-            .await?;
-        lifecycle::stage(Stage::Settled);
-        return Ok(());
-    }
-    lifecycle::stage(Stage::Reservation);
-    let plan = a.world.directory(move |d| d.stage_unlock(plan)).await?;
-    lifecycle::stage(Stage::Store);
-    let collector = plan.collected.as_ref().map(|_| plan.account);
-    let result = if let Some(pet) = plan.companion.as_ref().filter(|pet| pet.permanent) {
-        a.store
+            .await
+            .map(|_| ())
+    } else if let Some(pet) = plan.companion.as_ref().filter(|pet| pet.permanent) {
+        store
             .select_companion(
                 InventoryWrite {
                     id: plan.character,
@@ -792,8 +812,9 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 a.content.clone(),
             )
             .await
+            .map(|_| ())
     } else if let Some(slot) = plan.xp_boost {
-        a.store
+        store
             .consume_xp_booster(
                 InventoryWrite {
                     id: plan.character,
@@ -805,6 +826,7 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 plan.vaults.clone(),
             )
             .await
+            .map(|_| ())
     } else if let Some((slot, tex1, tex2)) = plan.appearance {
         let write = InventoryWrite {
             id: plan.character,
@@ -814,7 +836,7 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
         };
         let kind = u16::try_from(slot.kind)?;
         if slot.object == plan.player {
-            a.store
+            store
                 .consume_dye(write, slot.slot, kind, [tex1, tex2])
                 .await
         } else {
@@ -825,12 +847,13 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 .call(move |w| w.validate_ground_dye(&reserved))
                 .await
             {
-                Ok(()) => a.store.consume_ground_dye(write, kind, [tex1, tex2]).await,
+                Ok(()) => store.consume_ground_dye(write, kind, [tex1, tex2]).await,
                 Err(error) => Err(error),
             }
         }
+        .map(|_| ())
     } else if let Some((snapshot, slot, index, amount)) = &plan.stat_growth {
-        a.store
+        store
             .consume_stat(
                 snapshot.clone(),
                 (slot.object == plan.player).then_some(slot.slot),
@@ -839,6 +862,7 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 plan.vaults.clone(),
             )
             .await
+            .map(|_| ())
     } else if let Some(source) = plan.potion {
         ensure!(
             source.object == plan.player
@@ -847,7 +871,7 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 && plan.collected.is_none(),
             "inventory potion source must be the consuming actor"
         );
-        a.store
+        store
             .consume_inventory_potion(
                 InventoryWrite {
                     id: plan.character,
@@ -859,8 +883,9 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 u16::try_from(source.kind)?,
             )
             .await
+            .map(|_| ())
     } else {
-        a.store
+        store
             .exchange_collected(
                 vec![InventoryWrite {
                     id: plan.character,
@@ -872,15 +897,53 @@ async fn persist(a: &App, plan: InventoryPlan) -> Result<()> {
                 plan.collected.clone(),
             )
             .await
-            .and_then(|mut revisions| {
-                revisions
-                    .pop()
-                    .context("inventory commit returned no revision")
-            })
+            .map(|_| ())
     };
+    let record = a
+        .store
+        .world_event(event.id.clone())
+        .await?
+        .context("inventory operation journal disappeared; full plan retained")?;
+    if !matches!(record.status, 1 | 2) {
+        return Err(result
+            .err()
+            .context("native inventory returned without committing its journal")?
+            .context(format!(
+                "inventory event {} pending; full original plan retained, no refund or publication",
+                event.id
+            )));
+    }
+    if let Err(error) = result {
+        tracing::warn!(event=%event.id,error=%format_args!("{error:#}"),"inventory reply failed; exact committed journal outcome recovered without replay");
+    }
+    publish_committed_inventory(
+        a,
+        event,
+        record.result.context("committed inventory result absent")?,
+        collector,
+    )
+    .await
+}
+async fn publish_committed_inventory(
+    a: &App,
+    event: crate::store::world_events::Event,
+    outcome: serde_json::Value,
+    collector: Option<i32>,
+) -> Result<()> {
     lifecycle::stage(Stage::Publication);
+    let publish = event.clone();
+    let late = a
+        .world
+        .directory(move |d| d.publish_inventory_event(&publish, &outcome))
+        .await?;
+    if let Some((deadline, at)) = late {
+        a.store
+            .record_late_inventory_publication(event.clone(), deadline, at)
+            .await?;
+    }
+    a.store.publish_world_event(event.clone()).await?;
     a.world
-        .directory(move |d| d.finish_inventory(plan, result))
+        .directory(move |d| d.forget_inventory_event(&event.id))
         .await?;
     if let Some(account) = collector {
         gold::sync(a, account).await?;
@@ -940,10 +1003,13 @@ where
 
 enum CreditStep {
     Done,
+    Held,
     Waiting(std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>),
     Progress(Box<(lifecycle::Operation, i32, crate::store::Character)>),
 }
-async fn settle_giver_credits(a: &App, id: i32) -> Result<()> {
+/// Returns false while a staged terminal holds a recipient's progress: its journal receipt, published by a later
+/// persistence tick, settles that credit, so the giver must not wait for it inside the tick.
+async fn settle_giver_credits(a: &App, id: i32) -> Result<bool> {
     let account = a
         .world
         .for_player(id)
@@ -982,6 +1048,14 @@ async fn settle_giver_credits(a: &App, id: i32) -> Result<()> {
                     let Some((scope, recipient, account)) = recipients.first().copied() else {
                         return Ok(CreditStep::Done);
                     };
+                    if d.worlds[&scope].progress_held_by_terminal(recipient)? {
+                        tracing::debug!(
+                            giver = id,
+                            recipient,
+                            "causal credit awaits staged terminal receipt"
+                        );
+                        return Ok(CreditStep::Held);
+                    }
                     match lifecycle::reserve_credit_recipient(&app, giver, (account, recipient))? {
                         lifecycle::CreditAdmission::Waiting(wait) => Ok(CreditStep::Waiting(wait)),
                         lifecycle::CreditAdmission::Reserved(guard) => {
@@ -1003,7 +1077,8 @@ async fn settle_giver_credits(a: &App, id: i32) -> Result<()> {
                 })
                 .await?;
             match step {
-                CreditStep::Done => return Ok(()),
+                CreditStep::Done => return Ok(true),
+                CreditStep::Held => return Ok(false),
                 CreditStep::Waiting(wait) => wait.await,
                 CreditStep::Progress(progress) => {
                     let (guard, recipient, snapshot) = *progress;
@@ -1318,7 +1393,7 @@ fn input(
             let id = character("ground damage before character")?;
             Box::new(move |w| w.ground_damage(id, time, pos))
         }
-        22 => {
+        wire::SHOOT_ACK => {
             let time = r.i32()?;
             r.done()?;
             let id = character("SHOOT ACK before character")?;
@@ -1686,7 +1761,11 @@ async fn handle_inner(
                 lost: lost.clone(),
                 trace: Some(trace.clone()),
             };
-            let vault = if a.world.call(|w| Ok(w.name == "Vault")).await? {
+            let vault = if a
+                .world
+                .call(|w| Ok(w.template_id() == Some("vault")))
+                .await?
+            {
                 Some(a.store.vaults(account).await?)
             } else {
                 None
@@ -3236,7 +3315,43 @@ fn close_scripts(a: &App) -> Result<Vec<lifecycle::Finalized>> {
     Ok(completions)
 }
 
-pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
+pub(crate) async fn reconcile_world_origins(
+    store: &Store,
+    world: &Handle,
+    census: Vec<String>,
+) -> Result<Vec<(String, String)>> {
+    let candidates = store.lost_world_candidates(census).await?;
+    let absent = world
+        .directory(move |d| Ok(d.confirm_lost_journal_origins(candidates)))
+        .await?;
+    store.reconcile_confirmed_lost_events(absent).await
+}
+/// Runs about once a minute, or again next tick while a full batch shows a backlog.
+async fn prune_journal_history(a: &App, live: Vec<String>, ids: Vec<String>) -> Result<()> {
+    static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let now = i64::try_from(std::time::UNIX_EPOCH.elapsed()?.as_secs())?;
+    if now < NEXT.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(());
+    }
+    let compacted = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        a.store.compact_settled_world_events(ids.clone()),
+    )
+    .await
+    .context("journal compaction Store timeout; payloads retained")??;
+    let (pruned, _) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        a.store.prune_settled_world_events(live, ids, now),
+    )
+    .await
+    .context("journal retention Store timeout; history retained")??;
+    if pruned.max(compacted) < crate::store::world_events::JOURNAL_PRUNE_BATCH {
+        NEXT.store(now + 60, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(())
+}
+/// Returns whether terminal journal events were drained, so the caller can poll again without the full idle delay.
+pub(crate) async fn persistence_tick(a: &App) -> Result<bool> {
     // Commit progress across worlds before death settlement so causal recipients stay durable.
     for world in a.world.worlds() {
         let app = a.clone();
@@ -3287,6 +3402,163 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
         }))
         .await;
     }
+    let mut live = Vec::new();
+    let mut ids = a.world.directory(|d| Ok(d.inventory_journal_ids())).await?;
+    for world in a.world.worlds() {
+        if let Some((id, events)) = world
+            .registered_world(|w| Ok((w.world_instance(), w.terminal_journal_ids())))
+            .await?
+        {
+            live.push(id);
+            ids.extend(events);
+        }
+    }
+    let reconciled=tokio::time::timeout(std::time::Duration::from_secs(10),reconcile_world_origins(&a.store,&a.world,live.clone())).await.with_context(||format!("Store reconciliation deadline unresolved; original live journal events={ids:?} retained"))??;
+    if let Err(error) = prune_journal_history(a, live, ids).await {
+        tracing::error!(error=%format_args!("{error:#}"),"journal retention failed; history retained");
+    }
+    a.world
+        .directory(move |d| {
+            d.retire_lost_inventory_events(reconciled.into_iter().map(|(id, _)| id).collect())
+        })
+        .await?;
+    let retries = a.world.directory(|d| Ok(d.inventory_retries())).await?;
+    for (plan, event) in retries {
+        let id = event.id.clone();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            persist_journaled_inventory(a, plan, event),
+        )
+        .await;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::error!(event=%id,error=%format_args!("{error:#}"),"inventory event reconciliation retained original plan")
+            }
+            Err(error) => {
+                tracing::error!(event=%id,%error,"inventory event Store timeout; original plan retained")
+            }
+        }
+    }
+    let worlds = a.world.worlds();
+    let due = futures_util::future::join_all(
+        worlds
+            .iter()
+            .map(|world| world.registered_world(|w| Ok(w.due_terminal_events()))),
+    )
+    .await;
+    let mut owners = Vec::new();
+    let mut batch = Vec::new();
+    for (world, events) in worlds.iter().zip(due) {
+        for event in events?.unwrap_or_default() {
+            owners.push(world.clone());
+            batch.push(event);
+        }
+    }
+    let drained = !batch.is_empty();
+    if drained {
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            a.store.coordinate_terminals(batch),
+        )
+        .await
+        {
+            Ok(Ok(outcomes)) => {
+                futures_util::future::join_all(outcomes.into_iter().zip(owners).map(|((id, record), world)| async move {
+                    let result = match record {
+                        Ok(record) => world.call(move |w| w.finish_terminal_event(record)).await,
+                        Err(error) => Err(error),
+                    };
+                    if let Err(error) = result {
+                        tracing::error!(event=%id,error=%format_args!("{error:#}"),"terminal event retained for same-key reconciliation; no publication/reroll/refund");
+                    }
+                }))
+                .await;
+            }
+            Ok(Err(error)) => {
+                tracing::error!(error=%format_args!("{error:#}"),"terminal batch Store failure; original plans retained, no publication/reroll/refund")
+            }
+            Err(error) => {
+                tracing::error!(%error,"terminal batch Store timeout; original plans retained, no publication/reroll/refund")
+            }
+        }
+    }
+    for world in worlds {
+        let Some(ids) = world
+            .registered_world(|w| Ok(w.terminal_publications()))
+            .await?
+        else {
+            continue;
+        };
+        futures_util::future::join_all(ids.into_iter().map(|id| {
+            let world = &world;
+            async move {
+            let diagnostic = id.clone();
+            let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                let record = a
+                    .store
+                    .world_event(id.clone())
+                    .await?
+                    .context("native terminal publication lost durable event")?;
+                a.store.publish_world_event(record.event).await?;
+                world
+                    .call(move |w| {
+                        w.acknowledge_terminal_publication(id);
+                        Ok(())
+                    })
+                    .await
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::error!(event=%diagnostic,error=%format_args!("{error:#}"),"terminal publication acknowledgement retained")
+                }
+                Err(error) => {
+                    tracing::error!(event=%diagnostic,%error,"terminal publication acknowledgement Store timeout; original intent retained")
+                }
+            }
+            }
+        }))
+        .await;
+        let Some(events) = world.registered_world(|w| Ok(w.delivery_batch())).await? else {
+            continue;
+        };
+        // Serial world round trips per live bag starve the next terminal receipt under sustained kills.
+        // Fetch independently, then publish in the original event order under one world loan.
+        let deliveries = futures_util::future::join_all(events.into_iter().map(|mut attempt| async move {
+            let event = &attempt.event;
+            let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                let expiry = std::mem::take(&mut attempt.expiry);
+                if !expiry.is_empty() {
+                    a.store.expire_world_entitlements(event.clone(), expiry).await?;
+                }
+                a.store.unpicked_entitlements(event.clone()).await
+            }).await;
+            match result {
+                Ok(Ok(rows)) => Some((attempt, rows)),
+                Ok(Err(error)) => {
+                    tracing::error!(event=%event.id,error=%format_args!("{error:#}"),"entitlement delivery retains exact suffix");
+                    None
+                }
+                Err(error) => {
+                    tracing::error!(event=%event.id,%error,"entitlement delivery Store timeout; exact suffix retained");
+                    None
+                }
+            }
+        })).await;
+        if deliveries.iter().any(Option::is_some) {
+            world.registered_world(move |w| {
+                for (attempt, rows) in deliveries.into_iter().flatten() {
+                    let id = attempt.event.id.clone();
+                    if let Err(error) = w.publish_delivery(attempt, rows) {
+                        tracing::error!(event=%id,error=%format_args!("{error:#}"),"entitlement delivery retains exact suffix");
+                    }
+                }
+                Ok(())
+            }).await?;
+        }
+    }
     let mut dying = Vec::new();
     for world in a.world.worlds() {
         let app = a.clone();
@@ -3309,30 +3581,37 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
             dying.extend(candidates);
         }
     }
+    let mut held = std::collections::BTreeSet::new();
     for id in dying {
-        settle_giver_credits(a, id).await?;
-        refresh_giver_credits(a, id).await?;
+        if settle_giver_credits(a, id).await? {
+            refresh_giver_credits(a, id).await?;
+        } else {
+            held.insert(id);
+        }
     }
     for world in a.world.worlds() {
         let app = a.clone();
+        let held = held.clone();
         let Some(pending) = world
             .registered_world(move |world| {
                 let mut owned = BTreeMap::new();
                 let mut failure = None;
-                let plans =
-                    world.pending_deaths_where(|id, account| {
-                        match lifecycle::reserve_player(&app, account, id, "death") {
-                            Ok(Some(guard)) => {
-                                owned.insert(id, guard);
-                                true
-                            }
-                            Ok(None) => false,
-                            Err(error) => {
-                                failure = Some(error);
-                                false
-                            }
+                let plans = world.pending_deaths_where(|id, account| {
+                    if held.contains(&id) {
+                        return false;
+                    }
+                    match lifecycle::reserve_player(&app, account, id, "death") {
+                        Ok(Some(guard)) => {
+                            owned.insert(id, guard);
+                            true
                         }
-                    });
+                        Ok(None) => false,
+                        Err(error) => {
+                            failure = Some(error);
+                            false
+                        }
+                    }
+                });
                 if let Some(error) = failure {
                     return Err(error);
                 }
@@ -3362,7 +3641,7 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<()> {
             }
         }
     }
-    Ok(())
+    Ok(drained)
 }
 fn client_assets(client: &std::path::Path) -> Router<App> {
     let mut router = Router::new();
@@ -3384,14 +3663,139 @@ fn client_assets(client: &std::path::Path) -> Router<App> {
     )
 }
 
+fn drop_rates<S: Clone + Send + Sync + 'static>(
+    game: &crate::content::game::GameData,
+    revision: Option<&str>,
+) -> Result<axum::routing::MethodRouter<S>> {
+    let drops = axum::body::Bytes::from(serde_json::to_vec(&crate::loot::catalogue::snapshot(
+        game, revision,
+    )?)?);
+    Ok(get(move || {
+        let body = drops.clone();
+        async move {
+            (
+                [
+                    ("content-type", "application/json"),
+                    ("cache-control", "no-cache"),
+                ],
+                body,
+            )
+        }
+    }))
+}
+
+#[cfg(test)]
+mod drop_rates_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn xml_rewards_actual_cached_drop_rates_http_contract_without_world_or_store() {
+        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let game =
+            crate::content::game::GameData::load(std::path::Path::new("data"), &content).unwrap();
+        let router = Router::new().route(
+            "/api/drop-rates",
+            drop_rates::<()>(&game, Some("isolated-http-unit")).unwrap(),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/api/drop-rates", listener.local_addr().unwrap());
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async {
+                    stopped.await.unwrap();
+                })
+                .await
+                .unwrap();
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let mut bodies = Vec::new();
+        for _ in 0..2 {
+            let response = client.get(&url).send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.headers()["content-type"], "application/json");
+            assert_eq!(response.headers()["cache-control"], "no-cache");
+            bodies.push(response.bytes().await.unwrap());
+        }
+        stop.send(()).unwrap();
+        server.await.unwrap();
+        assert_eq!(bodies[0], bodies[1]);
+        let facts: serde_json::Value = serde_json::from_slice(&bodies[0]).unwrap();
+        assert_eq!(facts["schema_version"], 2);
+        assert_eq!(facts["revision"], "isolated-http-unit");
+        assert_eq!(
+            facts["content_fingerprint"],
+            "c45004a8b7475507fc5b8935020a15d168da3b5a45e53db2b36835d534dea54d"
+        );
+        assert_eq!(
+            facts["allocation_version"],
+            crate::loot::evaluator::ALLOCATION_VERSION
+        );
+        let object = |id| {
+            facts["objects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|o| o["id"] == id)
+                .unwrap()
+        };
+        let stheno = object(0x917);
+        assert_eq!(stheno["provenance"], "Recovered");
+        let bulwark = stheno["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["source_row"]["pool"] == serde_json::json!([0xc04]))
+            .unwrap();
+        assert_eq!(bulwark["bernoulli_attempt_probability"], 0.001);
+        assert_eq!(bulwark["source_row"]["threshold"], 0.15);
+        assert_eq!(bulwark["source_row"]["ownership"], "Private");
+        assert_eq!(
+            bulwark["source_row"]["source"]["object"],
+            "Stheno the Snake Queen"
+        );
+        assert_eq!(bulwark["final_probability"]["status"], "not_projected");
+        let thessal = object(0x1706);
+        let mana = thessal["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["source_row"]["pool"] == serde_json::json!([0xaea]))
+            .unwrap();
+        assert_eq!(mana["bernoulli_attempt_probability"], 0.18);
+        assert_eq!(mana["source_row"]["min"], 2);
+        assert_eq!(mana["guarantee_is_per_player"], false);
+        // Authored legacy-derived restoration (docs/xml-migration-differences.md).
+        let sprite = object(0x924);
+        assert_eq!(sprite["provenance"], "Corrected");
+        assert!(
+            sprite["reason"]
+                .as_str()
+                .unwrap()
+                .contains("79a4c92b:src/loot.rs:41")
+        );
+        let [quiver] = sprite["rows"].as_array().unwrap().as_slice() else {
+            panic!("one Quiver of Thunder row")
+        };
+        assert_eq!(quiver["source_row"]["pool"], serde_json::json!([0xc07]));
+        assert_eq!(quiver["bernoulli_attempt_probability"], 0.001);
+        assert_eq!(quiver["source_row"]["threshold"], 0.0);
+        assert_eq!(quiver["source_row"]["ownership"], "Private");
+        let origin = &quiver["source_row"]["row_origin"];
+        assert_eq!(origin["provenance"], "Authored");
+        assert_eq!(origin["origin"], "79a4c92b:src/loot.rs:41");
+        assert!(
+            mana["eligibility"]
+                .as_str()
+                .unwrap()
+                .contains("durable character")
+        );
+        let out = PathBuf::from(std::env::var("QA_RESULTS_DIR").unwrap());
+        std::fs::write(out.join("xml-rewards-http-drop-rates.json"), &bodies[0]).unwrap();
+    }
+}
+
 fn routes(a: &App, client: PathBuf) -> Router {
-    let drops = axum::body::Bytes::from(
-        serde_json::to_vec(&crate::loot::catalogue::snapshot(
-            &a.content,
-            a.diagnostics.source_revision.as_deref(),
-        ))
-        .expect("validated loot catalogue JSON"),
-    );
     let app = Router::new()
         .route(
             "/legacy-api/picture/save",
@@ -3444,18 +3848,14 @@ fn routes(a: &App, client: PathBuf) -> Router {
         )
         .route(
             "/api/drop-rates",
-            get(move || {
-                let body = drops.clone();
-                async move {
-                    (
-                        [
-                            ("content-type", "application/json"),
-                            ("cache-control", "no-cache"),
-                        ],
-                        body,
-                    )
-                }
-            }),
+            drop_rates(
+                a.content
+                    .game
+                    .as_deref()
+                    .expect("startup requires owning GameData"),
+                a.diagnostics.source_revision.as_deref(),
+            )
+            .expect("validated source-derived loot facts"),
         )
         .route("/api/hiscores", get(hiscores))
         .route("/api/collection/{account}", get(collection))
@@ -3555,9 +3955,16 @@ pub async fn serve(a: App, bind: SocketAddr, client: PathBuf, desktop: bool) -> 
     });
     let deaths = a.clone();
     a.world.supervisor.spawn("persistence", async move {
+        let mut drained = false;
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            persistence_tick(&deaths).await?;
+            // Staged terminals hold world permits until their receipt, so drain them promptly but still yield.
+            tokio::time::sleep(std::time::Duration::from_millis(if drained {
+                5
+            } else {
+                50
+            }))
+            .await;
+            drained = persistence_tick(&deaths).await?;
         }
     });
     // Deploy rehearsals send SIGTERM as soon as /health answers.

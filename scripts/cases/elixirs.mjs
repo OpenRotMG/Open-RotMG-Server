@@ -59,7 +59,7 @@ export async function run(game){
   await prepare(sick.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
   for(let n=0;n<25;n++){
     await sick.act({keys:[],duration_ms:200,target:{entity:grave.id,camera_angle:-Math.PI/4,fire:true}});
-    if((await sick.inspect()).diagnostic.entities.find(e=>e.id===grave.id)?.stage>0)break;
+    if((await sick.inspect()).diagnostic.xml?.[grave.id]?.states.some(s=>s.name==='Normal'))break;
   }
   for(let i=0;i<7;i++){
     for(let n=0;n<40&&!((await sick.observe()).character.conditions&16);n++)await sick.act({keys:[],duration_ms:200});

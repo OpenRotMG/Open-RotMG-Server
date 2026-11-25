@@ -1,5 +1,8 @@
 use super::*;
-use crate::content::{Ability, Object};
+use crate::content::{
+    Ability, Object,
+    game::{AdmissionRole, DeploymentKind, GameData, NativeService},
+};
 
 const THROW_MS: u64 = 1500;
 const MAX_ACTIVE: usize = 256;
@@ -9,12 +12,32 @@ pub(super) struct State {
     thrown: Vec<Thrown>,
     poisons: Vec<Poison>,
     pub(super) objects: BTreeMap<i32, Deployed>,
+    // Lethal area hits refused by terminal backpressure; retried every tick, never dropped.
+    owed: Vec<OwedHit>,
+}
+struct OwedHit {
+    owner: Option<i32>,
+    target: i32,
+    damage: i32,
+    piercing: bool,
+    effects: Vec<(u8, u64)>,
 }
 struct Thrown {
     owner: i32,
     position: Pos,
     at: u64,
     effect: Ability,
+    deployment: Option<CastDeployment>,
+}
+struct CastDeployment {
+    game: Arc<GameData>,
+    item: u16,
+    activation: usize,
+    kind: DeploymentKind,
+    target: u16,
+    entity: i32,
+    character: i32,
+    expires: u64,
 }
 struct Poison {
     owner: i32,
@@ -44,6 +67,13 @@ enum Deployment {
     Bomb,
 }
 impl World {
+    pub(super) fn pending_deployments(&self) -> usize {
+        self.ability_state
+            .thrown
+            .iter()
+            .filter(|t| t.deployment.is_some())
+            .count()
+    }
     // Client getTimer cooldowns continue during skipped physics ticks: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/com/company/assembleegameclient/objects/Player.as#L899-L917
     pub(super) fn ability_clock_ms(&self) -> Result<u64> {
         Ok(self
@@ -54,13 +84,7 @@ impl World {
             .as_millis() as u64)
     }
 
-    pub(super) fn spend_ability(
-        &mut self,
-        id: i32,
-        slot: Slot,
-        item: &Object,
-        pos: Pos,
-    ) -> Result<()> {
+    fn validate_ability(&self, id: i32, slot: Slot, item: &Object, pos: Pos) -> Result<(u64, u64)> {
         let now = self.ability_clock_ms()?;
         let p = &self.players[&id];
         ensure!(
@@ -119,6 +143,9 @@ impl World {
         let ability_ready_ms = now
             .checked_add(item.cooldown_ms)
             .context("ability cooldown overflow")?;
+        Ok((now, ability_ready_ms))
+    }
+    fn spend_ability(&mut self, id: i32, item: &Object, pos: Pos, now: u64, ability_ready_ms: u64) {
         let p = self.players.get_mut(&id).unwrap();
         p.character.mp -= item.mana_cost;
         p.character.lifetime.ability_used = true;
@@ -134,7 +161,6 @@ impl World {
             target_y = pos.y,
             "ability activated"
         );
-        Ok(())
     }
     fn ability_allies(&self, id: i32, range: Option<f32>) -> Vec<i32> {
         let origin = self.players[&id].pos;
@@ -199,6 +225,30 @@ impl World {
         item: &Object,
         pos: Pos,
     ) -> Result<()> {
+        let player = self.players.get(&id).context("ability owner absent")?;
+        ensure!(
+            slot.object == id
+                && slot.slot == 1
+                && player.character.items.get(1) == Some(&slot.kind)
+                && slot.kind == i32::from(item.kind),
+            "ability source is not current equipped inventory"
+        );
+        let game = self
+            .content
+            .game
+            .as_ref()
+            .context("ability GameData absent")?
+            .clone();
+        let item = game
+            .properties
+            .get(&u16::try_from(slot.kind)?)
+            .context("equipped ability lacks selected canonical properties")?;
+        game.admission(
+            item.kind,
+            AdmissionRole::Native(NativeService::Inventory),
+            "equipped native ability",
+        )?;
+        let (cast_ms, ready_ms) = self.validate_ability(id, slot, item, pos)?;
         ensure!(
             item.abilities.len() == item.activations,
             "ability activation count mismatch"
@@ -212,7 +262,48 @@ impl World {
             controller("active ability budget exhausted")
         );
         let origin = self.players[&id].pos;
-        for effect in &item.abilities {
+        let mut deployments = BTreeMap::new();
+        for (activation, effect) in item.abilities.iter().enumerate() {
+            if let Some(kind) = DeploymentKind::of_ability(effect) {
+                let target = game
+                    .deployment_binding(kind, "equipped native activation")?
+                    .kind;
+                game.deployment_admission(
+                    target,
+                    item,
+                    activation,
+                    kind,
+                    "equipped native activation",
+                )?;
+                let duration = match effect {
+                    Ability::Trap { .. } => THROW_MS + 10_000,
+                    Ability::Decoy { duration, .. } => *duration,
+                    Ability::SpiritBomb => 3000,
+                    _ => unreachable!(),
+                };
+                let expires = self
+                    .now
+                    .checked_add(duration)
+                    .context("deployment deadline overflow")?;
+                if let Ability::Decoy { angle, .. } = effect {
+                    let speed = self.players[&id].speed(&self.content, self.now)? * 1000.;
+                    ensure!(
+                        angle.is_finite() && speed.is_finite() && speed >= 0.,
+                        "invalid selected decoy trajectory"
+                    );
+                }
+                let destination = if kind == DeploymentKind::Trap {
+                    pos
+                } else {
+                    origin
+                };
+                self.xml_preflight_position(target, destination)?;
+                ensure!(
+                    self.xml_placeable(target, destination, &[], None)?,
+                    controller("deployment placement blocked")
+                );
+                deployments.insert(activation, (kind, target, expires));
+            }
             match effect {
                 Ability::Shoot => {
                     ensure!(
@@ -244,18 +335,39 @@ impl World {
                 }
                 Ability::Trap { .. } => {
                     ensure!(self.walkable(pos), controller("trap target is blocked"));
-                    self.content.get(0x711)?;
                 }
-                Ability::Decoy { .. } => {
-                    self.content.get(0x715)?;
-                }
-                Ability::SpiritBomb => {
-                    self.content.get(0x1409)?;
-                }
+
                 _ => {}
             }
         }
-        self.spend_ability(id, slot, item, pos)?;
+        ensure!(
+            self.xml_live_count() + deployments.len() <= xml::ACTOR_LIMIT,
+            controller("deployment shared actor capacity exhausted").context(format!(
+                "deployment shared actor capacity exhausted: live={} requested={} limit={}",
+                self.xml_live_count(),
+                deployments.len(),
+                xml::ACTOR_LIMIT
+            ))
+        );
+        let ids = self.xml_reserve_ids(deployments.len())?;
+        let mut reserved = BTreeMap::new();
+        for ((activation, (kind, target, expires)), entity) in deployments.into_iter().zip(ids) {
+            reserved.insert(
+                activation,
+                CastDeployment {
+                    game: game.clone(),
+                    item: item.kind,
+                    activation,
+                    kind,
+                    target,
+                    entity,
+                    character: self.players[&id].character.id,
+                    expires,
+                },
+            );
+        }
+        self.cancel_trade(id, "Trade cancelled by equipped ability activation.");
+        self.spend_ability(id, item, pos, cast_ms, ready_ms);
         let heading = if item
             .abilities
             .iter()
@@ -270,7 +382,7 @@ impl World {
             None
         };
         // Preserve XML order: Purification heals before removing Sick (selected objects.xml, Tome of Purification 0xc09).
-        for effect in &item.abilities {
+        for (activation, effect) in item.abilities.iter().enumerate() {
             tracing::debug!(
                 player = id,
                 item = item.kind,
@@ -284,7 +396,9 @@ impl World {
                 }
                 Ability::Shoot => {}
                 Ability::Nova => self.ability_nova(id, item, pos)?,
-                Ability::Heal { amount, range } => self.heal_ability(id, item, amount, range)?,
+                Ability::Heal { amount, range } => {
+                    self.heal_ability(id, item, amount, range, None)?
+                }
                 Ability::Condition {
                     effect,
                     duration,
@@ -334,6 +448,7 @@ impl World {
                         position: pos,
                         at: self.now + THROW_MS,
                         effect: effect.clone(),
+                        deployment: reserved.remove(&activation),
                     });
                 }
                 Ability::Drain { radius, damage } => {
@@ -348,13 +463,20 @@ impl World {
                         },
                         0xffff0000,
                     );
+                    // Kills journal XP and mark recipients pending; heal eligibility is decided before the drain.
+                    let eligible: Vec<i32> = self
+                        .players
+                        .iter()
+                        .filter(|(_, p)| super::cooperative::ready(p))
+                        .map(|(id, _)| *id)
+                        .collect();
                     let mut total = 0;
                     for target in self.ability_enemies(pos, radius) {
-                        total += self.damage_enemy(id, target, damage, false, &[], None)?;
+                        total += self.area_hit(Some(id), target, damage, false, &[])?;
                     }
                     // Keep the heal centered on the caster, as the period guide specifies: https://web.archive.org/web/20120519012136id_/http://forums.wildshadow.com/wiki/realm-mad-god/class-guide-necromancer
                     if total > 0 {
-                        self.heal_ability(id, item, total, radius)?;
+                        self.heal_ability(id, item, total, radius, Some(&eligible))?;
                     }
                 }
                 Ability::Stasis { duration } => {
@@ -405,7 +527,12 @@ impl World {
                     self.ability_effect(2, id, pos, origin, 0xffffffff);
                 }
                 Ability::Decoy { duration, angle } => {
-                    let object = self.spawn_entity(0x715, origin, vec![])?;
+                    let reservation = reserved
+                        .remove(&activation)
+                        .expect("preflighted decoy activation");
+                    let object = self
+                        .insert_entity_data(reservation.entity, reservation.target, origin, vec![])
+                        .expect("preflighted decoy birth");
                     self.ability_state.objects.insert(
                         object,
                         Deployed {
@@ -438,19 +565,23 @@ impl World {
                         0xffffffff,
                     );
                     for target in self.ability_enemies(pos, radius) {
-                        self.damage_enemy(
-                            id,
+                        self.area_hit(
+                            Some(id),
                             target,
                             damage,
                             false,
                             &[(crate::condition::DAZED, 3000)],
-                            None,
                         )?;
                     }
                 }
                 Ability::SpiritBomb => {
                     // This preserved item predates the modern six-blast prism: one 300-damage spirit bomb.
-                    let object = self.spawn_entity(0x1409, origin, vec![])?;
+                    let reservation = reserved
+                        .remove(&activation)
+                        .expect("preflighted spirit bomb activation");
+                    let object = self
+                        .insert_entity_data(reservation.entity, reservation.target, origin, vec![])
+                        .expect("preflighted spirit bomb birth");
                     self.ability_state.objects.insert(
                         object,
                         Deployed {
@@ -464,6 +595,60 @@ impl World {
             }
         }
         Ok(())
+    }
+    fn validate_trap_landing(
+        &self,
+        owner: i32,
+        reservation: &CastDeployment,
+        pos: Pos,
+    ) -> Result<()> {
+        let game = self
+            .content
+            .game
+            .as_ref()
+            .context("trap landing GameData absent")?;
+        ensure!(
+            Arc::ptr_eq(game, &reservation.game),
+            "trap landing catalog changed"
+        );
+        ensure!(
+            self.players
+                .get(&owner)
+                .is_some_and(|p| p.character.id == reservation.character)
+                && self.ability_owner(owner),
+            "trap landing owner/cast reservation changed"
+        );
+        ensure!(
+            self.now < reservation.expires,
+            "trap landing reservation expired: owner={owner} character={} item={:#x} activation={} target={:#x} deadline={} now={}",
+            reservation.character,
+            reservation.item,
+            reservation.activation,
+            reservation.target,
+            reservation.expires,
+            self.now
+        );
+        ensure!(
+            !self.entities.contains_key(&reservation.entity)
+                && !self.ability_state.objects.contains_key(&reservation.entity),
+            "trap landing reservation identity reused"
+        );
+        let item = game
+            .properties
+            .get(&reservation.item)
+            .context("trap landing canonical item absent")?;
+        game.deployment_admission(
+            reservation.target,
+            item,
+            reservation.activation,
+            reservation.kind,
+            "committed delayed trap activation",
+        )?;
+        ensure!(
+            reservation.kind == DeploymentKind::Trap,
+            "nontrap landing reservation"
+        );
+        self.xml_preflight_position(reservation.target, pos)
     }
     fn ability_shots(&mut self, id: i32, item: &Object, origin: Pos, target: Pos) -> Result<()> {
         let time = self.now as i32;
@@ -576,7 +761,7 @@ impl World {
         }
         let effects = effect.into_iter().collect::<Vec<_>>();
         for target in chain {
-            self.damage_enemy(owner, target, damage, false, &effects, None)?;
+            self.area_hit(Some(owner), target, damage, false, &effects)?;
         }
         Ok(())
     }
@@ -587,6 +772,7 @@ impl World {
             .get(&0)
             .context("ability has no projectile zero")?
             .clone();
+        let world = self.xml_world_id();
         let p = self.players.get_mut(&id).unwrap();
         p.character.shots += 20;
         p.character.lifetime.shots = p
@@ -602,6 +788,14 @@ impl World {
             let angle = i as f32 * std::f32::consts::TAU / 20.;
             let damage = self.rng.gen_range(spec.min..=spec.max);
             self.bullets.push(Bullet {
+                damage_origin: enemy_damage::DamageOrigin {
+                    context: crate::behavior::TerminalContext::PlayerKill {
+                        world,
+                        player: id,
+                        name: p.character.name.clone(),
+                    },
+                    character: Some(p.character.id),
+                },
                 owner: id,
                 source_kind: p.character.class,
                 id: bullet,
@@ -647,11 +841,14 @@ impl World {
         })
     }
     pub(super) fn decoy_positions(&self) -> impl Iterator<Item = Pos> + '_ {
+        self.decoy_targets().map(|(_, pos)| pos)
+    }
+    pub(super) fn decoy_targets(&self) -> impl Iterator<Item = (i32, Pos)> + '_ {
         self.ability_state
             .objects
             .iter()
             .filter(|(_, o)| matches!(o.kind, Deployment::Decoy { .. }))
-            .map(|(id, _)| self.entities[id].pos)
+            .map(|(id, _)| (*id, self.entities[id].pos))
     }
     pub(super) fn clear_abilities(&mut self, owner: i32) {
         self.ability_state.thrown.retain(|t| t.owner != owner);
@@ -667,12 +864,96 @@ impl World {
             self.remove_entity(id);
         }
     }
-    pub(super) fn ability_step(&mut self) {
+    /// Area damage defers a lethal hit refused by terminal backpressure instead of failing the whole effect.
+    pub(super) fn area_hit(
+        &mut self,
+        owner: Option<i32>,
+        target: i32,
+        damage: i32,
+        piercing: bool,
+        effects: &[(u8, u64)],
+    ) -> Result<i32> {
+        if self
+            .terminal_damage_admission(target, damage, piercing)
+            .is_err()
+        {
+            tracing::warn!(
+                ?owner,
+                actor = target,
+                damage,
+                "terminal backpressure defers area hit"
+            );
+            self.ability_state.owed.push(OwedHit {
+                owner,
+                target,
+                damage,
+                piercing,
+                effects: effects.to_vec(),
+            });
+            return Ok(0);
+        }
+        match owner {
+            Some(owner) => self.damage_enemy(owner, target, damage, piercing, effects, None),
+            None => self.damage_enemy_nonplayer(target, damage, piercing, effects),
+        }
+    }
+    pub(super) fn ability_step(&mut self) -> Result<()> {
+        let mut owed = std::mem::take(&mut self.ability_state.owed).into_iter();
+        while let Some(hit) = owed.next() {
+            if hit.owner.is_some_and(|owner| !self.ability_owner(owner)) {
+                tracing::warn!(owner = ?hit.owner, target = hit.target, damage = hit.damage, "owed area hit dropped: owner paused, departing, dead or quarantined");
+                continue;
+            }
+            if let Err(error) = self.area_hit(
+                hit.owner,
+                hit.target,
+                hit.damage,
+                hit.piercing,
+                &hit.effects,
+            ) {
+                tracing::error!(owner = ?hit.owner, target = hit.target, damage = hit.damage, %error, "owed area hit dropped: damage failed; untried owed hits retained");
+                self.ability_state.owed.extend(owed);
+                return Err(error);
+            }
+        }
+        let pending = self.ability_state.thrown.len();
+        self.ability_state.thrown.retain(|thrown| {
+            if let Some(reservation) = &thrown.deployment
+                && self.now >= reservation.expires {
+                    tracing::error!(owner=thrown.owner, character=reservation.character, item=reservation.item, activation=reservation.activation, target=reservation.target, expires=reservation.expires, now=self.now, "trap landing reservation expired; original cost retained and reservation released");
+                    return false;
+                }
+            true
+        });
+        let expired = pending - self.ability_state.thrown.len();
+        ensure!(
+            expired == 0,
+            "trap landing reservation expired and released: count={expired} now={}",
+            self.now
+        );
+        for thrown in self
+            .ability_state
+            .thrown
+            .iter()
+            .filter(|t| t.at <= self.now && self.ability_owner(t.owner))
+        {
+            if let Some(reservation) = &thrown.deployment {
+                self.validate_trap_landing(thrown.owner, reservation, thrown.position)?;
+                self.xml_placeable(reservation.target, thrown.position, &[], None)?;
+            }
+        }
         for thrown in std::mem::take(&mut self.ability_state.thrown) {
             if !self.ability_owner(thrown.owner) {
                 continue;
             }
             if self.now < thrown.at {
+                self.ability_state.thrown.push(thrown);
+                continue;
+            }
+            if let Some(reservation) = &thrown.deployment
+                && (!self.walkable(thrown.position)
+                    || !self.xml_placeable(reservation.target, thrown.position, &[], None)?)
+            {
                 self.ability_state.thrown.push(thrown);
                 continue;
             }
@@ -724,14 +1005,20 @@ impl World {
                     effect,
                     duration,
                 } => {
-                    let id = self
-                        .spawn_entity(0x711, thrown.position, vec![])
-                        .expect("validated trap landing");
+                    let reservation = thrown
+                        .deployment
+                        .context("trap landing lacks originating activation reservation")?;
+                    let id = self.insert_entity_data(
+                        reservation.entity,
+                        reservation.target,
+                        thrown.position,
+                        vec![],
+                    )?;
                     self.ability_state.objects.insert(
                         id,
                         Deployed {
                             owner: thrown.owner,
-                            until: self.now + 10000,
+                            until: reservation.expires,
                             pulse: self.now,
                             kind: Deployment::Trap {
                                 radius,
@@ -756,12 +1043,12 @@ impl World {
                     .targets
                     .retain(|(id, _, _)| self.entities.contains_key(id));
                 for (target, total, paid) in &mut poison.targets {
-                    let due = (i64::from(*total) * elapsed as i64 / poison.duration as i64) as i32;
+                    let due = (i128::from(*total) * i128::from(elapsed)
+                        / i128::from(poison.duration)) as i32;
                     let amount = due - *paid;
                     *paid = due;
                     if amount > 0 {
-                        self.damage_enemy(poison.owner, *target, amount, true, &[], None)
-                            .expect("validated poison damage");
+                        self.area_hit(Some(poison.owner), *target, amount, true, &[])?;
                     }
                 }
             }
@@ -800,15 +1087,13 @@ impl World {
                             0xff9000ff,
                         );
                         for target in self.ability_enemies(pos, radius) {
-                            self.damage_enemy(
-                                object.owner,
+                            self.area_hit(
+                                Some(object.owner),
                                 target,
                                 damage,
                                 false,
                                 &[(effect, duration)],
-                                None,
-                            )
-                            .expect("validated trap damage");
+                            )?;
                         }
                         self.remove_entity(id);
                         continue;
@@ -871,8 +1156,7 @@ impl World {
                     if expired {
                         self.ability_effect(5, id, Pos { x: 4., y: 0. }, pos, 0xffffffff);
                         for target in self.ability_enemies(pos, 4.) {
-                            self.damage_enemy(object.owner, target, 300, false, &[], None)
-                                .expect("validated spirit bomb damage");
+                            self.area_hit(Some(object.owner), target, 300, false, &[])?;
                         }
                         self.remove_entity(id);
                         continue;
@@ -881,6 +1165,7 @@ impl World {
             }
             self.ability_state.objects.insert(id, object);
         }
+        Ok(())
     }
 }
 
@@ -896,8 +1181,9 @@ mod tests {
     use super::*;
 
     fn decoy_world(origin: Pos, angle: f32, blocked: Option<(usize, usize)>) -> (World, i32, i32) {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let content = Arc::new(crate::world::test_content());
         let mut map = Map {
+            elevation: None,
             width: 32,
             height: 32,
             cells: vec![
@@ -916,6 +1202,7 @@ mod tests {
             map.cells[y * 32 + x].ground = 255;
         }
         let mut world = World::new(content, Arc::new(map)).unwrap();
+        world.clock.set_paused(true);
         let character: Character = serde_json::from_value(serde_json::json!({
             "schema":1,"lifetime":crate::store::FameLifetime::complete(),
             "class":0x324,"base":[720,252,50,25,75,75,40,50],
@@ -945,7 +1232,7 @@ mod tests {
 
     #[tokio::test]
     async fn trickster_unlock_requires_both_level_twenty_records_after_death() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for levels in [[19, 20], [20, 19], [20, 20]] {
             let store =
                 crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
@@ -1080,6 +1367,8 @@ mod tests {
         let enemy = world
             .spawn_entity(0x6b4, Pos { x: 12.5, y: 10.5 }, vec![])
             .unwrap();
+        // The XML executor enters the actor on its first tick and first moves on the second.
+        world.step();
         world.step();
         let distracted = world.entities[&enemy].pos.x;
         assert!(distracted < 12.5);
@@ -1099,6 +1388,10 @@ mod tests {
         p.ability_ready_ms = 0;
         let target = world
             .spawn_entity(0x678, Pos { x: 13.5, y: 10.5 }, vec![])
+            .unwrap();
+        // The XML Oasis Giant wanders (actors.xml:1930); hold it inside the blast like the legacy stationary target.
+        world
+            .apply_condition(target, crate::condition::PARALYZED, 10_000)
             .unwrap();
         let hp = world.entities[&target].hp;
         world

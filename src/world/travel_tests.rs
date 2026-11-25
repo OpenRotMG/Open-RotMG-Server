@@ -7,7 +7,7 @@ fn rejects<T>(result: Result<T>, message: &str) {
 
 #[test]
 fn arachna_realm_exit_preserves_parent_or_explicit_random_route() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut d = Directory::test_with_seed(std::path::Path::new("data"), content, 2, 1308).unwrap();
     for origin in [1, -2] {
         let route = d.dungeon_return_from(origin).unwrap();
@@ -41,7 +41,7 @@ fn arachna_realm_exit_preserves_parent_or_explicit_random_route() {
 
 #[test]
 fn travel_denials_bindings_expiry_and_once_only_admission() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut d = Directory::test_with_seed(std::path::Path::new("data"), content, 2, 791).unwrap();
     d.clock.set_paused(true);
     let dungeon = d

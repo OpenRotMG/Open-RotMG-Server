@@ -1,0 +1,516 @@
+{
+  "schema": 2,
+  "orientation": "row-major",
+  "units": "u8-0-255",
+  "layers": [
+    {
+      "map": "realm-fsod-1.wmap",
+      "map_sha256": "4db1a0c911142a81679dcc9a29d44306d84954405db7086e18deb1e87ab0538d",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "provenance": {
+        "kind": "recovered",
+        "source_format": "fsod-wmap-v2",
+        "source_url": "https://raw.githubusercontent.com/ossimc82/fabiano-swagger-of-doom/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/world1.wmap",
+        "source_sha256": "d204b348d37c1f2bbb07f8da18e7db2a54acfff32f168fb32f070918b23fea19",
+        "source_git_blob": "57793e37677c3b319b7df15e13ffc98d9296bfc5"
+      },
+      "file": "realm-fsod-1.elevation.zlib",
+      "sha256": "8ac1e94f773b34f4a247168a3d0c542990282878c007540e2059f35c58553168",
+      "expanded_sha256": "3178bd76de061dd536ec64c012de145338ed55dbb910f60f5bc78c4b514b3d0b"
+    },
+    {
+      "map": "realm-fsod-2.wmap",
+      "map_sha256": "deae4f49a4e9b1b405c08f7157bb542540c59ddf0abb9b24d47c741da3ef4c74",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "provenance": {
+        "kind": "recovered",
+        "source_format": "fsod-wmap-v2",
+        "source_url": "https://raw.githubusercontent.com/ossimc82/fabiano-swagger-of-doom/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/world2.wmap",
+        "source_sha256": "d13c60f19f4a644ff87974ddbb00b07d54911a873405701cb74eaeb492ce1278",
+        "source_git_blob": "a94d3f70ac2056645bec91ea253bf82a0bf2f004"
+      },
+      "file": "realm-fsod-2.elevation.zlib",
+      "sha256": "e5d91d88b46aa229398193f43545aac63334bf3fd1169f06d87c95cbb0ba3bcf",
+      "expanded_sha256": "54ba4c8b58763e98d81928031f6aa7c9380ead5f138e2fa645f6716df9a0b507"
+    },
+    {
+      "map": "realm-fsod-3.wmap",
+      "map_sha256": "6f0bf7856b085184d81256abd9e3844fbaab8555980dfa639578a44a970a0a27",
+      "dimensions": [
+        2048,
+        2048
+      ],
+      "provenance": {
+        "kind": "recovered",
+        "source_format": "fsod-wmap-v2",
+        "source_url": "https://raw.githubusercontent.com/ossimc82/fabiano-swagger-of-doom/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/world3.wmap",
+        "source_sha256": "1bcd03aa591e48024ca201f157876fc845b9dc0c64ad81075c74754df34c6654",
+        "source_git_blob": "239b93d32081a9fa1688205dee330c6fd4c0e403"
+      },
+      "file": "realm-fsod-3.elevation.zlib",
+      "sha256": "62940dd1c6480196102e2bbc572a9d6bdb9bc74a87ac0e3c8be92845f2f51a33",
+      "expanded_sha256": "4bcd687a18af01322f51c274b2eee498123643b8337c504861d69bfce0da3eee"
+    },
+    {
+      "map": "realms/classic-world-01-reconstruction.wmap",
+      "map_sha256": "7c1e09fc74a3fbbdcebcb04e1664b18818373a302c5debafd78c12c24d5e8489",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world01/elevation.zlib",
+      "sha256": "8cf306bfb26699384ec638097b1e91dddd2efa7b55151f037c0ae83bde773aa7",
+      "expanded_sha256": "59622fdd74fda1c64537d1e1568828b94b8496149d6f8725ed2c7e9a92da7074"
+    },
+    {
+      "map": "realms/classic-world-02-reconstruction.wmap",
+      "map_sha256": "1cc447e6f410ef163653a9f625e3ad15dfa129fc1c8f498fd702c85d59e7c496",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world02/elevation.zlib",
+      "sha256": "392349765cb6213ea7216060d3d955eb23c8a712f4f68aa1b32a48d6beeec56e",
+      "expanded_sha256": "d67945ce7b60132dc32f26dea8ac2707861f2586073205628e72892bc05c28a7"
+    },
+    {
+      "map": "realms/classic-world-03-reconstruction.wmap",
+      "map_sha256": "9d36ad4757e5fd0d9a2b04e3597f8d463d761bee2b1f91d2820485cd436e4cd1",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world03/elevation.zlib",
+      "sha256": "1af1a9bebd114b46e3f6fddaad9fecdbc0dffd0983a59b88bbde3892ab5850a6",
+      "expanded_sha256": "2b46f644c6203584d78db267b9443cb7ee7c3398772fc01c7dc2bc775513139e"
+    },
+    {
+      "map": "realms/classic-world-04-reconstruction.wmap",
+      "map_sha256": "60cecef2aabf39b80a3fbcd6d22923868205b7b696bb60dd2078ad8b3fc718c3",
+      "dimensions": [
+        2000,
+        2000
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world04/elevation.zlib",
+      "sha256": "dbbafabbc1f175f521aa3ecfa2b8c251adb657f60714fcb144bffbf14e35f7d0",
+      "expanded_sha256": "93b5a840bd0fe02a572bfa1b41bd310e2475ba952222ecd9fd30efaa1f183cd2"
+    },
+    {
+      "map": "realms/classic-world-05-reconstruction.wmap",
+      "map_sha256": "c6daa9af6a24e958de538f76a58cd1f957ca6bc837b8252e564d62f789f7710b",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world05/elevation.zlib",
+      "sha256": "46951936f1a1126a738e5a077b4469edf313533badf6eb45698fb3db3a4bdf5c",
+      "expanded_sha256": "ff3e8ec6421994089812c2150d020f2913a9d01dac158778d5c71c2fe8751d85"
+    },
+    {
+      "map": "realms/classic-world-06-reconstruction.wmap",
+      "map_sha256": "c726584e7bd453662e048c6b6522a912f16611c7a94c39843a54404f76e372bb",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world06/elevation.zlib",
+      "sha256": "5a7e723e0ae93efe9e01da841965fe832fc9e3bc1e0a019b51067701a46adaa6",
+      "expanded_sha256": "b128f7dd5e02e110952e87a1d5364ba7c00ba7bc3a7401acd50d34d4c79675da"
+    },
+    {
+      "map": "realms/classic-world-07-reconstruction.wmap",
+      "map_sha256": "1fcce4eaa7eb3a8d751063632e34a0b0b11902510f9e3a435d7d0b8ef287b266",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world07/elevation.zlib",
+      "sha256": "62473b158768329e86ef0cff0f43d726e89b7f6f045b8ad6eac8ffd860d69bd9",
+      "expanded_sha256": "0b48eb3d31e1e9602647ea608c214f9013dcbcb04a692cb6dcee7540a277ab7e"
+    },
+    {
+      "map": "realms/classic-world-08-reconstruction.wmap",
+      "map_sha256": "6b98871bb6d038d0fdd0ad5b7e03e0cdc0850b990ac2122c5361adaa559be475",
+      "dimensions": [
+        2000,
+        2000
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world08/elevation.zlib",
+      "sha256": "608682fe8eadb68b89b8127d4f7dbc8fda2bdf5a9b007b0747636650a77603fb",
+      "expanded_sha256": "41c2cb045e84701787250a5b736f68dcb5aaf7563b1b0d7d8edcbd20ba1bc3dc"
+    },
+    {
+      "map": "realms/classic-world-09-reconstruction.wmap",
+      "map_sha256": "67cabf6ff5a1d5f886b238739cab5ae396103d3dc4bf23f783884e63af49f066",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world09/elevation.zlib",
+      "sha256": "c900a75d372bf0d24da18358239bf99393350a700682edbf7a2d843e6cbad614",
+      "expanded_sha256": "cac623f82792f0d025f9fe6d7206e66dca4d8166ffeed4754fc045cc26001b03"
+    },
+    {
+      "map": "realms/classic-world-10-reconstruction.wmap",
+      "map_sha256": "b2c6221f3ff7100810277107581875b47f2e6e3b897e194a3074a5dda8e81e01",
+      "dimensions": [
+        2000,
+        2000
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world10/elevation.zlib",
+      "sha256": "49557d5ded453519863b72091c606df4e890ff4c000dd815edcc1e76685f8d0e",
+      "expanded_sha256": "aede9702ca03c29d67fe81cd55e6d7b29882a51d528019389dc14f708583f4ad"
+    },
+    {
+      "map": "realms/classic-world-11-reconstruction.wmap",
+      "map_sha256": "2c555db049f215dc28b34c638f1818f4c59d150519313e876ae06b27462184a5",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world11/elevation.zlib",
+      "sha256": "3497c9aca86f19affdb85007765bdb6ccf54799abfa98c64780bff85be8becfc",
+      "expanded_sha256": "2d223cf9e004d019d680b632978c448ab50ee9d7477542f9040dbfd3af0c12e7"
+    },
+    {
+      "map": "realms/classic-world-12-reconstruction.wmap",
+      "map_sha256": "aa256c870048e9c7235c5ff5a5ca222a0c81fe7d7796f454ad290d93d82e28d3",
+      "dimensions": [
+        2100,
+        2100
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world12/elevation.zlib",
+      "sha256": "a4f7dd4e7f332afb3a1a5db5d64e223c0ef968703540cbf053b9ca7cac4266ca",
+      "expanded_sha256": "7237f05ad60987675574152a6dac9b5c29afe4cb976cfbb7b987b2adce826763"
+    },
+    {
+      "map": "realms/classic-world-13-reconstruction.wmap",
+      "map_sha256": "230f4229e5cb4aa4316417f0fa707a71dc8bf26a3443aaf48867188cc3ce0f5e",
+      "dimensions": [
+        2000,
+        2000
+      ],
+      "provenance": {
+        "kind": "reconstructed",
+        "method": "terrain-band-median-v1: every cell gets the lower median of the recovered FSoD heights of its terrain byte; authored reconstruction, not original per-cell height",
+        "calibration": [
+          "realm-fsod-1.elevation.zlib",
+          "realm-fsod-2.elevation.zlib",
+          "realm-fsod-3.elevation.zlib"
+        ],
+        "terrain_heights": [
+          0,
+          254,
+          169,
+          175,
+          176,
+          69,
+          85,
+          92,
+          17,
+          26,
+          27,
+          3,
+          7
+        ]
+      },
+      "file": "realms/world13/elevation.zlib",
+      "sha256": "a486ff0c5b762ace351087fdee91175f0ddc6572ccb31ff2c949378cc8499b97",
+      "expanded_sha256": "0fecae4ecde55e783f3ff048f635099a578ff299e75e44f9921b49aa981df43d"
+    }
+  ]
+}

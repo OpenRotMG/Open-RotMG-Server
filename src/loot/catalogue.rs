@@ -1,309 +1,63 @@
-use super::*;
+use super::evaluator::{ALLOCATION_VERSION, definition_facts, landmark_chest_facts};
+use crate::content::game::{BehaviorKind, Field, GameData, Value as GameValue};
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-fn entries(content: &Content, kind: u16, picks: &[(f64, Pick)]) -> Vec<Value> {
-    picks
-        .iter()
-        .map(|(probability, pick)| {
-            let items = candidates(content, *pick);
-            assert!(
-                !items.is_empty(),
-                "published loot pool is empty for {kind:#x}"
-            );
-            let note = if kind == 0xd90 && matches!(pick, Pick::Item(0xc02)) {
-                format!(
-                    "Doom Bow additionally requires at least {} damage (15% HP).",
-                    (content.objects[&kind].hp * 15 + 99) / 100
-                )
-            } else {
-                String::new()
-            };
-            json!({"probability":probability,"items":items,"note":note})
-        })
+/// Every item a compiled defeat or landmark chest row can allocate.
+pub(crate) fn collectibles(game: &GameData) -> std::collections::BTreeSet<u16> {
+    game.definitions
+        .values()
+        .flat_map(|definition| &definition.loot)
+        .chain(game.landmark_chests.values().flat_map(|chest| &chest.rows))
+        .flat_map(|row| row.pool.iter().copied())
         .collect()
 }
-fn rules(content: &Content, kind: u16) -> (String, String, &'static str) {
-    use crate::dungeon::{abyss, lab, spider, tomb, trench};
-    if abyss::ROSTER.contains(&kind) {
-        return (
-            if matches!(kind, abyss::MALPHAS | abyss::IDOL) {
-                "At least 1% of max HP in aggregated account damage."
-            } else {
-                "At least one living contributor."
-            }
-            .into(),
-            if matches!(kind, abyss::MALPHAS | abyss::IDOL) {
-                "One private attempt per qualified account; VIT and DEF are guaranteed."
-            } else {
-                "One shared attempt per defeat."
-            }
-            .into(),
-            "src/world/abyss.rs",
-        );
-    }
-    if matches!(kind, lab::BOSS | lab::CREATION) {
-        return (
-            "Any positive damage; living account contributors.".into(),
-            "One private attempt per account, plus a guaranteed participation potion.".into(),
-            "src/world/lab.rs",
-        );
-    }
-    if kind == spider::BOSS {
-        return (
-            "Shared pool; positive-damage accounts also receive private Ichor.".into(),
-            "One shared attempt per defeat, plus participation rewards.".into(),
-            "src/world/spider.rs",
-        );
-    }
-    if potion_damage(kind).is_some() || matches!(kind, 0x91d | 0x91e) {
-        return ("Any positive damage for equipment; potion eligibility is separate.".into(), "Equipment rolls once per kill; bag type determines allocation, with one owner for colored bags.".into(), "src/world.rs");
-    }
-    let required = damage_threshold(content, kind);
-    let eligibility = if private(kind) {
-        format!(
-            "Damage {} {required}; living, present contributors only.",
-            if kind == tomb::SPHINX { ">=" } else { ">" }
-        )
-    } else {
-        "Any positive damage; living, present contributors only.".into()
-    };
-    let allocation = if tomb::BOSSES.contains(&kind) {
-        "Two total private attempts, assigned cyclically to contributors sorted by damage; not two per player.".into()
-    } else if kind == crate::dungeon::beach::BUM {
-        "One private winner: the highest-damage eligible contributor.".into()
-    } else if private(kind) {
-        let suffix = if matches!(kind, trench::HERMIT | tomb::SPHINX) {
-            " Stat-potion minimums are encounter-wide, not guaranteed to every player."
-        } else {
-            ""
-        };
-        format!("One private attempt per eligible player.{suffix}")
-    } else if attempts(kind, 2) == 1 {
-        "One shared attempt per kill.".into()
-    } else {
-        format!(
-            "min({} × eligible contributors, 8) shared attempts per kill; duplicate equipment is removed.",
-            attempts(kind, 1)
-        )
-    };
-    (eligibility, allocation, "src/world.rs")
-}
 
-pub(crate) fn snapshot(content: &Content, revision: Option<&str>) -> Value {
-    let mut groups = Vec::new();
-    for enemy in content
-        .objects
-        .values()
-        .filter(|e| e.enemy && crate::encounter::profile(e.kind).is_some())
-    {
-        let kind = enemy.kind;
-        let (eligibility, allocation, rules_file) = rules(content, kind);
-        let source_file = if crate::endgame::ROSTER.contains(&kind) {
-            "src/endgame.rs"
-        } else {
-            "src/loot.rs"
-        };
-        let mut add = |channel: &str,
-                       mode: &str,
-                       picks: &[(f64, Pick)],
-                       eligibility: String,
-                       allocation: String,
-                       source_file: &str| {
-            if !picks.is_empty() {
-                groups.push(json!({"enemy":{"id":kind,"name":enemy.name,"hp":enemy.hp},"channel":channel,"mode":mode,"eligibility":eligibility,"allocation":allocation,"rules_file":rules_file,"source_file":source_file,"entries":entries(content,kind,picks)}));
-            }
-        };
-        let per_item = per_item(kind);
-        add(
-            "Main loot",
-            if per_item {
-                "per_item"
-            } else if independent(kind) {
-                "independent"
-            } else {
-                "ordered"
-            },
-            table(kind),
-            eligibility.clone(),
-            allocation.clone(),
-            source_file,
-        );
-        let bonus_picks: Vec<_> = bonus(kind)
-            .iter()
-            .map(|&(p, item)| (p, Pick::Item(item)))
-            .collect();
-        let bonus_eligibility = potion_damage(kind).map_or(eligibility.clone(), |damage| {
-            format!("At least {damage} damage for private stat potions.")
-        });
-        add(
-            "Bonus loot",
-            "independent",
-            &bonus_picks,
-            bonus_eligibility,
-            if potion_damage(kind).is_some() {
-                "One private potion attempt per eligible player; equipment remains separately eligible.".into()
-            } else {
-                allocation.clone()
-            },
-            "src/loot.rs",
-        );
-        if !fauna_private_table(kind).is_empty() {
-            add(
-                "Private fauna loot",
-                "ordered",
-                fauna_private_table(kind),
-                "More than 1 damage; eligible contributors sorted by damage.".into(),
-                format!(
-                    "{} × contributors attempts, capped at 8 successful rolls; successes assigned round-robin and deduplicated per owner.",
-                    fauna_multiplier(kind)
-                ),
-                "src/loot.rs",
-            );
+pub(crate) fn snapshot(game: &GameData, revision: Option<&str>) -> Result<Value> {
+    let mut objects = Vec::new();
+    for definition in game.definitions.values() {
+        let death_births = definition.states.iter().flat_map(|state| {
+            state.behaviors.iter().filter(|behavior| behavior.kind == BehaviorKind::MetamorphoseAtDeath)
+                .map(move |behavior| (state, behavior))
+        }).map(|(state, behavior)| -> Result<Value> {
+            let Some(GameValue::Objects(targets)) = behavior.fields.get(&Field::ChildId) else {
+                anyhow::bail!("{}:{} death birth lacks linked ChildId", behavior.source.file, behavior.source.line);
+            };
+            let [id] = targets.as_slice() else {
+                anyhow::bail!("{}:{} death birth requires one linked ChildId", behavior.source.file, behavior.source.line);
+            };
+            let target = game.properties.get(id).context("death birth lacks selected target properties")?;
+            Ok(json!({"state_id":state.id,"state_source":state.source,"compiled_behavior":behavior,
+                "target":{"id":id,"name":target.name,"class":target.class,"dungeon_name":target.dungeon_name},
+                "condition":"Only if this source state/hook is active at terminal claim; probability is a source attempt, not unconditional portal delivery. Route, lifetime and atomic publication require the world coordinator."}))
+        }).collect::<Result<Vec<_>>>()?;
+        if definition.loot.is_empty() && death_births.is_empty() {
+            continue;
         }
-        if let Some(item) = participation_reward(kind) {
-            add(
-                "Participation guarantee",
-                "independent",
-                &[(1., Pick::Item(item))],
-                "Any positive damage; living account contributors.".into(),
-                "One private participation item per account, in addition to the main table.".into(),
-                "src/loot.rs",
-            );
-        }
-        if kind == 0xe37 {
-            add(
-                "Shared rum",
-                "independent",
-                &[(0.2, Pick::Item(0xc25))],
-                "At least one positive-damage contributor.".into(),
-                "One shared roll per defeat, outside the private table.".into(),
-                "src/world.rs",
-            );
-        }
-        if kind == crate::dungeon::trench::THESSAL {
-            add(
-                "High-damage mana guarantee",
-                "independent",
-                &[(1., Pick::Item(0xaea))],
-                "At least 32% of selected max HP in damage.".into(),
-                "One private Mana per qualified player; duplicate Mana from other rolls is removed.".into(),
-                "src/world.rs",
-            );
-        }
+        let mut facts = definition_facts(game, definition.kind)?;
+        facts["death_births"] = json!(death_births);
+        objects.push(facts);
     }
-    for enemy in content.objects.values() {
-        if let Some((portal, probability)) = crate::dungeon::portal_drop(enemy.kind) {
-            groups.push(json!({"enemy":{"id":enemy.kind,"name":enemy.name,"hp":enemy.hp},"channel":"Dungeon portal","mode":"independent","eligibility":"Defeated in the Realm; no damage requirement.","allocation":"One shared roll per kill; the portal opens for everyone.","rules_file":"src/world.rs","source_file":"src/dungeon.rs","entries":entries(content,enemy.kind,&[(probability,Pick::Item(portal))])}));
-        }
-    }
-    for kind in [0xdc2, 0x925, 0x675, 0x678, 0x67d, 0x668] {
-        groups.push(json!({"enemy":{"id":kind,"name":format!("{} chest",content.objects[&kind].name),"hp":0},"channel":"Landmark chest","mode":if matches!(kind,0xdc2|0x925){"capped"}else{"independent"},"eligibility":"Reach the spawned landmark chest; not a private kill reward.","allocation":if matches!(kind,0xdc2|0x925){"Shared chest; maximum 3–7 successful item rolls, chosen uniformly. Earlier successes can suppress later entries."}else{"Shared chest; independent tier rolls, including repeated potion attempts."},"rules_file":"src/world/realm_setpieces.rs","source_file":"src/loot.rs","entries":entries(content,kind,&chest_table(kind))}));
-    }
-    let ids: std::collections::BTreeSet<_> = groups
-        .iter()
-        .flat_map(|g| g["entries"].as_array().unwrap())
-        .flat_map(|e| e["items"].as_array().unwrap())
-        .map(|id| u16::try_from(id.as_u64().unwrap()).unwrap())
-        .collect();
-    let items: Vec<_> = ids
-        .into_iter()
-        .map(|id| {
-            let o = &content.objects[&id];
-            json!({"id":id,"name":o.dungeon_name.as_deref().unwrap_or(&o.name),"slot":o.slot_type,"tier":o.tier})
-        })
-        .collect();
-    json!({"revision":revision,"items":items,"groups":groups})
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::rngs::mock::StepRng;
-
-    #[test]
-    fn catalogue_follows_real_reward_rolls() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
-        let snapshot = snapshot(&content, Some(&"a".repeat(40)));
-        // Release 7.0 data from https://www.realmeye.com/forum/t/guide-to-loot-and-drop-rates/60740 with the Discord's tenfold corrections
-        let pairs = [
-            (0x917, 0xc04, 0.001),
-            (0xd06, 0xc03, 0.01),
-            (0xd90, 0xc02, 0.01),
-            (0x90a, 0xc01, 0.01),
-            (0xe1d, 0xc01, 0.015),
-            (0xd78, 0xc05, 0.03),
-            (crate::dungeon::lab::BOSS, 0xc30, 0.01),
-            (crate::dungeon::lab::BOSS, 0xc32, 0.02),
-            (crate::dungeon::lab::BOSS, 0xc33, 0.03),
-            (crate::dungeon::lab::CREATION, 0xc31, 0.05),
-            (crate::dungeon::lab::CREATION, 0xc33, 0.03),
-            (crate::dungeon::manor::BOSS, 0xc09, 0.01),
-            (crate::dungeon::manor::COFFIN, 0xc09, 0.01),
-            (crate::dungeon::snake::GUARD, 0xc04, 0.001),
-            (crate::dungeon::jungle::BOSS, 0xc17, 0.08),
-            (0x1705, 0xc10, 0.1),
-            (crate::dungeon::trench::THESSAL, 0xc13, 0.041),
-        ];
-        for (kind, item, rate) in pairs {
-            for (p, expected) in [(rate * 0.99, true), (rate * 1.01, false)] {
-                let sample = (p * u64::MAX as f64) as u64 & !u64::from(u32::MAX);
-                assert_eq!(
-                    rewards(&content, kind, &mut StepRng::new(sample, 0)).contains(&item),
-                    expected,
-                    "{kind:#x}/{item:#x} cutoff {p}"
-                );
-            }
-            let group = snapshot["groups"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|g| g["enemy"]["id"] == kind && g["channel"] == "Main loot")
-                .unwrap();
-            let entry = group["entries"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|e| e["items"] == json!([item]))
-                .unwrap();
-            assert_eq!(entry["probability"], rate);
-        }
-        assert_eq!(bonus(0xd59), &[(0.001, 0xc0a)]);
-        assert_eq!(bonus(0xd60), &[(0.001, 0xc06)]);
-        assert_eq!(table(crate::dungeon::tomb::BES)[0].0, 0.07);
-        assert!(!item_qualified(0xd90, 0xc02, 1199, 8000));
-        assert!(item_qualified(0xd90, 0xc02, 1200, 8000));
-        assert_eq!(attempts(crate::dungeon::tomb::BES, 10), 2);
-        assert_eq!(
-            participation_reward(crate::dungeon::lab::CREATION),
-            Some(0xa20)
-        );
-        let portals: Vec<_> = snapshot["groups"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|g| g["channel"] == "Dungeon portal")
-            .map(|g| {
-                (
-                    g["enemy"]["name"].as_str().unwrap().to_owned(),
-                    g["entries"][0].clone(),
-                )
-            })
-            .collect();
-        assert_eq!(portals.len(), 19);
-        assert!(portals.contains(&(
-            "Undead Dwarf God".into(),
-            json!({"probability":0.17,"items":[0x718],"note":""})
-        )));
-        assert!(portals.iter().any(|(name, _)| name == "Sprite Child"));
-        assert_eq!(
-            snapshot["items"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|i| i["name"] == "Snake Pit")
-                .count(),
-            1
-        );
-        assert!(snapshot["groups"].as_array().unwrap().len() > 300);
-    }
+    let landmark_chests = game
+        .landmark_chests
+        .keys()
+        .map(|kind| landmark_chest_facts(game, *kind))
+        .collect::<Result<Vec<_>>>()?;
+    let items: Vec<_> = collectibles(game).into_iter().map(|id| {
+            let item = &game.properties[&id];
+            json!({"id":id,"name":item.name,"slot":item.slot_type,"tier":item.tier,"bag_type":item.bag_type,"soulbound":item.soulbound})
+        }).collect();
+    Ok(
+        json!({"schema_version":2,"revision":revision,"content_fingerprint":game.fingerprint,
+        "allocation_version":ALLOCATION_VERSION,"items":items,"objects":objects,"landmark_chests":landmark_chests,
+        "policy":{
+            "qualification":"Recovered Release 7.0 literal XML rows, strict selected 123.5.1 properties; allocation/public-gate/RNG law is authored, not authenticated historical engine behavior.",
+            "independence":"Each source row, including identical repeats, is separate; never merge eligibility, ownership, source or min/max.",
+            "recipient_order":"Sort eligible durable character IDs, then reverse Fisher-Yates with unbiased bounded indices, independently per row. Public uses one virtual recipient.",
+            "allocation":"Bernoullis in fair order stop at max successes. Top up to min in that order, first recipients without success, cycle only when min exceeds recipient count. Pool choices occur after row recipient allocation, uniformly over sorted linked IDs. Duplicates are retained.",
+            "rng":"p=0/p=1 need no unit draw; max=0, p=0 with min=0, no eligible private character and failed public gate need no row draws. Singleton permutation/pool choices need no index draw. u < p succeeds; equality fails.",
+            "probability_labels":"Attempt-item probabilities are before min/max and are not final per-character probabilities. Final chance is deliberately not projected by this context-free endpoint.",
+            "delivery":"Allocation plans are pending entitlements, not committed drops. Native packing, transient capacity, durable ownership/pickup and once-only commit are coordinator obligations; insufficient capacity must not reroll."
+        }}),
+    )
 }

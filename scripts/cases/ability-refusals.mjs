@@ -48,7 +48,8 @@ export async function run(game){
   const tower=w=>{const f=w.encounter_markers.filter(m=>m.kind===0xd87).map(m=>m.position),lone=f.find(p=>f.every(q=>q===p||Math.hypot(p.x-q.x,p.y-q.y)>10));assert(lone,'No lone Living Floor');return{x:lone.x-1,y:lone.y+2};};
   const quiet=await game.join({class:0x30e,level:20,seed:879,world:'oryx-castle',position:tower,equipment:[-1,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,0]});
   await api({op:'cheat',actor:quiet.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
-  await quiet.act({keys:[],duration_ms:1000});const hit=await record('natural-quiet',quiet);
+  // The recovered Target state switches to the close-range ring only after 1.6 s.
+  for(let n=0;n<15&&!((await quiet.observe()).character.conditions&2);n++)await quiet.act({keys:[],duration_ms:400});const hit=await record('natural-quiet',quiet);
   game.check('natural Living Floor projectile applies Quiet and drains MP',!!(hit.view.character.conditions&2)&&hit.view.character.mp===0);
   await quiet.act({keys:[' '],duration_ms:100});
   const refused=await record('quiet-refusal',quiet);

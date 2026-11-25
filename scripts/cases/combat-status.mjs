@@ -3,8 +3,10 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x30e,level:20,seed:789,world:'spider-den',worldSeed:12351,position:{x:75.5,y:16.5},equipment:[0xa97,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
+export const fixture={class:0x30e,level:20,seed:789,world:'spider-den',worldSeed:12351,position:arachnaThread,equipment:[0xa97,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
 const bit=index=>1<<(index-1);
+// Spoke 9 lands 6.5 tiles at 120 degrees and threads web due east (actors.xml Arachna/Web Spoke 9); south of her, aim clears the Quest panel.
+export function arachnaThread(world){const a=world.encounter_markers.find(e=>e.kind===0x936).position;return {x:a.x-1,y:a.y+6.5*Math.sin(2*Math.PI/3)};}
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),observations=[];

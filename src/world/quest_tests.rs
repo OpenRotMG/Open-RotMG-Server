@@ -1,8 +1,9 @@
 use super::*;
 
 fn quest_fixture() -> (World, i32, i32, i32) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 64,
         height: 32,
         cells: vec![

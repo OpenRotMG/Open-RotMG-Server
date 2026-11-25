@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import {nativeMap} from './native-map.mjs';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {walk as nativeWalk} from './native-route.mjs';
 
 export const fixture={class:0x30e,level:20,seed:862,world:-2,position:'spawn',equipment:[0xb08,-1,0xb05,0xac5],backpack:[0xc23,-1,-1,-1,-1,-1,-1,-1],stats:[670,385,75,25,50,75,40,60]};
 export async function run(game){
@@ -9,37 +11,27 @@ export async function run(game){
   const report=JSON.parse(await readFile(out('native/result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(out('native/state/control.token'),'utf8')).trim(),'Content-Type':'application/json'};
   const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),entities=s=>s.diagnostic.entities;
-  let map,reward=null;
+  let map,reward=null,protectedUntil=0,armoredUntil=0;
   async function save(name){const s=await game.inspect();samples.push({name,state:s});await writeFile(out('journey.json'),JSON.stringify(samples));return s;}
   async function protect(){
     const response=await fetch(report.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}}})});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
     protections.push(receipt);await writeFile(out('protection.json'),JSON.stringify(protections));
+    protectedUntil=(await game.observe()).game_ms+60000;
   }
   async function refresh(){
-    const s=await game.inspect(),response=await fetch(report.origin+'/dev/map?player='+s.diagnostic.player,{headers});assert(response.ok);
-    map=await response.json();return map;
+    map=await nativeMap(report.origin,headers,(await game.inspect()).diagnostic.player);return map;
   }
-  async function step(input,capture){if(!((await game.observe()).character.conditions&(1<<23)))await protect();return game.act(input,capture);}
-  function route(start,goal,tolerance){
-    const width=map.width,blocked=new Set(map.blocked.map(([x,y])=>y*width+x)),first=Math.floor(start.y)*width+Math.floor(start.x),previous=new Map([[first,null]]),queue=[first];
-    for(let n=0;n<queue.length;n++){
-      const i=queue[n],p={x:i%width+.5,y:Math.floor(i/width)+.5};
-      if(distance(p,goal)<=tolerance){const path=[];for(let at=i;at!==null;at=previous.get(at))path.push({x:at%width+.5,y:Math.floor(at/width)+.5});return path.reverse();}
-      // Cell-centre routes clipped the native collider at corridor turns.
-      for(const j of [i-1,i+1,i-width,i+width])if(j>=0&&j<width*map.height&&!previous.has(j)&&[-1,0,1].every(dx=>[-1,0,1].every(dy=>!blocked.has(j+dx+dy*width)))){previous.set(j,i);queue.push(j);}
-    }
-    throw Error('No walkable route to '+JSON.stringify(goal));
+  // Protection cannot be renewed early; a staggered DEF window covers each renewal gap beside Manor vampires.
+  async function guard(){
+    const v=await game.observe();if(!(v.character.conditions&(1<<23)))await protect();const left=protectedUntil-(await game.observe()).game_ms;
+    if(left<=15000&&v.game_ms>=armoredUntil){const r=await fetch(report.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:3,amount:100,duration_ms:60000}}})});assert(r.ok&&(await r.json()).status==='succeeded');armoredUntil=v.game_ms+60000;}
+    return left;
   }
-  async function walk(goal,tolerance=.75){
-    const path=route((await game.observe()).position,goal,tolerance),turns=path.filter((p,i)=>i===path.length-1||i>0&&(p.x-path[i-1].x!==path[i+1].x-p.x||p.y-path[i-1].y!==path[i+1].y-p.y));
-    for(const point of turns)for(let n=0;n<80;n++){
-      const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y,d=distance(point,v.position);if(d<.45)break;
-      assert(n<79,'Native walk stalled at '+JSON.stringify({point,position:v.position}));
-      const keys=Math.abs(dx)>Math.abs(dy)?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']);
-      await step({keys,duration_ms:Math.max(60,Math.min(800,Math.round(Math.max(Math.abs(dx),Math.abs(dy))/7.73*1000)))});
-    }
-  }
+  async function step(input,capture){await guard();return game.act(input,capture);}
+  // The generated Manor has single-gap doorways; the shared half-tile route keeps the two-tile collider clearance it needs.
+  const walk=(goal,tolerance=.75)=>nativeWalk({client:{actor:game.actor,observe:()=>game.observe(),act:input=>step(input)},map:refresh,to:goal,options:()=>({reach:Math.max(tolerance,.3)}),record:r=>writeFile(out('manor-route.json'),JSON.stringify(r)),
+    ready:guard});
   async function shoot(id,limit=25,duration_ms=1000){for(let n=0;n<limit;n++){const s=await game.inspect(),e=entities(s).find(e=>e.id===id);if(!e)return;await step({keys:[],duration_ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});}throw Error('Native shots did not defeat '+id);}
   async function enter(from,name){
     await step({keys:[],mouse:{x:700,y:575},duration_ms:700});
@@ -53,24 +45,24 @@ export async function run(game){
   await refresh();await writeFile(out('entry-map.json'),JSON.stringify(map));
   game.check('key-created Manor retains its ordinary vampire-room population',map.entities.some(e=>e.kind>=0x1727&&e.kind<=0x172c));
   await step({keys:[],duration_ms:700},{name:'manor-entrance',when:()=>true});
-  const shelves=map.entities.filter(e=>e.kind===0x181a).sort((a,b)=>distance(a.pos,entry.view.position)-distance(b.pos,entry.view.position)),secret=shelves.find(e=>e.condition===0),ordinary=shelves.find(e=>e.condition!==0);
-  assert(secret&&ordinary,'Generated Manor must offer both shelf types for this case');
+  const shelves=map.entities.filter(e=>e.kind===0x181a).sort((a,b)=>distance(a.pos,entry.view.position)-distance(b.pos,entry.view.position)),ordinary=shelves.find(e=>e.condition!==0);
+  // Generated Manors hold several sealed rooms; open the secret shelves sealing a paired-coffin room.
+  const coffins=map.entities.filter(e=>e.kind===0x1737),pair=coffins.find(a=>coffins.some(b=>a.id!==b.id&&distance(a.pos,b.pos)===4));assert(pair,'No generated paired-coffin room');
+  const mate=coffins.find(e=>e.id!==pair.id&&distance(e.pos,pair.pos)===4),middle={x:(pair.pos.x+mate.pos.x)/2,y:(pair.pos.y+mate.pos.y)/2};
+  assert(ordinary&&shelves.some(e=>e.condition===0),'Generated Manor must offer both shelf types for this case');
   await walk(ordinary.pos,4);
   await step({keys:[],duration_ms:500,target:{entity:ordinary.id,camera_angle:-Math.PI/4,fire:true}});
   await step({keys:[],duration_ms:700},{name:'ordinary-shelf',when:()=>true});
   await refresh();await writeFile(out('ordinary-shelf.json'),JSON.stringify({before:ordinary,after:map.entities.find(e=>e.id===ordinary.id)}));
   game.check('ordinary bookshelf survives native staff damage',map.entities.some(e=>e.id===ordinary.id&&e.hp===ordinary.hp));
-  const doors=shelves.filter(e=>e.condition===0&&distance(e.pos,secret.pos)<=2),passage={x:doors.reduce((sum,e)=>sum+e.pos.x,0)/doors.length,y:doors.reduce((sum,e)=>sum+e.pos.y,0)/doors.length};
-  assert.equal(doors.length,3,'Selected secret passage must have three shelves');
+  const doors=shelves.filter(e=>e.condition===0).sort((a,b)=>distance(a.pos,middle)-distance(b.pos,middle)).slice(0,3),passage={x:doors.reduce((sum,e)=>sum+e.pos.x,0)/doors.length,y:doors.reduce((sum,e)=>sum+e.pos.y,0)/doors.length};
+  assert(doors.length===3&&doors.every(a=>doors.some(b=>b!==a&&distance(a.pos,b.pos)===1)),'Selected secret passage must have three adjacent shelves');
   await walk(passage,3);
   await step({keys:[],duration_ms:700},{name:'secret-shelf-before',when:()=>true});
-  for(const door of doors)await shoot(door.id);
+  for(const door of doors){await walk(door.pos,3);await shoot(door.id);}
   await refresh();game.check('native staff destroys secret shelves and opens their blocked passage',doors.every(door=>!map.entities.some(e=>e.id===door.id)&&!map.blocked.some(([x,y])=>x===Math.floor(door.pos.x)&&y===Math.floor(door.pos.y))));
-  await walk(passage,.3);
+  await walk(passage,.6);
   await step({keys:[],duration_ms:700},{name:'secret-shelf-after',when:()=>true});
-  const coffins=map.entities.filter(e=>e.kind===0x1737).sort((a,b)=>distance(a.pos,secret.pos)-distance(b.pos,secret.pos));
-  const pair=coffins.find(a=>coffins.some(b=>a.id!==b.id&&distance(a.pos,b.pos)===4));assert(pair,'No generated paired-coffin room');
-  const mate=coffins.find(e=>e.id!==pair.id&&distance(e.pos,pair.pos)===4);
   const outcomes=[];
   for(const coffin of [pair,mate]){
     await refresh();await walk(coffin.pos,4);
@@ -117,16 +109,23 @@ export async function run(game){
   await step({keys:[],duration_ms:700},{name:'ruthven-before',when:()=>true});
   for(let n=0;n<84;n++){
     const s=await game.inspect(),e=entities(s).find(e=>e.id===boss.id);if(!e)break;
-    if(distance(e.pos,s.view.position)>6)await walk(e.pos,4);
-    else await step({keys:[],duration_ms:1500,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+    if(distance(e.pos,s.view.position)>6){await walk(e.pos,4);continue;}
+    const left=await guard();
+    // A full firing hold can overrun the protection deadline in a room full of active coffins.
+    if(left<=200){await game.act({keys:[],duration_ms:Math.max(50,left+50)});continue;}
+    const live=(await game.inspect()).view.objects.some(o=>o.id===boss.id&&o.hp>0);
+    await game.act({keys:[],duration_ms:Math.min(1500,left-150),target:live?{entity:boss.id,camera_angle:-Math.PI/4,fire:true}:undefined});
   }
-  const defeated=await save('ruthven-defeated');
-  game.check('native staff defeats Ruthven and awards exactly one Manor completion',!entities(defeated).some(e=>e.id===boss.id)&&defeated.diagnostic.character.manors===entry.diagnostic.character.manors+1);
-  await refresh();const exit=map.entities.find(e=>e.kind===0x71d);assert(exit,'Ruthven must publish an earned exit');
+  game.check('native staff defeats Ruthven',!entities(await save('ruthven-defeated')).some(e=>e.id===boss.id));
+  // The recovered Vampire Summoner turns into the Realm Portal once no Lord Ruthven exists (manorOfTheImmortals.xml:939-957).
+  let exit;for(let n=0;n<10&&!exit;n++){await refresh();exit=map.entities.find(e=>e.kind===0x704);if(!exit)await step({keys:[],duration_ms:500});}
+  assert(exit,'Vampire Summoner must publish the earned Realm Portal');
+  const defeated=await save('manor-cleared');
+  game.check('Ruthven defeat awards exactly one Manor completion',defeated.diagnostic.character.manors===entry.diagnostic.character.manors+1);
   await step({keys:[],duration_ms:700},{name:'ruthven-after',when:()=>true});
   await walk(exit.pos);
   const returned=await enter(entry.view.session.world,'boss-exit');
-  game.check('earned exit returns the same living Wizard to Nexus with durable clear credit',returned.view.map.name==='Nexus'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.diagnostic.character.manors===defeated.diagnostic.character.manors);
+  game.check('earned Realm Portal returns the same living Wizard to the Realm with durable clear credit',returned.view.map.name==='Realm'&&returned.view.lifecycle.alive&&returned.view.session.character===initial.view.session.character&&returned.diagnostic.character.manors===defeated.diagnostic.character.manors);
   if(reward)game.check('collected private coffin reward persists through the earned exit',returned.view.character.items[4]===reward.view.character.items[4]);
   await step({keys:[],duration_ms:700},{name:'manor-return',when:()=>true});
 }

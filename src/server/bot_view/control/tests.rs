@@ -192,8 +192,9 @@ impl Socket {
 
 #[tokio::test]
 async fn protocol_ready_switch_reconnect_and_control_close_cancel_bootstrap() {
+    // The budget bounds protocol interactions, not full-density Realm fixture construction.
+    let (_, mut app) = crate::server::test_app();
     tokio::time::timeout(Duration::from_secs(20), async {
-        let (_, mut app) = crate::server::test_app();
         app.cctv = Cctv::test_catalogue();
         app.behind_proxy = true;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

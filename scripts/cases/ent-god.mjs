@@ -56,7 +56,7 @@ export async function run(game){
       const s=await game.inspect(),e=enemy(s),dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>5;
       const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
-      await act({keys,duration_ms:200,target:{entity:root.id,camera_angle:-Math.PI/4,fire:!approach}});
+      await act(approach?{keys,duration_ms:200}:{keys:[],duration_ms:200,target:{entity:root.id,camera_angle:-Math.PI/4,fire:true}});
     }
     await act({keys:[],duration_ms:500},{name:'ent-god-defeated',when:()=>true});
     const dead=await game.inspect();

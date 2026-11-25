@@ -1,6 +1,8 @@
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
+// Pin a layout with registered Castles (classic World 3 has three); unpinned catalog draws include Castle-free layouts.
+export const realmSeed=1;
 const spec={class:0x307,level:20,seed:798,world:1,equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
 export async function prepare(api){
   const registry=JSON.parse(await readFile(resolve('data/realm-sites.json'),'utf8'));
@@ -37,25 +39,22 @@ export async function run(game){
   game.check('naturally placed Realm boss activates',!!boss&&boss.activated!==null);
   const children=state=>state.diagnostic.entities.filter(e=>e.parent===boss.id&&family.includes(e.kind));
   game.check('all five dependent species spawn',family.every(k=>children(first).some(e=>e.kind===k)));
-  const speeds=new Set(),stages=new Set(),trace=[];
+  const speeds=new Set(),trace=[];
   function record(state){
     for(const p of state.view.projectiles.filter(p=>p.owner===boss.id))speeds.add(p.speed);
-    for(const e of children(state))stages.add(e.stage);
-    trace.push({time:state.view.time_ms,boss:state.diagnostic.entities.find(e=>e.id===boss.id)?.pos,children:children(state).map(e=>({id:e.id,kind:e.kind,stage:e.stage,pos:e.pos}))});
+    trace.push({time:state.view.time_ms,boss:state.diagnostic.entities.find(e=>e.id===boss.id)?.pos,children:children(state).map(e=>({id:e.id,kind:e.kind,pos:e.pos}))});
   }
   let pending=null,sampleError=null;
   const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{sampleError=e;}).finally(()=>{pending=null;});},100);
   try{await game.act({keys:[],duration_ms:10000},{name:'cyclops-attacks',when:()=>true});}
   finally{clearInterval(timer);if(pending)await pending;}
   if(sampleError)throw sampleError;
-  await writeFile(join(process.env.QA_RESULTS_DIR,'cycle.json'),JSON.stringify({speeds:[...speeds],stages:[...stages],trace}));
+  await writeFile(join(process.env.QA_RESULTS_DIR,'cycle.json'),JSON.stringify({speeds:[...speeds],trace}));
   game.check('native session observes blades and all four beam speeds',[65,20,40,60,80].every(s=>speeds.has(s)));
-  const distance=e=>Math.hypot(e.pos.x-first.view.position.x,e.pos.y-first.view.position.y),motions=new Set();
-  for(let n=1;n<trace.length;n++)for(const e of trace[n].children){
-    const prior=trace[n-1].children.find(p=>p.id===e.id),sign=e.stage===0?-1:1;
-    if(prior&&prior.stage===e.stage&&sign*(distance(e)-distance(prior))>.02)motions.add(e.kind+':'+e.stage);
-  }
-  game.check('all five species visibly pursue and retract',family.every(k=>[0,1].every(s=>motions.has(k+':'+s))));
+  // XML Cyclops followers are stateless StayCloseToSpawn/Follow/Wander movers (actors.xml:2014-2069), with no pursue/retract stages.
+  const motions=new Set();
+  for(let n=1;n<trace.length;n++)for(const e of trace[n].children){const prior=trace[n-1].children.find(p=>p.id===e.id);if(prior&&Math.hypot(e.pos.x-prior.pos.x,e.pos.y-prior.pos.y)>.02)motions.add(e.kind);}
+  game.check('all five species visibly move',family.every(k=>motions.has(k)));
   game.check('boss wanders in its castle',trace.some(t=>t.boss&&Math.hypot(t.boss.x-boss.pos.x,t.boss.y-boss.pos.y)>.2));
   const before=await game.observe();
   await game.act({keys:['d'],duration_ms:300});
@@ -70,7 +69,7 @@ export async function run(game){
   for(let n=0;n<25&&!children(await game.inspect()).some(e=>e.kind===victim.kind&&!prior.has(e.id));n++)await game.act({keys:[],duration_ms:1000});
   const replenished=await save('replenished');
   game.check('living boss replenishes defeated species',children(replenished).some(e=>e.kind===victim.kind&&!prior.has(e.id)));
-  game.check('sampled population respects current three-per-species cap',family.every(k=>children(replenished).filter(e=>e.kind===k).length<=3));
+  game.check('sampled population respects XML per-species caps (actors.xml:2006-2010)',family.every((k,i)=>children(replenished).filter(e=>e.kind===k).length<=[5,3,2,1,1][i]));
   const xp=(await game.observe()).character.experience;
   for(let n=0;n<30&&(await game.inspect()).view.objects.some(e=>e.id===boss.id&&e.hp>0);n++)await fire(boss.id);
   await game.act({keys:[],duration_ms:300});

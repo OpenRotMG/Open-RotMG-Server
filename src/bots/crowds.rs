@@ -89,7 +89,7 @@ impl Crowd {
         leading: bool,
         eligible: impl Fn(Pos) -> bool,
     ) -> Option<(&'a PlayerMarker, usize)> {
-        if v.map.name != "Realm" {
+        if v.map.template.as_deref() != Some("realm") {
             return None;
         }
         let here = self.bands.known(v.position);
@@ -227,7 +227,9 @@ impl Crowd {
             })
     }
     pub fn shortcut<'a>(&self, v: &'a PlayerView, objective: Pos) -> Option<&'a PlayerMarker> {
-        if !v.map.allow_teleport || matches!(v.map.name.as_str(), "Realm" | "Nexus") {
+        if !v.map.allow_teleport
+            || matches!(v.map.template.as_deref(), Some("realm") | Some("nexus"))
+        {
             return None;
         }
         // Rushers shorten the existing dungeon quest: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat

@@ -2,54 +2,18 @@ use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 
-pub const BOSS: u16 = 0x917;
-pub const PET: u16 = 0x918;
-// Six tiles clear cover throughout the two-tile wander; period evidence specifies circling, not radius: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
-pub const PET_RADIUS: f32 = 6.;
-// Angular speed is GetSpeed/radius, so a 6-tile ring must keep Orbit(7.5, 10)'s rate: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/Orbit.cs#L77
-pub fn pet_speed() -> f32 {
-    crate::encounter::nr_speed(7.5) * PET_RADIUS / 10.
-}
-pub const SWARM: u16 = 0x919;
-pub const GUARD: u16 = 0xe26;
-pub const BUTTON: u16 = 0xe27;
-pub const SPAWNER: u16 = 0xe28;
-pub const DART: u16 = 0xe25;
-pub const GUARD_RAGE_HP: i32 = 3300;
 const TREASURE_ENTRY_RISE: i32 = 12;
 // Keep bounds and darts on the eleven-tile rails of this later inactive template: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/maps/wmap%27s/snakepit%20treasure%20test.wmap
 const TREASURE_HALF_WIDTH: i32 = 5;
 
-// The modified 7.0 server provides explicit timings, not an authenticated 123.5.1 AI script.
-pub fn phase(elapsed: u64) -> (u64, u64) {
-    let cycle = elapsed / 31_000;
-    let t = elapsed % 31_000;
-    let (phase, age) = match t {
-        0..8000 => (0, t),
-        8000..25000 => (1, t - 8000),
-        _ => (2, t - 25000),
-    };
-    (cycle * 3 + phase, age)
-}
-
-pub fn initial_condition(kind: u16) -> i32 {
-    match kind {
-        BOSS => crate::condition::bit(crate::condition::INVULNERABLE),
-        BUTTON | SPAWNER | DART => crate::condition::bit(crate::condition::INVINCIBLE),
-        _ => 0,
-    }
-}
-
-pub fn shield(elapsed: u64) -> bool {
-    let (stage, age) = phase(elapsed);
-    match stage % 3 {
-        0 => age % 3000 < 2000,
-        1 => age >= 16000 || !(1000..2000).contains(&(age % 3000)),
-        _ => (1500..3500).contains(&age) || age >= 5000,
-    }
-}
-
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    let [retreat, boss_kind, grate, diggable_wall] = generator.placements("rooms")?;
+    let snakes = generator.placements::<5>("room-snakes")?;
+    let treasure = generator.placements("treasure")?;
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let mut treasure_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7472_6561_7375_7265);
     let mut attempts = 0;
@@ -176,6 +140,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let width = centers.iter().map(|p| p.0).max().unwrap() + 21;
     let height = centers.iter().map(|p| p.1).max().unwrap() + 21;
     let mut map = Map {
+        elevation: None,
         width,
         height,
         cells: vec![
@@ -194,7 +159,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let boss = |x: i32, y: i32| x.abs().max(y.abs()) <= 15 && x.abs().min(y.abs()) < 12;
     for (i, &(cx, cy)) in centers.iter().enumerate() {
         if i >= ordinary {
-            treasure_room(&mut map, cx, cy);
+            treasure_room(&mut map, cx, cy, treasure);
             continue;
         }
         let radius = half[i].0;
@@ -226,11 +191,11 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         }
         if i != 0 && i != 6 {
             for (dx, dy) in [(-4, 0), (4, 0)] {
-                map.cells[((cy + dy) * width + cx + dx) as usize].object = Some(0x173);
+                map.cells[((cy + dy) * width + cx + dx) as usize].object = Some(grate);
             }
             for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
                 map.cells[((cy + dy) * width + cx + dx) as usize].object =
-                    Some(rng.gen_range(0x225..=0x229));
+                    Some(snakes[usize::from(rng.gen_range(0_u16..=4))]);
             }
         }
     }
@@ -247,7 +212,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 let cell = &mut map.cells[(y * width + x) as usize];
                 if cell.ground == 0xff {
                     cell.ground = 0x16;
-                    cell.object = Some(0x172);
+                    cell.object = Some(diggable_wall);
                 }
             }
         }
@@ -277,7 +242,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         }
     }
     map.cells[(sy * width + sx) as usize].region = 1;
-    map.cells[(sy * width + sx) as usize].object = Some(0x703);
+    map.cells[(sy * width + sx) as usize].object = Some(retreat);
     let (bx, by) = centers[6];
     // Reconstruct the later map's notched shoulders, rim clearance and mixed cover, not rectangular bars: https://github.com/ossimc82/fabiano-swagger-of-doom/blob/6fd20aad4a7905b13f25389c68368a942a2b68cb/wServer/realm/worlds/maps/snakepit.wmap
     for (dx, dy) in [(-10, 0), (10, 0), (0, -10), (0, 10)] {
@@ -292,12 +257,15 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                     (bx + dx + thick * dx.signum(), by + along)
                 };
                 map.cells[(y * width + x) as usize].ground = 0x16;
-                map.cells[(y * width + x) as usize].object =
-                    Some(if dx == 0 && along >= 0 { 0x172 } else { 0x170 });
+                map.cells[(y * width + x) as usize].object = Some(if dx == 0 && along >= 0 {
+                    diggable_wall
+                } else {
+                    0x170
+                });
             }
         }
     }
-    map.cells[(by * width + bx) as usize].object = Some(BOSS);
+    map.cells[(by * width + bx) as usize].object = Some(boss_kind);
     for cell in &map.cells {
         ensure!(
             content.grounds.contains_key(&cell.ground),
@@ -320,7 +288,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     Ok(map)
 }
 
-fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
+fn treasure_room(map: &mut Map, cx: i32, cy: i32, [button, spawner, dart]: [u16; 3]) {
     // Floor rails, a button alcove and a lower side entry are visible here; dimensions are reconstructed: https://www.youtube.com/watch?v=o90GtXTf9Mw&t=720
     let cy = cy - TREASURE_ENTRY_RISE;
     let inside = |x: i32, y: i32| {
@@ -348,11 +316,11 @@ fn treasure_room(map: &mut Map, cx: i32, cy: i32) {
             };
         }
     }
-    map.cells[((cy - 12) * map.width + cx) as usize].object = Some(BUTTON);
-    map.cells[(cy * map.width + cx) as usize].object = Some(SPAWNER);
+    map.cells[((cy - 12) * map.width + cx) as usize].object = Some(button);
+    map.cells[(cy * map.width + cx) as usize].object = Some(spawner);
     for dy in [-4, -2, 0, 2, 4] {
         for dx in [-TREASURE_HALF_WIDTH, TREASURE_HALF_WIDTH] {
-            map.cells[((cy + dy) * map.width + cx + dx) as usize].object = Some(DART);
+            map.cells[((cy + dy) * map.width + cx + dx) as usize].object = Some(dart);
         }
     }
 }

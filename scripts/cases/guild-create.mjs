@@ -89,7 +89,7 @@ export async function run(game) {
       const a=Math.floor(p.x),b=Math.floor(p.y);let aim={x,y};
       if(a!==goal[0]||b!==goal[1]) {
         const choices=queue.filter(([c,d])=>Math.abs(c-a)<=1&&Math.abs(d-b)<=1&&pass(c,b)&&pass(a,d)).sort((c,d)=>distance.get(c.join(','))-distance.get(d.join(',')));
-        assert(choices.length,'No native walking route');
+        assert(choices.length,'No native walking route '+JSON.stringify({position:p,goal}));
         let [c,d]=choices[0];const dx=c-a,dy=d-b;
         for(let n=0;n<7;n++) {
           const e=c+dx,f=d+dy;
@@ -123,7 +123,7 @@ export async function run(game) {
     await ui(player,index,'named-'+index,async c=>{await type(c,300,255,index===0?'GuildOwner':'GuildGuest');await click(c,480,380);});
     game.check('ordinary client chooses its account name '+index,(await player.inspect()).diagnostic.character.name===(index===0?'GuildOwner':'GuildGuest'));
     await player.act({keys:[],mouse:{x:300,y:300},duration_ms:200});
-    await walk(player,73.9,75.5);await approachRegister(player);
+    await approachRegister(player);
   }
   await ui(game,0,'guild-register',async()=>{});
   await ui(game,0,'create-cancel-dialog',c=>click(c,700,580));

@@ -403,7 +403,7 @@ impl Brain {
             tracks: BTreeMap::new(),
             next_teleport: 0,
             plan: plan::Plan::default(),
-            nexus_until: if view.map.name == "Nexus" {
+            nexus_until: if view.map.template.as_deref() == Some("nexus") {
                 view.time_ms + 10000
             } else {
                 0
@@ -515,7 +515,7 @@ impl Brain {
                 }
             }
         }
-        if self.mind.events.knows_blue && v.map.name == "Mad Lab" {
+        if self.mind.events.knows_blue && v.map.template.as_deref() == Some("mad-lab") {
             for pool in v.objects.iter().filter(|p| {
                 p.kind == crate::dungeon::lab::HEXXER
                     && ((v.position.x as i32 - p.position.x as i32).abs() >= 2
@@ -786,7 +786,7 @@ impl Brain {
             self.blocked.insert(tile(destination), v.tick + excluded);
             tracing::warn!(player=v.session.player,tick=v.tick,goal=?self.goal,x=destination.x,y=destination.y,repeats=*repeats,excluded,"autonomous route made no progress; temporarily excluded");
             // Login crowds briefly wedge bots on the Nexus spawn; only a stall elsewhere is a loop.
-            if v.map.name != "Nexus" {
+            if v.map.template.as_deref() != Some("nexus") {
                 self.plan.record(
                     plan::now(),
                     plan::Kind::Aborted,
@@ -907,7 +907,7 @@ impl Brain {
             && !quests::hunts_quests(&self.profile)
     }
     fn farms_godlands(&self, v: &PlayerView) -> bool {
-        v.map.name == "Realm" && self.prefers_godlands(v)
+        v.map.template.as_deref() == Some("realm") && self.prefers_godlands(v)
     }
     fn quest_appeal(
         &self,
@@ -915,7 +915,7 @@ impl Brain {
         content: &Content,
         quest: &crate::world::view::VisibleObject,
     ) -> Option<quests::Appeal> {
-        (v.map.name == "Realm"
+        (v.map.template.as_deref() == Some("realm")
             && v.character.level == 20
             && v.quest == Some(quest.id)
             && (!self.farms_godlands(v)
@@ -1092,7 +1092,7 @@ impl Brain {
             .events
             .remedy(v)
             .filter(|blue| grid.next(v.position, blue.position).is_some());
-        if events::shared(&v.map.name) {
+        if events::shared(v.map.template.as_deref()) {
             tracing::info!(
                 account = v.session.account,
                 character = v.session.character,
@@ -1153,7 +1153,7 @@ impl Brain {
             return Ok(());
         }
         // Standing still can be threatened even when the hunter's held route already dodges the shot.
-        if v.map.name == "Realm"
+        if v.map.template.as_deref() == Some("realm")
             && matches!(decision.goal, Goal::Hunt(_))
             && self
                 .travel
@@ -1234,12 +1234,14 @@ impl Brain {
                 return Ok((Activity::Trade, market));
             }
         }
-        if (equipping && s.remedy.is_none()) || (v.map.name == "Vault" && s.inspecting) {
+        if (equipping && s.remedy.is_none())
+            || (v.map.template.as_deref() == Some("vault") && s.inspecting)
+        {
             return Ok((Activity::Equip, decision));
         }
         if decision.item.is_none()
             && !reserved
-            && v.map.name == "Nexus"
+            && v.map.template.as_deref() == Some("nexus")
             && let Some(drop) = progression::discard(v, content, self.mind.future_class)?
         {
             tracing::info!(
@@ -1298,7 +1300,7 @@ impl Brain {
             self.stationary = v.tick;
             return Ok((Activity::Social, decision));
         }
-        if v.map.name == "Vault" && self.agreement.is_none() {
+        if v.map.template.as_deref() == Some("vault") && self.agreement.is_none() {
             if self.mind.social.trying_loadout(v) {
                 decision.aim = Some(Pos {
                     x: v.position.x + self.heading.cos() * 6.,
@@ -1316,7 +1318,10 @@ impl Brain {
         {
             return Ok((Activity::Social, social));
         }
-        if v.map.name == "Nexus" && self.agreement.is_none() && v.time_ms < self.nexus_until {
+        if v.map.template.as_deref() == Some("nexus")
+            && self.agreement.is_none()
+            && v.time_ms < self.nexus_until
+        {
             if decision.item.is_none()
                 && self.group.is_none()
                 && self.companion.is_none()
@@ -1382,13 +1387,13 @@ impl Brain {
         };
         Ok(match owner {
             plan::Owner::Trade => {
-                if !matches!(v.map.name.as_str(), "Nexus" | "Vault")
+                if !matches!(v.map.template.as_deref(), Some("nexus") | Some("vault"))
                     && (!peaceful || self.committed(v))
                 {
                     return Ok(Yield);
                 }
                 let started = self.plan.owner() == Some(owner);
-                if v.map.name == "Realm"
+                if v.map.template.as_deref() == Some("realm")
                     && s.health >= 0.75
                     && if started {
                         self.mind.market.sought
@@ -1443,9 +1448,9 @@ impl Brain {
                         && !self.mind.market.vault_full()
                         && self.agreement.is_none()
                         && progression::stash(v, content, self.mind.future_class)?;
-                match v.map.name.as_str() {
+                match v.map.template.as_deref() {
                     _ if !due => Yield,
-                    "Vault" => {
+                    Some("vault") => {
                         match progression::bank(
                             v,
                             content,
@@ -1457,7 +1462,7 @@ impl Brain {
                             _ => Done("own Vault organized"),
                         }
                     }
-                    "Nexus" => match v.objects.iter().find(|p| p.kind == 0x720 && p.usable) {
+                    Some("nexus") => match v.objects.iter().find(|p| p.kind == 0x720 && p.usable) {
                         Some(portal) => {
                             let mut d = idle();
                             d.goal = Goal::Portal(portal.id);
@@ -1471,7 +1476,7 @@ impl Brain {
                         None if started => Abort("no usable Vault portal observed"),
                         None => Yield,
                     },
-                    "Realm"
+                    Some("realm")
                         if peaceful
                             && s.health >= 0.75
                             && (started
@@ -1732,7 +1737,7 @@ impl Brain {
                 };
             if let Some(reason) = escape
                 && (urgent || decision.item.is_none())
-                && v.map.name != "Nexus"
+                && v.map.template.as_deref() != Some("nexus")
             {
                 if reason == "volley_margin" {
                     v.volley_margin_ms
@@ -1824,7 +1829,7 @@ impl Brain {
         }));
         let speed = !farmer && self.mind.intentions.as_ref().is_some_and(|i| i.speed());
         // Level 20s weigh whether a Realm quest is worth it; lower levels keep following their leveling quests.
-        let veteran_realm = v.map.name == "Realm" && v.character.level == 20;
+        let veteran_realm = v.map.template.as_deref() == Some("realm") && v.character.level == 20;
         let realm_quest = if let Some(quest) = enemies.iter().find(|e| v.quest == Some(e.id))
             && let Some(appeal) = self.quest_appeal(v, content, quest)
         {
@@ -1891,7 +1896,7 @@ impl Brain {
         let fringe_fight =
             approaching_godlands && fighting_nearby && bands::near_godlands(v, reaction_distance);
         // A quest worth following is where this player goes; otherwise it heads for its own band, a level 20's Godlands.
-        if v.map.name == "Realm"
+        if v.map.template.as_deref() == Some("realm")
             && realm_quest.is_none()
             && !fringe_fight
             && health >= (self.profile.recovery + 0.1).max(0.75)
@@ -1916,8 +1921,10 @@ impl Brain {
         // Live: level 20s heading for the Godlands or their arrow stopped for every enemy in range until the trip timed out.
         let heading = realm_quest.is_some() || choices.iter().any(|(_, g, _)| *g == Goal::Venture);
         // Grated rooms cannot stay cleared; geared players push past snakes: https://whyigame.wordpress.com/2012/05/31/rotmg-oops-1-snakes-in-a-pit/
-        let dungeon =
-            !matches!(v.map.name.as_str(), "Realm" | "Nexus" | "Vault") && v.quest.is_some();
+        let dungeon = !matches!(
+            v.map.template.as_deref(),
+            Some("realm") | Some("nexus") | Some("vault")
+        ) && v.quest.is_some();
         let rushing = dungeon
             && health >= 0.75
             && v.character.level == 20
@@ -1925,7 +1932,8 @@ impl Brain {
             && self.mind.cognition.directions >= 8;
         for enemy in enemies {
             if !progression::can_fight(v, content, enemy)
-                || (events::shared(&v.map.name) || content.objects[&enemy.kind].encounter)
+                || (events::shared(v.map.template.as_deref())
+                    || content.objects[&enemy.kind].encounter)
                     && !progression::vulnerable(enemy)
             {
                 continue;
@@ -1959,7 +1967,7 @@ impl Brain {
                     0.
                 };
             choices.push((score, Goal::Fight(enemy.id), enemy.position));
-            if v.map.name == "Realm"
+            if v.map.template.as_deref() == Some("realm")
                 && content.objects[&enemy.kind].god
                 && content.objects[&enemy.kind].terrain == 1
                 && (!farmer || bands::in_godlands(v, enemy.position))
@@ -1972,8 +1980,9 @@ impl Brain {
                 ));
             }
             if speed
-                && crate::dungeon::portal_drop(enemy.kind)
-                    .is_some_and(|(portal, _)| portal == 0x718)
+                && (content.game.as_ref())
+                    .expect("validated GameData")
+                    .births_at_death(enemy.kind, 0x718)
             {
                 choices.push((
                     76. + self.profile.resources,
@@ -1981,7 +1990,7 @@ impl Brain {
                     enemy.position,
                 ));
             }
-            if events::shared(&v.map.name)
+            if events::shared(v.map.template.as_deref())
                 && progression::vulnerable(enemy)
                 && events::objective(enemy.kind)
             {
@@ -1990,13 +1999,15 @@ impl Brain {
             // Stheno's shield cannot prevent approaching the quest that wakes her encounter.
             if v.quest == Some(enemy.id)
                 && !veteran_realm
-                && (!protected || v.map.name == "Snake Pit")
+                && (!protected || v.map.template.as_deref() == Some("snake-pit"))
                 && (v.character.level >= 3 || d <= 48.)
             {
                 choices.push((
-                    if v.map.name == "Snake Pit" || events::shared(&v.map.name) {
+                    if v.map.template.as_deref() == Some("snake-pit")
+                        || events::shared(v.map.template.as_deref())
+                    {
                         97.
-                    } else if v.map.name == "Realm" {
+                    } else if v.map.template.as_deref() == Some("realm") {
                         70. + self.profile.resources
                     } else {
                         55. + self.profile.resources
@@ -2015,7 +2026,10 @@ impl Brain {
                 .filter(|o| content.objects[&o.kind].class == "Container")
             {
                 // Kiting out of weapon range does not make the guarded chest safe to approach.
-                if v.map.name == "Realm" && bag.kind == 0x501 && !peaceful(enemies, bag.position) {
+                if v.map.template.as_deref() == Some("realm")
+                    && bag.kind == 0x501
+                    && !peaceful(enemies, bag.position)
+                {
                     continue;
                 }
                 if progression::pickup(
@@ -2047,7 +2061,7 @@ impl Brain {
             }
         }
         let peaceful = nearest.is_none_or(|e| e.position.distance(v.position) > 5.);
-        let realm = if v.map.name == "Nexus" && peaceful && health >= 0.75 {
+        let realm = if v.map.template.as_deref() == Some("nexus") && peaceful && health >= 0.75 {
             self.realm_portal(v, grid)?
         } else {
             None
@@ -2055,31 +2069,36 @@ impl Brain {
         if let Some((id, position)) = realm {
             choices.push((95., Goal::Portal(id), position));
         }
-        for portal in v
-            .objects
-            .iter()
-            .filter(|p| p.usable)
-            .filter(|p| match v.map.name.as_str() {
-                "Nexus" => matches!(p.kind, 0x704 | 0x70e | 0x71c),
-                // The committed exit is public even when a straggler missed personal clear credit.
-                "Pirate Cave" => p.kind == 0x704,
-                "Snake Pit" => matches!(p.kind, 0x704 | 0x71d),
-                "Oryx's Castle" => p.kind == 0xd7b && events::ready(v, content),
-                "Oryx's Chamber" => p.kind == 0x71d || p.kind == 0x700 && events::ready(v, content),
-                "Wine Cellar" | "Mad Lab" => matches!(p.kind, 0x71d | 0x712),
-                "Realm" => {
-                    progression::ready(v, content, p.kind)
-                        && (!farmer || p.kind != 0x718 || self.group.is_some())
-                        && self.group.as_ref().is_none_or(|g| {
-                            p.kind == 0x890 || !g.finished && g.purpose.portal() == p.kind
-                        })
-                }
-                _ => false,
-            })
+        for portal in
+            v.objects
+                .iter()
+                .filter(|p| p.usable)
+                .filter(|p| match v.map.template.as_deref() {
+                    Some("nexus") => matches!(p.kind, 0x704 | 0x70e | 0x71c),
+                    // The committed exit is public even when a straggler missed personal clear credit.
+                    Some("pirate-cave") => p.kind == 0x704,
+                    Some("snake-pit") => matches!(p.kind, 0x704 | 0x71d),
+                    Some("oryx-castle") => p.kind == 0xd7b && events::ready(v, content),
+                    Some("oryx-chamber") => {
+                        p.kind == 0x71d || p.kind == 0x700 && events::ready(v, content)
+                    }
+                    Some("wine-cellar") | Some("mad-lab") => matches!(p.kind, 0x71d | 0x712),
+                    Some("realm") => {
+                        progression::ready(v, content, p.kind)
+                            && (!farmer || p.kind != 0x718 || self.group.is_some())
+                            && self.group.as_ref().is_none_or(|g| {
+                                p.kind == 0x890 || !g.finished && g.purpose.portal() == p.kind
+                            })
+                    }
+                    _ => false,
+                })
         {
             let exiting = portal.kind == 0x71d
-                || matches!(v.map.name.as_str(), "Pirate Cave" | "Snake Pit")
-                || portal.kind == 0x712 && events::shared(&v.map.name);
+                || matches!(
+                    v.map.template.as_deref(),
+                    Some("pirate-cave") | Some("snake-pit")
+                )
+                || portal.kind == 0x712 && events::shared(v.map.template.as_deref());
             if exiting || ((peaceful || matches!(portal.kind, 0xd7b | 0x700)) && health >= 0.75) {
                 let reward_waiting = choices.iter().any(|(_, goal, _)| {
                     if let Goal::Loot(id) = goal {
@@ -2098,7 +2117,7 @@ impl Brain {
                 choices.push((
                     if exiting {
                         if reward_waiting
-                            || events::shared(&v.map.name)
+                            || events::shared(v.map.template.as_deref())
                                 && choices
                                     .iter()
                                     .any(|(_, goal, _)| matches!(goal, Goal::Loot(_)))
@@ -2231,7 +2250,7 @@ impl Brain {
             choices.push((score, Goal::Follow(marker.id), marker.position));
         }
         // Revisiting an emptied room must not compete with progressing through the dungeon.
-        if v.map.name == "Realm"
+        if v.map.template.as_deref() == Some("realm")
             && let Some(place) = self.hunting
             && v.time_ms.saturating_sub(self.last_encounter)
                 > ((if v.character.level < 3 {
@@ -2288,7 +2307,7 @@ impl Brain {
                 // A traveller can shoot a side enemy without giving up the route at a band edge.
                 // Inside the Godlands a farmer's leg stops for every god; that is what it walks on to find.
                 let farming = farmer && !approaching_godlands && kept == Goal::Venture;
-                let approaching = v.map.name == "Realm"
+                let approaching = v.map.template.as_deref() == Some("realm")
                     && matches!(kept, Goal::Hunt(_) | Goal::Venture)
                     && !farming
                     && offered.is_some_and(|p| travel(&kept, p));
@@ -2331,7 +2350,7 @@ impl Brain {
                 choices.push((12., self.goal.clone(), center((x, y))));
             } else {
                 // Nexus hedges can put the frontier outside a short leg; choosing only local tiles keeps bots inside the courtyard.
-                let nexus = v.map.name == "Nexus";
+                let nexus = v.map.template.as_deref() == Some("nexus");
                 let reachable = if nexus {
                     grid.reachable(v.position)
                 } else {
@@ -2567,7 +2586,7 @@ impl Brain {
             };
             if let Goal::Portal(portal) = goal
                 && witnessed_portal != Some(portal)
-                && v.map.name == "Realm"
+                && v.map.template.as_deref() == Some("realm")
                 && v.position.distance(destination) <= 2.
                 && self.portal.is_none_or(|(seen, _)| seen != portal)
             {
@@ -2700,7 +2719,7 @@ impl Brain {
             }
             // A crowd fighting gods advertises itself, as 2012 trains did with "train here".
             if let Goal::Fight(id) | Goal::Hunt(id) = decision.goal
-                && v.map.name == "Realm"
+                && v.map.template.as_deref() == Some("realm")
                 && v.character.level == 20
                 && decision.chat.is_none()
                 && v.time_ms >= self.next_train_call

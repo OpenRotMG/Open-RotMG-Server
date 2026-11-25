@@ -28,18 +28,22 @@ export async function run(game){
   await walk(game,{x:12.5,y:8.5});
   for(let n=0;n<20&&(await game.inspect()).diagnostic.entities.some(e=>e.id===hen.id);n++)await game.act({keys:[],duration_ms:400,target:{entity:hen.id,camera_angle:-Math.PI/4,fire:true}});
   await peer.act({keys:[],duration_ms:500});const killed=await save('shared-kill');
-  const publicBag=killed[0].diagnostic.entities.find(e=>e.kind===0x500&&e.items?.includes(0xab0));assert(publicBag);
+  // Recovered Evil Hen has a guaranteed soulbound Health Potion (monsters.xml:856-866; actors.xml:2180-2182).
+  const reward=killed[0].diagnostic.entities.find(e=>e.items?.includes(0xa22)&&e.extra_stats.some(([stat,owner])=>stat===54&&owner===starts[0].account));assert(reward);
   game.check('ordinary staff kill removes the same enemy for both viewers',killed.every(s=>!s.view.objects.some(o=>o.id===hen.id))&&!killed[0].diagnostic.entities.some(e=>e.id===hen.id));
-  game.check('both viewers see the single earned public reward',killed.every(s=>s.view.objects.some(o=>o.id===publicBag.id)));
-  await shot('shared-kill-observer',peer);await walk(peer,publicBag.pos);await shot('shared-public-loot',peer);
-  const collecting=await peer.observe();await peer.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
-  const picked=await peer.observe();game.check('noncontributor collects the public potion once',picked.character.items[4]===0xab0&&picked.character.inventory_revision===collecting.character.inventory_revision+1);
-  await peer.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
-  game.check('retrying the empty reward cannot duplicate it',(await peer.observe()).character.inventory_revision===picked.character.inventory_revision);
+  game.check('only the contributor sees the earned private reward',killed[0].view.objects.some(o=>o.id===reward.id)&&!killed[1].view.objects.some(o=>o.id===reward.id));
+  await walk(peer,reward.pos);await shot('shared-private-reward-hidden',peer);
+  const other=await peer.observe();await peer.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+  game.check('noncontributor cannot collect the private potion',(await peer.observe()).character.inventory_revision===other.character.inventory_revision);
+  await walk(game,reward.pos);await shot('shared-private-loot');
+  const collecting=await game.observe();await game.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+  const picked=await game.observe();game.check('contributor collects the private Health Potion once',picked.character.items[4]===0xa22&&picked.character.inventory_revision===collecting.character.inventory_revision+1);
+  await game.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
+  game.check('retrying the empty reward cannot duplicate it',(await game.observe()).character.inventory_revision===picked.character.inventory_revision);
   // World-wide identity must end at departure, not at the combat radius: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/player/Player.Update.cs#L22-L65
   await game.act({keys:['Insert'],duration_ms:1800});await peer.act({keys:[],duration_ms:500});const departed=await save('one-departed');await shot('shared-departure',peer);
   game.check('departure removes the old player from both object and marker audiences',departed[0].view.map.name==='Nexus'&&departed[1].view.map.name==='Tutorial'&&departed.every((s,i)=>!s.view.objects.some(o=>o.account===starts[1-i].account)&&!s.view.player_markers.some(o=>o.account===starts[1-i].account)));
   await peer.act({keys:['Insert'],duration_ms:1800});await game.act({keys:[],duration_ms:500});const reunited=await save('reunited');await shot('shared-reconnected');await shot('shared-peer-reconnected',peer);
   for(let i=0;i<2;i++){const s=reunited[i].view,other=reunited[1-i].view;game.check('participant '+i+' reconnects alive with the same account and character under a fresh player ID',s.map.name==='Nexus'&&s.lifecycle.alive&&s.session.account===starts[i].account&&s.session.character===starts[i].character&&s.session.player!==starts[i].player);game.check('participant '+i+' sees only the peers fresh world identity',s.objects.some(o=>o.id===other.session.player)&&!s.objects.some(o=>o.id===starts[1-i].player));}
-  game.check('reconnect preserves the one collected potion and its revision',reunited[1].view.character.items[4]===0xab0&&reunited[1].view.character.inventory_revision===picked.character.inventory_revision&&reunited[0].view.character.items[4]===-1);
+  game.check('reconnect preserves the one collected potion and its revision',reunited[0].view.character.items[4]===0xa22&&reunited[0].view.character.inventory_revision===picked.character.inventory_revision&&reunited[1].view.character.items[4]===-1);
 }

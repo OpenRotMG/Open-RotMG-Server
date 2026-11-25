@@ -808,7 +808,9 @@ fn begin_finalization(
                 FINALIZING.scope((), async {
                     stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
                     stop_acknowledged = true;
-                    super::settle_giver_credits(&app, avatar).await?;
+                    while !super::settle_giver_credits(&app, avatar).await? {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
                     let result =
                         self::account(&app, vec![account], "finalization", move |app| async move {
                             super::depart_inner_with_transfer(&app, avatar, transfer_key).await
@@ -1160,7 +1162,13 @@ pub(super) fn collector_death_candidate(a: &App, account: i32, avatar: i32) -> R
     ensure!(claim.matches_avatar(avatar), "stale death candidate avatar");
     Ok(!claim.pending && claim.finalization.is_none())
 }
-pub(super) fn require_progress_owner(a: &App, account: i32, player: i32) -> Result<()> {
+/// `journaled`: a staged terminal holds the progress and its Store receipt settles it without an account reservation.
+pub(super) fn require_progress_owner(
+    a: &App,
+    account: i32,
+    player: i32,
+    journaled: bool,
+) -> Result<()> {
     let owners = a.owners.lock().expect("ownership registry poisoned");
     let claim = owners
         .get(&account)
@@ -1168,9 +1176,10 @@ pub(super) fn require_progress_owner(a: &App, account: i32, player: i32) -> Resu
     ensure!(
         claim.avatar == Some(player)
             && claim.owner_present
-            && claim.pending
+            && (claim.pending || journaled)
             && claim.finalization.is_none(),
-        "native pause progress owner is stale, unreserved or closing"
+        "native pause progress owner is stale, unreserved or closing: journaled={journaled} pending={}",
+        claim.pending
     );
     Ok(())
 }

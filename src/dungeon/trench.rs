@@ -1,47 +1,22 @@
-use crate::{
-    content::{Cell, Content, Map},
-    encounter::{Motion, Profile},
-};
+use crate::content::{Cell, Content, Map};
 use anyhow::{Result, ensure};
 use rand::{Rng, SeedableRng};
 
 pub const HERMIT: u16 = 0xd61;
 pub const THESSAL: u16 = 0x1706;
 pub const VENT: u16 = 0x731;
-pub const ROSTER: &[u16] = &[
-    0xd61, 0xd62, 0xd63, 0xd64, 0xd65, 0x1700, 0x1702, 0x1703, 0x1704, 0x1705, 0x1706, 0x1707,
-    0x1708, 0x1709, 0x170a, 0x170b, 0x170c, 0x170d, 0x170e,
-];
 
-pub fn profile(kind: u16) -> Option<Profile> {
-    ROSTER.contains(&kind).then_some(Profile {
-        motion: Motion::Stationary,
-        speed: 0.,
-        interval: 50,
-        range: 30.,
-    })
-}
-
-pub fn validate(content: &Content, kind: u16) -> Result<()> {
-    ensure!(ROSTER.contains(&kind), "unknown ocean encounter {kind:#x}");
-    let indices: &[u8] = match kind {
-        HERMIT | THESSAL | 0x1707 => &[0, 1, 2, 3],
-        0x1700 => &[0, 1, 2],
-        0xd62 | 0xd64 | 0x1708 | 0x170a | 0x170c | 0x170e => &[0, 1],
-        0xd65 | 0x1704 | 0x1705 | 0x170d => &[],
-        _ => &[0],
-    };
-    for index in indices {
-        ensure!(
-            content.get(kind)?.projectiles.contains_key(index),
-            "ocean encounter {kind:#x} lacks selected projectile {index}"
-        );
-    }
-    Ok(())
-}
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    let [coral, vent, wall, boss, retreat] = generator.placements("cavern")?;
+    let packs = generator.placements::<12>("chamber-packs")?;
+    let [left_guard, right_guard] = generator.placements("chamber-guards")?;
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let mut map = Map {
+        elevation: None,
         width: 110,
         height: 100,
         cells: vec![
@@ -84,7 +59,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         }
         // Build 122.0.1 shows coral; this offset remains reconstructed: https://steamcommunity.com/sharedfiles/filedetails/?id=23486568
         if i != 12 {
-            map.cells[index(cx - 4, cy)].object = Some(0x1711);
+            map.cells[index(cx - 4, cy)].object = Some(coral);
         }
     }
     for pair in rooms.windows(2) {
@@ -99,7 +74,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 }
             }
             if steps % 6 == 0 {
-                map.cells[index(x, y)].object = Some(VENT);
+                map.cells[index(x, y)].object = Some(vent);
             }
             if (x, y) == (tx, ty) {
                 break;
@@ -113,17 +88,12 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         }
     }
     for (i, &(x, y)) in rooms.iter().enumerate().skip(1).take(11) {
-        let pack: &[u16] = match i % 4 {
-            0 => &[0x1700, 0x1708, 0x1708],
-            1 => &[0x170a, 0x1709, 0x1709],
-            2 => &[0x170c, 0x1708, 0x1708],
-            _ => &[0x170d, 0x170e, 0x170e],
-        };
+        let pack = &packs[i % 4 * 3..][..3];
         for (j, kind) in pack.iter().enumerate() {
             map.cells[index(x - 2 + j as i32 * 2, y + 2)].object = Some(*kind);
         }
-        map.cells[index(x, y)].object = Some(VENT);
-        for &(dx, dy, kind) in &[(-3, -2, 0x170f), (3, -2, 0x1710)] {
+        map.cells[index(x, y)].object = Some(vent);
+        for &(dx, dy, kind) in &[(-3, -2, left_guard), (3, -2, right_guard)] {
             map.cells[index(x + dx, y + dy)].object = Some(kind);
         }
     }
@@ -134,23 +104,23 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                     .iter()
                     .any(|&(x, y)| map.cells[index(x, y)].ground == 0x2e)
             {
-                map.cells[index(x, y)].object = Some(0x1713);
+                map.cells[index(x, y)].object = Some(wall);
             }
         }
     }
     for (dx, dy) in [(14, 0), (-14, 0), (0, 14), (0, -14)] {
-        map.cells[index(64 + dx, 76 + dy)].object = Some(VENT);
+        map.cells[index(64 + dx, 76 + dy)].object = Some(vent);
     }
-    map.cells[index(64, 76)].object = Some(THESSAL);
+    map.cells[index(64, 76)].object = Some(boss);
     // FSoD oceantrench.jm fills the Spawn region with 21 vents: a 5x5 block without its corners.
     for dy in -2..=2i32 {
         for dx in -2..=2i32 {
             if dx.abs() + dy.abs() < 4 {
-                map.cells[index(12 + dx, 12 + dy)].object = Some(VENT);
+                map.cells[index(12 + dx, 12 + dy)].object = Some(vent);
             }
         }
     }
-    map.cells[index(12, 9)].object = Some(0x703);
+    map.cells[index(12, 9)].object = Some(retreat);
     map.cells[index(12, 12)].region = 1;
     for c in &map.cells {
         ensure!(
@@ -171,12 +141,11 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use sha2::{Digest, Sha256};
 
     #[test]
     fn coral_dressing_preserves_trench_layout_and_encounters() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         let coral = content.get(0x1711).unwrap();
         assert!(coral.static_object);
         assert!(!coral.blocks && !coral.blocks_sight && !coral.full_occupy);
@@ -184,7 +153,8 @@ mod tests {
         let mut baseline = Sha256::new();
         let mut counts = Vec::new();
         for seed in (0..64).chain([12351, u64::MAX]) {
-            let mut map = generate(&content, seed).unwrap();
+            let mut map =
+                crate::dungeon::generate_selected(&content, "ocean-trench", seed).unwrap();
             let mut count = 0;
             for cell in &mut map.cells {
                 if cell.object == Some(0x1711) {
@@ -209,14 +179,63 @@ mod tests {
 
     #[test]
     fn spawn_room_holds_the_reference_vent_cluster() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in (0..16).chain([12351, u64::MAX]) {
-            let map = generate(&content, seed).unwrap();
+            let map = crate::dungeon::generate_selected(&content, "ocean-trench", seed).unwrap();
             let vents = (10..=14)
                 .flat_map(|y| (10..=14).map(move |x| (x, y)))
-                .filter(|&(x, y)| map.cells[y * 110 + x].object == Some(VENT))
+                .filter(|&(x, y)| map.cells[y * 110 + x].object == Some(super::VENT))
                 .count();
             assert!(vents >= 21, "{vents} vents at spawn, seed {seed}");
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn xml_cutover_trench_chamber_packs_read_linked_geometry_objects() {
+    use std::{path::Path, sync::Arc};
+    let source = crate::world::test_content();
+    let seed = 12351;
+    let baseline = crate::dungeon::generate_selected(&source, "ocean-trench", seed).unwrap();
+    let data = Path::new("data");
+    let mut inputs = source
+        .game
+        .as_ref()
+        .unwrap()
+        .inputs
+        .keys()
+        .map(|file| (file.clone(), std::fs::read(data.join(file)).unwrap()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let geometry = inputs.get_mut("game/123.5.1/geometry.xml").unwrap();
+    let xml = std::str::from_utf8(geometry).unwrap();
+    let prefix = "role=\"chamber-packs\" objects=\"";
+    let expected = format!("{prefix}Fishman Warrior,");
+    assert_eq!(xml.matches(&expected).count(), 1);
+    *geometry = xml
+        .replacen(&expected, &format!("{prefix}Fishman,"), 1)
+        .into_bytes();
+    let mut changed = source;
+    changed.game = Some(Arc::new(
+        crate::content::game::compile_fixture_at(&changed, inputs, data).unwrap(),
+    ));
+    let actual = crate::dungeon::generate_selected(&changed, "ocean-trench", seed).unwrap();
+    assert_eq!(
+        (actual.width, actual.height, &actual.spawns),
+        (baseline.width, baseline.height, &baseline.spawns)
+    );
+    let mut replaced = 0;
+    for (before, after) in baseline.cells.iter().zip(&actual.cells) {
+        assert_eq!(
+            (before.ground, before.region, &before.config),
+            (after.ground, after.region, &after.config)
+        );
+        if before.object == Some(0x1700) {
+            assert_eq!(after.object, Some(0x1708));
+            replaced += 1;
+        } else {
+            assert_eq!(after.object, before.object);
+        }
+    }
+    assert_eq!(replaced, 2);
 }

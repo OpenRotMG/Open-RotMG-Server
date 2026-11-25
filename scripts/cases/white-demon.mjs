@@ -47,12 +47,15 @@ export async function run(game){
     assert.equal(root.bullet,0);
     const volleys=new Map();
     for(const p of shots.values()){const volley=Math.floor((p.id-1)/3);if(!volleys.has(volley))volleys.set(volley,[]);volleys.get(volley).push(p.angle);}
-    game.check('native volleys contain three shots with twenty-degree gaps',[...volleys.values()].filter(a=>a.length===3).length>=3&&[...volleys.values()].filter(a=>a.length===3).every(a=>a.sort((a,b)=>a-b).slice(1).every((v,i)=>Math.abs(v-a[i]-Math.PI/9)<.001)));
-    for(let n=0;n<100&&enemy(await game.inspect());n++){
-      const s=await game.inspect(),e=enemy(s),dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
-      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>5;
+    game.check('native volleys contain three shots with thirty-degree gaps (actors.xml:1532 angle=30)',[...volleys.values()].filter(a=>a.length===3).length>=3&&[...volleys.values()].filter(a=>a.length===3).every(a=>a.sort((a,b)=>a-b).slice(1).every((v,i)=>Math.abs(v-a[i]-Math.PI/6)<.001)));
+    for(let n=0;n<100;n++){
+      const s=await game.inspect(),e=enemy(s);if(!e)break;
+      const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
+      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,distance=Math.hypot(dx,dy),approach=distance>5;
       const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
-      await act({keys,duration_ms:200,target:{entity:root.id,camera_angle:-Math.PI/4,fire:!approach}});
+      // Keep the observed bearing if the preceding shots finish the same Demon before the next input.
+      const scale=90/Math.max(1,distance);
+      await act({keys,duration_ms:200,...(!approach?{mouse:{x:300+x*scale,y:325+y*scale}}:{})});
     }
     await act({keys:[],duration_ms:500},{name:'white-demon-defeated',when:()=>true});
     const dead=await game.inspect();

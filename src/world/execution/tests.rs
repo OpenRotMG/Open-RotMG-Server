@@ -6,7 +6,7 @@ use std::{
 use tokio::sync::oneshot;
 
 fn directory() -> Directory {
-    let content = Arc::new(crate::content::Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     Directory::test_with_seed(std::path::Path::new("data"), content, 16, 12351).unwrap()
 }
 

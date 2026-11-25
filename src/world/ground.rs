@@ -21,15 +21,7 @@ impl World {
             .cell(pos.x, pos.y)
             .ok_or_else(|| protocol("ground damage outside map"))?;
         let i = pos.y as usize * self.map.width as usize + pos.x as usize;
-        // A native report can precede receipt of a restored-floor UPDATE; its RNG draw still occurred.
-        let ground = if p.controller == Controller::Human
-            && !self.content.hazards.contains_key(&c.ground)
-            && self.lava_patches.contains_key(&i)
-        {
-            crate::dungeon::abyss::LAVA
-        } else {
-            c.ground
-        };
+        let ground = c.ground;
         let hazard = self
             .content
             .hazards
@@ -135,6 +127,37 @@ impl World {
         for (id, pos) in actors {
             if let Err(error) = self.ground_damage(id, self.now as i32, pos) {
                 tracing::error!(player=id,%error,"actor ground damage refused");
+            }
+        }
+    }
+    /// Compiled UsesBreath (dungeons.xml:1079) read per second like RestoresBreath's dt*speed (behavior.cc:2665-2683).
+    pub(super) fn breath_step(&mut self) {
+        let Some(rate) = self.uses_breath else { return };
+        let drained = |ms: u64| (rate * ms as f64 / 1000.).floor() as i32;
+        let drain = drained(self.now) - drained(self.now.saturating_sub(50));
+        // No recovered suffocation value: 10 HP per 150 ms is base ocean.rs:754-790 / realm-src HandleOceanTrenchGround.
+        let suffocate = self.now.is_multiple_of(150);
+        for (id, p) in self.players.iter_mut().filter(|(_, p)| {
+            p.character.alive && !p.paused && !p.departing && !p.death_pending && !p.death_started
+        }) {
+            if p.oxygen > 0 {
+                p.oxygen = (p.oxygen - drain).clamp(0, 100);
+            } else if suffocate {
+                let hp_before = p.character.hp;
+                p.character.hp = (p.character.hp - 10).max(0);
+                p.record_bot_damage(self.now, hp_before);
+                p.audit_hp(*id, &self.name, self.now, "suffocation", hp_before);
+                if p.character.hp == 0 {
+                    p.death_pending = true;
+                    p.killer = "suffocation".into();
+                    p.bot_goal = None;
+                    p.bot_aim = None;
+                }
+                tracing::debug!(
+                    player = id,
+                    hp = p.character.hp,
+                    "suffocation damage committed"
+                );
             }
         }
     }

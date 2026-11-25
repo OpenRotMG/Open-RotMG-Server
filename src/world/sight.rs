@@ -40,13 +40,12 @@ impl World {
     /// black north of Dr Terrible's room while its Lab Emergency Walls (BlocksSight) stand, though the Horrific
     /// Creation's room lies in sight range: https://www.youtube.com/watch?v=C4sKt3Se0T0&t=40 (2012-09-27).
     pub(super) fn room_sight_world(&self) -> bool {
-        matches!(
-            self.name.as_str(),
-            "Snake Pit"
-                | "Manor of the Immortals"
-                | crate::dungeon::davy::NAME
-                | crate::dungeon::lab::NAME
-        )
+        use crate::content::game::Visibility;
+        self.xml_world_template()
+            .and_then(|w| w.services.visibility.as_ref())
+            .is_some_and(|service| {
+                matches!(service.value, Visibility::Path | Visibility::LineOfSight)
+            })
     }
 
     pub(super) fn invalidate_sight(&mut self) {

@@ -2,8 +2,9 @@ use super::*;
 use crate::condition::{PARALYZED, SLOWED, bit};
 
 fn fixture(kind: u16) -> (World, i32, Pos) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 32,
         height: 32,
         cells: vec![
@@ -18,9 +19,10 @@ fn fixture(kind: u16) -> (World, i32, Pos) {
         ],
         spawns: vec![(8.5, 8.5)],
     };
-    let mut world = World::new(content, Arc::new(map)).unwrap();
+    let mut world = World::in_domain(content, Arc::new(map), WorldDomain::NonRealm).unwrap();
     world.clock.set_paused(true);
     let mut ch = Character::fresh(world.content.get(0x322).unwrap()).unwrap();
+    ch.name = "Huntress".into();
     ch.account = 1;
     ch.id = 1;
     ch.base[1] = 252;
@@ -85,11 +87,11 @@ fn huntress_tiers_arm_then_blast_multiple_enemies_once() {
         );
         assert_eq!(w.players[&owner].character.mp, 252);
         w.now = 1499;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&inner].hp, 7500);
         assert_eq!(w.ability_state.thrown.len(), 1);
         w.now = 1500;
-        w.ability_step();
+        w.ability_step().unwrap();
         for target in [inner, outer] {
             assert_eq!(w.entities[&target].hp, 7500 - (damage - 19));
             assert_eq!(
@@ -102,9 +104,65 @@ fn huntress_tiers_arm_then_blast_multiple_enemies_once() {
         }
         assert_eq!(w.entities[&far].hp, 7500);
         assert!(w.ability_state.thrown.is_empty() && w.ability_state.objects.is_empty());
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&inner].hp, 7500 - (damage - 19));
     }
+}
+
+#[test]
+fn huntress_trap_killing_more_enemies_than_terminal_capacity_defers_without_losing_hits() {
+    let (mut w, owner, pos) = fixture(0xab1);
+    let targets: Vec<_> = (0..crate::world::TERMINAL_PENDING_LIMIT + 2)
+        .map(|i| {
+            // Clumped eggs share one tile: each corpse's custody must not block the others' replacements.
+            let at = Pos {
+                x: pos.x + 0.05 * i as f32,
+                y: pos.y + 1.,
+            };
+            let id = w.spawn_entity(0x206, at, vec![]).unwrap();
+            w.entities.get_mut(&id).unwrap().hp = 1;
+            id
+        })
+        .collect();
+    cast(&mut w, owner, pos).unwrap();
+    w.now = 1500;
+    w.ability_step().unwrap();
+    assert!(w.ability_state.objects.is_empty());
+    assert_eq!(w.ability_state.owed.len(), 2);
+    // Surviving 0x917s shoot back while the World steps; the owner must stay eligible.
+    w.players.get_mut(&owner).unwrap().lab_conditions = bit(crate::condition::INVINCIBLE);
+    assert!(
+        targets
+            .iter()
+            .all(|id| w.entities[id].hp == 1 || w.xml_terminal_pending(*id))
+    );
+    // One owner's progress commits serially, so each drained pass stages about one more of its kills.
+    for _ in 0..2 * targets.len() + 10 {
+        crate::world::xml::tests::drain_events(&mut w).unwrap();
+        w.step();
+    }
+    crate::world::xml::tests::drain_events(&mut w).unwrap();
+    assert!(
+        w.ability_state.owed.is_empty(),
+        "owed={} pending={} capacity={} entities={:?}",
+        w.ability_state.owed.len(),
+        w.pending_terminal_events().len(),
+        w.xml
+            .terminal_capacity
+            .load(std::sync::atomic::Ordering::Acquire),
+        targets
+            .iter()
+            .map(|id| w.entities.get(id).map(|e| e.hp))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        targets.iter().all(|id| !w.entities.contains_key(id)),
+        "{:?}",
+        targets
+            .iter()
+            .filter_map(|id| w.entities.get(id).map(|e| (e.id, e.hp)))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -114,12 +172,12 @@ fn huntress_outer_ring_does_not_trigger_but_ten_second_expiry_explodes() {
     cast(&mut w, owner, pos).unwrap();
     for now in [1500, 11499] {
         w.now = now;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&target].hp, 7500);
         assert_eq!(w.ability_state.objects.len(), 1);
     }
     w.now = 11500;
-    w.ability_step();
+    w.ability_step().unwrap();
     assert_eq!(w.entities[&target].hp, 7469);
     assert!(w.ability_state.objects.is_empty());
 }
@@ -164,14 +222,14 @@ fn huntress_rejections_and_owner_departure_leave_no_delayed_damage() {
         cast(&mut w, owner, pos).unwrap();
         if landed {
             w.now = 1500;
-            w.ability_step();
+            w.ability_step().unwrap();
         }
         let saved = w.leave(owner).unwrap();
         assert_eq!(saved.mp, 212);
         let next = w.enter(saved, None).unwrap();
         assert_ne!(next, owner);
         w.now = 12000;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&target].hp, 7500);
         assert!(w.ability_state.thrown.is_empty() && w.ability_state.objects.is_empty());
         assert!(!w.entities.values().any(|e| e.kind == 0x711));
@@ -180,7 +238,7 @@ fn huntress_rejections_and_owner_departure_leave_no_delayed_damage() {
 
 #[tokio::test]
 async fn huntress_requires_both_twenty_records_and_preserves_death() {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     for (rogue, archer) in [(19, 20), (20, 19), (20, 20)] {
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
         let guid = format!("huntress-{rogue}-{archer}");
@@ -222,4 +280,51 @@ async fn huntress_requires_both_twenty_records_and_preserves_death() {
             assert!(created.is_err());
         }
     }
+}
+
+#[test]
+fn owed_area_hits_survive_a_failing_hit_and_drop_only_with_a_reason() {
+    let (mut w, owner, pos) = fixture(0xab1);
+    let live = w
+        .spawn_entity(
+            0x206,
+            Pos {
+                x: pos.x,
+                y: pos.y + 1.,
+            },
+            vec![],
+        )
+        .unwrap();
+    let hp = w.entities[&live].hp;
+    let hit = |effects| OwedHit {
+        owner: Some(owner),
+        target: live,
+        damage: 10,
+        piercing: true,
+        effects,
+    };
+    w.ability_state.owed = vec![hit(vec![(0, 1000)]), hit(vec![])];
+    assert!(
+        w.ability_step().is_err(),
+        "an invalid condition index fails its hit"
+    );
+    assert_eq!(
+        w.ability_state
+            .owed
+            .iter()
+            .map(|h| h.effects.len())
+            .collect::<Vec<_>>(),
+        vec![0],
+        "untried hit retained"
+    );
+    w.ability_step().unwrap();
+    assert!(w.ability_state.owed.is_empty() && w.entities[&live].hp < hp);
+    w.ability_state.owed = vec![hit(vec![])];
+    w.players.get_mut(&owner).unwrap().paused = true;
+    let before = w.entities[&live].hp;
+    w.ability_step().unwrap();
+    assert!(
+        w.ability_state.owed.is_empty() && w.entities[&live].hp == before,
+        "paused owner's hit dropped, logged"
+    );
 }

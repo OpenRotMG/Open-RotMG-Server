@@ -220,7 +220,7 @@ impl Plan {
         if let Some(old) = self.checkpoint.replace(current.clone()) {
             // Nexus and Vault trips are errands, not exploration.
             let reason = if current.world != old.world
-                && !matches!(v.map.name.as_str(), "Nexus" | "Vault")
+                && !matches!(v.map.template.as_deref(), Some("nexus") | Some("vault"))
                 && self.areas.insert(current.world)
             {
                 Some(format!("entered {}", v.map.name))

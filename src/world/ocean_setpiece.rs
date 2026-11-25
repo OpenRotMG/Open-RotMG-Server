@@ -3,23 +3,18 @@ use super::realm_setpieces::Area;
 use super::*;
 use rand::seq::SliceRandom;
 
-pub(super) const HERMIT_SPAWNERS: [(i32, i32); 8] = [
-    (13, 8),
-    (20, 17),
-    (16, 8),
-    (18, 8),
-    (10, 13),
-    (21, 13),
-    (11, 17),
-    (15, 18),
-];
+use crate::content::game::{IslandOwnership, IslandPlacement, NamedSite, SiteRole};
 
 fn hermit_radius(x: i32, y: i32) -> f32 {
     ((x as f32 - 16.).powi(2) + ((y as f32 - 14.) * 1.1).powi(2)).sqrt()
 }
 
 impl World {
-    pub(super) fn populate_hermit(&mut self) -> Result<()> {
+    pub(super) fn place_hermit_island(
+        &mut self,
+        rule: &NamedSite,
+        placements: &[IslandPlacement],
+    ) -> Result<()> {
         ensure!(
             self.players.is_empty() && self.now == 0,
             "Hermit landmark requires an unentered Realm"
@@ -36,13 +31,12 @@ impl World {
                     .map(|e| e.pos),
             )
             .collect();
-        // Inland event range: realm-src@1855c017, wServer/realm/Oryx.cs::SpawnEvent (Mountains..MidForest).
         let mut candidates: Vec<_> = self
             .map
             .cells
             .iter()
             .enumerate()
-            .filter(|(_, c)| (1..=7).contains(&c.terrain))
+            .filter(|(_, c)| rule.terrains.contains(&c.terrain))
             .map(|(i, _)| Area {
                 x: i as i32 % self.map.width - 16,
                 y: i as i32 / self.map.width - 14,
@@ -86,8 +80,10 @@ impl World {
                 (hermit_radius(x, y) <= 15.).then_some(((area.y + y) * width + area.x + x) as usize)
             })
         });
-        let original = self.capture_event_site(area, indices)?;
-        self.event_sites.push(original);
+        if rule.role == SiteRole::Event {
+            let original = self.capture_event_site(area, indices)?;
+            self.event_sites.push(original);
+        }
         // Reconstruct the source island's rings without erasing generated waterways.
         for y in 0..29 {
             for x in 0..32 {
@@ -121,42 +117,37 @@ impl World {
                 cell.config.clear();
             }
         }
-        let root = self.insert_entity(
-            crate::dungeon::trench::HERMIT,
+        let root = self.spawn_site_actor(
+            rule.kind,
             Pos {
                 x: area.x as f32 + 16.,
                 y: area.y as f32 + 13.5,
             },
-            vec![],
+            rule.role,
+            false,
         )?;
-        let e = self.entities.get_mut(&root).unwrap();
-        e.quest.set(Some(root), root, &mut self.quest_ids);
-        e.stage = Some(0);
-        e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
-        e.extra_stats = vec![(61, 2)];
-        for (x, y) in HERMIT_SPAWNERS {
-            let id = self
-                .spawn_entity(
-                    0xd65,
-                    Pos {
-                        x: (area.x + x) as f32 + 0.5,
-                        y: (area.y + y) as f32 + 0.5,
-                    },
-                    vec![],
-                )
-                .with_context(|| format!("Hermit spawner placement failed at offset {x},{y}"))?;
-            let e = self.entities.get_mut(&id).unwrap();
-            e.parent.set(Some(root), id, &mut self.timed_ids);
-            e.quest.set(Some(root), id, &mut self.quest_ids);
-            e.condition |= crate::condition::bit(crate::condition::INVINCIBLE);
-        }
-        for (x, y) in [(11, 7), (20, 7), (8, 13), (20, 19)] {
+        for &IslandPlacement {
+            kind,
+            x,
+            y,
+            ownership,
+        } in placements
+        {
             let pos = Pos {
                 x: (area.x + x) as f32 + 0.5,
                 y: (area.y + y) as f32 + 0.5,
             };
-            if self.walkable(pos) {
-                self.spawn_entity(0x17b, pos, vec![])?;
+            // Pillars are optional dressing on the preserved shoreline, not quest dependents.
+            if ownership == IslandOwnership::IndependentScenery && !self.walkable(pos) {
+                continue;
+            }
+            let id = self.spawn_entity(kind, pos, vec![]).with_context(|| {
+                format!("Island actor {kind:#x} placement failed at offset {x},{y}")
+            })?;
+            if ownership == IslandOwnership::Defender {
+                let e = self.entities.get_mut(&id).unwrap();
+                e.parent.set(Some(root), id, &mut self.timed_ids);
+                e.quest.set(Some(root), id, &mut self.quest_ids);
             }
         }
         self.setpieces.push(area);

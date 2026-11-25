@@ -47,12 +47,19 @@ impl Directory {
             || world.guild.is_some()
             || destination.owner.is_some()
             || destination.guild.is_some()
-            || !crate::dungeon::DUNGEONS
-                .iter()
-                .any(|(kind, _, name, _)| *kind == entity.kind && *name == destination.name)
+            || !destination.xml_world_template().is_some_and(|t| {
+                t.clear_key.is_some()
+                    && t.instance
+                        .as_ref()
+                        .is_some_and(|r| r.entrance == entity.kind)
+            })
             || binding.origin != source
             || binding.destination != Some(grant.destination)
-            || binding.expires <= self.tick
+            || binding.expires.is_some_and(|expires| expires <= self.tick)
+            || world.xml_terminal_pending(portal)
+            || world
+                .xml_portal_expiry(portal)
+                .is_some_and(|at| at <= world.now)
             || !entity.published
             || entity.conditions(world.now) & crate::condition::bit(crate::condition::INVISIBLE)
                 != 0
@@ -116,9 +123,9 @@ impl Directory {
             .context("completed entry world missing")?;
         let public = destination_world.owner.is_none()
             && destination_world.guild.is_none()
-            && crate::dungeon::DUNGEONS
-                .iter()
-                .any(|(_, _, name, _)| *name == destination_world.name);
+            && destination_world
+                .xml_world_template()
+                .is_some_and(|t| t.clear_key.is_some());
         let entrant = destination_world
             .players
             .get(&player)
@@ -145,18 +152,26 @@ impl Directory {
             return Ok(0);
         }
         let now = self.tick * 50;
-        let portal_expires_ms = self.portals.get(&witness.portal).map(|b| b.expires * 50);
+        let binding_expiry = self.portals.get(&witness.portal).map(|b| b.expires);
         let Some(world) = self.worlds.get_mut(&witness.source) else {
             return Ok(0);
         };
-        if now >= witness.observed_ms + LIFETIME_MS
+        let observation_end = witness
+            .observed_ms
+            .checked_add(LIFETIME_MS)
+            .context("entry observation deadline overflow")?;
+        if now >= observation_end
             || world.owner.is_some()
             || world.guild.is_some()
             || !self.portals.get(&witness.portal).is_some_and(|b| {
                 b.origin == witness.source
                     && b.destination == Some(destination)
-                    && b.expires > self.tick
+                    && b.expires.is_none_or(|expires| expires > self.tick)
             })
+            || world.xml_terminal_pending(witness.portal)
+            || world
+                .xml_portal_expiry(witness.portal)
+                .is_some_and(|at| at <= world.now)
             || !world.entities.get(&witness.portal).is_some_and(|e| {
                 e.published
                     && e.kind == witness.kind
@@ -171,6 +186,23 @@ impl Directory {
             );
             return Ok(0);
         }
+        let expires_ms = match binding_expiry.context("live portal binding checked")? {
+            Some(expires) => observation_end.min(
+                expires
+                    .checked_mul(50)
+                    .context("portal binding clock overflow")?,
+            ),
+            None => match world.xml_portal_expiry(witness.portal) {
+                Some(at) => observation_end.min(
+                    now.checked_add(
+                        at.checked_sub(world.now)
+                            .context("XML portal already expired")?,
+                    )
+                    .context("XML portal observation clock overflow")?,
+                ),
+                None => observation_end,
+            },
+        };
         let mut delivered = 0;
         for (id, account, character) in witness.observers {
             if !world.players.get(&id).is_some_and(|p| {
@@ -198,8 +230,7 @@ impl Directory {
                 name: witness.name.clone(),
                 observed_ms: witness.observed_ms,
                 // World-local perception cannot consult Directory while it owns this world.
-                expires_ms: (witness.observed_ms + LIFETIME_MS)
-                    .min(portal_expires_ms.expect("live portal binding checked")),
+                expires_ms,
             });
             delivered += 1;
         }

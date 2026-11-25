@@ -65,6 +65,7 @@ impl Config {
         let mut shore_bots = None;
         let mut bot_llm = None;
         let mut client_dir = None;
+        let mut data_dir = None;
         let mut state_dir = None;
         let mut test_state = false;
         let mut args = args.iter();
@@ -112,6 +113,12 @@ impl Config {
                         args.next().context("--client requires a directory")?,
                     ));
                 }
+                "--data" => {
+                    ensure!(data_dir.is_none(), "duplicate --data");
+                    data_dir = Some(PathBuf::from(
+                        args.next().context("--data requires a directory")?,
+                    ));
+                }
                 "--state" | "--test-state" => {
                     ensure!(state_dir.is_none(), "duplicate state directory");
                     if arg == "--test-state" {
@@ -122,7 +129,7 @@ impl Config {
                     ));
                 }
                 _ => anyhow::bail!(
-                    "usage: openrotmg [--desktop --config ABS_FILE | --config FILE] [--port PORT] [--dev-control] [--shore-bots | --no-shore-bots] [--bot-llm | --no-bot-llm] [--client DIR] [--state DIR] [--realm-seed SEED]"
+                    "usage: openrotmg [--desktop --config ABS_FILE | --config FILE] [--port PORT] [--dev-control] [--shore-bots | --no-shore-bots] [--bot-llm | --no-bot-llm] [--client DIR] [--data DIR] [--state DIR] [--realm-seed SEED]"
                 ),
             }
         }
@@ -162,6 +169,9 @@ impl Config {
         };
         if let Some(client) = client_dir {
             config.client = client;
+        }
+        if let Some(data) = data_dir {
+            config.data = data;
         }
         if let Some(state) = state_dir {
             config.state = state;
@@ -372,6 +382,21 @@ mod bot_view_tests {
             vec!["--realm-seed", "1", "--realm-seed", "2"],
         ] {
             assert!(Config::load(&args.into_iter().map(String::from).collect::<Vec<_>>()).is_err());
+        }
+    }
+
+    #[test]
+    fn explicit_data_replaces_compiled_source_data_once_and_must_be_absolute() {
+        let load =
+            |args: &[&str]| Config::load(&args.iter().map(|a| a.to_string()).collect::<Vec<_>>());
+        let (config, _) = load(&["--data", "/retained/data"]).unwrap();
+        assert_eq!(config.data, PathBuf::from("/retained/data"));
+        for args in [
+            &["--data"][..],
+            &["--data", "relative"],
+            &["--data", "/a", "--data", "/b"],
+        ] {
+            assert!(load(args).is_err(), "{args:?}");
         }
     }
 

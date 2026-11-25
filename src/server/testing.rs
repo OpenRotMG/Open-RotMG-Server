@@ -21,6 +21,7 @@ struct NativeLease {
     owner: String,
     expires: Instant,
     actors: Vec<i32>,
+    terminal: Option<i32>,
 }
 struct NativeControlRequest {
     trace: Arc<crate::performance::NativeControlTrace>,
@@ -165,6 +166,12 @@ enum Command {
         operation: String,
         #[serde(default)]
         actors: Vec<i32>,
+        #[serde(default)]
+        terminal: Option<i32>,
+    },
+    NativeRebind {
+        actor: i32,
+        replacement: Option<i32>,
     },
     Result {
         request: String,
@@ -613,11 +620,16 @@ async fn native_lease(
     owner: String,
     operation: String,
     actors: Vec<i32>,
+    terminal: Option<i32>,
 ) -> Result<Value> {
     valid_id(&owner)?;
     ensure!(
         t.stopped.borrow().is_none(),
         "native control lease expired; this prepared session is terminal"
+    );
+    ensure!(
+        terminal.is_none_or(|actor| operation == "begin" && actors.contains(&actor)),
+        "an expected native death must name one participant when the lease begins"
     );
     match operation.as_str() {
         "begin" => {
@@ -657,6 +669,7 @@ async fn native_lease(
                     owner: owner.clone(),
                     expires: Instant::now() + Duration::from_millis(1500),
                     actors,
+                    terminal,
                 });
             }
             let (app, test, selected) = (a.clone(), t.clone(), owner.clone());
@@ -683,11 +696,11 @@ async fn native_lease(
             });
         }
         "renew" => {
-            let actors = {
+            let (actors, expected) = {
                 let lease = t.lease.lock().expect("native lease poisoned");
                 let lease = lease.as_ref().context("native lease is not active")?;
                 ensure!(lease.owner == owner, "native lease owner differs");
-                lease.actors.clone()
+                (lease.actors.clone(), lease.terminal)
             };
             if !actors.is_empty() {
                 let state = native_state(a, t, actors, false).await?;
@@ -695,6 +708,7 @@ async fn native_lease(
                     .as_array()
                     .unwrap()
                     .iter()
+                    .filter(|p| expected.is_none_or(|actor| p["actor"] != actor))
                     .find(|p| matches!(p["stage"].as_str(), Some("dead" | "dying" | "lost")))
                 {
                     let reason =
@@ -739,6 +753,102 @@ async fn native_lease(
     }
     Ok(json!({"owner":owner,"operation":operation,"ttl_ms":1500}))
 }
+// The selected client's Continue/new-character UI creates the replacement; the bridge only adopts it.
+async fn native_rebind(
+    a: &App,
+    t: &Testing,
+    id: &str,
+    actor: i32,
+    replacement: Option<i32>,
+) -> Result<Value> {
+    let old = t.registration(actor)?;
+    ensure!(
+        old.controller == Controller::Native,
+        "identity rebinding requires a native actor"
+    );
+    ensure!(
+        a.world.clock.paused() && t.lease.lock().expect("native lease poisoned").is_none(),
+        "identity rebinding requires a paused session without native control"
+    );
+    let rebound = t.path(&format!("actor-{actor}"), "rebound");
+    ensure!(
+        !rebound.exists(),
+        "native actor was already rebound; its identity stays terminal"
+    );
+    ensure!(
+        !a.store.character_alive(actor, old.guid.clone()).await?,
+        "native actor is not durably dead; no replacement was selected"
+    );
+    let sessions = a
+        .world
+        .directory(move |d| {
+            Ok(d.worlds
+                .iter()
+                .flat_map(|(world, w)| w.players.iter().map(move |(id, p)| (*world, *id, p)))
+                .filter(|(_, _, p)| p.controller == crate::world::Controller::Human)
+                .map(|(world, player, p)| {
+                    let ready = p.character.alive
+                        && !p.death_pending
+                        && !p.pending
+                        && !p.native_transferring()
+                        && p.tx
+                            .as_ref()
+                            .is_some_and(|o| !o.packets.is_closed() && o.lost.borrow().is_none())
+                        && p.native_ready(true);
+                    (
+                        p.character.id,
+                        p.character.account,
+                        p.character.class,
+                        player,
+                        world,
+                        ready,
+                    )
+                })
+                .collect::<Vec<_>>())
+        })
+        .await?;
+    ensure!(
+        !sessions.iter().any(|s| s.0 == actor),
+        "terminal native actor is still connected"
+    );
+    let unregistered = sessions
+        .into_iter()
+        .filter(|s| t.registration(s.0).is_err())
+        .collect::<Vec<_>>();
+    let [(character, account, class, player, world, ready)] = unregistered[..] else {
+        bail!(
+            "identity rebinding requires exactly one connected unregistered native character, found {}",
+            unregistered.len()
+        );
+    };
+    ensure!(
+        a.store.account_guid(account).await? == old.guid,
+        "connected replacement belongs to another account"
+    );
+    ensure!(ready, "replacement character has not finished loading");
+    let receipt = json!({"actor":actor,"replacement":character,"account":account,"class":class,"player":player,"world":world});
+    let Some(selected) = replacement else {
+        return Ok(receipt);
+    };
+    ensure!(
+        selected == character,
+        "selected replacement {selected} differs from connected character {character}"
+    );
+    write_json(
+        &t.path(&format!("actor-{character}"), "spawn"),
+        &Registration {
+            guid: old.guid,
+            controller: Controller::Native,
+            profile: None,
+        },
+    )?;
+    write_json(&rebound, &receipt)?;
+    t.record(
+        id,
+        json!({"event":"native_identity_rebound","receipt":receipt}),
+    )?;
+    Ok(receipt)
+}
 async fn pause(a: &App, native: &[i32], sessions: &[(i32, i32)]) -> Result<()> {
     let native = native.to_vec();
     ensure!(
@@ -754,36 +864,40 @@ async fn pause(a: &App, native: &[i32], sessions: &[(i32, i32)]) -> Result<()> {
     let sessions: BTreeMap<_, _> = sessions.iter().copied().collect();
     let app = a.clone();
     a.world.directory(move |d| {
-        for (id,p) in d.worlds.values().flat_map(|w|w.players.iter()).filter(|(_,p)|p.controller == crate::world::Controller::Human) {
-            ensure!(native.contains(&p.character.id), "native character {} needs coordinated Ruffle pause through the managed native client",p.character.id);
-            ensure!(sessions.get(&p.character.id)==Some(id), "native pause session changed; complete the actual reconnect before suspending");
-            if let Some(snapshot) = p.native_pause_progress()? {
-                lifecycle::require_progress_owner(&app, snapshot.account, *id)?;
+        for w in d.worlds.values() {
+            for (id,p) in w.players.iter().filter(|(_,p)|p.controller == crate::world::Controller::Human) {
+                ensure!(native.contains(&p.character.id), "native character {} needs coordinated Ruffle pause through the managed native client",p.character.id);
+                ensure!(sessions.get(&p.character.id)==Some(id), "native pause session changed; complete the actual reconnect before suspending");
+                if let Some(snapshot) = p.native_pause_progress()? {
+                    lifecycle::require_progress_owner(&app, snapshot.account, *id, w.terminal_holds_progress(snapshot)?)?;
+                }
             }
         }
         d.clock.set_paused(true);
         Ok(())
     }).await?;
+    let mut unsettled = Vec::new();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if a.world
+            unsettled = a
+                .world
                 .directory(|d| {
-                    for w in d.worlds.values() {
-                        if !w.settled()? {
-                            return Ok(false);
-                        }
+                    let mut out = Vec::new();
+                    for w in d.worlds.values_mut() {
+                        w.xml_settle_captured_terminals()?;
+                        out.extend(w.unsettled()?);
                     }
-                    Ok(true)
+                    Ok(out)
                 })
-                .await?
-            {
+                .await?;
+            if unsettled.is_empty() {
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
-    .context("simulation stopped but persistence did not settle; inspect trace before resuming")?
+    .with_context(|| format!("simulation stopped but persistence did not settle {unsettled:?}; inspect trace before resuming"))?
 }
 async fn finish_action(
     a: &App,
@@ -1259,7 +1373,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::PrepareRealmClosure{world} => prepare_realm_closure(a,t,world).await,
         Command::Catalog{search,limit} => {ensure!(!search.is_empty() && search.len()<=80 && (1..=20).contains(&limit),"catalog needs search and limit 1–20");let matches=a.content.objects.values().filter(|o|o.name.to_lowercase().contains(&search.to_lowercase())).collect::<Vec<_>>();Ok(json!({"items":matches.iter().take(limit).map(|o|json!({"id":o.kind,"name":o.name,"class":o.class,"slot_type":o.slot_type,"unsupported_equipment":o.unsupported_equipment})).collect::<Vec<_>>(),"omitted":matches.len().saturating_sub(limit)}))},
         // JavaScript numbers would round the seed needed to reproduce a prepared map.
-        Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed.map(|seed|seed.to_string()),"privileged":true,"damaging_ground":w.map.cells.iter().enumerate().filter(|(_,c)|w.content.hazards.contains_key(&c.ground)).map(|(i,_)|Pos{x:(i as i32%w.map.width) as f32+0.5,y:(i as i32/w.map.width) as f32+0.5}).filter(|p|w.walkable(*p)).take(16).collect::<Vec<_>>(),"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||e.kind==crate::dungeon::spider::BOSS||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0x67d|crate::dungeon::pirate::BOSS|0xd05|0xd06|0xd7a|0xd7b|0xd7d|0xd7e|0xd87|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe31|0xe32|0xe45|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
+        Command::WorldInfo{world} => a.world.in_world(world).call(|w|Ok(json!({"name":w.name,"width":w.map.width,"height":w.map.height,"realm_layout":w.realm_layout,"spawn_points":w.map.spawns,"prepared_seed":w.prepared_seed.map(|seed|seed.to_string()),"privileged":true,"damaging_ground":w.map.cells.iter().enumerate().filter(|(_,c)|w.content.hazards.contains_key(&c.ground)).map(|(i,_)|Pos{x:(i as i32%w.map.width) as f32+0.5,y:(i as i32/w.map.width) as f32+0.5}).filter(|p|w.walkable(*p)).take(16).collect::<Vec<_>>(),"encounter_markers":w.entities.values().filter(|e|crate::endgame::GUARDIANS.contains(&e.kind)||crate::dungeon::manor::ROSTER.contains(&e.kind)||e.kind==crate::dungeon::manor::BOOKCASE||e.kind==crate::dungeon::spider::BOSS||matches!(e.kind,crate::endgame::ORYX|crate::endgame::ORYX2|0x67d|crate::dungeon::pirate::BOSS|crate::dungeon::abyss::MALPHAS|crate::dungeon::abyss::IDOL|0xd05|0xd06|0xd7a|0xd7b|0xd7d|0xd7e|0xd87|crate::dungeon::trench::VENT|crate::dungeon::trench::THESSAL|0x721|0x700|0xe31|0xe32|0xe45|0xe3e..=0xe41)).map(|e|json!({"id":e.id,"kind":e.kind,"hp":e.hp,"defense":w.content.objects[&e.kind].defense,"position":e.pos,"region":w.map.cells[(e.pos.y as i32*w.map.width+e.pos.x as i32) as usize].region})).collect::<Vec<_>>()}))).await,
         Command::Spawn{spec} => spawn(a,t,spec).await,
         Command::Persona{profile,world,position} => prepare_persona(a,t,profile,world,position).await,
         Command::World{template,seed} => { let world=a.world.directory(move |d|match seed { Some(seed)=>d.prepared_instance_with_seed(&template,seed), None=>d.prepared_instance(&template) }).await?; Ok(json!({"world":world,"provenance":"prepared"})) },
@@ -1268,12 +1382,13 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
         Command::Resume => {resume(a,t).await?;Ok(json!({"paused":false}))},
         Command::NativeSync{actors} => native_sync(a,t,actors).await,
         Command::NativeState{actors} => native_state(a,t,actors,true).await,
-        Command::NativeLease{owner,operation,actors} => {
+        Command::NativeRebind{actor,replacement} => native_rebind(a,t,id,actor,replacement).await,
+        Command::NativeLease{owner,operation,actors,terminal} => {
             let trace = Arc::new(crate::performance::NativeControlTrace {request:id.into(),operation:operation.clone(),started:Instant::now()});
             let requests = Arc::new(Mutex::new(crate::performance::Requests {native_control:Some(trace.clone()),..Default::default()}));
             let mut lifecycle = NativeControlRequest {trace,requests:requests.clone(),outcome:"dropped",error:None};
             tracing::info!(request=id,%operation,"native control request received");
-            let result = crate::performance::REQUEST.scope(requests,native_lease(a,t,owner,operation,actors)).await;
+            let result = crate::performance::REQUEST.scope(requests,native_lease(a,t,owner,operation,actors,terminal)).await;
             lifecycle.outcome = if result.is_ok() {"ok"} else {"error"};
             lifecycle.error = result.as_ref().err().map(|error|format!("{error:#}"));
             result
@@ -1332,7 +1447,7 @@ async fn execute(a: &App, t: &Testing, id: &str, command: Command) -> Result<Val
             let player=resolve(a,actor).await?;
             super::lifecycle::player(a,player,"qa_cheat",move |a| async move {
             super::lifecycle::stage(Stage::Reservation);
-            let mut ch=a.world.for_player(player).call(move |w| {let p=w.players.get(&player).context("player missing")?;ensure!(p.character.alive&&!p.pending&&!p.progress_started&&!p.death_pending&&!p.departing,"actor has pending gameplay or persistence");Ok(p.character.clone())}).await?;
+            let mut ch=a.world.for_player(player).call(move |w| {let p=w.players.get(&player).context("player missing")?;ensure!(p.character.alive&&!p.death_pending,"actor is dead");ensure!(!p.pending&&!p.progress_started&&!p.departing,"actor has pending gameplay or persistence");Ok(p.character.clone())}).await?;
             match change {
                 Cheat::StatModifier{index,amount,duration_ms}=>{a.world.for_player(player).call(move |w| w.prepare_stat_modifier(player,index,amount,duration_ms)).await?;},
                 Cheat::Protection{condition,duration_ms}=>{a.world.for_player(player).call(move |w| {
@@ -1439,9 +1554,7 @@ async fn prepared_realm_closure_guards_and_selected_realm_isolation() {
             .to_string()
             .contains("prepared state")
     );
-    let mut d =
-        crate::world::Directory::prepared(Path::new("data"), app.content.clone(), 16, 12351, 2)
-            .unwrap();
+    let mut d = crate::world::Directory::prepared(app.content.clone(), 16, 12351, 2).unwrap();
     d.clock.set_paused(true);
     let other: Vec<_> = d.worlds[&1]
         .entities
@@ -1856,6 +1969,294 @@ mod directory_observation_tests {
         assert_eq!(decoded["directory_ms"].as_u64(), Some(directory_tick * 50));
         assert_eq!(decoded["directory_ms"], 0);
         assert_ne!(decoded["directory_ms"], decoded["game_ms"]);
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod native_pause_tests {
+    use super::*;
+
+    // Stheno job 0887460c: a swarm terminal staged its XP recipient's progress just before the controller paused.
+    #[tokio::test]
+    async fn pause_settles_progress_held_by_a_staged_terminal_journal() {
+        let (dir, app) = super::super::account_actions::tests::fixture_with_native_control();
+        let testing = app.testing.as_ref().unwrap();
+        let guid = "native-pause-terminal-progress";
+        let account = app.store.list(guid.into()).await.unwrap();
+        let character = app
+            .store
+            .create(account.id, app.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        let actor = character.id;
+        write_json(
+            &testing.path(&format!("actor-{actor}"), "spawn"),
+            &Registration {
+                guid: guid.into(),
+                controller: Controller::Native,
+                profile: None,
+            },
+        )
+        .unwrap();
+        let owner = app.claim_session(account.id).unwrap();
+        let (packets, _inbox) = tokio::sync::mpsc::channel(256);
+        let (lost, _) = tokio::sync::watch::channel(None);
+        let player = app
+            .world
+            .in_world(-3)
+            .call(move |w| {
+                let output = crate::world::Output {
+                    trace: None,
+                    packets,
+                    lost,
+                };
+                w.enter(character, Some(output))
+            })
+            .await
+            .unwrap();
+        owner.bind(player).unwrap();
+        let before = app
+            .world
+            .for_player(player)
+            .call(move |w| {
+                let enemy = w.spawn_entity(0x651, w.players[&player].pos, vec![])?;
+                w.defeat_entity(enemy)?;
+                let p = &w.players[&player];
+                let held = p.native_pause_progress()?.context("no staged progress")?;
+                ensure!(
+                    w.terminal_holds_progress(held)?,
+                    "progress not held by a terminal"
+                );
+                Ok(p.character.exp)
+            })
+            .await
+            .unwrap();
+        let drain = app.clone();
+        let drain = tokio::spawn(async move {
+            loop {
+                super::super::persistence_tick(&drain).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        });
+        pause(&app, &[actor], &[(actor, player)]).await.unwrap();
+        drain.abort();
+        assert!(app.store.load(account.id, actor).await.unwrap().exp > before);
+        drop((owner, app));
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod native_rebind_tests {
+    use super::*;
+
+    async fn connect(app: &App, character: Character) -> i32 {
+        let (packets, inbox) = tokio::sync::mpsc::channel(256);
+        std::mem::forget(inbox);
+        let (lost, _) = tokio::sync::watch::channel(None);
+        app.world
+            .in_world(-2)
+            .call(move |w| {
+                let output = crate::world::Output {
+                    trace: None,
+                    packets,
+                    lost,
+                };
+                let player = w.enter(character, Some(output))?;
+                w.players.get_mut(&player).unwrap().native_update_acked = true;
+                Ok(player)
+            })
+            .await
+            .unwrap()
+    }
+    async fn native_actor(app: &App, guid: &str) -> Character {
+        let account = app.store.list(guid.into()).await.unwrap();
+        let character = app
+            .store
+            .create(account.id, app.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        write_json(
+            &app.testing
+                .as_ref()
+                .unwrap()
+                .path(&format!("actor-{}", character.id), "spawn"),
+            &Registration {
+                guid: guid.into(),
+                controller: Controller::Native,
+                profile: None,
+            },
+        )
+        .unwrap();
+        character
+    }
+    fn error(result: Result<Value>) -> String {
+        format!("{:#}", result.unwrap_err())
+    }
+
+    #[tokio::test]
+    async fn rebind_keeps_old_actor_terminal_and_refuses_unrelated_accounts() {
+        let (dir, app) = super::super::account_actions::tests::fixture_with_native_control();
+        let t = app.testing.as_ref().unwrap();
+        let old = native_actor(&app, "rebind-owner").await;
+        let player = connect(&app, old.clone()).await;
+        assert!(
+            error(native_rebind(&app, t, "r1", old.id, None).await).contains("not durably dead")
+        );
+        app.world
+            .for_player(player)
+            .call(move |w| w.leave(player).map(|_| ()))
+            .await
+            .unwrap();
+        app.store
+            .delete_character(old.account, old.id)
+            .await
+            .unwrap();
+        assert!(error(native_rebind(&app, t, "r2", old.id, None).await).contains("found 0"));
+        let foreign_account = app.store.list("rebind-stranger".into()).await.unwrap();
+        let foreign = app
+            .store
+            .create(foreign_account.id, app.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        let foreign_player = connect(&app, foreign).await;
+        assert!(
+            error(native_rebind(&app, t, "r3", old.id, None).await).contains("another account")
+        );
+        app.world
+            .for_player(foreign_player)
+            .call(move |w| w.leave(foreign_player).map(|_| ()))
+            .await
+            .unwrap();
+        let replacement = app
+            .store
+            .create(old.account, app.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        connect(&app, replacement.clone()).await;
+        let found = native_rebind(&app, t, "r4", old.id, None).await.unwrap();
+        assert_eq!(found["replacement"], replacement.id);
+        assert_eq!(found["account"], old.account);
+        assert!(
+            t.registration(replacement.id).is_err(),
+            "discovery must not bind"
+        );
+        assert!(
+            error(native_rebind(&app, t, "r5", old.id, Some(replacement.id + 1)).await)
+                .contains("differs")
+        );
+        native_rebind(&app, t, "r6", old.id, Some(replacement.id))
+            .await
+            .unwrap();
+        assert!(matches!(
+            t.registration(replacement.id).unwrap().controller,
+            Controller::Native
+        ));
+        assert!(
+            error(native_rebind(&app, t, "r7", old.id, Some(replacement.id)).await)
+                .contains("already rebound")
+        );
+        let state = native_state(&app, t, vec![old.id, replacement.id], false)
+            .await
+            .unwrap();
+        assert_eq!(state["actors"][0]["stage"], "dead");
+        assert_eq!(state["actors"][1]["stage"], "ready");
+        assert!(snapshot(&app, old.id, false).await.is_err());
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn expected_death_lease_halts_other_terminals_and_still_expires() {
+        let (dir, app) = super::super::account_actions::tests::fixture_with_native_control();
+        let t = app.testing.as_ref().unwrap();
+        let dying = native_actor(&app, "lease-dying").await;
+        let other = native_actor(&app, "lease-other").await;
+        let dying_player = connect(&app, dying.clone()).await;
+        let other_player = connect(&app, other.clone()).await;
+        let actors = vec![dying.id, other.id];
+        assert!(
+            native_lease(
+                &app,
+                t,
+                "lease".into(),
+                "begin".into(),
+                actors.clone(),
+                Some(7)
+            )
+            .await
+            .is_err()
+        );
+        native_lease(
+            &app,
+            t,
+            "lease".into(),
+            "begin".into(),
+            actors,
+            Some(dying.id),
+        )
+        .await
+        .unwrap();
+        let kill = async |player: i32| {
+            app.world
+                .for_player(player)
+                .call(move |w| {
+                    w.players.get_mut(&player).unwrap().character.alive = false;
+                    Ok(())
+                })
+                .await
+        };
+        kill(dying_player).await.unwrap();
+        native_lease(&app, t, "lease".into(), "renew".into(), vec![], None)
+            .await
+            .unwrap();
+        assert!(t.stopped.borrow().is_none());
+        kill(other_player).await.unwrap();
+        assert!(
+            native_lease(&app, t, "lease".into(), "renew".into(), vec![], None)
+                .await
+                .is_err()
+        );
+        assert!(
+            t.stopped
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .contains("terminal during control")
+        );
+        drop(app);
+        fs::remove_dir_all(dir).unwrap();
+
+        let (dir, app) = super::super::account_actions::tests::fixture_with_native_control();
+        let t = app.testing.as_ref().unwrap();
+        let dying = native_actor(&app, "lease-expiry").await;
+        connect(&app, dying.clone()).await;
+        native_lease(
+            &app,
+            t,
+            "expiry".into(),
+            "begin".into(),
+            vec![dying.id],
+            Some(dying.id),
+        )
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(1700)).await;
+        assert!(
+            t.stopped
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .contains("lease expired")
+        );
+        app.world.clock.set_paused(true);
+        let rebind = Command::NativeRebind {
+            actor: dying.id,
+            replacement: None,
+        };
+        assert!(error(execute(&app, t, "after-expiry", rebind).await).contains("terminal"));
         drop(app);
         fs::remove_dir_all(dir).unwrap();
     }

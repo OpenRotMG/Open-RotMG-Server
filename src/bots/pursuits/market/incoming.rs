@@ -37,7 +37,7 @@ impl Market {
             || self.trade.is_some()
             || self.reserved_bargain()
             || v.elapsed_ms < self.next_request_ms
-            || v.map.name != "Nexus"
+            || v.map.template.as_deref() != Some("nexus")
             || !super::super::settled(v)
         {
             return;
@@ -77,7 +77,7 @@ impl Market {
             return Ok(None);
         };
         let valid = g.session == [v.session.world, v.session.player, v.session.character]
-            && v.map.name == "Nexus"
+            && v.map.template.as_deref() == Some("nexus")
             && super::super::settled(v)
             && v.elapsed_ms < g.until
             && v.character.hp * 4 >= v.character.stats[0] * 3

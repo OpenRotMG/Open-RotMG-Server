@@ -434,6 +434,10 @@ fn unwatched_bot_ticks_are_not_encoded_and_the_first_watched_tick_is_complete() 
             vec![],
         )
         .unwrap();
+    // The XML 0x602 now attacks; a stunned witness keeps the bot's stats stable across the watched ticks.
+    world
+        .apply_condition(near, crate::condition::STUNNED, 600_000)
+        .unwrap();
     for _ in 0..6 {
         world.step();
     }

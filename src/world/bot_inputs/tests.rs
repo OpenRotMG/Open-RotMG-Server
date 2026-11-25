@@ -85,7 +85,7 @@ fn idle_cursor_is_available_and_aim_stays_inside_native_scene() {
 
 #[test]
 fn lifecycle_clears_inputs_without_replaying_on_ready_or_replacement() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
     let mut w = World::new(content.clone(), map).unwrap();
     let mut ch = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
@@ -160,7 +160,7 @@ fn held_pointer_translates_with_the_virtual_view_without_involuntary_rotation() 
 
 #[test]
 fn blocked_held_step_publishes_waypoint_feedback_and_releases_keys() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
     let mut w = World::new(content.clone(), map).unwrap();
     let mut ch = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
@@ -262,7 +262,7 @@ fn sub_tenth_held_inputs_arrive_exactly_and_zero_targets_stay_stopped() {
 }
 
 fn held_walk(open: fn(usize, usize) -> bool, start: Pos, target: Pos) -> (Pos, Inputs) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let cells = (0..24 * 24)
         .map(|i| crate::content::Cell {
             ground: if open(i % 24, i / 24) { 1 } else { 255 },
@@ -273,6 +273,7 @@ fn held_walk(open: fn(usize, usize) -> bool, start: Pos, target: Pos) -> (Pos, I
         })
         .collect();
     let map = Map {
+        elevation: None,
         width: 24,
         height: 24,
         cells,

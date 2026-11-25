@@ -58,8 +58,18 @@ export async function run(game){
   await game.act({keys:['Insert'],duration_ms:1800});game.check('native escape interrupts Kitchen into Nexus',(await game.observe()).world==='Nexus');
   const config=JSON.parse(await readFile(configFile,'utf8')),browser=config.native.find(n=>n.actor===game.actor),cdp=await connect({port:browser.port,target:browser.target,owner:browser.owner,url:config.origin+'/',helper:config.browserTools});
   try{
-    const action=game.act({keys:[],duration_ms:2200});
-    const input=(async()=>{const deadline=Date.now()+5000;while((await game.observe()).paused){assert(Date.now()<deadline);await delay(20);}const enter=async()=>{for(const type of ['keyDown','keyUp'])await cdp.call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13});};await enter();await cdp.call('Input.insertText',{text:'/tutorial'});await enter();})();
+    const log=join(root,'controller.stderr'),offset=(await readFile(log,'utf8')).length;
+    const action=game.act({keys:[],duration_ms:4500});
+    const input=(async()=>{
+      const deadline=Date.now()+10000;
+      while(true){
+        const acks=new Set((await readFile(log,'utf8')).slice(offset).split('\n').slice(0,-1).filter(l=>l.startsWith('{"event":"native_sync_verified_ack"')).map(l=>JSON.parse(l).context.actor));
+        if(config.native.every(c=>acks.has(c.actor)))break;
+        assert(Date.now()<deadline,'Tutorial chat must wait for the current cohort resume ACKs');await delay(20);
+      }
+      const enter=async()=>{for(const type of ['keyDown','keyUp'])await cdp.call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13});};
+      await enter();await cdp.call('Input.insertText',{text:'/tutorial'});await enter();
+    })();
     const results=await Promise.allSettled([action,input]);for(const r of results)if(r.status==='rejected')throw r.reason;
   }finally{cdp.close();}
   const returned=await record('reentry');

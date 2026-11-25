@@ -140,7 +140,7 @@ impl Bands {
             }
         }
         self.limit = suitable(v, identity);
-        if v.map.name != "Realm" {
+        if v.map.template.as_deref() != Some("realm") {
             return false;
         }
         for enemy in v
@@ -160,7 +160,10 @@ impl Bands {
             if tier >= entry.0 {
                 *entry = (tier, enemy.position);
             }
-            if crate::dungeon::portal_drop(enemy.kind).is_some_and(|(portal, _)| portal == 0x718) {
+            if (c.game.as_ref())
+                .expect("validated GameData")
+                .births_at_death(enemy.kind, 0x718)
+            {
                 self.snake_source = Some(enemy.position);
             }
             if tier == 4
@@ -198,7 +201,7 @@ impl Bands {
     }
     /// Walking may enter unobserved ground; `None` orders below every band.
     pub fn survivable(&self, v: &PlayerView, p: Pos) -> bool {
-        v.map.name != "Realm" || self.known(p) <= Some(self.limit)
+        v.map.template.as_deref() != Some("realm") || self.known(p) <= Some(self.limit)
     }
     /// Ground at most one band below this character's own still pays; unobserved ground may.
     pub fn worthwhile(&self, p: Pos) -> bool {
@@ -207,7 +210,9 @@ impl Bands {
     /// A far marker may stand among enemies never seen, so low levels only teleport onto observed ground.
     pub fn teleportable(&self, v: &PlayerView, p: Pos) -> bool {
         self.survivable(v, p)
-            && (v.map.name != "Realm" || v.character.level >= 20 || self.known(p).is_some())
+            && (v.map.template.as_deref() != Some("realm")
+                || v.character.level >= 20
+                || self.known(p).is_some())
     }
     /// Where to farm next: back out of a band above this character, or up toward its suitable band.
     pub fn venture(&self, v: &PlayerView) -> Option<Pos> {

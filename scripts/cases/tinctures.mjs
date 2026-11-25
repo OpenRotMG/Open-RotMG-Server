@@ -29,11 +29,24 @@ export async function run(game){
   await game.act({keys:[],duration_ms:200},{name:'stacked-dexterity',when:()=>true});
   await writeFile(join(root,'stacking-observation.json'),JSON.stringify({baseline,doubled},null,2));
   game.check('second tincture contributes floor(15/2), not another 15',doubled.character.stats.dexterity===82);
-  const firstUntil=baseline.game_ms+31300;
-  await wait(firstUntil-(await game.observe()).game_ms+100);
-  game.check('first expiry does not refresh the first timer; remaining dose has full strength',(await game.observe()).character.stats.dexterity===75);
-  await wait(5500);
-  game.check('both independent doses expire',(await game.observe()).character.stats.dexterity===60);
+  // Each dose lasts 30 active seconds (data/objects.xml:3843–3857); bracket expiry by the inventory-consumption action.
+  async function expire(name,dose,from,to){
+    const {before,after}=samples.find(s=>s.name===dose),early=before.game_ms+30000,late=after.game_ms+30050;
+    let previous=await game.observe();
+    for(let n=0;n<80&&previous.game_ms<=late&&previous.character.stats.dexterity===from;n++){
+      await game.act({keys:[],duration_ms:Math.max(100,Math.min(1000,early-previous.game_ms-150))});
+      const current=await game.observe();
+      if(current.character.stats.dexterity!==from){
+        samples.push({name,previous,current,early,late});
+        game.check(name,current.character.stats.dexterity===to&&current.game_ms>=early&&previous.game_ms<=late);
+        return;
+      }
+      previous=current;
+    }
+    assert.fail(`${name}: DEX ${previous.character.stats.dexterity} at actor time ${previous.game_ms}, expected transition ${from}→${to} in ${early}–${late}`);
+  }
+  await expire('first expiry does not refresh the first timer; remaining dose has full strength','first-dexterity',82,75);
+  await expire('both independent doses expire','overlapping-dexterity',75,60);
   await prepare(game.actor,{kind:'vitals',hp:100,mp:100});
   for(const [key,slot,stat,amount] of [['3',6,'max_hp',75],['4',7,'max_mp',75],['5',8,'defense',15]]){
     const before=await game.observe(),after=await use(game,key,slot,'self-'+stat);

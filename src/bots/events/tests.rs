@@ -21,6 +21,7 @@ fn object(id: i32, kind: u16) -> VisibleObject {
 fn fixture() -> (Content, PlayerView, Events, Profile) {
     let (c, mut v) = quest_tests::fixture();
     v.map.name = "Wine Cellar".into();
+    v.map.template = Some("wine-cellar".into());
     v.character.level = 20;
     v.objects.clear();
     v.quest = None;
@@ -205,6 +206,7 @@ fn aftermath_request_is_bound_to_goal_session_ownership_audience_and_linger() {
 fn aftermath_held_incantation_uses_existing_opening_and_readiness_path() {
     let (c, mut v, mut e, p) = fixture();
     v.map.name = "Oryx's Chamber".into();
+    v.map.template = Some("oryx-chamber".into());
     v.objects.clear();
     v.objects.push(object(10, crate::endgame::LOCKED_CELLAR));
     v.character.items[5] = i32::from(crate::endgame::INCANTATION);
@@ -250,6 +252,7 @@ fn aftermath_commitment_preserves_held_incantation_and_remedy_not_idle_reports()
     v.time_ms += 50;
     v.elapsed_ms += 50;
     v.map.name = "Oryx's Chamber".into();
+    v.map.template = Some("oryx-chamber".into());
     v.objects.clear();
     v.objects.push(object(10, crate::endgame::LOCKED_CELLAR));
     v.character.items[5] = i32::from(crate::endgame::INCANTATION);
@@ -262,6 +265,7 @@ fn aftermath_commitment_preserves_held_incantation_and_remedy_not_idle_reports()
     v.time_ms += 50;
     v.elapsed_ms += 50;
     v.map.name = "Mad Lab".into();
+    v.map.template = Some("mad-lab".into());
     v.character.conditions = crate::condition::bit(crate::condition::HEXED);
     v.objects.clear();
     let mut blue = object(11, crate::dungeon::lab::DEHEXXER);

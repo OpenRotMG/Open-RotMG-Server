@@ -43,7 +43,7 @@ fn healing_selected(
         return Ok(None);
     }
     let own_need = v.character.stats[0] - v.character.hp;
-    let needs_cleanse = events::shared(&v.map.name)
+    let needs_cleanse = events::shared(v.map.template.as_deref())
         && tome
             .abilities
             .iter()
@@ -594,6 +594,7 @@ mod support_tests {
         assert!(healing_selected(&v, &content, |_| true).unwrap().is_some());
         v.character.items[1] = 0xc09;
         v.map.name = "Mad Lab".into();
+        v.map.template = Some("mad-lab".into());
         v.character.conditions = bit(SICK) | bit(SLOWED);
         assert!(healing_selected(&v, &content, |_| true).unwrap().is_some());
     }

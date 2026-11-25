@@ -157,7 +157,7 @@ impl Market {
             || r.account != v.session.account
             || !revision_current
             || v.elapsed_ms >= r.until
-            || v.map.name != "Nexus"
+            || v.map.template.as_deref() != Some("nexus")
             || !super::super::settled(v)
         {
             return Ok(Some(false));

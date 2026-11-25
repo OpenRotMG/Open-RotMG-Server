@@ -11,7 +11,8 @@ export async function run(game){
  async function move(point){
   for(let n=0;n<90;n++){
    await heal();const v=await game.observe(),d=Math.hypot(point.x-v.position.x,point.y-v.position.y);if(d<.4)return;
-   await game.act({keys:keys(v.position,point),duration_ms:Math.max(50,Math.min(500,Math.round(d*100)))});
+   // The whole journey must fit the native harness's 256 receipts, so walk and fire in longer acts.
+   await game.act({keys:keys(v.position,point),duration_ms:Math.max(50,Math.min(1500,Math.round(d*110)))});
   }
   assert.fail('Native route blocked '+JSON.stringify(point));
  }
@@ -28,13 +29,14 @@ export async function run(game){
  }
  const priority=[0xdd3,0xdd0,0xdcd,0xdcf,0xdd2,0xdd1,0xdce,0xdcc];let roomsCleared=0;
  async function clearRoom(center,dx,dy){
-  for(let n=0;n<45;n++){
+  for(let n=0;n<60;n++){
    const s=await game.inspect(),enemies=s.diagnostic.entities.filter(e=>priority.includes(e.kind)&&Math.hypot(e.home.x-center.x,e.home.y-center.y)<8);
    if(n===0)assert(enemies.length>0,'Generated room has no ordinary population');
    if(!enemies.length){roomsCleared++;await log('room-cleared');return;}
    const targets=enemies.filter(e=>Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<9.7).sort((a,b)=>priority.indexOf(a.kind)-priority.indexOf(b.kind));
-   if(!targets.length){await move({x:center.x-6*dx,y:center.y-6*dy});continue;}
-   await log('room-shot-'+targets[0].id);await heal();await game.act({keys:[],duration_ms:1200,mouse:aim(s.view.position,targets[0].pos)});
+   // XML Mask Hunters and Basilisk Babies roam away from their room; chase the nearest instead of a fixed point.
+   if(!targets.length){const near=enemies.sort((a,b)=>Math.hypot(a.pos.x-s.view.position.x,a.pos.y-s.view.position.y)-Math.hypot(b.pos.x-s.view.position.x,b.pos.y-s.view.position.y))[0];await game.act({keys:keys(s.view.position,near.pos),duration_ms:600});continue;}
+   await log('room-shot-'+targets[0].id);await heal();await game.act({keys:[],duration_ms:2000,mouse:aim(s.view.position,targets[0].pos)});
   }
   assert.fail('Native ranged fire did not clear the ordinary room');
  }
@@ -57,23 +59,27 @@ export async function run(game){
   await move({x:to.x-4*dx,y:to.y-4*dy});await heal();await log('room-'+i);previous=i;
  }
  game.check('ordinary native fire clears each populated room on the boss route',roomsCleared===path.length-1);
- const [bx,by]=rooms[generated.boss_room];await move({x:20+bx*20+.5-9,y:20+by*20+.5});
+ const [bx,by]=rooms[generated.boss_room],center={x:20+bx*20+.5,y:20+by*20+.5};
+ await move({x:center.x-9,y:center.y});
+ // Keep a two-tile margin in the radius-11 boss clearing (src/dungeon/jungle.rs), even when Stage2 moves off center.
+ const westOf=pos=>{const dx=pos.x-center.x-9,dy=pos.y-center.y,scale=Math.max(1,Math.hypot(dx,dy)/9);return {x:center.x+dx/scale,y:center.y+dy/scale};};
  await capture('boss-arrival');const stages=new Set();
+ // Recovered Mixcoatl (actors.xml 0x0dc3): Stage1 attacks, then below 50% HP Rage into the circling Stage2.
+ const phase=(s,boss)=>(s.diagnostic.xml[boss.id]?.states??[]).map(x=>x.name).find(n=>['Ini','Stage1','SummonChoice','Rage','Summon','Stage2'].includes(n));
  for(let n=0;n<90;n++){
-  const s=await log('boss-'+n),boss=s.diagnostic.entities.find(e=>e.kind===0xdc3);if(!boss)break;stages.add(boss.stage);
+  const s=await log('boss-'+n),boss=s.diagnostic.entities.find(e=>e.kind===0xdc3);if(!boss)break;const stage=phase(s,boss);stages.add(stage);
   const d=Math.hypot(boss.pos.x-s.view.position.x,boss.pos.y-s.view.position.y);
-  if(d>9.7){await move({x:boss.pos.x-9,y:boss.pos.y});continue;}
-  if(d<7.5&&boss.stage!==6){await move({x:boss.pos.x-9,y:boss.pos.y});continue;}
+  if(d>9.7||(d<7.5&&stage!=='Stage2')){await move(westOf(boss.pos));continue;}
   let movement=[];
-  if(boss.stage===6){
-   const center={x:20+bx*20+.5,y:20+by*20+.5},angle=Math.atan2(s.view.position.y-center.y,s.view.position.x-center.x)+.6;
+  if(stage==='Stage2'){
+   const angle=Math.atan2(s.view.position.y-center.y,s.view.position.x-center.x)+.6;
    movement=keys(s.view.position,{x:center.x+8.5*Math.cos(angle),y:center.y+8.5*Math.sin(angle)});
    if(s.view.character.hp<650&&s.view.character.mp>=100)movement.push(' ');
   }else await heal();
-  await game.act({keys:movement,duration_ms:boss.stage===6?500:1000,mouse:aim(s.view.position,boss.pos)});
+  await game.act({keys:movement,duration_ms:stage==='Stage2'?700:1500,mouse:aim(s.view.position,boss.pos)});
  }
  const clear=await log('defeat');
- game.check('ordinary native shots defeat Mixcoatl after actual phases',!clear.diagnostic.entities.some(e=>e.kind===0xdc3)&&stages.has(1)&&stages.has(6));
+ game.check('ordinary native shots defeat Mixcoatl after actual phases',!clear.diagnostic.entities.some(e=>e.kind===0xdc3)&&stages.has('Stage1')&&stages.has('Stage2'));
  game.check('one Jungle clear is committed',clear.diagnostic.character.jungles===1);
  await game.act({keys:[],duration_ms:2200});const retired=await log('boss-totems-retired'),totems=retired.diagnostic.entities.filter(e=>e.kind===0xdc4);
  game.check('four Boss Totems remain and stop firing after their own boss dies',totems.length===4&&!retired.view.projectiles.some(p=>totems.some(e=>e.id===p.owner))&&retired.diagnostic.character.jungles===1);

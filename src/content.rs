@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail, ensure};
 use roxmltree::Node;
 mod abilities;
+pub mod game;
 pub(crate) mod item_values;
 pub use abilities::Ability;
 mod consumables;
@@ -9,7 +10,11 @@ pub use consumables::{Companion, ConsumableEffect};
 pub use reviews::Reviews;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, io::Read, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Read,
+    path::Path,
+};
 
 pub const WIZARD: u16 = 0x030e;
 pub const PRIEST: u16 = 0x0310;
@@ -87,6 +92,10 @@ impl Projectile {
     }
 }
 impl Object {
+    pub(crate) fn is_portal(&self) -> bool {
+        matches!(self.class.as_str(), "Portal" | "GuildHallPortal")
+    }
+
     pub fn is_potion(&self) -> bool {
         self.potion
             && self.consumable
@@ -187,6 +196,8 @@ pub struct Object {
     pub cube: bool,
     pub oryx: bool,
     pub stasis_immune: bool,
+    pub flying: bool,
+    pub sound_ids: BTreeSet<u8>,
     pub leach_health: bool,
     pub terrain: u8,
     pub spawn_weight: Option<f32>,
@@ -218,12 +229,15 @@ pub struct Hazard {
 }
 #[derive(Clone)]
 pub struct Content {
+    pub game: Option<std::sync::Arc<game::GameData>>,
     pub reviewed_accounts: Reviews,
     pub(crate) xml_sha256: [String; 2],
     pub objects: BTreeMap<u16, Object>,
     pub(crate) item_values: item_values::ItemValues,
     pub grounds: BTreeMap<u8, f32>,
     pub ground_names: BTreeMap<u8, String>,
+    pub void_grounds: BTreeSet<u8>,
+    pub sinking_grounds: BTreeSet<u8>,
     pub pushes: BTreeMap<u8, (f32, f32)>,
     pub hazards: BTreeMap<u8, Hazard>,
     pub classes: BTreeMap<u16, Class>,
@@ -490,23 +504,21 @@ impl Content {
                 encounter: child(n, "Encounter").is_some(),
                 cube: child(n, "Cube").is_some(),
                 oryx: child(n, "Oryx").is_some(),
+                flying: child(n, "Flying").is_some(),
+                sound_ids: n
+                    .children()
+                    .filter(|c| c.has_tag_name("Sound") && c.attribute("id").is_some())
+                    .map(|c| {
+                        Ok(u8::try_from(kind(
+                            c.attribute("id").context("Sound id missing")?,
+                        )?)?)
+                    })
+                    .collect::<Result<_>>()?,
                 stasis_immune: child(n, "StasisImmune").is_some(),
                 leach_health: child(n, "LeachHealth").is_some(),
                 terrain: match text(n, "Terrain").as_str() {
                     "" => 0,
-                    "Mountains" => 1,
-                    "HighSand" => 2,
-                    "HighPlains" => 3,
-                    "HighForest" => 4,
-                    "MidSand" => 5,
-                    "MidPlains" => 6,
-                    "MidForest" => 7,
-                    "LowSand" => 8,
-                    "LowPlains" => 9,
-                    "LowForest" => 10,
-                    "ShoreSand" => 11,
-                    "ShorePlains" => 12,
-                    terrain => bail!("unknown selected terrain {terrain}"),
+                    value => terrain(value)?,
                 },
                 spawn_weight: child(n, "SpawnProb")
                     .map(|v| -> Result<f32> {
@@ -616,10 +628,18 @@ impl Content {
         let doc = roxmltree::Document::parse(&data)?;
         let mut grounds = BTreeMap::new();
         let mut ground_names = BTreeMap::new();
+        let mut void_grounds = BTreeSet::new();
+        let mut sinking_grounds = BTreeSet::new();
         let mut pushes = BTreeMap::new();
         let mut hazards = BTreeMap::new();
         for n in doc.root_element().children().filter(|n| n.is_element()) {
             let id = u8::try_from(kind(n.attribute("type").context("ground type missing")?)?)?;
+            if child(n, "Sink").is_some() {
+                sinking_grounds.insert(id);
+            }
+            if child(n, "CompositePriority").is_some() && number(n, "CompositePriority", 0.)? < 0. {
+                void_grounds.insert(id);
+            }
             let speed = if child(n, "NoWalk").is_some() {
                 0.
             } else {
@@ -666,12 +686,15 @@ impl Content {
         );
         let item_values = item_values::ItemValues::load(&objects)?;
         let out = Self {
+            game: None,
             reviewed_accounts: Reviews::new(reviews::load(&dir.join("reviewed-accounts.json"))?),
             item_values,
             xml_sha256: [objects_sha256, grounds_sha256],
             objects,
             grounds,
             ground_names,
+            void_grounds,
+            sinking_grounds,
             pushes,
             hazards,
             classes,
@@ -738,6 +761,8 @@ pub struct Cell {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Map {
+    #[serde(skip)]
+    pub elevation: Option<std::sync::Arc<[u8]>>,
     pub width: i32,
     pub height: i32,
     pub cells: Vec<Cell>,
@@ -863,11 +888,19 @@ impl Map {
         }
         ensure!(r.pos == r.data.len(), "trailing map data");
         Ok(Self {
+            elevation: None,
             width,
             height,
             cells,
             spawns,
         })
+    }
+    pub fn elevation_at(&self, x: f32, y: f32) -> Option<u8> {
+        self.cell(x, y)?;
+        self.elevation
+            .as_ref()?
+            .get(y.floor() as usize * self.width as usize + x.floor() as usize)
+            .copied()
     }
     pub fn cell(&self, x: f32, y: f32) -> Option<&Cell> {
         if x < 0. || y < 0. || x >= self.width as f32 || y >= self.height as f32 {
@@ -876,4 +909,22 @@ impl Map {
         self.cells
             .get(y.floor() as usize * self.width as usize + x.floor() as usize)
     }
+}
+
+fn terrain(s: &str) -> Result<u8> {
+    Ok(match s {
+        "Mountains" => 1,
+        "HighSand" => 2,
+        "HighPlains" => 3,
+        "HighForest" => 4,
+        "MidSand" => 5,
+        "MidPlains" => 6,
+        "MidForest" => 7,
+        "LowSand" => 8,
+        "LowPlains" => 9,
+        "LowForest" => 10,
+        "ShoreSand" => 11,
+        "ShorePlains" => 12,
+        value => bail!("unknown selected terrain {value}"),
+    })
 }

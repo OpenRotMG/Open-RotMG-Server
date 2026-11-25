@@ -1,10 +1,14 @@
 use super::*;
+use crate::{
+    loot::evaluator::{self, Owner},
+    store::world_events::{LIMITS, TerminalPayload},
+};
 
 async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
-    let mut w = World::new(content, map).unwrap();
+    let mut w = World::in_domain(content, map, WorldDomain::NonRealm).unwrap();
     for id in w.entities.keys().copied().collect::<Vec<_>>() {
         w.remove_entity(id);
     }
@@ -31,6 +35,147 @@ async fn reward_world() -> (World, crate::store::Store, Vec<(i32, i32)>) {
     (w, store, owners)
 }
 
+/// Mirrors the journaled publication packaging so pickup-source tests start from a real native bag.
+fn source_bag(w: &mut World, pos: Pos, owner: Option<i32>, items: Vec<i32>, source: u16) {
+    let count = items.len();
+    let bag = w.loot_bag(pos, owner, items).unwrap();
+    let name = w.content.objects[&source].name.clone();
+    let e = w.entities.get_mut(&bag).unwrap();
+    e.drop_slots = (0..count).collect();
+    e.drop_source = Some(name);
+}
+
+fn clear_bags(w: &mut World) {
+    // Expire published bags through their real lifetime so the journal settles each case before the next.
+    if let Some(deadline) = w.bag_expiry.values().max().copied() {
+        w.now = w.now.max(deadline);
+        w.step();
+    }
+    crate::world::xml::tests::drain_events(w).unwrap();
+    assert!(w.bag_expiry.is_empty() && w.delivery_events().is_empty());
+}
+
+/// Defeat through the real terminal path and shared real-journal drain; returns the journaled payload.
+fn defeat(w: &mut World, kind: u16, damage: &[(i32, i32)], seed: u64) -> TerminalPayload {
+    defeat_at(w, kind, Pos { x: 3.5, y: 3.5 }, damage, seed)
+}
+fn defeat_at(
+    w: &mut World,
+    kind: u16,
+    pos: Pos,
+    damage: &[(i32, i32)],
+    seed: u64,
+) -> TerminalPayload {
+    clear_bags(w);
+    let id = w.spawn_entity(kind, pos, vec![]).unwrap();
+    w.entities.get_mut(&id).unwrap().damage = damage.iter().copied().collect();
+    w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+    w.defeat_entity(id).unwrap();
+    let event = w
+        .pending_terminal_events()
+        .into_iter()
+        .next()
+        .expect("terminal journaled");
+    assert!(
+        w.bag_expiry.is_empty(),
+        "loot visible before durable receipt"
+    );
+    let payload = event.terminal_payload().unwrap().clone();
+    // Publication emits at most four bags per drain; repeat until the whole plan is visible.
+    for _ in 0..8 {
+        crate::world::xml::tests::drain_events(w).unwrap();
+    }
+    assert!(!w.entities.contains_key(&id), "kind={kind:#x}");
+    payload
+}
+
+/// The visible bags are exactly the journaled plan, which is the evaluator's plan for the captured facts.
+fn assert_published_plan(w: &World, payload: &TerminalPayload, owners: &[(i32, i32)]) -> usize {
+    let game = w.xml_game();
+    assert_eq!(
+        payload.allocation.as_ref(),
+        Some(
+            &evaluator::evaluate(game, payload.defeat, &payload.ledger, payload.seed, LIMITS)
+                .unwrap()
+        )
+    );
+    let account = |character: i32| owners.iter().find(|(_, c)| *c == character).unwrap().0;
+    let rows = &game.definitions[&payload.defeat.kind].loot;
+    let mut expected: Vec<_> = payload
+        .allocations()
+        .iter()
+        .map(|a| match a.owner() {
+            Owner::Public => (None, i32::from(a.item())),
+            Owner::Character(c) => (Some(account(c)), i32::from(a.item())),
+        })
+        .collect();
+    for (row, r) in rows.iter().enumerate() {
+        if matches!(r.ownership, crate::content::game::LootOwnership::Public) {
+            let count = payload
+                .allocations()
+                .iter()
+                .filter(|a| a.row() == row)
+                .count();
+            assert!(
+                count <= (r.min as usize).max(1),
+                "public row {row} rolled per contributor"
+            );
+        }
+    }
+    let mut actual = Vec::new();
+    for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
+        assert_eq!(
+            bag.drop_source.as_deref(),
+            Some(w.content.objects[&payload.defeat.kind].name.as_str())
+        );
+        let owner = bag
+            .extra_stats
+            .iter()
+            .find(|(stat, _)| *stat == 54)
+            .map(|(_, o)| *o);
+        for item in bag.items.iter().copied().filter(|item| *item >= 0) {
+            assert!(owner.is_some() || !w.content.objects[&(item as u16)].soulbound);
+            actual.push((owner, item));
+        }
+        for (other, _) in owners {
+            assert_eq!(bag.accessible(*other), owner.is_none_or(|o| o == *other));
+        }
+    }
+    expected.sort_unstable();
+    actual.sort_unstable();
+    assert_eq!(
+        actual, expected,
+        "kind={:#x} seed={}",
+        payload.defeat.kind, payload.seed
+    );
+    expected.len()
+}
+
+fn sweep(w: &mut World, owners: &[(i32, i32)], kinds: impl IntoIterator<Item = u16>) -> usize {
+    let mut allocated = 0;
+    for kind in kinds {
+        let hp = w.content.objects[&kind].hp;
+        for contributors in [1, 3] {
+            for seed in 0..4 {
+                let mut damage: Vec<_> = owners[..contributors]
+                    .iter()
+                    .map(|(_, c)| (*c, hp))
+                    .collect();
+                damage.push((owners[5].1, 0));
+                let payload = defeat(w, kind, &damage, seed);
+                assert!(
+                    payload
+                        .ledger
+                        .iter()
+                        .all(|c| c.character != owners[5].1 || c.effective_damage == 0)
+                );
+                allocated += assert_published_plan(w, &payload, owners);
+            }
+        }
+    }
+    allocated
+}
+
 #[tokio::test]
 async fn original_source_survives_pickup_but_player_redeposits_do_not_create_discoveries() {
     let (mut w, store, _) = reward_world().await;
@@ -38,7 +183,9 @@ async fn original_source_survives_pickup_but_player_redeposits_do_not_create_dis
     w.players.get_mut(&player).unwrap().controller = Controller::Human;
     let pos = w.players[&player].pos;
     let account = w.players[&player].character.account;
-    w.loot_bags(pos, Some(account), &[0xa22; 9], 0x91f).unwrap();
+    for items in [vec![0xa22; 8], vec![0xa22]] {
+        source_bag(&mut w, pos, Some(account), items, 0x91f);
+    }
     for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
         assert_eq!(
             bag.drop_source.as_deref(),
@@ -97,8 +244,14 @@ async fn original_source_survives_pickup_but_player_redeposits_do_not_create_dis
     w.players.get_mut(&player).unwrap().character.items[11] = -1;
     for container in [
         w.loot_bag(pos, None, vec![0xa22]).unwrap(),
-        w.spawn_entity(0x501, pos, vec![0xa22, -1, -1, -1, -1, -1, -1, -1])
-            .unwrap(),
+        w.insert_native_entity(
+            0x501,
+            NativeService::Container,
+            pos,
+            vec![0xa22, -1, -1, -1, -1, -1, -1, -1],
+            "prepared public treasure-container ownership regression",
+        )
+        .unwrap(),
     ] {
         let plan = w
             .swap(
@@ -137,11 +290,7 @@ async fn generated_landmark_chest_loot_has_its_chest_source() {
                 w.remove_entity(id);
             }
             w.rng = rand::rngs::StdRng::seed_from_u64(seed);
-            if kind == crate::dungeon::jungle::COIL {
-                w.spawn_coil_site(pos).unwrap();
-            } else {
-                w.spawn_landmark_chests(kind, pos).unwrap();
-            }
+            w.spawn_landmark_chests(kind, pos).unwrap();
             let source = format!("{} chest", w.content.objects[&kind].name);
             for chest in w.entities.values().filter(|e| e.kind == 0x501) {
                 assert_eq!(chest.kind, 0x501);
@@ -191,86 +340,6 @@ async fn generated_landmark_chest_loot_has_its_chest_source() {
         }
         assert!(picked, "no equipment generated for chest {kind:#x}");
     }
-}
-
-#[tokio::test]
-async fn ent_tincture_death_preserves_rolls_and_has_one_eligible_owner() {
-    let (mut w, _store, owners) = reward_world().await;
-    assert!(w.content.objects[&0xb0c].soulbound);
-    assert!(
-        w.loot_bag(Pos { x: 3.5, y: 3.5 }, None, vec![0xb0c])
-            .is_err()
-    );
-    let mut successes = 0;
-    let mut misses = 0;
-    for kind in [0x921, 0x922] {
-        for contributors in [0usize, 1, 3, 5] {
-            for seed in 0..128 {
-                clear_bags(&mut w);
-                let mut expected_rng = rand::rngs::StdRng::seed_from_u64(seed);
-                let mut expected = false;
-                for _ in 0..(contributors * 2).min(8) {
-                    let items = crate::loot::rewards(&w.content, kind, &mut expected_rng);
-                    assert!(items.iter().all(|item| *item == 0xb0c));
-                    expected |= !items.is_empty();
-                }
-                let id = w
-                    .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
-                    .unwrap();
-                w.entities.get_mut(&id).unwrap().damage = owners[..contributors]
-                    .iter()
-                    .map(|(_, character)| (*character, 1))
-                    .collect();
-                w.entities
-                    .get_mut(&id)
-                    .unwrap()
-                    .damage
-                    .insert(owners[5].1, 0);
-                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
-                w.defeat_entity(id).unwrap();
-                assert!(!w.entities.contains_key(&id));
-                assert_eq!(
-                    w.bag_expiry.len(),
-                    usize::from(expected),
-                    "seed={seed}, contributors={contributors}"
-                );
-                if expected {
-                    successes += 1;
-                    let bag = &w.entities[w.bag_expiry.keys().next().unwrap()];
-                    assert_eq!(
-                        bag.items
-                            .iter()
-                            .copied()
-                            .filter(|item| *item >= 0)
-                            .collect::<Vec<_>>(),
-                        [0xb0c]
-                    );
-                    assert_eq!(
-                        owners[..contributors]
-                            .iter()
-                            .filter(|(owner, _)| bag.accessible(*owner))
-                            .count(),
-                        1
-                    );
-                    assert!(
-                        owners[contributors..]
-                            .iter()
-                            .all(|(owner, _)| !bag.accessible(*owner))
-                    );
-                    assert_eq!(
-                        bag.extra_stats
-                            .iter()
-                            .filter(|(stat, _)| *stat == 54)
-                            .count(),
-                        1
-                    );
-                } else {
-                    misses += 1;
-                }
-            }
-        }
-    }
-    assert!(successes > 0 && misses > 0);
 }
 
 #[tokio::test]
@@ -362,487 +431,332 @@ async fn private_loot_reentry_deadline_and_committed_pickup() {
 }
 
 #[tokio::test]
-async fn surface_follower_death_rolls_public_equipment_once_not_per_contributor() {
+async fn follower_and_slime_terminal_loot_is_the_journaled_evaluator_plan_once_per_public_row() {
     let (mut w, _store, owners) = reward_world().await;
-    let mut successes = 0;
-    for kind in (0x669..=0x66b)
+    let kinds = [0x921, 0x922, 0xd9d, 0xd9f, 0x6c6]
+        .into_iter()
+        .chain(0x669..=0x66b)
         .chain(0x605..=0x607)
         .chain(0x612..=0x613)
         .chain(0x60e..=0x610)
         .chain(0x65f..=0x661)
-        .chain(0x91d..=0x91e)
-        .chain([0x6c6])
-    {
-        for seed in 0..64 {
-            let expected = crate::loot::rewards(
-                &w.content,
-                kind,
-                &mut rand::rngs::StdRng::seed_from_u64(seed),
-            );
-            successes += expected.len();
-            for contributors in [1, 3] {
-                clear_bags(&mut w);
-                let id = w
-                    .spawn_entity(kind, Pos { x: 3.5, y: 3.5 }, vec![])
-                    .unwrap();
-                w.entities.get_mut(&id).unwrap().damage = owners[..contributors]
-                    .iter()
-                    .map(|(_, character)| (*character, 1))
-                    .collect();
-                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
-                w.defeat_entity(id).unwrap();
-                let mut actual = Vec::new();
-                for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
-                    let follower = matches!(kind, 0x91d | 0x91e);
-                    assert_eq!(
-                        bag.bag_owners.len(),
-                        if follower && bag.kind == 0x500 {
-                            contributors
-                        } else {
-                            0
-                        }
-                    );
-                    for item in bag.items.iter().copied().filter(|item| *item >= 0) {
-                        let bound = w.content.objects[&(item as u16)].soulbound;
-                        let owned = bound || (follower && bag.kind != 0x500);
-                        assert_eq!(!bag.extra_stats.is_empty(), owned);
-                        if owned {
-                            assert!(
-                                owners[..contributors]
-                                    .iter()
-                                    .any(|(owner, _)| bag.extra_stats.contains(&(54, *owner)))
-                            );
-                            assert!(!bag.accessible(owners[5].0));
-                        } else if follower {
-                            assert!(
-                                owners[..contributors]
-                                    .iter()
-                                    .all(|(owner, _)| bag.accessible(*owner))
-                            );
-                            assert!(!bag.accessible(owners[5].0));
-                        }
-                        actual.push(item);
-                    }
-                }
-                actual.sort_unstable();
-                let mut expected: Vec<_> = expected.iter().map(|id| i32::from(*id)).collect();
-                expected.sort_unstable();
-                assert_eq!(
-                    actual, expected,
-                    "kind={kind:#x}, seed={seed}, contributors={contributors}"
-                );
-                assert!(!w.entities.contains_key(&id));
-            }
-        }
-    }
-    assert!(successes > 0);
+        .chain(0x91d..=0x91e);
+    assert!(sweep(&mut w, &owners, kinds) > 0);
 }
 
 #[tokio::test]
-async fn lair_slime_splits_leave_potion_rolls_to_terminal_forms() {
-    let (mut world, _store, owners) = reward_world().await;
-    for (parent, child, count) in [(0xd9b, 0xd9c, 4), (0xd9c, 0xd9d, 4), (0xd9e, 0xd9f, 6)] {
-        for seed in 0..64 {
-            for id in world.entities.keys().copied().collect::<Vec<_>>() {
-                world.remove_entity(id);
-            }
-            let id = world
-                .spawn_entity(parent, Pos { x: 3.5, y: 3.5 }, vec![])
-                .unwrap();
-            world
-                .entities
-                .get_mut(&id)
-                .unwrap()
-                .damage
-                .insert(owners[0].1, 1);
-            world.rng = rand::rngs::StdRng::seed_from_u64(seed);
-            world.defeat_entity(id).unwrap();
-            assert!(!world.entities.contains_key(&id));
-            assert_eq!(world.actors().filter(|e| e.kind == child).count(), count);
-            assert!(
-                world.bag_expiry.is_empty(),
-                "intermediate {parent:#x}, seed {seed} rolled loot"
-            );
-        }
+async fn god_and_boss_terminal_loot_is_the_journaled_evaluator_plan_in_owner_bags() {
+    let (mut w, _store, owners) = reward_world().await;
+    assert!(
+        sweep(
+            &mut w,
+            &owners,
+            [0x651, 0x657, crate::dungeon::spider::BOSS, 0xd90]
+        ) > 0
+    );
+}
+
+#[tokio::test]
+async fn lair_slime_splits_birth_children_and_only_terminal_forms_have_potion_rows() {
+    let (mut w, _store, owners) = reward_world().await;
+    let game = w.xml_game();
+    for kind in [0xd9b, 0xd9c, 0xd9e] {
+        assert!(game.definitions[&kind].loot.is_empty());
     }
     for kind in [0xd9d, 0xd9f] {
-        let outcomes: BTreeSet<_> = (0..256)
-            .map(|seed| {
-                crate::loot::rewards(
-                    &world.content,
-                    kind,
-                    &mut rand::rngs::StdRng::seed_from_u64(seed),
-                )
-            })
-            .collect();
-        assert_eq!(outcomes, BTreeSet::from([vec![], vec![0xa22], vec![0xa23]]));
-    }
-}
-
-#[test]
-fn septavius_stages_a_realm_exit_until_clear_commit() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
-    let map = crate::dungeon::undead::generate(&content, 12351).unwrap();
-    let mut world = World::new(content, Arc::new(map)).unwrap();
-    world.name = "Undead Lair".into();
-    world.encounter = true;
-    let boss = world.actors().find(|e| e.kind == 0xd90).unwrap().id;
-    world.defeat_entity(boss).unwrap();
-    assert!(world.cleared);
-    assert!(!world.entities.contains_key(&boss));
-    let exit = &world.entities[&world.clear_exit.unwrap()];
-    assert_eq!(exit.kind, 0x704);
-    assert!(!exit.published);
-    assert_eq!(world.actors().filter(|e| e.kind == 0x704).count(), 1);
-    assert!(!world.actors().any(|e| e.kind == 0x71d));
-}
-
-#[test]
-fn mad_lab_portal_drop_uses_ten_percent_balance_policy() {
-    assert_eq!(crate::dungeon::portal_drop(0x657), Some((0x890, 0.1)));
-}
-
-#[tokio::test]
-async fn kage_kami_death_always_requests_a_manor_portal_in_the_realm() {
-    let (mut w, _store, _owners) = reward_world().await;
-    for name in ["Realm", "Tutorial"] {
-        w.name = name.into();
-        for seed in 0..16u64 {
-            clear_bags(&mut w);
-            w.portal_requests.clear();
-            let pos = Pos { x: 3.5, y: 3.5 };
-            let id = w.spawn_entity(0x6db, pos, vec![]).unwrap();
-            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
-            w.defeat_entity(id).unwrap();
-            if name == "Realm" {
-                assert_eq!(w.portal_requests.len(), 1, "seed={seed}");
-                assert_eq!(w.portal_requests[0].0, 0x739, "seed={seed}");
-                assert!(w.portal_requests[0].1.distance(pos) < 0.01, "seed={seed}");
-            } else {
-                assert!(w.portal_requests.is_empty(), "seed={seed}");
-            }
-        }
-    }
-}
-
-#[tokio::test]
-async fn arachna_stages_one_realm_exit_until_durable_clear_commit() {
-    let (mut world, store, owners) = reward_world().await;
-    world.name = "Spider Den".into();
-    let boss = world
-        .spawn_entity(crate::dungeon::spider::BOSS, Pos { x: 3.5, y: 3.5 }, vec![])
-        .unwrap();
-    world
-        .entities
-        .get_mut(&boss)
-        .unwrap()
-        .damage
-        .insert(owners[0].1, 1);
-    world.defeat_entity(boss).unwrap();
-    let exit = world.clear_exit.unwrap();
-    assert_eq!(world.entities[&exit].kind, 0x704);
-    assert!(!world.entities[&exit].published);
-    assert!(!world.entities.contains_key(&boss));
-    assert!(!world.actors().any(|e| e.kind == 0x71d));
-    let plans = world.pending_progress_where(|_, account| account == owners[0].0);
-    assert_eq!(plans.len(), 1);
-    let (player, snapshot) = plans.into_iter().next().unwrap();
-    assert_eq!(snapshot.spider_dens, 1);
-    assert!(!world.entities[&exit].published);
-    world
-        .committed(player, store.progress(snapshot.clone()).await)
-        .unwrap();
-    world.finish_progress(player, snapshot.clone()).unwrap();
-    assert_eq!(
-        store
-            .load(snapshot.account, snapshot.id)
-            .await
-            .unwrap()
-            .spider_dens,
-        1
-    );
-    assert!(world.entities[&exit].published);
-    assert!(world.clear_exit.is_none());
-    assert!(
-        world
-            .pending_progress_where(|_, account| account == owners[0].0)
-            .is_empty()
-    );
-    assert!(world.finish_progress(player, snapshot).is_err());
-    assert_eq!(world.actors().filter(|e| e.kind == 0x704).count(), 1);
-}
-
-#[tokio::test]
-async fn flying_brain_death_requests_only_the_realm_lab_portal() {
-    let (mut w, _store, _owners) = reward_world().await;
-    let mut successes = 0;
-    for name in ["Realm", "Tutorial"] {
-        w.name = name.into();
-        for kind in [0x657, 0x658] {
-            for seed in 0..32 {
-                clear_bags(&mut w);
-                w.portal_requests.clear();
-                let pos = Pos { x: 3.5, y: 3.5 };
-                let id = w.spawn_entity(kind, pos, vec![]).unwrap();
-                w.rng = rand::rngs::StdRng::seed_from_u64(seed);
-                let expected = name == "Realm"
-                    && kind == 0x657
-                    && rand::rngs::StdRng::seed_from_u64(seed).gen_bool(0.1);
-                w.defeat_entity(id).unwrap();
-                assert!(!w.entities.contains_key(&id));
-                assert_eq!(
-                    w.portal_requests.len(),
-                    usize::from(expected),
-                    "world={name}, kind={kind:#x}, seed={seed}"
-                );
-                if expected {
-                    successes += 1;
-                    assert_eq!(w.portal_requests[0].0, 0x890);
-                    assert!(w.portal_requests[0].1.distance(pos) < 0.01);
-                }
-            }
-        }
-    }
-    assert!((1..32).contains(&successes));
-}
-
-fn clear_bags(w: &mut World) {
-    for id in w.bag_expiry.keys().copied().collect::<Vec<_>>() {
-        w.remove_entity(id);
-    }
-}
-
-fn white_demon_gear(content: &Content, seed: u64) -> Vec<i32> {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let mut items = Vec::new();
-    for (chance, tier, slots) in [
-        (0.04, 6, crate::loot::WEAPONS),
-        (0.02, 7, crate::loot::WEAPONS),
-        (0.01, 8, crate::loot::WEAPONS),
-        (0.08, 6, crate::loot::ARMOR),
-        (0.04, 7, crate::loot::ARMOR),
-        (0.02, 8, crate::loot::ARMOR),
-        (0.01, 9, crate::loot::ARMOR),
-        (0.015, 3, crate::loot::RINGS),
-        (0.005, 4, crate::loot::RINGS),
-        (0.02, 4, crate::loot::ABILITIES),
-    ] {
-        let candidates: Vec<_> = content
-            .objects
-            .values()
-            .filter(|item| item.tier == Some(tier) && slots.contains(&item.slot_type))
-            .collect();
-        for item in &candidates {
-            if rng.gen_bool(chance / candidates.len() as f64) {
-                items.push(i32::from(item.kind));
-            }
-        }
-    }
-    items.sort_unstable();
-    items
-}
-
-#[tokio::test]
-async fn god_potion_and_equipment_bags_do_not_stack() {
-    let (mut w, _store, owners) = reward_world().await;
-    let (account, character) = owners[0];
-    let seed = 650;
-    let mut expected_rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let expected = crate::loot::god_loot(&w.content, 0x651, &[(account, 1000)], &mut expected_rng);
-    let mut expected_items: Vec<_> = expected
-        .shared
-        .iter()
-        .chain(expected.private.values().flatten())
-        .copied()
-        .map(i32::from)
-        .collect();
-    expected_items.sort_unstable();
-    for chunk in expected.shared.chunks(8) {
-        if chunk
-            .iter()
-            .any(|item| w.content.objects[item].bag_type != 0)
-        {
-            expected.shared_owners.choose(&mut expected_rng).unwrap();
-        }
-    }
-    let pos = Pos { x: 3.5, y: 3.5 };
-    let root = w.spawn_entity(0x651, pos, vec![]).unwrap();
-    w.entities
-        .get_mut(&root)
-        .unwrap()
-        .damage
-        .insert(character, 1000);
-    w.rng = rand::rngs::StdRng::seed_from_u64(seed);
-    w.defeat_entity(root).unwrap();
-    let bags: Vec<_> = w.bag_expiry.keys().map(|id| &w.entities[id]).collect();
-    assert_eq!(bags.len(), 2, "seed={seed}");
-    assert!(bags.iter().any(|bag| bag.items.contains(&0xa1f)));
-    assert!(
-        bags.iter()
-            .all(|bag| bag.accessible(account) && !bag.accessible(owners[1].0))
-    );
-    assert!(
-        bags[0].pos.distance(bags[1].pos) > 0.1,
-        "seed={seed}: bags overlap at {:?}",
-        bags[0].pos
-    );
-    let mut actual_items: Vec<_> = bags
-        .iter()
-        .flat_map(|b| b.items.iter().copied())
-        .filter(|i| *i >= 0)
-        .collect();
-    actual_items.sort_unstable();
-    assert_eq!(actual_items, expected_items);
-    assert_eq!(
-        rand::RngCore::next_u64(&mut w.rng),
-        rand::RngCore::next_u64(&mut expected_rng)
-    );
-}
-
-#[tokio::test]
-async fn god_gear_death_roll_is_once_per_candidate_with_private_colored_bags() {
-    let (mut w, _store, owners) = reward_world().await;
-    let mut seeds = vec![0, 1, 2, 3];
-    let multiple = (0..32768)
-        .find(|seed| {
-            white_demon_gear(&w.content, *seed)
+        assert!(
+            game.definitions[&kind]
+                .loot
                 .iter()
-                .filter(|kind| {
-                    let item = &w.content.objects[&(**kind as u16)];
-                    item.tier == Some(6) && crate::loot::WEAPONS.contains(&item.slot_type)
-                })
-                .count()
-                > 1
-        })
-        .expect("terminating seeded search must exercise multiple successes in one tier");
-    seeds.push(multiple);
-    for contributors in [1, 2, 5] {
-        for seed in &seeds {
-            clear_bags(&mut w);
-            let root = w
-                .spawn_entity(0x651, Pos { x: 3.5, y: 3.5 }, vec![])
-                .unwrap();
-            w.entities.get_mut(&root).unwrap().damage = owners[..contributors]
-                .iter()
-                .map(|(_, character)| (*character, 1))
-                .collect();
-            w.rng = rand::rngs::StdRng::seed_from_u64(*seed);
-            w.defeat_entity(root).unwrap();
-            assert!(!w.entities.contains_key(&root));
-            let mut actual = Vec::new();
-            for bag in w.bag_expiry.keys().map(|id| &w.entities[id]) {
-                assert_eq!(bag.items.len(), 8);
-                assert_eq!(
-                    bag.drop_source.as_deref(),
-                    Some(w.content.objects[&0x651].name.as_str())
-                );
-                assert_eq!(
-                    owners[..contributors]
-                        .iter()
-                        .filter(|(account, _)| bag.accessible(*account))
-                        .count(),
-                    if bag.kind == 0x500 { contributors } else { 1 }
-                );
-                assert!(!bag.accessible(owners[5].0));
-                actual.extend(bag.items.iter().copied().filter(|item| *item >= 0));
-            }
-            actual.sort_unstable();
-            assert_eq!(
-                actual,
-                white_demon_gear(&w.content, *seed),
-                "contributors={contributors}, seed={seed}"
-            );
-            assert_eq!(actual.iter().collect::<BTreeSet<_>>().len(), actual.len());
-        }
+                .all(|row| row.pool == [0xa22, 0xa23])
+        );
     }
-}
-
-#[tokio::test]
-async fn god_loot_chunks_scatter_inside_corpse_tile_without_changing_owners_or_rng() {
-    let (mut w, _store, owners) = reward_world().await;
-    let shared_owners = vec![owners[0].0, owners[1].0];
-    for pos in [
-        Pos { x: 3.001, y: 3.001 },
-        Pos { x: 3.999, y: 3.999 },
-        Pos { x: 3., y: 4. },
-    ] {
-        clear_bags(&mut w);
-        let mut expected_rng = w.rng.clone();
-        let expected_gear_owners: Vec<_> = (0..2)
-            .map(|_| *shared_owners.choose(&mut expected_rng).unwrap())
-            .collect();
-        let loot = crate::loot::GodLoot {
-            private: BTreeMap::from([
-                (owners[0].0, vec![0xa1f; 17]),
-                (owners[1].0, vec![0xa20; 2]),
-            ]),
-            shared: vec![0xa9f; 9],
-            shared_owners: shared_owners.clone(),
-        };
-        w.god_loot_bags(pos, loot, 0x91f).unwrap();
-        let bags: Vec<_> = w.bag_expiry.keys().map(|id| &w.entities[id]).collect();
-        assert_eq!(bags.len(), 6);
-        for bag in &bags {
-            assert_eq!(
-                bag.drop_source.as_deref(),
-                Some(w.content.objects[&0x91f].name.as_str())
-            );
+    for (parent, child) in [(0xd9b, 0xd9c), (0xd9c, 0xd9d), (0xd9e, 0xd9f)] {
+        for id in w.entities.keys().copied().collect::<Vec<_>>() {
+            w.remove_entity(id);
         }
-        let positions: BTreeSet<_> = bags
-            .iter()
-            .map(|b| (b.pos.x.to_bits(), b.pos.y.to_bits()))
-            .collect();
-        assert_eq!(positions.len(), bags.len());
-        for bag in &bags {
-            assert_eq!(bag.pos.x.floor(), pos.x.floor());
-            assert_eq!(bag.pos.y.floor(), pos.y.floor());
-            assert!((bag.pos.x - pos.x).abs() <= 0.5 && (bag.pos.y - pos.y).abs() <= 0.5);
-            assert!(w.walkable(bag.pos));
-            assert_eq!(bag.items.len(), 8);
-            assert_eq!(
-                bag.drop_slots,
-                (0..bag.items.iter().filter(|i| **i >= 0).count()).collect::<BTreeSet<_>>()
-            );
-            assert_eq!(w.bag_expiry[&bag.id], w.now + 60_000);
-            assert_eq!(bag.size, 80);
-            assert!(!bag.accessible(owners[5].0));
-            let owner = if bag.items.contains(&0xa1f) {
-                owners[0].0
-            } else if bag.items.contains(&0xa20) {
-                owners[1].0
-            } else {
-                expected_gear_owners
-                    [usize::from(bag.items.iter().filter(|i| **i >= 0).count() == 1)]
-            };
-            assert_eq!(bag.extra_stats, [(54, owner)]);
-            assert!(bag.bag_owners.is_empty());
-        }
-        for (item, count) in [(0xa1f, 17), (0xa20, 2), (0xa9f, 9)] {
-            assert_eq!(
-                bags.iter()
-                    .flat_map(|b| &b.items)
-                    .filter(|i| **i == item)
-                    .count(),
-                count
-            );
-        }
-        assert_eq!(
-            rand::RngCore::next_u64(&mut w.rng),
-            rand::RngCore::next_u64(&mut expected_rng)
+        let payload = defeat(&mut w, parent, &[(owners[0].1, 1)], 7);
+        assert!(
+            payload
+                .allocation
+                .as_ref()
+                .is_none_or(|plan| plan.allocations().is_empty())
+        );
+        assert!(
+            w.bag_expiry.is_empty(),
+            "intermediate {parent:#x} rolled loot"
+        );
+        assert!(
+            w.actors().any(|e| e.kind == child),
+            "{parent:#x} births {child:#x}"
         );
     }
 }
 
 #[tokio::test]
-async fn level_one_players_receive_uncapped_god_experience() {
-    let (mut w, _store, _) = reward_world().await;
-    let god = w
-        .spawn_entity(0x67d, Pos { x: 3.5, y: 3.5 }, vec![])
-        .unwrap();
-    w.defeat_entity(god).unwrap();
-    assert!(
-        w.players
+async fn septavius_and_arachna_clear_stage_one_realm_exit_until_durable_commit() {
+    let (mut w, _store, owners) = reward_world().await;
+    for (template, boss, dens) in [
+        ("undead-lair", 0xd90, 0),
+        ("spider-den", crate::dungeon::spider::BOSS, 1),
+    ] {
+        w.xml.template = Some(template.into());
+        w.cleared = false;
+        let id = w
+            .spawn_entity(boss, Pos { x: 3.5, y: 3.5 }, vec![])
+            .unwrap();
+        w.entities
+            .get_mut(&id)
+            .unwrap()
+            .damage
+            .insert(owners[0].1, 1);
+        let before = w
+            .players
             .values()
-            .all(|p| p.character.level == 1 && p.experience_queued == 450)
+            .find(|p| p.character.id == owners[0].1)
+            .unwrap()
+            .character
+            .spider_dens;
+        w.defeat_entity(id).unwrap();
+        assert!(!w.cleared && !w.actors().any(|e| e.kind == 0x704 && e.published));
+        crate::world::xml::tests::drain_events(&mut w).unwrap();
+        assert!(w.cleared && !w.entities.contains_key(&id));
+        assert_eq!(
+            w.actors().filter(|e| e.kind == 0x704).count(),
+            1,
+            "{template}"
+        );
+        assert!(!w.actors().any(|e| e.kind == 0x71d));
+        let after = w
+            .players
+            .values()
+            .find(|p| p.character.id == owners[0].1)
+            .unwrap()
+            .character
+            .spider_dens;
+        assert_eq!(after, before + dens);
+        for e in w
+            .actors()
+            .filter(|e| e.kind == 0x704)
+            .map(|e| e.id)
+            .collect::<Vec<_>>()
+        {
+            w.remove_entity(e);
+        }
+    }
+}
+
+#[test]
+fn kage_kami_and_flying_brain_declare_their_xml_death_portal_births() {
+    let content = crate::world::test_content();
+    let snapshot = crate::loot::catalogue::snapshot(content.game.as_ref().unwrap(), None).unwrap();
+    let births = |kind: u16| {
+        snapshot["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["id"] == kind)
+            .unwrap()["death_births"]
+            .clone()
+    };
+    for (kind, portal) in [
+        (0x6db, "Manor of the Immortals Portal"),
+        (0x657, "Mad Lab Portal"),
+    ] {
+        let births = births(kind);
+        assert_eq!(births.as_array().unwrap().len(), 1, "{kind:#x}");
+        assert_eq!(births[0]["target"]["name"], portal);
+    }
+    assert!(births(0x658).as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn kage_kami_and_flying_brain_defeats_birth_their_portal_through_the_terminal_path() {
+    let (mut w, _store, owners) = reward_world().await;
+    for (kind, portal) in [
+        (0x6db, "Manor of the Immortals Portal"),
+        (0x657, "Mad Lab Portal"),
+    ] {
+        let portal = w
+            .content
+            .objects
+            .values()
+            .find(|o| o.name == portal)
+            .unwrap()
+            .kind;
+        let damage = [(owners[0].1, w.content.objects[&kind].hp)];
+        let seed = (0..2000)
+            .find(|seed| {
+                defeat(&mut w, kind, &damage, *seed);
+                let born = w.entities.values().filter(|e| e.kind == portal).count();
+                for id in w
+                    .entities
+                    .values()
+                    .filter(|e| e.kind == portal)
+                    .map(|e| e.id)
+                    .collect::<Vec<_>>()
+                {
+                    w.remove_entity(id);
+                }
+                assert!(born <= 1, "{kind:#x} seed={seed} born={born}");
+                born == 1
+            })
+            .unwrap_or_else(|| panic!("{kind:#x} never birthed its portal in 2000 defeats"));
+        assert!(seed < 2000);
+    }
+}
+
+#[tokio::test]
+async fn god_potion_and_equipment_bags_do_not_stack() {
+    let (mut w, _store, owners) = reward_world().await;
+    let hp = w.content.objects[&0x651].hp;
+    let damage: Vec<_> = owners[..3].iter().map(|(_, c)| (*c, hp)).collect();
+    let mut seed = 0;
+    loop {
+        let payload = defeat(&mut w, 0x651, &damage, seed);
+        assert_published_plan(&w, &payload, &owners);
+        if w.bag_expiry.len() > 1 {
+            break;
+        }
+        seed += 1;
+        assert!(
+            seed < 256,
+            "fixed seeds publish several bags from one defeat"
+        );
+    }
+    let positions: BTreeSet<_> = w
+        .bag_expiry
+        .keys()
+        .map(|id| {
+            let p = w.entities[id].pos;
+            (p.x.to_bits(), p.y.to_bits())
+        })
+        .collect();
+    assert_eq!(
+        positions.len(),
+        w.bag_expiry.len(),
+        "seed={seed}: bags stack"
     );
+}
+
+#[tokio::test]
+async fn god_loot_chunks_scatter_inside_corpse_tile_without_changing_owners_or_rng() {
+    let (mut w, _store, owners) = reward_world().await;
+    let hp = w.content.objects[&0x651].hp;
+    let damage: Vec<_> = owners[..3].iter().map(|(_, c)| (*c, hp)).collect();
+    for corpse in [
+        Pos { x: 3.001, y: 3.001 },
+        Pos { x: 3.999, y: 3.999 },
+        Pos { x: 3., y: 4. },
+    ] {
+        let mut published = 0;
+        for seed in 0..16 {
+            let payload = defeat_at(&mut w, 0x651, corpse, &damage, seed);
+            assert_published_plan(&w, &payload, &owners);
+            for id in w.bag_expiry.keys() {
+                let pos = w.entities[id].pos;
+                assert_eq!(
+                    (pos.x.floor(), pos.y.floor()),
+                    (corpse.x.floor(), corpse.y.floor())
+                );
+                assert!(
+                    (pos.x - corpse.x).abs() <= 0.5
+                        && (pos.y - corpse.y).abs() <= 0.5
+                        && w.walkable(pos)
+                );
+            }
+            let Some(&bag) = w.bag_expiry.keys().next() else {
+                continue;
+            };
+            let (pos, items) = (w.entities[&bag].pos, w.entities[&bag].items.clone());
+            w.remove_entity(bag);
+            let rng = w.rng.clone();
+            crate::world::xml::tests::drain_events(&mut w).unwrap();
+            assert_eq!(
+                rand::RngCore::next_u64(&mut w.rng),
+                rand::RngCore::next_u64(&mut rng.clone())
+            );
+            let again = w
+                .bag_expiry
+                .keys()
+                .map(|id| &w.entities[id])
+                .find(|e| e.items == items)
+                .expect("republished bag");
+            assert_eq!(
+                (again.pos.x.to_bits(), again.pos.y.to_bits()),
+                (pos.x.to_bits(), pos.y.to_bits())
+            );
+            published += 1;
+        }
+        assert!(published > 0);
+    }
+}
+
+#[tokio::test]
+async fn unplaceable_entitlement_bags_are_abandoned_after_the_window_and_rows_stay_unpicked() {
+    let (mut w, _store, owners) = reward_world().await;
+    let hp = w.content.objects[&0x651].hp;
+    let damage: Vec<_> = owners[..3].iter().map(|(_, c)| (*c, hp)).collect();
+    let void = *w.content.void_grounds.iter().next().unwrap();
+    let pos = Pos { x: 3.5, y: 3.5 };
+    let event = (0..64)
+        .find_map(|seed| {
+            let id = w.spawn_entity(0x651, pos, vec![]).unwrap();
+            w.entities.get_mut(&id).unwrap().damage = damage.iter().copied().collect();
+            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
+            w.defeat_entity(id).unwrap();
+            let event = w.pending_terminal_events().into_iter().next().unwrap();
+            if event.terminal_payload().unwrap().allocations().is_empty() {
+                crate::world::xml::tests::drain_events(&mut w).unwrap();
+                return None;
+            }
+            Some(event)
+        })
+        .expect("a seed draws a God bag");
+    // The corpse tile turns to void after the defeat: no bag can ever be placed there.
+    let width = w.map.width as usize;
+    Arc::make_mut(&mut w.map).cells[3 * width + 3].ground = void;
+    // Inside the window the stuck delivery logs once and stays pending rather than failing every drain.
+    crate::world::xml::tests::drain_events(&mut w).unwrap();
+    assert!(!w.delivery_events().is_empty() && w.bag_expiry.is_empty());
+    assert_eq!(
+        w.xml
+            .terminal_capacity
+            .load(std::sync::atomic::Ordering::Acquire),
+        1
+    );
+    w.now += super::xml::PREFLIGHT_RETRY_MS;
+    crate::world::xml::tests::drain_events(&mut w).unwrap();
+    assert!(w.delivery_events().is_empty() && w.bag_expiry.is_empty());
+    assert_eq!(
+        w.xml
+            .terminal_capacity
+            .load(std::sync::atomic::Ordering::Acquire),
+        0
+    );
+    let db = rusqlite::Connection::open(
+        std::path::PathBuf::from(std::env::var("QA_RESULTS_DIR").unwrap())
+            .join(format!("world-terminal-{}.db", w.xml.instance)),
+    )
+    .unwrap();
+    let unpicked: i64 = db
+        .query_row(
+            "SELECT count(*) FROM world_entitlements WHERE event=?1 AND status=0",
+            [&event.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        unpicked as usize,
+        event.terminal_payload().unwrap().allocations().len(),
+        "committed entitlements stay unpicked for operator reconciliation"
+    );
+}
+
+#[tokio::test]
+async fn level_one_players_receive_uncapped_xml_god_experience() {
+    let (mut w, _store, _) = reward_world().await;
+    assert!(w.players.values().all(|p| p.character.level == 1));
+    defeat(&mut w, 0x67d, &[], 0);
+    assert!(w.players.values().all(|p| p.character.exp == 450));
 }

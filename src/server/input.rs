@@ -1,4 +1,7 @@
-use crate::wire::{Codec, MAX_FRAME, Packet};
+use crate::wire::{Codec, MAX_FRAME, Packet, SHOOT_ACK};
+/// Client OTHERHIT, sent for every observed enemy projectile that strikes cover or another player (server.rs collision_report):
+/// https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Projectile.as#L237-L241
+const OTHER_HIT: u8 = 66;
 use axum::{body::Bytes, extract::ws::Message};
 use futures_util::{Stream, StreamExt};
 use std::{
@@ -45,8 +48,8 @@ where
     S: Stream<Item = Result<Message, E>> + Send + Unpin + 'static,
     E: Display + Send + 'static,
 {
-    // Input keeps its socket receipt time while queued; MAX_FRAME bytes and 512 packets/s bound it, so a stalled world need not drop players.
-    let (tx, rx) = mpsc::channel(512);
+    // Input keeps its socket receipt time while queued; MAX_FRAME bytes, 512 other packets/s and the outstanding SHOOT acks bound it, so a stalled world need not drop players.
+    let (tx, rx) = mpsc::channel(512 + crate::world::MAX_PENDING_SHOOT_UNITS);
     let last_frame = Arc::new(Mutex::new(None));
     let received_frame = last_frame.clone();
     let task = tokio::spawn(async move {
@@ -54,6 +57,7 @@ where
         let bytes = Arc::new(Semaphore::new(MAX_FRAME));
         let mut window = Instant::now();
         let mut count = 0usize;
+        let mut types = [0u32; 256];
         let mut dispatched = 0;
         let mut frame_number = 0;
         while let Some(message) = stream.next().await {
@@ -80,10 +84,18 @@ where
                     if window.elapsed().as_secs() >= 1 {
                         window = Instant::now();
                         count = 0;
+                        types = [0; 256];
                     }
-                    count = count.saturating_add(packets.len());
+                    for packet in &packets {
+                        types[packet.id as usize] += 1;
+                        // SHOOT acks only answer our own volleys (unsolicited ones close the session); Ruthven's bats legitimately drew 723/s.
+                        // OTHERHIT scales with nearby enemy fire, not our input, and is ignored; a Coil-temple snake swarm drew 495/s.
+                        count += usize::from(!matches!(packet.id, SHOOT_ACK | OTHER_HIT));
+                    }
                     if count > 512 {
-                        tracing::warn!("input packet rate exceeded");
+                        let types: Vec<_> =
+                            (0..=u8::MAX).zip(types).filter(|(_, n)| *n > 0).collect();
+                        tracing::warn!(count, ?types, "input packet rate exceeded");
                         crate::world::lose(&lost, "input_rate_exceeded");
                         return;
                     }
@@ -134,4 +146,30 @@ where
         }
     });
     (rx, InputTask { task, last_frame })
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn shoot_acks_and_other_hit_reports_do_not_count_toward_the_input_packet_rate() {
+    for (id, packets, cause) in [
+        (SHOOT_ACK, 2000, None),
+        (OTHER_HIT, 2000, None),
+        (crate::wire::MOVE, 513, Some("input_rate_exceeded")),
+    ] {
+        let mut client = Codec::client();
+        let frame: Vec<u8> = (0..packets)
+            .flat_map(|_| client.frame(id, vec![0; 4]))
+            .collect();
+        let (lost, observed) = watch::channel(None);
+        let stream = futures_util::stream::iter([Ok::<_, std::convert::Infallible>(
+            Message::Binary(frame.into()),
+        )]);
+        let (mut rx, _task) = receive(stream, lost, Default::default(), Default::default());
+        let mut received = 0;
+        while rx.recv().await.is_some() {
+            received += 1;
+        }
+        assert_eq!(*observed.borrow(), cause);
+        assert_eq!(received, if cause.is_none() { packets } else { 0 });
+    }
 }

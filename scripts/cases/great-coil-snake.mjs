@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
+export const realmSeed=0;
 const spec={class:0x300,level:8,seed:814,world:1,equipment:[0xa19,0xb27,0xa0d,-1],backpack:Array(8).fill(-1),stats:[720,252,50,25,50,75,40,50]};
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
 let coil,chest,blocked;
@@ -14,9 +15,9 @@ export async function prepare(api){
   const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json();blocked=new Set(map.blocked.map(p=>p.join(',')));
-  const coils=map.entities.filter(e=>e.kind===0xdc2);assert.equal(coils.length,2);
-  coil=coils.find(e=>[-3,-2,-1,0].every(dx=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(','))));assert(coil,'No natural Coil with a clear approach');
-  chest=map.entities.find(e=>e.kind===0x501&&e.pos.x===coil.pos.x&&e.pos.y===coil.pos.y);assert(chest,'Natural temple lacks its chest');
+  const coils=map.entities.filter(e=>e.kind===0xdc2),chestAt=e=>map.entities.find(c=>c.kind===0x501&&c.pos.x===e.pos.x&&c.pos.y===e.pos.y);
+  coil=coils.find(e=>chestAt(e)&&[-3,-2,-1,0].every(dx=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)].join(','))));assert(coil,'No natural chest temple Coil with a clear approach among '+coils.length);
+  chest=chestAt(coil);
   await writeFile(join(process.env.QA_RESULTS_DIR,'natural-temples.json'),JSON.stringify({world,coils,chest}));
   return {...spec,position:{x:coil.pos.x-3,y:coil.pos.y}};
 }
@@ -57,37 +58,45 @@ export async function run(game){
   let livingEgg;
   for(let n=0;n<24;n++){
     const s=await game.inspect();
-    livingEgg=s.diagnostic.entities.find(e=>e.kind===0xdc1&&e.activated!==null&&s.diagnostic.time_ms-e.activated<3000&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<4.5&&clearLine(s.view.position,e.pos));
+    livingEgg=s.diagnostic.entities.find(e=>e.kind===0xdc1&&e.parent===coil.id&&e.activated!==null&&s.diagnostic.time_ms-e.activated<3000&&Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<4.5&&clearLine(s.view.position,e.pos));
     if(livingEgg)break;await sample({keys:[],duration_ms:500});
   }
   assert(livingEgg,'No young natural egg with a clear dagger shot');
-  const beforeEgg=await game.inspect();
+  const beforeEgg=await save('before-egg');
   await game.act({keys:[],duration_ms:50,target:{entity:livingEgg.id,camera_angle:-Math.PI/4,fire:true}});
   await game.act({keys:[],duration_ms:400});
   const afterEgg=await save('egg-destroyed');
-  game.check('shooting an egg kills it without XP or immediate hatch',!entity(afterEgg,livingEgg.id)&&afterEgg.view.character.experience===beforeEgg.view.character.experience&&afterEgg.diagnostic.character.lifetime.kills===beforeEgg.diagnostic.character.lifetime.kills+1&&!afterEgg.diagnostic.entities.some(e=>e.kind===0xdc0&&e.activated>beforeEgg.diagnostic.time_ms&&Math.hypot(e.pos.x-livingEgg.pos.x,e.pos.y-livingEgg.pos.y)<1));
+  // A Coil can lay a fresh sibling between the inspect and the native hit. Match its durable terminal receipt to the observed Coil, not to one snapshot.
+  const {DatabaseSync}=await import('node:sqlite');
+  const db=new DatabaseSync(join(root,'state/game.db'),{readOnly:true});
+  const eggKills=db.prepare("SELECT json_extract(payload,'$.payload.data.defeat.actor') actor FROM world_events WHERE kind='terminal' AND status=2 AND json_extract(payload,'$.payload.data.defeat.kind')=3521 AND json_extract(payload,'$.payload.data.actions.publication.parent')=? AND json_extract(payload,'$.payload.data.actions.publication.reason')='Defeated'").all(coil.id);
+  db.close();
+  const shotEgg=eggKills[0]?.actor;
+  game.check('the native shot kills one existing Coil egg without XP or a hatch from that egg',eggKills.length===1&&!entity(afterEgg,shotEgg)&&
+    afterEgg.view.character.experience===beforeEgg.view.character.experience&&afterEgg.diagnostic.character.lifetime.kills===beforeEgg.diagnostic.character.lifetime.kills+1&&
+    !afterEgg.diagnostic.entities.some(e=>e.kind===0xdc0&&e.parent===shotEgg));
   await sample({keys:[],duration_ms:6000},{name:'coil-eggs',when:v=>v.game_ms>9000});
   await sample({keys:[],duration_ms:6000});
   const active=await save('active'),xp=active.view.character.experience;
   game.check('natural Coil activates and wanders',samples.some(s=>{const e=entity(s,coil.id);return e?.activated!==null&&Math.hypot(e.pos.x-coil.pos.x,e.pos.y-coil.pos.y)>.1;}));
   const aimed=[...shots.values()].filter(p=>p.owner===coil.id&&p.speed===65),rings=[...shots.values()].filter(p=>p.owner===coil.id&&p.speed===45);
   game.check('native client receives selected long-lived Snake Shot',aimed.length>0&&aimed.every(p=>p.lifetime_ms===16000));
-  game.check('native client receives ten-way 36-degree Ghost Shot rings',rings.length>=10&&new Set(rings.map(p=>Math.round((p.angle*180/Math.PI+360)%360))).size===10&&rings.every(p=>p.lifetime_ms===1000));
-  const hatched=[];
-  for(let i=1;i<samples.length;i++){
-    const s=samples[i],prior=samples[i-1];
-    for(const e of prior.diagnostic.entities.filter(e=>e.kind===0xdc1&&e.id!==livingEgg.id&&!entity(s,e.id))){
-      const children=s.diagnostic.entities.filter(c=>c.kind===0xdc0&&c.activated>prior.diagnostic.time_ms&&Math.hypot(c.pos.x-e.pos.x,c.pos.y-e.pos.y)<1);
-      if(children.length)hatched.push({id:e.id,age:s.diagnostic.time_ms-e.activated,count:children.length});
-    }
-  }
-  game.check('natural eggs hatch after five seconds into one or two Snakes without XP',hatched.length>0&&hatched.every(h=>h.age>=5000&&h.age<=5300&&h.count>=1&&h.count<=2)&&xp===afterEgg.view.character.experience);
+  // XML rings are targeted (actors.xml:10278), so each volley is ten 36-degree rays aimed at the player, not a fixed rosette.
+  const volleys=Map.groupBy(rings,p=>p.start.x+':'+p.start.y);
+  game.check('native client receives ten-way 36-degree Ghost Shot rings',[...volleys.values()].some(g=>g.length===10&&new Set(g.map(p=>Math.round(((p.angle*180/Math.PI)%36+36)%36)%36)).size===1)&&rings.every(p=>p.lifetime_ms===1000));
+  // XML eggs hatch after 5.4s into one or two Great Temple Snakes (actors.xml:10258-10266).
+  const firstSeen=kind=>{const m=new Map();for(const s of samples)for(const e of s.diagnostic.entities)if(e.kind===kind&&e.activated!==null&&!m.has(e.id))m.set(e.id,e);return [...m.values()];};
+  const snakes=firstSeen(0xdc0),hatched=firstSeen(0xdc1).filter(e=>e.id!==shotEgg).map(egg=>({id:egg.id,activated:egg.activated,children:snakes.filter(c=>c.parent===egg.id)})).filter(h=>h.children.length);
+  game.check('natural eggs hatch after 5.4 seconds into one or two Snakes without XP',hatched.length>0&&hatched.every(h=>h.children.length<=2&&h.children.every(c=>c.activated-h.activated>=5400&&c.activated-h.activated<=5800))&&xp===afterEgg.view.character.experience);
   game.check('Temple Snake attacks reach the native client',[...shots.values()].some(p=>p.owner!==coil.id&&samples.some(s=>entity(s,p.owner)?.kind===0xdc0)&&p.speed===55&&p.lifetime_ms===800));
   const cloakStart=(await game.inspect()).diagnostic.time_ms;
-  await sample({keys:[' '],duration_ms:6000});
+  // A single tap cloaks; a 6s held key outlives the native hold under load.
+  await sample({keys:[' '],duration_ms:250});await sample({keys:[],duration_ms:5750});
   const cloaked=samples.filter(s=>s.diagnostic.time_ms>cloakStart+1000&&(s.view.character.conditions&(1<<12)));
   game.check('ordinary cloak is observed',cloaked.length>0);
-  game.check('fixed Ghost Shot rings continue while the only nearby player is cloaked',cloaked.some(s=>s.view.projectiles.some(p=>p.owner===coil.id&&p.speed===45)));
+  // Every XML Coil Shoot is targeted (actors.xml:10276-10278), so no new ring is aimed at the only, cloaked player.
+  const before=new Set(samples.filter(s=>s.diagnostic.time_ms<=cloakStart).flatMap(s=>s.view.projectiles.map(p=>p.owner+':'+p.id)));
+  game.check('targeted Ghost Shot rings stop while the only nearby player is cloaked',!cloaked.some(s=>s.view.projectiles.some(p=>p.owner===coil.id&&p.speed===45&&!before.has(p.owner+':'+p.id)&&s.diagnostic.time_ms>cloakStart+1500)));
   await writeFile(join(process.env.QA_RESULTS_DIR,'attacks.json'),JSON.stringify({samples,shots:[...shots.values()],hatched}));
 
   await defeat(coil.id);await game.act({keys:[],duration_ms:500});

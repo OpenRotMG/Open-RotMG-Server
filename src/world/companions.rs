@@ -1,7 +1,7 @@
 use super::*;
 use crate::content::Object;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub(crate) struct Plan {
     pub source: Slot,
     pub permanent: bool,
@@ -75,6 +75,25 @@ fn castle_successor(content: &Content, item: &Object) -> Result<i32> {
 }
 
 impl World {
+    pub(super) fn preflight_companion(&self, kind: u16, pos: Pos) -> Result<()> {
+        ensure!(
+            self.companions.active.len() < 128,
+            controller("companion population limit reached")
+        );
+        self.xml_game().entity_admission(
+            kind,
+            AdmissionRole::Native(NativeService::Companion),
+            "actual companion owner/item reservation",
+        )?;
+        self.xml_preflight_position(kind, pos)?;
+        ensure!(
+            self.xml_live_count() < xml::ACTOR_LIMIT && self.xml_placeable(kind, pos, &[], None)?,
+            "actual companion placement/capacity refused: live={} limit={}",
+            self.xml_live_count(),
+            xml::ACTOR_LIMIT
+        );
+        Ok(())
+    }
     fn reserve_companion(
         &mut self,
         owner: i32,
@@ -82,10 +101,7 @@ impl World {
         permanent: bool,
         pos: Pos,
     ) -> Result<i32> {
-        ensure!(
-            self.companions.active.len() < 128,
-            controller("companion population limit reached")
-        );
+        self.preflight_companion(kind, pos)?;
         if !permanent {
             duration(kind)?;
             if matches!(kind, 0x1407 | 0x1408) {
@@ -110,7 +126,8 @@ impl World {
                 controller("at most eight temporary companions may be active")
             );
         }
-        let entity = self.spawn_entity(kind, pos, vec![])?;
+        let entity = allocate_id(&self.ids)?;
+        self.insert_entity_data(entity, kind, pos, vec![])?;
         let e = self.entities.get_mut(&entity).unwrap();
         e.published = false;
         e.reserved = true;
@@ -140,7 +157,17 @@ impl World {
         );
         Ok(entity)
     }
-    pub(super) fn attach_companion(&mut self, owner: i32, kind: u16, pos: Pos) -> Result<()> {
+    pub(super) fn attach_companion(
+        &mut self,
+        owner: i32,
+        character: &Character,
+        kind: u16,
+        pos: Pos,
+    ) -> Result<()> {
+        ensure!(
+            character.alive && character.pet_kind == Some(kind),
+            "companion entry lacks actual durable character selection"
+        );
         self.content.permanent_companion(kind)?;
         let id = self.reserve_companion(owner, kind, true, pos)?;
         self.publish_companion(id)
@@ -189,6 +216,31 @@ impl World {
         slot: Slot,
         item: &Object,
     ) -> Result<InventoryPlan> {
+        let p = self.players.get(&id).context("companion owner absent")?;
+        ensure!(
+            p.active()
+                && slot.object == id
+                && p.character.items.get(slot.slot) == Some(&slot.kind)
+                && slot.kind == i32::from(item.kind),
+            "companion item is not current owned inventory"
+        );
+        let game = self
+            .content
+            .game
+            .as_ref()
+            .context("companion GameData absent")?
+            .clone();
+        let item = game
+            .properties
+            .get(&item.kind)
+            .context("companion canonical selected item absent")?;
+        game.admission(
+            item.kind,
+            crate::content::game::AdmissionRole::Native(
+                crate::content::game::NativeService::Inventory,
+            ),
+            "owned companion item activation",
+        )?;
         let metadata = item
             .companion
             .as_ref()
@@ -198,6 +250,19 @@ impl World {
             "invalid companion item activation"
         );
         let kind = self.content.companion_kind(&metadata.object)?;
+        game.entity_admission(
+            kind,
+            crate::content::game::AdmissionRole::Native(
+                crate::content::game::NativeService::Companion,
+            ),
+            "owned companion item target",
+        )?;
+        ensure!(
+            game.property_dependencies
+                .get(&item.kind)
+                .is_some_and(|kinds| kinds.contains(&kind)),
+            "companion item lacks actual compiled target edge"
+        );
         let p = &self.players[&id];
         if metadata.permanent {
             ensure!(
@@ -228,12 +293,13 @@ impl World {
                 -1
             };
         }
+        let mut plan = self.plan(id, items, None)?;
         let entity = if selected.is_some() {
             Some(self.reserve_companion(id, kind, metadata.permanent, pos)?)
         } else {
             None
         };
-        let mut plan = self.plan(id, items, None);
+        self.cancel_trade(id, "Trade cancelled by owned companion activation.");
         plan.companion = Some(Plan {
             source: slot,
             permanent: metadata.permanent,
@@ -251,18 +317,6 @@ impl World {
             "companion staged; item not committed yet"
         );
         Ok(plan)
-    }
-    pub(super) fn discard_companion(&mut self, plan: &Option<Plan>) -> Result<()> {
-        if let Some(entity) = plan.as_ref().and_then(|p| p.entity) {
-            let pet = self
-                .companions
-                .active
-                .get(&entity)
-                .context("unpublished companion lost")?;
-            ensure!(!pet.published, "cannot discard a published companion");
-            self.remove_companion(entity);
-        }
-        Ok(())
     }
     pub(super) fn finish_companion(&mut self, owner: i32, plan: Option<Plan>) -> Result<()> {
         let Some(plan) = plan else { return Ok(()) };
@@ -368,7 +422,7 @@ impl World {
             .map(|e| e.id)
             .collect();
         for target in &targets {
-            self.damage_enemy(0, *target, 100, true, &[], None)?;
+            self.area_hit(None, *target, 100, true, &[])?;
         }
         let pet = self.companions.active.get_mut(&id).unwrap();
         pet.remaining -= 1;
@@ -545,7 +599,7 @@ impl World {
                         .collect();
                     for target in targets {
                         // Period drake damage does not establish player loot or weapon credit.
-                        self.damage_enemy(0, target, 35, false, &[], None)?;
+                        self.area_hit(None, target, 35, false, &[])?;
                     }
                 }
                 0x1402 => self.apply_condition(target, crate::condition::PARALYZED, 5000)?,
@@ -571,7 +625,7 @@ impl World {
             }
             if self.now >= next {
                 self.companions.bleeds.get_mut(&target).unwrap().1 = self.now + 1000;
-                self.damage_enemy(0, target, 30, true, &[], None)?;
+                self.area_hit(None, target, 30, true, &[])?;
             }
         }
         Ok(())

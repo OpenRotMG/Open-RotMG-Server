@@ -324,7 +324,7 @@ impl Directory {
             !self.worlds.contains_key(&id),
             "Realm allocation identity collision"
         );
-        let build = self.construction("realm-shore", "Realm", false, None);
+        let build = self.construction("realm", "Realm", false, None);
         let receiver = self.worlds.prepare_replacement(id, self.tick, build)?;
         self.next_world = next;
         self.realm_population.preparing = Some((id, receiver));
@@ -337,7 +337,7 @@ impl Directory {
 #[test]
 fn realm_population_grows_once_when_all_capacity_is_reserved() {
     let path = std::path::Path::new("data");
-    let content = Arc::new(Content::load(path).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut d = Directory::test_with_seed(path, content, 1, 1344).unwrap();
     d.issue(1, 1, -3).unwrap();
     d.issue(2, 2, 1).unwrap();

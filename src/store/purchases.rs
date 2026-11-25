@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Purchase {
     pub item: u16,
     pub slot: usize,
@@ -25,8 +25,9 @@ impl Store {
                 && write.revision < i32::MAX,
             "invalid purchase inventory"
         );
+        let operation = self.world_operation.clone();
         self.call(move |db| {
-            let tx = db.transaction()?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let registered: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM credentials WHERE account=?1)",
                 [write.account], |r| r.get(0))?;
@@ -48,6 +49,8 @@ impl Store {
                 .context("purchase wallet missing or invalid")?;
             ensure!(balance >= 0, "negative purchase wallet");
             if balance < purchase.price {
+                world_events::reject_operation(&tx, operation.as_ref())?;
+                tx.commit()?;
                 return Ok(None);
             }
             ensure!(tx.execute(debit, params![write.account, purchase.price])? == 1, "purchase debit conflict");
@@ -55,6 +58,7 @@ impl Store {
                 "UPDATE characters SET items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![write.id, write.account, write.revision, serde_json::to_string(&items)?])? == 1,
                 "purchase inventory conflict");
+            world_events::finish_operation(&tx, operation.as_ref(), &serde_json::json!({"revision":write.revision+1,"native_result":[write.revision+1,balance-purchase.price]}))?;
             tx.commit()?;
             Ok(Some((write.revision + 1, balance - purchase.price)))
         }).await

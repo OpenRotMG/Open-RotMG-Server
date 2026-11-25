@@ -17,15 +17,17 @@ export async function run(game){
     const before=await game.inspect(),ids=new Set(before.diagnostic.entities.map(e=>e.id));
     const kind=before.diagnostic.entities.find(e=>e.id===parent).kind;
     const parents=before.diagnostic.entities.filter(e=>e.kind===kind).map(e=>e.id);
+    // A distant wandering parent can leave the inspected neighbourhood without dying; only the fought group can split.
+    const near=id=>{const e=before.diagnostic.entities.find(e=>e.id===id);return Math.hypot(e.pos.x-before.view.position.x,e.pos.y-before.view.position.y)<9;};
     for(let n=0;n<12;n++){
-      const current=await game.inspect();if(parents.some(id=>!current.diagnostic.entities.some(e=>e.id===id)))break;
+      const current=await game.inspect();if(parents.some(id=>near(id)&&!current.diagnostic.entities.some(e=>e.id===id)))break;
       await game.act({keys:[],duration_ms:50,target:{entity:parent,camera_angle:-Math.PI/4,fire:true}});
       await game.act({keys:[],duration_ms:250});
     }
     await game.act({keys:[],duration_ms:1000},{name,when:()=>true});
     const after=await game.inspect(),children=after.diagnostic.entities.filter(e=>!ids.has(e.id)&&e.kind===child);
     observations.push({name,parent,child,count,before,after});await writeFile(join(process.env.QA_RESULTS_DIR,'splits.json'),JSON.stringify(observations));
-    const defeated=parents.filter(id=>!after.diagnostic.entities.some(e=>e.id===id));
+    const defeated=parents.filter(id=>near(id)&&!after.diagnostic.entities.some(e=>e.id===id));
     game.check(name+': parent deaths produce the exact surviving replacement generation',defeated.length>0&&children.length===count*defeated.length);
     game.check(name+': intermediate death leaves no potion bag',!after.diagnostic.entities.some(e=>!ids.has(e.id)&&e.items?.some(item=>item!==-1)));
     game.check(name+': intermediate death retains period XP',after.view.character.experience>before.view.character.experience);

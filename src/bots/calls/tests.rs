@@ -159,6 +159,7 @@ fn own_readiness_and_existing_commitments_decline_without_changing_goals() {
     );
     b.companion = None;
     v.map.name = "Snake Pit".into();
+    v.map.template = Some("snake-pit".into());
     assert_eq!(
         b.call_rejection(&v, &c, Activity::Snake, 200).unwrap(),
         Some("ordinary_dungeon_or_world")

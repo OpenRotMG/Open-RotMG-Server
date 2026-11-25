@@ -603,15 +603,18 @@ fn vault_trip_keeps_the_nexus_market_visit_until_an_outing() {
         ..Market::default()
     };
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     market.observe(&v);
     // Every world entry reloads the durable mind, which drops the process-local visit.
     let mut reloaded = Market::default();
     reloaded.bind();
     reloaded.continue_visit(&market);
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     reloaded.observe(&v);
     assert!(reloaded.session.is_some() && reloaded.session_used);
     v.map.name = "Realm".into();
+    v.map.template = Some("realm".into());
     reloaded.observe(&v);
     assert!(reloaded.session.is_none() && !reloaded.session_used);
 }
@@ -777,6 +780,7 @@ async fn funded_bots_settle_through_native_exchange() {
 fn vault_funds_preserve_the_sellers_fair_exact_price() {
     let (c, mut v) = crate::bots::quest_tests::fixture();
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.session.world = -2;
     let mut seller = v.objects.remove(0);
     seller.account = Some(2);
@@ -832,6 +836,7 @@ fn vault_funds_preserve_the_sellers_fair_exact_price() {
         .unwrap();
     assert!(matches!(to_vault.journey, Some(Journey::Portal(_))));
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     let seller = v.objects.remove(0);
     let mut chest = v.objects.pop().unwrap();
     chest.kind = 0x504;
@@ -858,6 +863,7 @@ fn vault_funds_preserve_the_sellers_fair_exact_price() {
         Some(Journey::Nexus)
     ));
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.objects = vec![seller];
     assert!(market.receive(&ad, &v, &c, None).unwrap());
     assert!(

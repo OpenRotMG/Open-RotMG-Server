@@ -3,7 +3,7 @@ use crate::{content::reviews::Review, store::Store};
 
 #[tokio::test]
 async fn reviewed_accounts_look_like_unnamed_guests_to_other_players_only() {
-    let mut content = Content::load(std::path::Path::new("data")).unwrap();
+    let mut content = crate::world::test_content();
     let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let marked = store.list("reviewed-name-marked".into()).await.unwrap().id;
     let plain = store.list("reviewed-name-plain".into()).await.unwrap().id;

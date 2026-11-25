@@ -28,12 +28,16 @@ export async function prepare(api){
 export async function run(game){
   let serial=0,protectedUntil=0;
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
-  const family=s=>s.diagnostic.entities.filter(e=>e.camp===lizard.camp&&kinds.includes(e.kind));
+  // XML Lizard God MakeMinions every elf role (actors.xml:1505-1509); they are owned by parent, not by the natural camp.
+  const family=s=>s.diagnostic.entities.filter(e=>(e.id===lizard.id||e.parent===lizard.id)&&kinds.includes(e.kind));
   async function protect(){
     const now=(await game.observe()).game_ms;assert(Number.isSafeInteger(now));if(now<protectedUntil)return;
     const path=join(process.env.QA_RESULTS_DIR,'protection-'+serial+'.json');
     await writeFile(path,JSON.stringify({id:'night-elf-protection-'+serial++,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
     execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);protectedUntil=now+60000;
+    // Protection renewals leave a gap; armor covers it against the God's full twelve-elf XML roster (fix-h flayers precedent).
+    await writeFile(path,JSON.stringify({id:'night-elf-armor-'+serial++,command:{op:'cheat',actor:game.actor,change:{kind:'stat_modifier',index:3,amount:100,duration_ms:60000}}}));
+    execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(root,'native.json'),path]);
   }
   const act=async(input,capture)=>{
     await protect();
@@ -41,29 +45,39 @@ export async function run(game){
     return game.act(input,capture);
   };
   const begin=await save('arrival');
-  game.check('natural HighForest camp contains the six selected identities',kinds.every(k=>family(begin).some(e=>e.kind===k)));
-  game.check('selected HP survives ordinary admission',[[0x650,900],[0x64f,180],[0x64a,240],[0x64b,280],[0x64c,220],[0x64d,300]].every(([k,hp])=>family(begin).filter(e=>e.kind===k).every(e=>e.hp===hp)));
+  // Recovered realm/high.xml:1400–1404: offspring belong to the XML spawner, not an ordinary population slot.
+  game.check('ordinary root is placed before it owns any offspring',begin.diagnostic.entities.some(e=>e.id===lizard.id&&e.camp===null&&e.parent===null)&&!begin.diagnostic.entities.some(e=>e.parent===lizard.id));
   await protect();
   const samples=[];
   for(let n=0;n<24;n++){await act({keys:[],duration_ms:500});samples.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify(samples));
   await act({keys:[],duration_ms:800},{name:'night-elves-combat',when:()=>true});
+  const seen=new Map();for(const s of samples)for(const e of family(s))if(!seen.has(e.id))seen.set(e.id,e);
+  game.check('activated God makes the five selected elf identities',kinds.every(k=>[...seen.values()].some(e=>e.kind===k)));
+  game.check('selected HP survives XML birth',[[0x650,900],[0x64f,180],[0x64a,240],[0x64b,280],[0x64c,220],[0x64d,300]].every(([k,hp])=>[...seen.values()].filter(e=>e.kind===k).every(e=>e.hp===hp)));
   for(const [kind,speed,lifetime] of [[0x650,70,1600],[0x64f,70,1200],[0x64a,75,2000],[0x64b,100,800],[0x64c,60,2000],[0x64d,80,2000]]){
     const ids=new Set(samples.flatMap(s=>family(s).filter(e=>e.kind===kind).map(e=>e.id)));
     game.check(kind+': selected projectile reaches native client',samples.some(s=>s.view.projectiles.some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime)));
-    game.check(kind+': activates and moves or holds its chase stop range',samples.some(s=>family(s).some(e=>e.kind===kind&&e.activated!==null&&(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<([0x650,0x64b].includes(kind)?1.5:7.5)||family(begin).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.2)))));
+    // The Lizard God follows to seven tiles (realm/high.xml), not the Warrior's melee range.
+    game.check(kind+': activates and moves or holds its chase stop range',samples.some(s=>family(s).some(e=>e.kind===kind&&e.activated!==null&&(Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<(kind===0x64b?1.5:7.5)||Math.hypot(e.pos.x-seen.get(e.id).pos.x,e.pos.y-seen.get(e.id).pos.y)>.2))));
   }
   const caps=[[0x650,1],[0x64f,1],[0x64a,4],[0x64b,3],[0x64c,2],[0x64d,2]];
-  game.check('current camp role caps hold',samples.every(s=>caps.every(([k,n])=>family(s).filter(e=>e.kind===k).length<=n)));
-  game.check('current reconstruction adds new owned elves while active',samples.some(s=>family(s).some(e=>!family(begin).some(p=>p.id===e.id))));
+  game.check('XML role caps hold',samples.every(s=>caps.every(([k,n])=>family(s).filter(e=>e.kind===k).length<=n)));
+  game.check('activated God fills its XML roster',samples.some(s=>caps.every(([k,n])=>family(s).filter(e=>e.kind===k).length===n)));
+  const report=JSON.parse(await readFile(join(root,'result.json'),'utf8')),headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
+  // The God climbs toward StayAbove altitude 160 (actors.xml:1490) and can leave the 20-tile diagnostic window, so chase it on the world map.
+  const locate=async(s,id)=>family(s).find(e=>e.id===id)??(id===lizard.id?(await (await fetch(report.origin+'/dev/map?player='+s.diagnostic.player,{headers})).json()).entities.find(e=>e.id===id):undefined);
   async function defeat(id){
-    const xp=(await game.observe()).character.experience;
-    for(let n=0;n<60;n++){
-      const s=await game.inspect(),e=family(s).find(e=>e.id===id);if(!e)break;
+    const xp=(await game.observe()).character.experience;let last;
+    for(let n=0;n<100;n++){
+      const s=await game.inspect(),e=await locate(s,id);if(!e)break;
       const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
-      if(Math.hypot(dx,dy)>4||!s.view.objects.some(o=>o.id===id&&o.hp>0))await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:150});
-      else await act({keys:[],duration_ms:150,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
-      await act({keys:[],duration_ms:250});
+      // Highland trees can pin a straight chase after the wandering God; step sideways when the approach stalls.
+      const stuck=last&&Math.hypot(s.view.position.x-last.x,s.view.position.y-last.y)<.05;last=s.view.position;
+      if(stuck&&Math.hypot(dx,dy)>4)await act({keys:[Math.abs(y)>Math.abs(x)?(y>0?'a':'d'):(x>0?'s':'w')],duration_ms:400});
+      else if(Math.hypot(dx,dy)>4||!s.view.objects.some(o=>o.id===id&&o.hp>0))await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:300});
+      // One act per attempt keeps six defeats against the full XML roster inside the native receipt budget.
+      else await act({keys:[],duration_ms:400,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
     }
     await act({keys:[],duration_ms:350});const dead=await save('defeated-'+id);
     game.check(id+': native staff defeats target and earns XP',!family(dead).some(e=>e.id===id)&&dead.view.character.experience>xp);
@@ -74,7 +88,7 @@ export async function run(game){
   for(const kind of [0x64f,0x64a,0x64b,0x64c,0x64d]){
     const s=await game.inspect(),victim=family(s).find(e=>e.kind===kind);
     if(victim)await defeat(victim.id);
-    else game.check(kind+': native collateral already defeated the observed role',family(begin).filter(e=>e.kind===kind).every(e=>!family(s).some(p=>p.id===e.id))&&s.view.character.experience>begin.view.character.experience);
+    else game.check(kind+': native collateral already defeated the observed role',[...seen.values()].filter(e=>e.kind===kind).every(e=>!family(s).some(p=>p.id===e.id))&&s.view.character.experience>begin.view.character.experience);
   }
   await act({keys:[],duration_ms:2500});
   const dead=await save('defeated'),survivors=family(dead),endStart=(await game.observe()).game_ms;

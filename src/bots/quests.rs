@@ -1,33 +1,35 @@
 //! Why a level-20 player leaves the Godlands for the quest arrow: an event worth joining, or a quest-hunting habit.
 use super::*;
-use std::sync::{LazyLock, Mutex};
 
-const SAMPLES: u32 = 400;
 // Catalog units are twelfths of a Defense potion; four Speed potions buy one Defense.
 const SPEED_POTION_UNITS: f32 = 3.;
 /// Below this, a quest is not worth a detour for someone with reasons to choose.
 const INTERESTING: f32 = 50.;
 
-static VALUES: LazyLock<Mutex<BTreeMap<u16, f32>>> = LazyLock::new(Default::default);
-
-/// Expected priced drops in Speed potions. Unpriced items count nothing: the price table is all a bot knows of worth.
-pub(super) fn loot_value(c: &Content, kind: u16) -> f32 {
-    if crate::encounter::profile(kind).is_none() {
-        return 0.;
-    }
-    *VALUES
-        .lock()
-        .expect("quest loot values poisoned")
-        .entry(kind)
-        .or_insert_with(|| {
-            let mut rng = rand::rngs::StdRng::seed_from_u64(u64::from(kind));
-            let units: u64 = (0..SAMPLES)
-                .flat_map(|_| crate::loot::rewards(c, kind, &mut rng))
-                .filter_map(|item| c.item_values.quote_range(i32::from(item)).ok())
-                .map(|range| (range.min + range.max) / 2)
-                .sum();
-            units as f32 / SAMPLES as f32 / SPEED_POTION_UNITS
+/// Expected priced drops in Speed potions from compiled attempt-item probabilities (before thresholds/min/max).
+/// Unpriced items count nothing: the price table is all a bot knows of worth.
+pub(super) fn loot_value(c: &Content, kind: u16) -> Result<f32> {
+    let game = c
+        .game
+        .as_ref()
+        .context("bot quest appeal requires compiled GameData")?;
+    let units: f64 = game
+        .definitions
+        .get(&kind)
+        .with_context(|| format!("bot quest appeal: kind {kind:#x} has no compiled definition"))?
+        .loot
+        .iter()
+        .flat_map(|row| {
+            row.pool
+                .iter()
+                .map(move |item| (row.probability / row.pool.len() as f64, *item))
         })
+        .filter_map(|(p, item)| {
+            let range = c.item_values.quote_range(i32::from(item)).ok()?;
+            Some(p * ((range.min + range.max) / 2) as f64)
+        })
+        .sum();
+    Ok((units / f64::from(SPEED_POTION_UNITS)) as f32)
 }
 
 /// Owner decision: about one level 20 in ten hunts quests; the rest farm the Godlands.
@@ -56,7 +58,11 @@ impl Appeal {
 pub(super) fn appeal(p: &Profile, c: &Content, kind: u16, crowd: usize) -> Appeal {
     // Veterans who recognize valuable bags also know what a quest drops; newcomers judge by the arrow and the crowd.
     let value = if p.knows_blue {
-        loot_value(c, kind)
+        // An undeclared quest kind is a data defect to report, not a reason to stop the bot.
+        loot_value(c, kind).unwrap_or_else(|error| {
+            tracing::error!(kind, %error, "bot quest appeal skipped drop value");
+            0.
+        })
     } else {
         0.
     };
@@ -97,7 +103,7 @@ fn red_demon_is_a_hero_not_an_event() {
 #[cfg(test)]
 #[test]
 fn calibration_print() {
-    let c = Content::load(std::path::Path::new("data")).unwrap();
+    let c = crate::world::test_content();
     for kind in [
         0xd50u16, 0xd54, 0xe37, 0xd5f, 0xd59, 0xd56, 0xd61, 0x675, 0x91f, 0x91b, 0x928, 0x678,
         0x67d, 0x654, 0x655, 0x656, 0x91a,
@@ -106,7 +112,7 @@ fn calibration_print() {
             "CAL {:#x} {} value={:.2} god={} quest={}",
             kind,
             c.objects[&kind].name,
-            loot_value(&c, kind),
+            loot_value(&c, kind).unwrap(),
             c.objects[&kind].god,
             c.objects[&kind].quest
         );

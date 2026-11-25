@@ -1,7 +1,5 @@
-use crate::{
-    content::{Cell, Content, Map},
-    encounter::{Motion, Profile, nr_speed},
-};
+use super::{Rect, opposite, rect_bounds};
+use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use std::{collections::BTreeMap, sync::LazyLock};
@@ -9,89 +7,22 @@ use std::{collections::BTreeMap, sync::LazyLock};
 pub const NAME: &str = "Davy Jones's Locker";
 pub const TEMPLATE: &str = "davy-jones-locker";
 pub const BOSS: u16 = 0xe32;
+#[cfg(test)]
 pub const UNLIT: u16 = 0xe35;
+#[cfg(test)]
 pub const LIT: u16 = 0xe36;
+#[cfg(test)]
 pub const KEYS: [u16; 4] = [0xe3e, 0xe3f, 0xe40, 0xe41];
-pub const COLORS: [&str; 4] = ["purple", "green", "red", "yellow"];
+#[cfg(test)]
 pub const DOORS: [u16; 4] = [0x186a, 0x186c, 0x1868, 0x186e];
-pub const ROSTER: [u16; 12] = [
-    BOSS, UNLIT, LIT, 0xe50, 0xe48, 0xe31, 0xe3a, 0xe44, 0xe2f, 0xe45, 0xe42, 0xe43,
-];
-
+/// Recovered openers delete their colour's door pair within 3 tiles once its key tag is set (ghostShip.xml:1861-1925).
+#[cfg(test)]
+pub const OPENERS: [u16; 4] = [0xe34, 0xe33, 0xe30, 0xe2e];
+#[cfg(test)]
 pub fn door_color(kind: u16) -> Option<usize> {
     DOORS
         .iter()
         .position(|door| kind == *door || kind == *door + 1)
-}
-pub fn profile(kind: u16) -> Option<Profile> {
-    let follow = |rate, interval| {
-        (
-            Motion::Follow {
-                sight: 8.,
-                stop: 1.,
-                idle: nr_speed(0.1),
-                duration: 0,
-                cooldown: 0,
-            },
-            rate,
-            interval,
-            10.,
-        )
-    };
-    let (motion, rate, interval, range) = match kind {
-        BOSS => (Motion::WanderHome { radius: 3. }, 0.2, 50, 12.),
-        UNLIT | 0x182e => (Motion::Stationary, 0., 0, 0.),
-        LIT => (Motion::Stationary, 0., 50, 10.),
-        0xe44 => (
-            Motion::Chase {
-                sight: 8.,
-                stop: 2.,
-            },
-            0.35,
-            4000,
-            10.,
-        ),
-        0xe48 => (
-            Motion::Orbit {
-                anchor: crate::encounter::Anchor::Parent,
-                radius: 3.,
-            },
-            0.3,
-            50,
-            10.,
-        ),
-        0xe45 => (
-            Motion::Chase {
-                sight: 13.,
-                stop: 6.,
-            },
-            0.2,
-            50,
-            13.,
-        ),
-        0xe31 | 0xe50 => follow(0.6, 2000),
-        0xe3a => follow(0.25, 1750),
-        0xe2f => follow(0.55, 1750),
-        0xe42 => follow(0.4, 2500),
-        0xe43 => follow(0.3, 2000),
-        _ => return None,
-    };
-    Some(Profile {
-        motion,
-        speed: if rate == 0. { 0. } else { nr_speed(rate) },
-        interval,
-        range,
-    })
-}
-pub fn initial_condition(kind: u16) -> i32 {
-    if kind == 0xe48 {
-        return crate::condition::bit(crate::condition::INVINCIBLE);
-    }
-    if matches!(kind, BOSS | LIT | 0xe50) || KEYS.contains(&kind) {
-        crate::condition::bit(crate::condition::INVULNERABLE)
-    } else {
-        0
-    }
 }
 
 /// Every layout tunable; sources are in data/README.md and the PR description.
@@ -201,44 +132,6 @@ static LIBRARY: LazyLock<Library> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../../data/davy-templates.json"))
         .expect("data/davy-templates.json is a valid template library")
 });
-
-#[derive(Clone, Copy, Debug)]
-struct Rect {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-}
-impl Rect {
-    /// The cell `along` this rect's `side` edge, `out` cells outside it.
-    fn at(self, side: char, along: i32, out: i32) -> (i32, i32) {
-        match side {
-            'N' => (self.x + along, self.y - out),
-            'S' => (self.x + along, self.y + self.h - 1 + out),
-            'W' => (self.x - out, self.y + along),
-            _ => (self.x + self.w - 1 + out, self.y + along),
-        }
-    }
-    fn grow(self, g: i32) -> Rect {
-        Rect {
-            x: self.x - g,
-            y: self.y - g,
-            w: self.w + 2 * g,
-            h: self.h + 2 * g,
-        }
-    }
-    fn overlaps(self, o: Rect) -> bool {
-        self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
-    }
-}
-fn opposite(side: char) -> char {
-    match side {
-        'N' => 'S',
-        'S' => 'N',
-        'W' => 'E',
-        _ => 'W',
-    }
-}
 
 struct Node {
     name: &'static str,
@@ -534,25 +427,26 @@ fn plan(rng: &mut StdRng) -> Option<(Vec<Node>, Vec<Rect>)> {
             .flatten();
         placed.or_else(|| attach(&mut nodes, &mut gaps, &any, &ROOM_WEIGHTS, false, rng))?;
     }
-    let (x0, y0, x1, y1) = bounds(nodes.iter().map(|n| n.rect).chain(gaps.iter().copied()));
+    let (x0, y0, x1, y1) = rect_bounds(nodes.iter().map(|n| n.rect).chain(gaps.iter().copied()));
     (x1 - x0 < WORLD - 2 && y1 - y0 < WORLD - 2).then_some((nodes, gaps))
 }
-fn bounds(rects: impl Iterator<Item = Rect> + Clone) -> (i32, i32, i32, i32) {
-    let min = |f: fn(&Rect) -> i32| rects.clone().map(|r| f(&r)).min().unwrap_or(0);
-    let max = |f: fn(&Rect) -> i32| rects.clone().map(|r| f(&r)).max().unwrap_or(0);
-    (
-        min(|r| r.x),
-        min(|r| r.y),
-        max(|r| r.x + r.w),
-        max(|r| r.y + r.h),
-    )
+
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    Ok(build(content, generator, seed)?.0)
 }
 
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
-    Ok(build(content, seed)?.0)
-}
-
-fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>)> {
+fn build(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<(Map, Vec<Node>)> {
+    let doors_for_color = generator.placements::<8>("door-halves")?;
+    let openers = generator.placements::<4>("door-openers")?;
+    let color_keys = generator.placements::<4>("room-keys")?;
     use tuning::*;
     const DARK: u8 = 0x7e;
     const SPACE: u8 = 0xfe;
@@ -585,7 +479,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>)> {
     // doorless and keyless.
     let holders = [0, rooms[red + GREEN + YELLOW], rooms[red], rooms[0]];
 
-    let (x0, y0, x1, y1) = bounds(nodes.iter().map(|n| n.rect).chain(gaps.iter().copied()));
+    let (x0, y0, x1, y1) = rect_bounds(nodes.iter().map(|n| n.rect).chain(gaps.iter().copied()));
     let (dx, dy) = (
         (WORLD - (x1 - x0) + 1) / 2 - x0,
         (WORLD - (y1 - y0) + 1) / 2 - y0,
@@ -633,6 +527,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>)> {
         region: 0,
     };
     let mut map = Map {
+        elevation: None,
         width: WORLD,
         height: WORLD,
         cells: vec![blank.clone(); (WORLD * WORLD) as usize],
@@ -697,7 +592,8 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>)> {
             // Lf/Rt order varies on nilly's side-by-side pairs; its three stacked pairs all put Lf on top.
             let lf_first = doors[i][0].0 == doors[i][1].0 || rng.gen_bool(0.5);
             for (k, &p) in doors[i].iter().enumerate() {
-                map.cells[at(p)].object = Some(DOORS[c] + u16::from((k == 0) == lf_first));
+                map.cells[at(p)].object =
+                    Some(doors_for_color[2 * c + usize::from((k == 0) == lf_first)]);
             }
         }
         let modules = if n.t.hall() {
@@ -715,9 +611,40 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>)> {
             }
         }
     }
+    for (i, n) in nodes.iter().enumerate() {
+        let Some(c) = n.color else { continue };
+        // No recovered layout places the opener; it needs a free walkable cell within its 3-tile reach of both halves.
+        let centre = |p: (i32, i32)| (p.0 as f32 + 0.5, p.1 as f32 + 0.5);
+        let reach = |p: (i32, i32)| {
+            doors[i]
+                .iter()
+                .map(|d| (centre(*d).0 - centre(p).0).hypot(centre(*d).1 - centre(p).1))
+                .fold(0f32, f32::max)
+        };
+        let (mx, my) = (doors[i][0].0, doors[i][0].1);
+        let p = (mx - 3..=mx + 3)
+            .flat_map(|x| (my - 3..=my + 3).map(move |y| (x, y)))
+            .filter(|&(x, y)| (0..WORLD).contains(&x) && (0..WORLD).contains(&y))
+            .filter(|&p| {
+                let cell = &map.cells[at(p)];
+                cell.object.is_none()
+                    && cell.ground != SPACE
+                    && content
+                        .grounds
+                        .get(&cell.ground)
+                        .is_some_and(|speed| *speed > 0.)
+            })
+            .min_by(|a, b| reach(*a).total_cmp(&reach(*b)))
+            .context("Davy coloured door pair lacks a free cell for its opener")?;
+        ensure!(
+            reach(p) <= 3.,
+            "Davy door opener cell is beyond its 3-tile reach"
+        );
+        map.cells[at(p)].object = Some(openers[c]);
+    }
     for (color, &i) in holders.iter().enumerate() {
         map.cells[at(keys[i].context("Davy key room lacks a key slot")?)].object =
-            Some(KEYS[color]);
+            Some(color_keys[color]);
     }
     let &(sx, sy) = map
         .spawns
@@ -766,9 +693,14 @@ mod tests {
 
     #[test]
     fn davy_tree_follows_2012_rules() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..48 {
-            let (map, nodes) = build(&content, seed).unwrap();
+            let (map, nodes) = build(
+                &content,
+                crate::dungeon::test_generator(&content, TEMPLATE),
+                seed,
+            )
+            .unwrap();
             let halls = nodes.iter().filter(|n| n.t.hall()).count();
             assert!(
                 tuning::HALLS.contains(&halls)

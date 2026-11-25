@@ -12,13 +12,14 @@ export async function run(game){
   const sarcs=before.view.objects.filter(o=>o.kind===0xd29&&distance(o.position,position)<2);
   assert.equal(sarcs.length,1,'Prepared position must identify exactly one original Sarcophagus');
   const sarc=sarcs[0],guards=view=>view.objects.filter(o=>(o.kind===0xd2a||o.kind===0xd2b)&&distance(o.position,sarc.position)<10);
-  const initial=guards(before.view);assert(initial.length>=8&&initial.length<=12,'Unexpected initial sentry population');assert(initial.every(o=>o.hp===o.max_hp),'Sentry census must start at full health');
-  records.original={sarc:sarc.id,guards:initial.map(o=>o.id)};await persist();
-  await game.act({keys:[' '],duration_ms:1800},{name:'tomb-sarcophagus-sentries',when:v=>v.world==='Tomb of the Ancients'&&v.lifecycle.alive&&v.game_ms>=1500&&v.character.mp<before.view.character.mp&&(v.character.conditions&(1<<12))!==0});
+  // dungeons.xml:1569 places only the Sarcophagus; actors.xml:7112-7119 ObjectToss lands its eight priests 1.5s later.
+  assert.equal(guards(before.view).length,0,'Sentries must come from the Sarcophagus toss, not the map');
+  records.original={sarc:sarc.id};await persist();
+  await game.act({keys:[' '],duration_ms:2500},{name:'tomb-sarcophagus-sentries',when:v=>v.world==='Tomb of the Ancients'&&v.lifecycle.alive&&v.game_ms>=1500&&v.character.mp<before.view.character.mp&&(v.character.conditions&(1<<12))!==0});
   const during=await game.inspect();records.during=during;await persist();
   await game.act({keys:['Insert'],duration_ms:300});const after=await game.inspect();records.after=after;await persist();
-  const present=guards(during.view),ids=present.map(o=>o.id).sort((a,b)=>a-b);
+  const present=guards(during.view);
   game.check('ordinary cloak spends mana without primary shots',(during.view.character.conditions&(1<<12))!==0&&during.view.character.mp<before.view.character.mp&&after.diagnostic.character.shots===0);
   game.check('same living Rogue escapes without kills or Tomb credit',after.view.map.name==='Nexus'&&after.view.lifecycle.alive&&after.view.session.character===before.view.session.character&&after.diagnostic.character.kills===0&&after.diagnostic.character.tombs===0);
-  game.check('original Sarcophagus retains eight full-health sentries',initial.length===8&&present.length===8&&JSON.stringify(ids)===JSON.stringify([...records.original.guards].sort((a,b)=>a-b))&&present.every(o=>o.hp===o.max_hp)&&during.view.objects.some(o=>o.id===sarc.id&&o.hp===15000));
+  game.check('Sarcophagus tosses four Priests and four Priestesses, all full health',present.length===8&&present.filter(o=>o.kind===0xd2a).length===4&&present.every(o=>o.hp===o.max_hp)&&during.view.objects.some(o=>o.id===sarc.id&&o.hp===15000));
 }

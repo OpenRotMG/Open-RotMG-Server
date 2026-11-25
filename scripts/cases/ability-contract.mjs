@@ -4,6 +4,8 @@ export const fixture={class:0x307,level:20,seed:879,world:-2,position:'spawn',eq
 export async function run(game){
   const records=[];
   const record=async label=>{const v=await game.inspect();records.push({label,...v});await writeFile(join(process.env.QA_RESULTS_DIR,'ability-observations.json'),JSON.stringify(records));return v.view;};
+  // Native LOAD can already accept keys while the selected client's arrival title still hides the inventory.
+  await game.act({keys:[],duration_ms:3500},{name:'ability-ready',when:view=>view.game_ms>=3000});
   const initial=await record('initial');
   await game.act({keys:[' '],mouse:{x:500,y:325},duration_ms:180});
   const thunder=await record('thunder');

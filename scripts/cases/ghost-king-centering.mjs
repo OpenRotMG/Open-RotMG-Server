@@ -13,7 +13,7 @@ export async function prepare(api) {
   const current = events.slice(start+1,end);
   const piece = current.find(e=>e.message==='named Realm boss setpiece placed'&&e.kind===0x928);
   assert(piece, 'Ordinary population must create a generated Ghost King tower');
-  const root = current.find(e=>e.message==='finite named Realm quest placed'&&e.kind===0x928&&e.x>=piece.x&&e.x<piece.x+piece.width&&e.y>=piece.y&&e.y<piece.y+piece.height);
+  const root = current.find(e=>e.message==='linked Realm site placed'&&e.kind===0x928&&e.x>=piece.x&&e.x<piece.x+piece.width&&e.y>=piece.y&&e.y<piece.y+piece.height);
   assert(root, 'Generated tower must have an ordinary quest root');
   await writeFile(join(out,'generated-tower.json'),JSON.stringify({world,piece,root},null,2));
   return {class:0x31e,level:20,seed:1296,world:1,position:{x:root.x,y:root.y+2},
@@ -24,6 +24,8 @@ export async function run(game) {
   game.check('generated King home is centered without changing the tower bounds',root.x===piece.x+13&&root.y===piece.y+13);
   const records = [];
   const entity = (state,id)=>state.diagnostic.entities.find(e=>e.id===id);
+  // Recovered Ghost King states (actors.xml:3800): Idle paces until HP<99.999%, then EvaluationStart1.
+  const phase = state=>(state.diagnostic.xml[root.entity]?.states??[]).map(x=>x.name).at(-1);
   async function save(label) {
     const state = await game.inspect();
     records.push({label,state});
@@ -46,21 +48,21 @@ export async function run(game) {
   for(let n=0;n<50;n++) {
     state = await game.inspect();
     const king = entity(state,root.entity);
-    assert(king?.stage===0&&king.hp===300000, 'Untouched ordinary King required');
+    assert([undefined,'Idle'].includes(phase(state))&&king?.hp===300000, 'Untouched ordinary King required');
     if(king.pos.x>=root.x+1.5)break;
     await game.act({keys:[],duration_ms:250});
   }
   state = await save('eastern-idle');
   game.check('ordinary King paces east inside its generated tower',entity(state,root.entity).pos.x>=root.x+1.5);
   await approach(entity(state,root.entity).pos);
-  for(let n=0;n<12&&entity(await game.inspect(),root.entity).stage===0;n++)
+  for(let n=0;n<12&&[undefined,'Idle'].includes(phase(await game.inspect()));n++)
     await game.act({keys:[],duration_ms:100,target:{entity:root.entity,camera_angle:-Math.PI/4,fire:true}});
   state = await save('evaluation-start');
-  game.check('ordinary sword fire starts King evaluation',entity(state,root.entity).stage===1);
+  game.check('ordinary sword fire starts King evaluation',phase(state)==='EvaluationStart1');
   await game.act({keys:[],duration_ms:10000},{name:'generated-tower-wave',when:()=>true});
   state = await save('wave-landed');
   const king = entity(state,root.entity);
-  const masters = state.diagnostic.entities.filter(e=>e.kind===0x929&&e.quest===king.quest);
+  const masters = state.diagnostic.entities.filter(e=>e.kind===0x929&&(e.parent===king.id||e.quest===king.quest));
   game.check('generated tower admits the required owned Ghost Master',masters.length===1);
   const master = masters[0];
   await approach(master.pos);
@@ -73,8 +75,10 @@ export async function run(game) {
     await game.act({keys:[],duration_ms:1000,target:{entity:master.id,camera_angle:-Math.PI/4,fire:true}});
   }
   state = await save('master-release');
+  // XML Wait times out 140s after entry, about when the Master lands (actors.xml:3933); a damaged Master (<94% HP) orders the release first.
+  const actual = state.diagnostic.entities.find(e=>e.kind===0x92d&&e.quest===king.quest);
   game.check('ordinary Master damage releases the same encounter before timeout',
-    !entity(state,root.entity)&&state.diagnostic.entities.some(e=>e.kind===0x92d&&e.quest===king.quest)&&state.diagnostic.time_ms-king.activated<140000);
+    !entity(state,root.entity)&&actual&&actual.activated-master.activated<139000);
   game.check('same Knight survives ordinary combat without health or phase overrides',state.view.lifecycle.alive);
   await game.act({keys:[],duration_ms:500},{name:'master-released-king',when:()=>true});
 }

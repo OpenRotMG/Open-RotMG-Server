@@ -1,7 +1,7 @@
 use super::*;
 
 fn fixture() -> (World, i32) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Arc::new(Map::load(std::path::Path::new("data/nexus-limbo.wmap"), &content).unwrap());
     let mut w = World::new(content, map).unwrap();
     w.clock.set_paused(true);
@@ -137,6 +137,7 @@ fn aura_recipients_and_inventory_commit_remain_authoritative() {
         w.now += 30_000;
     }
     let plan = begin(&mut w, id, 0xb0c);
+    let reserved = (plan.character, plan.revision);
     assert!(w.use_item(id, slot(id, 0xb0c), pos).is_err());
     assert_eq!(stats(&w, id), base);
     assert!(
@@ -145,9 +146,11 @@ fn aura_recipients_and_inventory_commit_remain_authoritative() {
     );
     assert_eq!(stats(&w, id), base);
     assert_eq!(w.players[&id].character.items[4], 0xb0c);
-    assert!(
-        w.players
-            .values()
-            .all(|p| p.boosts.iter().all(|b| b.until.is_some()))
-    );
+    // A failed reply may conceal COMMIT: the reservation stays unapplied and the owner quarantined, never refunded.
+    assert!(w.players[&id].persistence_failure.is_some());
+    assert!(w.players.values().all(|p| {
+        p.boosts
+            .iter()
+            .all(|b| b.until.is_some() || b.source == reserved)
+    }));
 }

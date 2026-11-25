@@ -1,0 +1,15 @@
+[
+  ["pirate-cave", "0927", "pirate_caves"],
+  ["snake-pit", "0917", "dungeons[0]"],
+  ["sprite-world", "0d06", "dungeons[1]"],
+  ["undead-lair", "0d90", "dungeons[2]"],
+  ["abyss-of-demons", "090a", "abysses"],
+  ["ocean-trench", "1706", "trenches"],
+  ["spider-den", "0936", "spider_dens"],
+  ["mad-lab", "0976", "mad_labs"],
+  ["forbidden-jungle", "0dc3", "jungles"],
+  ["manor-of-the-immortals", "1736", "manors"],
+  ["beachzone", "0e56", "beaches"],
+  ["davy-jones-locker", "0e32", "davy_lockers"],
+  ["tomb-of-the-ancients", "0d25", "tombs"]
+]

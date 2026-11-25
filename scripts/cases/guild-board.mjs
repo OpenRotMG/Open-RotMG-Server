@@ -50,17 +50,26 @@ export async function run(game){
   await ui(game,0,null,()=>click(0,700,575));
   await ui(peer,1,null,()=>click(1,700,575));
   game.check('two ordinary clients enter the same guild hall',(await game.observe()).world==='Guild Hall'&&(await peer.observe()).session.world===(await game.observe()).session.world);
-  async function walk(player,x,y){
+  async function walk(player,x,y,tolerance=.3){
     for(let n=0;n<30;n++){
-      const p=(await player.observe()).position,dx=x-p.x,dy=y-p.y,d=Math.hypot(dx,dy);if(d<.3)return;
+      const p=(await player.observe()).position,dx=x-p.x,dy=y-p.y,d=Math.hypot(dx,dy);if(d<tolerance)return;
       const sx=(dx-dy)/Math.SQRT2,sy=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(sx)>.1)keys.push(sx>0?'d':'a');if(Math.abs(sy)>.1)keys.push(sy>0?'s':'w');
       await player.act({keys,duration_ms:Math.min(1500,Math.max(50,Math.round(d*140)))});
     }
     throw Error(`Walk to ${x},${y} failed: ${JSON.stringify((await player.observe()).position)}`);
   }
-  await walk(game,15.5,11.5);await walk(game,11.5,11.5);await walk(game,11.5,9.2);
-  await walk(peer,15.5,11.5);await walk(peer,11.5,11.5);await walk(peer,11.5,9.2);
+  async function approachBoard(player){
+    await walk(player,15.5,11.5);await walk(player,12.5,10.5);
+    const state=await player.inspect(),board=state.view.objects.find(o=>o.kind===0x1e7&&o.position.x===11.5);
+    assert(board,'Western Grade 1 hall Guild Board must be visible');
+    // The south tile bounds movement at y=9.5. Approach the selected OccupySquare sign from the unoccupied east tile instead.
+    await walk(player,board.position.x+.75,board.position.y,.15);
+    const reached=await player.inspect();
+    await writeFile(join(out,`board-approach-${player.actor}-${reached.view.time_ms}.json`),JSON.stringify({position:reached.view.position,board:board.position}));
+  }
+  await approachBoard(game);
+  await approachBoard(peer);
   await ui(game,0,'board-founder-empty',()=>click(0,700,575));
   await ui(peer,1,'board-member-empty',()=>click(1,700,575));
   game.check('both members load the same initially empty board',clients.every(c=>c.responses.some(r=>r.op==='getBoard'&&r.text==='')));
@@ -86,7 +95,7 @@ export async function run(game){
   game.check('ordinary Nexus reconnect preserves the same living character',(await game.observe()).world==='Nexus'&&(await game.observe()).lifecycle.alive&&(await game.observe()).session.character===beforeReconnect.session.character);
   await walk(game,76.5,77.1);
   await ui(game,0,null,()=>click(0,700,575));
-  await walk(game,15.5,11.5);await walk(game,11.5,11.5);await walk(game,11.5,9.2);
+  await approachBoard(game);
   await ui(game,0,'board-after-reconnect',()=>click(0,700,575));
   game.check('reconnect and hall reentry retain saved board',clients[0].responses.at(-1).text===text);
   game.check('both ordinary native participants remain alive',(await game.observe()).lifecycle.alive&&(await peer.observe()).lifecycle.alive);

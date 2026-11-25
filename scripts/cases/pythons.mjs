@@ -27,10 +27,10 @@ export async function checkPythons(game,kinds,position){
     game.check(p.kind+': generated Python activates and moves',samples.some(s=>s.diagnostic.entities.some(e=>e.id===p.id&&e.activated!==null&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.2)));
     game.check(p.kind+': selected projectile appears during native combat',[...shots.values()].some(s=>s.owner===p.id&&s.speed===80&&s.lifetime_ms===(p.kind===0x225?2000:3000)));
   }
-  // The dated guide supports three Fire shots, not exact cadence or loot odds: https://wikiwiki.jp/rmd/Fire%20Python
-  if(kinds.includes(0x225))game.check('Fire Python emits six-degree three-shot fans',samples.some(s=>{
+  // Fire Python uses three shots with the 9° Shoot default (snakePit.xml:439ff; actors.xml:240-244; docs/reference-sources.md).
+  if(kinds.includes(0x225))game.check('Fire Python emits nine-degree three-shot fans',samples.some(s=>{
     const fan=s.view.projectiles.filter(p=>p.owner===targets.find(p=>p.kind===0x225).id);
-    return fan.some(p=>[-1,1].every(sign=>fan.some(q=>Math.hypot(p.start.x-q.start.x,p.start.y-q.start.y)<.001&&Math.abs(q.angle-p.angle-sign*Math.PI/30)<.001)));
+    return fan.some(p=>[-1,1].every(sign=>fan.some(q=>Math.hypot(p.start.x-q.start.x,p.start.y-q.start.y)<.001&&Math.abs(q.angle-p.angle-sign*Math.PI/20)<.001)));
   }));
   for(const target of targets){
     const before=await game.inspect(),alive=before.diagnostic.entities.some(e=>e.id===target.id),xp=before.view.character.experience;

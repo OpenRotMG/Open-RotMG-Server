@@ -4,6 +4,8 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const out=process.env.QA_RESULTS_DIR;
 process.env.RUST_LOG='info,openrotmg::world::native_hits=debug';
+// The same pinned layout as phoenix-god-boundary.mjs places a natural Phoenix Lord.
+export const realmSeed=1058;
 const spec={class:0x31d,level:20,seed:799,world:1,equipment:[0xb0b,0xb29,0xafc,0xac0],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 let root;
 export async function prepare(api){
@@ -12,7 +14,7 @@ export async function prepare(api){
   const end=events.findLastIndex(f=>f.message==='Realm simulation populated'&&f.layout===info.realm_layout);
   assert(end>=0,'Completed Realm population required');
   const start=events.slice(0,end).findLastIndex(f=>f.message==='Realm simulation populated');
-  root=events.slice(start+1,end).find(f=>f.message==='finite named Realm quest placed'&&f.kind===0x675&&f.layout===info.realm_layout);
+  root=events.slice(start+1,end).find(f=>f.message==='linked Realm site placed'&&f.kind===0x675&&f.layout===info.realm_layout);
   await writeFile(join(out,'site.json'),JSON.stringify({info,root}));
   assert(root,'This ordinary Realm has zero Pyres, a valid population; this case requires a naturally placed Phoenix');
   return {...spec,position:{x:root.x,y:root.y}};
@@ -28,7 +30,9 @@ export async function run(game){
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
     protectedUntil.set(actor.actor,now+duration_ms);
   }
-  const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id),family=s=>s.diagnostic.entities.filter(e=>e.quest===root.entity),form=(s,kind)=>family(s).find(e=>e.kind===kind);
+  // Quest forms inherit the quest; their XML MakeMinions Pyre birds are owned by parent (actors.xml:1903).
+  const heads=new Set([root.entity]),entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
+  const family=s=>{for(const e of s.diagnostic.entities)if(e.quest===root.entity)heads.add(e.id);return s.diagnostic.entities.filter(e=>heads.has(e.id)||heads.has(e.parent));},form=(s,kind)=>family(s).find(e=>e.kind===kind);
   async function approach(actor,point,range=1.5){
     for(let n=0;n<60;n++){
       const view=await actor.observe(),dx=point.x-view.position.x,dy=point.y-view.position.y;
@@ -41,15 +45,18 @@ export async function run(game){
     throw Error('Native walking did not reach the observed target');
   }
   async function fire(actor,id,ms=150){
+    if((await actor.observe()).game_ms>=protectedUntil.get(actor.actor))await protect(actor);
     const target=entity(await actor.inspect(),id);assert(target,'Living combat target required');
     await approach(actor,target.pos);
     await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
   }
   const initial=await save('entry');assert(entity(initial,root.entity)?.kind===0x675,'Ordinary placed Lord required');
   await protect(game);
-  await game.act({keys:['s'],duration_ms:150});
-  game.check('native movement at the naturally placed Pyre',Math.hypot((await game.observe()).position.x-initial.view.position.x,(await game.observe()).position.y-initial.view.position.y)>.3);
-  await game.act({keys:['w'],duration_ms:150});
+  // The Pyre's scenery can wall off any one side of the Lord's spawn point.
+  const moved=async()=>{const v=await game.observe();return Math.hypot(v.position.x-initial.view.position.x,v.position.y-initial.view.position.y)>.3;};
+  for(const key of ['s','d','w','a'])if(!await moved())await game.act({keys:[key],duration_ms:150});
+  game.check('native movement at the naturally placed Pyre',await moved());
+  await approach(game,initial.view.position,.3);
   await game.act({keys:[],duration_ms:1000},{name:'phoenix-lord',when:()=>true});
   const active=await save('active');
   game.check('Lord activates and summons both Birdman kinds',entity(active,root.entity).activated!==null&&[0x676,0x677].every(k=>family(active).some(e=>e.kind===k)));
@@ -57,21 +64,24 @@ export async function run(game){
   for(let n=0;n<30&&entity(await game.inspect(),root.entity);n++)await fire(game,root.entity);
   let state=await save('egg-born'),egg=form(state,0x6c2);assert(egg,'Native Lord defeat must produce Egg');
   const lordHistory=await history();
-  game.check('Lord transforms without an intermediate defeat or private reward',lordHistory.some(f=>f.message==='named quest transformed without rewards'&&f.entity===root.entity&&f.replacement===egg.id)&&!lordHistory.some(f=>f.message==='enemy defeated'&&f.entity===root.entity)&&!state.diagnostic.entities.some(e=>e.extra_stats.some(([stat,account])=>stat===54&&account>=0)));
+  // XML Phoenix Lord really dies (XP, no loot table) and MetamorphoseAtDeath births the Egg (actors.xml:1905); base transformed without rewards.
+  game.check('Lord dies into its quest-carrying Egg without a private reward',lordHistory.some(f=>f.message==='enemy defeated'&&f.entity===root.entity)&&egg.quest===root.entity&&!state.diagnostic.entities.some(e=>e.extra_stats.some(([stat,account])=>stat===54&&account>=0)));
   game.check('Egg retains encounter and contributor damage',egg.quest===root.entity&&egg.damage[game.actor]===3000);
   const shield=1<<24,eggHp=egg.hp,eggSize=egg.size;
   game.check('new Egg is invulnerable',!!(egg.condition&shield));
-  await game.act({keys:[],duration_ms:300,target:{entity:egg.id,camera_angle:-Math.PI/4,fire:true}},{name:'phoenix-egg-shielded',when:()=>true});
+  // The Egg is only shielded for 2s (actors.xml:2222-2225); keep the probe short.
+  await game.act({keys:[],duration_ms:150,target:{entity:egg.id,camera_angle:-Math.PI/4,fire:true}},{name:'phoenix-egg-shielded',when:()=>true});
   state=await save('egg-shielded');egg=entity(state,egg.id);
   game.check('shielded Egg rejects native sword damage',egg.hp===eggHp);
-  game.check('shielded Egg retains selected size130',eggSize===130&&egg.size===130);
+  // XML grows the Egg only once unshielded (actors.xml Phoenix Egg grow/shrink); a loaded 150ms probe can overrun the 2s shield.
+  game.check('new shielded Egg has selected size130',eggSize===130);
   await game.act({keys:[],duration_ms:2000});
   state=await save('egg-vulnerable');egg=entity(state,egg.id);
   game.check('Egg becomes vulnerable and stays stationary',!(egg.condition&shield)&&Math.hypot(egg.pos.x-form(records.find(r=>r.label==='egg-born').state,0x6c2).pos.x,egg.pos.y-form(records.find(r=>r.label==='egg-born').state,0x6c2).pos.y)<.01);
   for(let n=0;n<45&&entity(await game.inspect(),egg.id);n++)await fire(game,egg.id);
   state=await save('reborn');const reborn=form(state,0x6c1);assert(reborn,'Native Egg defeat must produce Reborn');
   const eggHistory=await history();
-  game.check('Egg transforms without an intermediate defeat and preserves damage',eggHistory.some(f=>f.message==='named quest transformed without rewards'&&f.entity===egg.id&&f.replacement===reborn.id)&&!eggHistory.some(f=>f.message==='enemy defeated'&&f.entity===egg.id)&&reborn.damage[game.actor]===8000);
+  game.check('Egg dies into the quest-carrying Reborn and preserves damage',eggHistory.some(f=>f.message==='enemy defeated'&&f.entity===egg.id)&&reborn.quest===root.entity&&reborn.damage[game.actor]===8000);
   const shots=[],positions=[];let pending=null,error=null;
   const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(s=>{shots.push(...s.view.projectiles.filter(p=>p.owner===reborn.id));positions.push(entity(s,reborn.id)?.pos);}).catch(e=>{error=e;}).finally(()=>{pending=null;});},100);
   try{await game.act({keys:[],duration_ms:9500},{name:'phoenix-reborn',when:()=>true});}finally{clearInterval(timer);if(pending)await pending;}
@@ -84,6 +94,9 @@ export async function run(game){
   game.check('Reborn wanders',positions.some(p=>p&&Math.hypot(p.x-reborn.pos.x,p.y-reborn.pos.y)>.2));
   const expires=Math.max(...protectedUntil.values())+50;
   while((await game.observe()).game_ms<expires)await game.act({keys:[],duration_ms:Math.min(10000,expires-(await game.observe()).game_ms)});
+  // The Reborn now flies with up to four XML Pyre birds (actors.xml:2201), so enter the unprotected hit at full health.
+  const full=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'vitals',hp:770,mp:(await game.observe()).character.mp}}})});
+  assert(full.ok&&(await full.json()).status==='succeeded','Full-health fixture required');
   const beforeHit=(await game.observe()).character.hp;
   for(let n=0;n<25&&!((await game.observe()).character.conditions&(1<<2));n++){
     await approach(game,entity(await game.inspect(),reborn.id).pos,.25);
@@ -91,7 +104,8 @@ export async function run(game){
   }
   const weakened=await save('weak');
   const events=await history();
-  game.check('unprotected native spinner collision applies Weak and loses HP',!!(weakened.view.character.conditions&(1<<2))&&weakened.view.character.hp<beforeHit&&events.some(f=>f.message==='player damaged'&&f.player===weakened.view.session.player&&f.owner===reborn.id&&f.source_kind===0x6c1&&f.damage>0));
+  // Vitality regenerates a ~9 HP spinner hit within the act (local b01e2f98), so read the HP loss from the hit's own record.
+  game.check('unprotected native spinner collision applies Weak and loses HP',!!(weakened.view.character.conditions&(1<<2))&&events.some(f=>f.message==='player damaged'&&f.player===weakened.view.session.player&&f.owner===reborn.id&&f.source_kind===0x6c1&&f.damage>0&&f.hp<beforeHit));
   await game.act({keys:[],duration_ms:100},{name:'phoenix-weak',when:()=>true});
   await protect(game,60000);
   const companion=await game.join({...spec,world:initial.view.session.world,seed:800,position:entity(await game.inspect(),reborn.id).pos});

@@ -105,26 +105,9 @@ impl Directory {
 
 impl World {
     pub(super) fn allow_teleport(&self) -> bool {
-        // Abyss dungeon anchoring relies on player teleports: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
-        matches!(
-            self.name.as_str(),
-            // Build 123.0.0 exposes Nexus Teleport: https://www.youtube.com/watch?v=Ex_Ix3dlB4U&t=299
-            "Nexus"
-                | "Realm"
-                | "Pirate Cave"
-                // Period dungeon groups teleport to clearers: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
-                | "Spider Den"
-                | "Snake Pit"
-                | "Sprite World"
-                | "Undead Lair"
-                | "Abyss of Demons"
-                // Manor follows the ordinary-world permission: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/World.cs#L35
-                | "Manor of the Immortals"
-                // Trench groups teleport to rushers: https://www.realmeye.com/wiki/ocean-trench#tips-and-strategies
-                | "Ocean Trench"
-                // Tomb parties teleport to rushers: https://web.archive.org/web/20130502034124id_/http://forums.wildshadow.com/wiki/realm-mad-god/tomb-ancients
-                | "Tomb of the Ancients"
-        )
+        self.xml_world_template()
+            .and_then(|w| w.services.allow_teleport.as_ref())
+            .is_some_and(|service| service.value)
     }
 
     fn teleport_destination(&self, id: i32, target: i32) -> Result<Pos> {
@@ -184,61 +167,6 @@ impl World {
         Ok(q.pos)
     }
 
-    // Multi-recipient healing follows this comparator, not authenticated 123.5.1 policy: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/HealPlayer.cs
-    pub(super) fn fountain_heal(&mut self) {
-        const RANGE: f32 = 5.;
-        const AMOUNT: i32 = 100;
-        if self.fountains.is_empty() || self.now < self.next_fountain_heal {
-            return;
-        }
-        self.next_fountain_heal = self.now + 1000;
-        let fountains = self.fountains.clone();
-        let mut healed = Vec::new();
-        for (fountain, pos) in fountains {
-            for (id, p) in self.players.iter_mut() {
-                if !ready(p)
-                    || p.pos.distance(pos) >= RANGE
-                    || p.conditions(self.now) & crate::condition::bit(crate::condition::SICK) != 0
-                {
-                    continue;
-                }
-                let cap = p
-                    .effective(&self.content, self.now)
-                    .expect("validated player equipment and base stats")[0];
-                let amount = (cap - p.character.hp).clamp(0, AMOUNT);
-                if amount == 0 {
-                    continue;
-                }
-                let before = p.character.hp;
-                p.character.hp += amount;
-                p.audit_hp(*id, &self.name, self.now, "fountain", before);
-                healed.push((*id, amount, p.pos, fountain));
-            }
-        }
-        for (id, amount, pos, fountain) in healed {
-            let mut out = Writer::new();
-            out.i32(id).utf(&format!("+{amount}")).u32(0xff00ff00);
-            for p in self
-                .players
-                .values()
-                .filter(|p| ready(p) && p.known.contains(&id) && p.known.contains(&fountain))
-            {
-                send(p, wire::NOTIFICATION, out.0.clone());
-                send(p, wire::SHOW_EFFECT, effect(1, id, pos));
-                send(p, wire::SHOW_EFFECT, effect(7, fountain, pos));
-            }
-            tracing::info!(
-                player = id,
-                fountain,
-                amount,
-                x = pos.x,
-                y = pos.y,
-                world = %self.name,
-                "fountain healed player"
-            );
-        }
-    }
-
     pub(super) fn consumable_heal_nova(
         &mut self,
         owner: i32,
@@ -289,14 +217,15 @@ impl World {
         item: &Object,
         amount: i32,
         range: f32,
+        eligible: Option<&[i32]>,
     ) -> Result<()> {
         let p = self.players.get(&id).context("healer missing")?;
         let position = p.pos;
         let healing = self
             .players
             .iter()
-            .filter(|(_, q)| {
-                ready(q)
+            .filter(|(target, q)| {
+                eligible.map_or_else(|| ready(q), |eligible| eligible.contains(target))
                     && q.pos.distance(position) < range
                     && q.conditions(self.now) & crate::condition::bit(crate::condition::SICK) == 0
             })

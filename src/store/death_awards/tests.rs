@@ -368,8 +368,8 @@ async fn every_selected_ring_pays_only_its_equipped_fame_once() {
 
 #[test]
 fn leather_armor_selected_bonuses_caps_eligibility_and_fame() {
-    let content = Content::load(Path::new("data")).unwrap();
-    let collectible = crate::loot::collectibles(&content);
+    let content = crate::world::test_content();
+    let collectible = crate::loot::catalogue::collectibles(content.game.as_ref().unwrap());
     let roster = [
         (0xa78, 5, 0, 0, 0, 0),
         (0xa0d, 6, 0, 0, 0, 0),
@@ -475,7 +475,7 @@ async fn all_death_fame_phase2_schema17_roundtrip_corruption() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i32>(0))
             .unwrap(),
-        24
+        25
     );
     let original: String = db
         .query_row(

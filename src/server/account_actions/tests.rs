@@ -9,7 +9,7 @@ pub(crate) fn fixture_with_native_control() -> (PathBuf, App) {
 fn fixture_with_control(native: bool) -> (PathBuf, App) {
     let dir = std::env::temp_dir().join(format!("session-actions-{}", rand::random::<u64>()));
     std::fs::create_dir(&dir).unwrap();
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let testing = native.then(|| {
         std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))
             .unwrap();
@@ -21,13 +21,7 @@ fn fixture_with_control(native: bool) -> (PathBuf, App) {
         super::super::testing::Testing::open(&dir).unwrap().unwrap()
     });
     let directory = if native {
-        crate::world::Directory::prepared(
-            std::path::Path::new("data"),
-            content.clone(),
-            16,
-            12351,
-            2,
-        )
+        crate::world::Directory::prepared(content.clone(), 16, 12351, 2)
     } else {
         crate::world::Directory::test_with_seed(
             std::path::Path::new("data"),

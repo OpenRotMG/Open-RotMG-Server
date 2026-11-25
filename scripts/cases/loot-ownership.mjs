@@ -10,9 +10,13 @@ export async function run(game){
   const hen=dropped.diagnostic.entities.find(e=>e.kind===0x6b2);
   game.check('authored Tutorial hen exists',!!hen);
   for(let i=0;i<20&&(await game.inspect()).diagnostic.entities.some(e=>e.id===hen.id);i++)await game.act({keys:[],duration_ms:400,target:{entity:hen.id,camera_angle:-Math.PI/4,fire:true}});
-  const killed=await game.inspect(),publicBag=killed.diagnostic.entities.find(e=>e.kind===0x500&&e.items?.includes(0xab0));
-  game.check('ordinary staff combat earns one public hen reward',!killed.diagnostic.entities.some(e=>e.id===hen.id)&&!!publicBag);
-  game.check('noncontributor native account sees public loot',(await other.inspect()).view.objects.some(e=>e.id===publicBag.id));
+  // Evil Hen's only row is SoulboundLoot prob=1 Health Potion (game/123.5.1/actors.xml:2182): private to its damager.
+  // Rewards publish from the durable journal receipt, so the bag can appear a few ticks after the death.
+  let killed=await game.inspect();
+  for(let i=0;i<10&&!killed.diagnostic.entities.some(e=>e.items?.includes(0xa22));i++){await game.act({keys:[],duration_ms:300});killed=await game.inspect();}
+  const henBag=killed.diagnostic.entities.find(e=>e.items?.includes(0xa22));
+  game.check('ordinary staff combat earns one private hen reward',!killed.diagnostic.entities.some(e=>e.id===hen.id)&&!!henBag&&killed.view.objects.some(e=>e.id===henBag.id));
+  game.check('noncontributor native account cannot see the soulbound reward',!(await other.inspect()).view.objects.some(e=>e.id===henBag.id));
   async function approach(client,goal){
     for(let i=0;i<40;i++){
       const v=await client.observe(),dx=goal.x-v.position.x,dy=goal.y-v.position.y;
@@ -24,14 +28,14 @@ export async function run(game){
     }
     throw Error('Native approach did not reach loot');
   }
-  await approach(other,publicBag.pos);
-  await other.act({keys:[],duration_ms:700},{name:'loot-public',when:()=>true});
-  const collecting=await other.observe();
-  await other.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
-  const picked=await other.observe();
-  game.check('noncontributor collects the earned public potion once',picked.character.items[4]===0xab0&&picked.character.inventory_revision===collecting.character.inventory_revision+1);
-  await other.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
-  game.check('empty bag cannot duplicate its reward',(await other.observe()).character.inventory_revision===picked.character.inventory_revision);
+  await approach(game,henBag.pos);
+  await game.act({keys:[],duration_ms:700},{name:'loot-private-reward',when:()=>true});
+  const collecting=await game.observe();
+  await game.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+  const picked=await game.observe();
+  game.check('eligible killer collects the earned potion once',picked.character.items[4]===0xa22&&picked.character.inventory_revision===collecting.character.inventory_revision+1);
+  await game.act({keys:[],duration_ms:400,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
+  game.check('empty bag cannot duplicate its reward',(await game.observe()).character.inventory_revision===picked.character.inventory_revision);
   // Both comparators schedule removal, not public conversion: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L142
   for(let i=0;i<7;i++){
     await game.act({keys:[],duration_ms:10000});
@@ -39,7 +43,7 @@ export async function run(game){
   }
   const expired=await game.inspect();
   game.check('nonempty private loot expires without becoming public',!expired.diagnostic.entities.some(e=>e.id===privateBag.id));
-  game.check('collected public loot is removed',!expired.diagnostic.entities.some(e=>e.id===publicBag.id));
-  game.check('expiry does not remove the collected potion or kill either character',(await other.observe()).character.items[4]===0xab0&&expired.view.lifecycle.alive&&(await other.observe()).lifecycle.alive);
+  game.check('collected reward bag is removed',!expired.diagnostic.entities.some(e=>e.id===henBag.id));
+  game.check('expiry does not remove the collected potion or kill either character',expired.view.character.items[4]===0xa22&&expired.view.lifecycle.alive&&(await other.observe()).lifecycle.alive);
   await game.act({keys:[],duration_ms:800},{name:'loot-expired',when:()=>true});
 }

@@ -36,7 +36,8 @@ export async function run(game){
     return after;
   }
   const rateBefore=await cast('t6-seal',95);
-  await game.act({keys:[],duration_ms:100},{name:'healing-rate',when:view=>view.game_ms>rateBefore.caster.game_ms});
+  // A subsecond window quantizes integer HP enough to obscure the 28 HP/s rate (paladin_tests.rs).
+  await game.act({keys:[],duration_ms:2000},{name:'healing-rate',when:view=>view.game_ms>rateBefore.caster.game_ms});
   const rateAfter=await sample('rate-after');
   for(const role of ['caster','ally']){
     const actual=(rateAfter[role].character.hp-rateBefore[role].character.hp)*1000/(rateAfter[role].game_ms-rateBefore[role].game_ms);

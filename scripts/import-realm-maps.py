@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import array
 import hashlib
+import json
 from pathlib import Path
 import struct
 import sys
@@ -15,7 +16,7 @@ BLOBS = (
 )
 
 
-def convert(raw):
+def source_cells(raw):
     if raw[:1] != b"\x02":
         raise ValueError("expected FSoD WMAP v2")
     decoder = zlib.decompressobj()
@@ -60,6 +61,12 @@ def convert(raw):
     payload = data[offset:]
     if len(payload) != 2048 * 2048 * 3:
         raise ValueError("truncated or trailing Realm cells")
+    return data[:offset], dictionary, payload
+
+
+def convert(raw):
+    header, dictionary, payload = source_cells(raw)
+    count = len(dictionary)
     cells = bytearray(2048 * 2048 * 2)
     cells[0::2], cells[1::2] = payload[0::3], payload[1::3]
     indices = array.array("H", cells)
@@ -69,11 +76,12 @@ def convert(raw):
         raise ValueError("invalid map dictionary index")
     from realm_roads import round_roads
     cells = round_roads(cells, dictionary, 2048, 2048)
-    return zlib.compress(data[:offset] + cells, 9)
+    return zlib.compress(header + cells, 9)
 
 
 def main():
     destination = Path(__file__).resolve().parents[1] / "data"
+    layers = []
     for index, blob in enumerate(BLOBS, 1):
         url = f"https://raw.githubusercontent.com/ossimc82/fabiano-swagger-of-doom/{REVISION}/wServer/realm/worlds/maps/world{index}.wmap"
         with urllib.request.urlopen(url, timeout=60) as response:
@@ -84,7 +92,23 @@ def main():
         converted = convert(raw)
         path = destination / f"realm-fsod-{index}.wmap"
         path.write_bytes(converted)
-        print(path.name, hashlib.sha256(converted).hexdigest())
+        height = source_cells(raw)[2][2::3]
+        compressed = zlib.compress(height, 9)
+        elevation = path.with_suffix(".elevation.zlib")
+        elevation.write_bytes(compressed)
+        layers.append({
+            "map": path.name, "map_sha256": hashlib.sha256(converted).hexdigest(),
+            "dimensions": [2048, 2048],
+            "provenance": {"kind": "recovered", "source_format": "fsod-wmap-v2", "source_url": url,
+                           "source_sha256": hashlib.sha256(raw).hexdigest(), "source_git_blob": blob},
+            "file": elevation.name, "sha256": hashlib.sha256(compressed).hexdigest(),
+            "expanded_sha256": hashlib.sha256(height).hexdigest(),
+        })
+        print(path.name, layers[-1]["map_sha256"], elevation.name, layers[-1]["expanded_sha256"])
+    # Reconstructed layers are calibrated from these; rerun reconstruct-realm-elevations.py afterwards.
+    (destination / "realm-elevations.json").write_text(json.dumps({
+        "schema": 2, "orientation": "row-major", "units": "u8-0-255", "layers": layers,
+    }, indent=2) + "\n")
 
 
 if __name__ == "__main__":

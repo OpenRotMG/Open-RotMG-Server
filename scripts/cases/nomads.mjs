@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 const out=process.env.QA_RESULTS_DIR;
+export const realmSeed=12351;
 const spec={class:0x30e,level:20,seed:833,world:1,equipment:[0xa97,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,25,0,50,20,0,0]};
 let shaman;
 export async function prepare(api){
@@ -14,11 +15,18 @@ export async function prepare(api){
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
   const shamans=map.entities.filter(e=>e.kind===0x6c6);
   await writeFile(join(out,'natural-shamans.json'),JSON.stringify(shamans));
-  const candidates=shamans.filter(e=>Array.from({length:7},(_,i)=>!blocked.has([Math.floor(e.pos.x)-6+i,Math.floor(e.pos.y)].join(','))).every(Boolean));
-  const clearance=e=>Math.min(...map.entities.filter(p=>p.id!==e.id&&p.hp>0&&p.kind>=0x600).map(p=>Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)));
-  shaman=candidates.sort((a,b)=>clearance(b)-clearance(a))[0];assert(shaman,'No naturally placed Shaman with a clear approach');
-  await writeFile(join(out,'placement.json'),JSON.stringify({world,shaman,clearance:clearance(shaman),naturalShamans:map.entities.filter(e=>e.kind===0x6c6).length}));
-  return {...spec,position:{x:shaman.pos.x-6,y:shaman.pos.y}};
+  const close=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+  const candidates=shamans.flatMap(e=>[[-1,0],[1,0],[0,-1],[0,1]].flatMap(([dx,dy])=>{
+    if(Array.from({length:7},(_,i)=>[Math.floor(e.pos.x)+i*dx,Math.floor(e.pos.y)+i*dy].join(',')).some(cell=>blocked.has(cell)))return [];
+    const position={x:e.pos.x+6*dx,y:e.pos.y+6*dy};
+    const clearance=Math.min(...map.entities.filter(p=>p.id!==e.id&&p.hp>0&&p.kind>=0x600).map(p=>Math.min(close(p.pos,e.pos),close(p.pos,position))));
+    return [{e,position,clearance}];
+  }));
+  // The normal killable witness must be separated from unrelated natural attacks.
+  const selected=candidates.sort((a,b)=>b.clearance-a.clearance)[0];assert(selected,'No naturally placed Shaman with a clear approach');
+  const {e,position,clearance}=selected;shaman=e;
+  await writeFile(join(out,'placement.json'),JSON.stringify({world,shaman,position,clearance,naturalShamans:shamans.length}));
+  return {...spec,position};
 }
 export async function run(game){
   const save=async(name,state)=>writeFile(join(out,name+'.json'),JSON.stringify(state));
@@ -27,7 +35,8 @@ export async function run(game){
   const initial=await game.inspect();await save('arrival',initial);
   game.check('natural solo MidSand Shaman enters native view with selected 140 HP',entity(initial)?.hp===140&&entity(initial).camp===null&&entity(initial).quest===null&&initial.view.tiles.some(t=>t.ground===189));
   const samples=[];let blind=false,damage=false;
-  for(let n=0;n<36;n++){
+  // The XML Shaman only Wanders, so keep sampling until its spinner has actually hit and blinded the player.
+  for(let n=0;n<36||n<80&&!(blind&&damage);n++){
     await game.act({keys:[],duration_ms:200},n===5?{name:'nomad-encounter',when:()=>true}:undefined);
     const s=await game.inspect();samples.push(s);
     damage ||= s.view.character.hp<initial.view.character.hp;
@@ -39,13 +48,14 @@ export async function run(game){
     assert(s.view.lifecycle.alive,'Prepared Wizard died before encounter observations');
   }
   await save('combat',samples);
-  game.check('native Shaman activates and moves toward nearby player',samples.some(s=>entity(s)?.activated!==null&&entity(s).pos.x<shaman.pos.x-1));
+  // The XML Shaman only Wanders (actors.xml:2307); base chased the player.
+  game.check('native Shaman activates and wanders',samples.some(s=>entity(s)&&entity(s).activated!==null&&Math.hypot(entity(s).pos.x-shaman.pos.x,entity(s).pos.y-shaman.pos.y)>.2));
   game.check('unprotected native player receives encounter damage',damage);
   game.check('native spinner collision applies selected Blind',blind);
   const shots=samples.flatMap(s=>s.view.projectiles.filter(p=>p.owner===shaman.id));
   game.check('both selected projectile speeds and lifetimes execute',[55,60].every(speed=>shots.some(p=>p.speed===speed&&p.lifetime_ms===2600)));
   const births=new Map();
-  for(const s of samples)for(const p of s.view.projectiles.filter(p=>p.owner===shaman.id)){
+  for(const s of samples.filter(entity))for(const p of s.view.projectiles.filter(p=>p.owner===shaman.id)){
     const age=Math.round((s.view.time_ms-Math.hypot(p.position.x-p.start.x,p.position.y-p.start.y)/(p.speed/10000)-entity(s).activated)/50)*50;
     births.set(p.speed+':'+age,{speed:p.speed,age});
   }
@@ -59,12 +69,19 @@ export async function run(game){
     return [...groups.values()].filter(g=>g.length===3).map(g=>g.sort((a,b)=>a-b));
   });
   game.check('native Green Magic fan uses primary 11-degree adjacent spacing',fans.length>0&&fans.every(g=>g.slice(1).every((a,i)=>Math.abs(a-g[i]-11*Math.PI/180)<.002)));
-  game.check('native attack deadlines retain primary phase entry delays and cooldowns',[...births.values()].every(b=>{
-    const phase=b.age%5300;
-    return b.speed===55?phase>=500&&phase<3100&&phase%500===0:phase>=3800&&phase<5300&&(phase-3100)%700===0;
-  })&&[3800,4500].every(age=>births.has('60:'+age)));
+  // XML fire1 shoots every 0.5s from 0.5s for 3.1s, fire2 every 0.7s from 0.7s for 2.2s (actors.xml:2308-2315).
+  // The 5.3s cycle is anchored on the executor clock, which can start a tick before activation is recorded; align on the 0.5s fire1 grid.
+  const shift=(500-Math.min(...[...births.values()].filter(b=>b.speed===55).map(b=>b.age))%500)%500,phase=b=>(b.age+shift)%5300;
+  // Verify two complete cycles before a wandering Shaman can lose its range-10 target and defer later shots.
+  const cycles=[0,1].map(n=>[...births.values()].filter(b=>Math.floor((b.age+shift)/5300)===n));
+  game.check('native attack timing follows XML state offsets and cooldowns',cycles.every(c=>[55,60].every(speed=>c.some(b=>b.speed===speed))&&c.every(b=>b.speed===55?[500,1000,1500,2000,2500,3000].includes(phase(b)):[3800,4500,5200].includes(phase(b)))));
   const xp=(await game.observe()).character.experience;
-  for(let n=0;n<50&&entity(await game.inspect());n++)await game.act({keys:[],duration_ms:250,target:{entity:shaman.id,camera_angle:-Math.PI/4,fire:true}});
+  // The XML Shaman only Wanders (actors.xml:2307), so close in before firing.
+  for(let n=0;n<100;n++){
+    const s=await game.inspect(),e=entity(s);if(!e)break;
+    const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+    await game.act(Math.hypot(dx,dy)>4?{keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:200}:{keys:[],duration_ms:250,target:{entity:shaman.id,camera_angle:-Math.PI/4,fire:true}});
+  }
   const dead=await game.inspect();await save('defeated',dead);
   game.check('ordinary native staff fire defeats Shaman and grants XP',!entity(dead)&&dead.view.character.experience>xp);
   await game.act({keys:[],duration_ms:1800},{name:'nomad-defeated',when:()=>true});

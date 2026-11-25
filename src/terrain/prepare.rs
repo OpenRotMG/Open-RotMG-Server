@@ -210,6 +210,7 @@ const WORLD13_TOMB_SUPPORT: &str =
 pub(super) const WORLD02_ID: &str = "classic-world-02-reconstruction";
 pub(super) const WORLD03_ID: &str = "classic-world-03-reconstruction";
 
+#[derive(Debug)]
 pub(super) struct ScopedLava {
     world: u8,
     terrain: u8,
@@ -770,6 +771,7 @@ pub(super) fn valid_id(id: &str) -> bool {
     })
 }
 impl Recipe {
+    #[cfg(test)]
     pub(super) fn lava_scope(&self, root: &Path) -> Result<Option<ScopedLava>> {
         match self {
             Self::ReviewedCellsV1(r) if r.schema == 2 => Ok(None),
@@ -823,6 +825,7 @@ impl Recipe {
             _ => None,
         }
     }
+    #[cfg(test)]
     pub(super) fn dimensions(&self) -> [usize; 2] {
         match self {
             Self::ClassicV1(r) => [r.width, r.height],
@@ -970,7 +973,11 @@ fn recipes(root: &Path) -> Result<BTreeMap<String, Recipe>> {
 }
 pub(super) fn read_recipe(root: &Path, relative: &str) -> Result<Recipe> {
     let path = safe_path(root, relative)?;
-    let recipe: Recipe = serde_json::from_slice(&bounded_read(&path, 64 * 1024)?)
+    parse_recipe(root, relative, &bounded_read(&path, 64 * 1024)?)
+}
+fn parse_recipe(root: &Path, relative: &str, bytes: &[u8]) -> Result<Recipe> {
+    let path = safe_path(root, relative)?;
+    let recipe: Recipe = serde_json::from_slice(bytes)
         .with_context(|| format!("parse recipe {}", path.display()))?;
     recipe
         .validate()
@@ -1002,7 +1009,12 @@ fn expand_layer(bytes: &[u8], count: usize, expected: &str) -> Result<Vec<u8>> {
     );
     inflate(bytes, count, CELLS + 4096, expected)
 }
-fn inflate(bytes: &[u8], count: usize, compressed_bound: usize, expected: &str) -> Result<Vec<u8>> {
+pub(super) fn inflate(
+    bytes: &[u8],
+    count: usize,
+    compressed_bound: usize,
+    expected: &str,
+) -> Result<Vec<u8>> {
     ensure!(
         bytes.len() <= compressed_bound,
         "compressed layer exceeds bound"
@@ -1205,6 +1217,7 @@ fn assemble(
     }
     Ok((
         Map {
+            elevation: Some(e.into()),
             width: width as i32,
             height: height as i32,
             cells,
@@ -1834,6 +1847,7 @@ fn indexed_map(raw: &[u8], dictionary: &[Cell], dimensions: [usize; 2]) -> Resul
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(Map {
+        elevation: None,
         width: width as i32,
         height: height as i32,
         cells,
@@ -1882,6 +1896,153 @@ fn reviewed_map(
     let compressed = hashed_input(root, &indices.path, &indices.sha256, bytes + 4096)?;
     let raw = inflate(&compressed, bytes, bytes + 4096, &indices.expanded_sha256)?;
     Ok((indexed_map(&raw, &dictionary, dimensions)?, lava))
+}
+
+#[derive(Debug, Serialize)]
+pub struct CompiledGeometryRecipe {
+    recipe: Recipe,
+    pub(crate) dimensions: [u32; 2],
+    pub(crate) objects: BTreeSet<u16>,
+    pub(crate) input_sha256: BTreeMap<String, String>,
+    pub(crate) output_sha256: String,
+    #[serde(skip)]
+    bytes: std::sync::Arc<[u8]>,
+    #[serde(skip)]
+    lava: Option<ScopedLava>,
+    #[serde(skip)]
+    elevation: Option<std::sync::Arc<[u8]>>,
+    reconstructed_elevation: Option<std::sync::Arc<super::elevation::SourceElevation>>,
+}
+impl CompiledGeometryRecipe {
+    #[cfg(test)]
+    pub(crate) fn retained_encoded_bytes(&self) -> usize {
+        self.bytes.len()
+            + self.elevation.as_ref().map_or(0, |e| e.len())
+            + self
+                .reconstructed_elevation
+                .as_ref()
+                .map_or(0, |e| e.retained_encoded_bytes())
+    }
+    pub(crate) fn id(&self) -> &str {
+        self.recipe.id()
+    }
+    pub(crate) fn decode(&self, content: &Content) -> Result<Map> {
+        let mut map = Map::decode_realm_cells(&self.bytes, content, [2100, 2100])
+            .with_context(|| self.recipe.contract())?;
+        map.elevation = match &self.reconstructed_elevation {
+            Some(source) => Some(source.decode()?),
+            None => self.elevation.clone(),
+        };
+        self.validate_loaded(&map, content)?;
+        Ok(map)
+    }
+    pub(crate) fn validate_loaded(&self, map: &Map, content: &Content) -> Result<()> {
+        ensure!(
+            map.elevation
+                .as_ref()
+                .map(|e| e.len())
+                .is_none_or(|n| n == map.cells.len()),
+            "{} elevation dimension mismatch",
+            self.recipe.contract()
+        );
+        ensure!(
+            [map.width as u32, map.height as u32] == self.dimensions,
+            "{} compiled dimensions disagree",
+            self.recipe.contract()
+        );
+        if let Some(lava) = &self.lava {
+            lava.validate_loaded(map, content)?;
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn compile_geometry_recipe(
+    data: &Path,
+    relative: &str,
+    expected_recipe: &str,
+    expected_output: &str,
+    content: &Content,
+) -> Result<CompiledGeometryRecipe> {
+    let root = safe_path(data, "realms")?;
+    ensure!(
+        valid_hash(expected_recipe) && valid_hash(expected_output),
+        "invalid reconstruction binding SHA-256"
+    );
+    let recipe_bytes = hashed_input(&root, relative, expected_recipe, 64 * 1024)?;
+    let recipe = parse_recipe(&root, relative, &recipe_bytes)
+        .with_context(|| format!("compile Realm reconstruction {relative}"))?;
+    if let Some(identity) = recipe.content_identity() {
+        ensure!(
+            identity == content.xml_sha256,
+            "{} selected content identity mismatch",
+            recipe.contract()
+        );
+    }
+    let mut inputs = BTreeMap::from([(format!("realms/{relative}"), sha256(&recipe_bytes))]);
+    for file in recipe.inputs() {
+        let bytes = bounded_read(&safe_path(&root, file)?, 16 * 1024 * 1024)?;
+        inputs.insert(format!("realms/{file}"), sha256(&bytes));
+    }
+    let (map, lava) = match &recipe {
+        Recipe::ClassicV1(r) => {
+            let elevation = load_layer(&root, &r.layers.elevation)?;
+            let moisture = load_layer(&root, &r.layers.moisture)?;
+            let overrides = load_layer(&root, &r.layers.overrides)?;
+            (
+                assemble(
+                    &elevation,
+                    &moisture,
+                    &overrides,
+                    r.width,
+                    r.height,
+                    r.scenery_seed,
+                )?
+                .0,
+                None,
+            )
+        }
+        Recipe::ReviewedCellsV1(r) => {
+            reviewed_map(&root, r, content).with_context(|| recipe.contract())?
+        }
+    };
+    let bytes = match &recipe {
+        Recipe::ClassicV1(_) => encode(&map, content)?,
+        Recipe::ReviewedCellsV1(r) => encode_reviewed(&map, content, lava.as_ref(), Some(r))?,
+    }
+    .0;
+    let output_sha256 = sha256(&bytes);
+    ensure!(
+        output_sha256 == expected_output,
+        "{} regenerated output SHA-256 mismatch: expected {expected_output}, got {output_sha256}",
+        recipe.contract()
+    );
+    let reconstructed_elevation = match &recipe {
+        Recipe::ClassicV1(_) => None,
+        Recipe::ReviewedCellsV1(_) => {
+            let source = super::elevation::SourceElevation::load(
+                data,
+                &format!("realms/{}", recipe.output()),
+                &output_sha256,
+                [map.width as usize, map.height as usize],
+            )?;
+            inputs.extend(source.input_sha256.clone());
+            Some(std::sync::Arc::new(source))
+        }
+    };
+    let compiled = CompiledGeometryRecipe {
+        recipe,
+        dimensions: [map.width as u32, map.height as u32],
+        objects: map.cells.iter().filter_map(|c| c.object).collect(),
+        input_sha256: inputs,
+        output_sha256,
+        bytes: bytes.into(),
+        lava,
+        elevation: map.elevation.clone(),
+        reconstructed_elevation,
+    };
+    compiled.validate_loaded(&map, content)?;
+    Ok(compiled)
 }
 
 pub(crate) fn run(args: &[String]) -> Result<bool> {

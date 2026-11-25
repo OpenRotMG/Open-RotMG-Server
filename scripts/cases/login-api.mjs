@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -6,9 +7,11 @@ import {join} from 'node:path';
 import {createServer} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
 
-const [native,client]=process.argv.slice(2),out=process.env.QA_RESULTS_DIR;
-assert(native&&client&&out,'Run through qa.py exec with a closed login native run and its exact client directory');
+const [native,client,binary,data]=process.argv.slice(2),out=process.env.QA_RESULTS_DIR;
+assert(native&&client&&binary&&data&&out,'Run through qa.py exec with a closed login native run and its exact client directory');
 const receipt=JSON.parse(await readFile(join(native,'result.json'),'utf8'));
+assert.equal(receipt.data.path,data,'Data must match the closed native run');
+assert.equal(createHash('sha256').update(await readFile(binary)).digest('hex'),receipt.inputs.serverBinary,'Binary must match the closed native run');
 assert(receipt.status==='passed'&&receipt.cleanupErrors.length===0,'Native run must have passed and closed');
 const state=join(native,'state'),exec=promisify(execFile);
 const query=async sql=>JSON.parse((await exec('python3',['-c','import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); print(json.dumps(c.execute(sys.argv[2]).fetchall()))',join(state,'game.db'),sql])).stdout);
@@ -16,15 +19,21 @@ const snapshot=()=>query('SELECT a.id,a.name,a.credits,f.balance,f.earned,r.emai
 const before=await snapshot(),account=receipt.account;
 const listener=createServer();await new Promise(ok=>listener.listen(0,'127.0.0.1',ok));const port=listener.address().port;await new Promise(ok=>listener.close(ok));
 const origin='http://127.0.0.1:'+port,log=await open(join(out,'api-server.log'),'a',0o600);
-const child=spawn(join(state,'server-build/openrotmg'),['--state',state,'--dev-control','--no-shore-bots','--client',client,'--port',String(port)],{stdio:['ignore',log.fd,log.fd]});
+const child=spawn(binary,['--data',data,'--state',state,'--dev-control','--no-shore-bots','--client',client,'--port',String(port)],{stdio:['ignore',log.fd,log.fd]});
 const closed=new Promise((ok,bad)=>{child.once('error',bad);child.once('close',(code,signal)=>ok({code,signal}));});
 const checks=[],check=(name,value)=>{assert(value,name);checks.push(name);};
+let ready=false;
 try {
-  const deadline=Date.now()+30000;
-  while(true) {
-    assert(child.exitCode===null,'Cold server exited during startup');
-    try {if((await fetch(origin+'/',{signal:AbortSignal.timeout(1000)})).ok)break;}catch(error){assert(Date.now()<deadline,'Cold server did not start: '+error);}
-    assert(Date.now()<deadline,'Cold server did not become ready');await delay(100);
+  // Full Realm construction precedes the frontdoor and exceeded 30 seconds on both VPS attempts.
+  const deadline=Date.now()+120000;
+  let lastProbe;
+  while(!ready) {
+    assert(child.exitCode===null&&child.signalCode===null,'Cold server exited during startup; see api-server.log');
+    try {
+      const response=await fetch(origin+'/health',{signal:AbortSignal.timeout(1000)});
+      ready=response.ok;lastProbe=`HTTP ${response.status}`;await response.body?.cancel();
+    }catch(error){lastProbe=String(error);}
+    if(!ready){assert(Date.now()<deadline,`Cold server did not become ready: ${lastProbe}; see api-server.log`);await delay(100);}
   }
   let requests=0;
   const request=async(path,guid='login-921@example.test',password='fixture-password')=>{
@@ -51,6 +60,6 @@ try {
   assert.deepEqual(await snapshot(),before,'Rate admission changed persisted progress');
 } finally {
   child.kill('SIGINT');const timer=setTimeout(()=>child.kill('SIGKILL'),10000);
-  try {assert.deepEqual(await closed,{code:0,signal:null},'Cold server did not shut down cleanly');}finally{clearTimeout(timer);await log.close();}
+  try {const result=await closed;if(ready)assert.deepEqual(result,{code:0,signal:null},'Cold server did not shut down cleanly');}finally{clearTimeout(timer);await log.close();}
 }
 await writeFile(join(out,'login-api.json'),JSON.stringify({status:'passed',native,revision:receipt.source.head,checks},null,2));

@@ -377,7 +377,7 @@ pub(super) fn ability(
             && enemy.hp > weapon.max * 2
             && distance <= reach
             && shot_clear(v, grid, enemy.position, passes_cover)
-            && (v.map.name != "Snake Pit"
+            && (v.map.template.as_deref() != Some("snake-pit")
                 || v.quest == Some(enemy.id)
                 || v.character.mp - item.mana_cost >= item.mana_cost)
     };

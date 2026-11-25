@@ -27,7 +27,19 @@ fn price(item: &Object) -> Option<(i32, u8)> {
         0xaa9 | 0xaf3 => (190, 1),
         0xaf1 => (180, 1),
         0xaef => (690, 1),
-        _ if item.class == "Dye" => (if item.name.contains("Cloth") { 120 } else { 60 }, 0),
+        _ if item.class == "Dye" => {
+            // The provisional price groups include primary dyes and patterned secondary cloths.
+            (
+                if item.textures[0].is_some()
+                    || item.textures[1].is_some_and(|texture| texture >> 24 != 1)
+                {
+                    120
+                } else {
+                    60
+                },
+                0,
+            )
+        }
         _ => return None,
     })
 }
@@ -104,13 +116,34 @@ impl Offer {
     }
 }
 
-pub(super) fn configure(e: &mut Entity, content: &Content) -> Result<Offer> {
-    let item = content.get(u16::try_from(value(e, 34)?)?)?;
+pub(super) fn stock<'a>(content: &'a Content, stats: &[(u8, i32)]) -> Result<&'a Object> {
+    let stat = |id| {
+        stats
+            .iter()
+            .find(|(key, _)| *key == id)
+            .map(|(_, value)| *value)
+            .with_context(|| format!("merchant missing stat {id}"))
+    };
+    let item = content.get(u16::try_from(stat(34)?)?)?;
     ensure!(
         matches!(item.class.as_str(), "Equipment" | "Dye"),
         "merchant stock is not an item"
     );
-    ensure!(value(e, 42)? >= 0, "invalid merchant stock count");
+    content
+        .game
+        .as_ref()
+        .context("merchant requires retained XML GameData")?
+        .admission(
+            item.kind,
+            AdmissionRole::Native(NativeService::Inventory),
+            "actual map merchant stock",
+        )?;
+    ensure!(stat(42)? >= 0, "invalid merchant stock count");
+    ensure!(stat(43)? >= -1, "invalid merchant remaining minutes");
+    Ok(item)
+}
+pub(super) fn configure(e: &mut Entity, content: &Content) -> Result<Offer> {
+    let item = stock(content, &e.extra_stats)?;
     if let Some((price, currency)) = price(item) {
         e.extra_stats
             .extend([(36, price), (40, i32::from(currency))]);
@@ -161,7 +194,7 @@ pub(crate) fn reply(success: bool, message: &str) -> Packet {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub(crate) struct VaultPurchase {
     pub seller: i32,
     pub opened: i32,
@@ -177,6 +210,7 @@ impl World {
     }
 
     pub fn buy(&mut self, id: i32, merchant: i32) -> Result<InventoryPlan> {
+        self.xml_check_catalog()?;
         let p = self.players.get(&id).context("purchase owner missing")?;
         ensure!(
             p.persistence_failure.is_none(),
@@ -193,6 +227,11 @@ impl World {
             .entities
             .get(&merchant)
             .ok_or_else(|| controller("Merchant no longer exists."))?;
+        self.xml_game().admission(
+            e.kind,
+            AdmissionRole::Native(NativeService::Merchant),
+            "actual merchant purchase",
+        )?;
         ensure!(
             self.content.get(e.kind)?.class == "Merchant",
             controller("This object is not a merchant.")
@@ -221,6 +260,11 @@ impl World {
             controller("Insufficient star rank.")
         );
         let item = u16::try_from(value(e, 34)?)?;
+        self.xml_game().admission(
+            item,
+            AdmissionRole::Native(NativeService::Inventory),
+            "actual merchant purchase stock",
+        )?;
         let price = value(e, 36).context("This item has no configured shop price.")?;
         let currency = u8::try_from(value(e, 40)?)?;
         ensure!(
@@ -232,8 +276,8 @@ impl World {
             .ok_or_else(|| controller("Not enough inventory space."))?;
         let mut items = p.character.items.clone();
         items[slot] = i32::from(item);
+        let mut plan = self.plan(id, items, None)?;
         self.cancel_trade(id, "Trade cancelled by purchase.");
-        let mut plan = self.plan(id, items, None);
         plan.purchase = Some((
             merchant,
             Purchase {
@@ -255,12 +299,17 @@ impl World {
             .entities
             .get(&seller)
             .context("Closed chest no longer exists.")?;
+        self.xml_game().admission(
+            e.kind,
+            AdmissionRole::Native(NativeService::Container),
+            "actual private vault sale",
+        )?;
         let chest = *self
             .closed_vaults
             .get(&seller)
             .context("Unknown closed chest identity.")?;
         ensure!(
-            self.name == "Vault"
+            self.template_id() == Some("vault")
                 && self.owner == Some(account)
                 && e.kind == 0x505
                 && e.accessible(account),
@@ -286,14 +335,20 @@ impl World {
         );
         let pos = e.pos;
         let items = p.character.items.clone();
+        let mut plan = self.plan(id, items, None)?;
         // Allocate the actual owned object before spending; publication must not depend on a later spawn.
-        let opened = self.spawn_entity(0x504, pos, vec![-1; 8])?;
+        let opened = self.insert_native_entity(
+            0x504,
+            NativeService::Container,
+            pos,
+            vec![-1; 8],
+            "validated private vault purchase reservation",
+        )?;
         let e = self.entities.get_mut(&opened).unwrap();
         e.published = false;
         e.reserved = true;
         e.extra_stats.push((54, account));
         self.cancel_trade(id, "Trade cancelled by Vault purchase.");
-        let mut plan = self.plan(id, items, None);
         plan.vault_purchase = Some(VaultPurchase {
             seller,
             opened,

@@ -1,6 +1,9 @@
 use crate::server::lifecycle::{CloseReason, controller, protocol};
 use crate::{
-    content::{Content, Map, PARALYZED, Projectile, SLOWED, SPEEDY, STUNNED},
+    content::{
+        Content, Map, PARALYZED, Projectile, SLOWED, SPEEDY, STUNNED,
+        game::{AdmissionRole, NativeService, ProgressKey, geometry::Geometry},
+    },
     store::{AccountLists, AccountPresentation, Character, LevelAssist, Vault},
     wire::{self, Packet, Writer},
 };
@@ -21,50 +24,36 @@ pub(crate) mod bot_inputs;
 pub(crate) mod spectator;
 
 mod cell_index;
-mod charges;
 pub(crate) mod chat;
 #[cfg(test)]
 mod community_postclear_audit;
 
+#[cfg(test)]
+mod castle_tests;
 mod companions;
 mod consumables;
 mod davy;
 mod dungeon_entry;
 mod endgame;
-mod endgame_ai;
 mod enemy_damage;
 mod enemy_shots;
 mod entity_store;
 mod execution;
-mod families;
-mod fauna;
-mod fauna_births;
-mod fauna_special;
+#[cfg(test)]
 mod ghost_ship;
-mod gods;
 mod ground_dye;
-mod oryx1;
 
 mod gold;
-mod golems;
 
 mod ground;
 
 mod guilds;
-mod lab;
 
-mod deathmage;
-mod lair;
 mod landmark_ai;
 
-mod lost_lands;
 mod manor;
-mod manor_entry;
-mod midlands;
 
-mod named_births;
 mod names;
-mod ocean;
 mod ocean_setpiece;
 
 mod population;
@@ -81,39 +70,32 @@ mod realm_setpieces;
 mod sight;
 mod skull_erosion;
 
-mod spider;
-
 pub(crate) mod native_lag;
 mod tick_stats;
-mod tomb;
 mod tracked;
 
 pub(crate) use chat::{chat_error, chat_info, chat_private, validate as validate_chat};
 pub use endgame::ForcedTransfer;
-mod abyss;
-#[cfg(test)]
-mod abyss_tests;
-
-mod beach;
-mod coil;
-mod jungle;
 
 mod cooperative;
 mod evidence;
 
 mod mechanics;
-use mechanics::SummonBudget;
 
 mod native_hits;
 
 mod npc_attacks;
 mod npc_queries;
-mod tutorial;
+mod xml;
+pub(crate) use native_hits::MAX_PENDING_SHOOT_UNITS;
+#[cfg(test)]
+pub(crate) use xml::{
+    TERMINAL_PENDING_ALLOCATION_LIMIT, TERMINAL_PENDING_LIMIT, tests::drain_events,
+};
 
 mod reconciliation;
 
 mod resurrection;
-mod snake;
 
 pub use reconciliation::{NativeInput, RejectedNativeShot};
 mod progression;
@@ -144,13 +126,6 @@ impl Pos {
         ((self.x - p.x).powi(2) + (self.y - p.y).powi(2)).sqrt()
     }
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Following {
-    #[default]
-    Unknown,
-    Acquired,
-    Resting,
-}
 #[derive(Clone)]
 pub struct Entity {
     pub id: i32,
@@ -177,32 +152,11 @@ pub struct EntityData {
     published: bool,
     damage: BTreeMap<i32, i32>,
     goal: Option<Pos>,
-    #[serde(skip)]
-    motion: Option<crate::encounter::Motion>,
-    #[serde(skip)]
-    following: Following,
-    #[serde(skip)]
-    lair_escort: Option<lair::Escort>,
-    #[serde(skip)]
-    tomb: Option<tomb::State>,
-    #[serde(skip)]
-    follow_remaining: u64,
-    #[serde(skip)]
-    strict_initialized: bool,
-    #[serde(skip)]
-    charge: Option<charges::Charge>,
-    #[serde(skip)]
-    script: Option<landmark_ai::Script>,
-    #[serde(skip)]
-    abyss: Option<abyss::Runtime>,
     last_step: Pos,
     phase: f32,
     orbit: Option<realm_events::Orbit>,
     next_shot: u64,
-    #[serde(skip)]
-    attacks: crate::encounter::attacks::Clocks,
     activated: Option<u64>,
-    stage: Option<u64>,
     parent: tracked::Tracked<i32>,
     camp: Option<usize>,
     #[serde(skip)]
@@ -235,18 +189,11 @@ impl std::fmt::Debug for Entity {
         out.field("damage", &self.damage);
         out.field("home", &self.home);
         out.field("goal", &self.goal);
-        out.field("motion", &self.motion);
-        out.field("following", &self.following);
-        out.field("tomb", &self.tomb);
-        out.field("charge", &self.charge);
-        out.field("script", &self.script);
         out.field("last_step", &self.last_step);
         out.field("phase", &self.phase);
         out.field("orbit", &self.orbit);
         out.field("next_shot", &self.next_shot);
-        out.field("attacks", &self.attacks);
         out.field("activated", &self.activated);
-        out.field("stage", &self.stage);
         out.field("parent", &self.parent);
         out.field("camp", &self.camp);
         out.field("population_slot", &self.population_slot);
@@ -265,7 +212,7 @@ impl Serialize for Entity {
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut out = serializer.serialize_struct("Entity", 31)?;
+        let mut out = serializer.serialize_struct("Entity", 30)?;
         out.serialize_field("id", &self.id)?;
         out.serialize_field("kind", &self.kind)?;
         out.serialize_field("name", &self.name)?;
@@ -287,8 +234,6 @@ impl Serialize for Entity {
         out.serialize_field("orbit", &self.orbit)?;
         out.serialize_field("next_shot", &self.next_shot)?;
         out.serialize_field("activated", &self.activated)?;
-        out.serialize_field("stage", &self.stage)?;
-        out.serialize_field("tomb", &self.tomb)?;
         out.serialize_field("parent", &self.parent)?;
         out.serialize_field("camp", &self.camp)?;
         out.serialize_field("quest", &self.quest)?;
@@ -373,6 +318,7 @@ pub struct Player {
     committed_lifetime: crate::store::FameLifetime,
     statuses: BTreeMap<u8, (u64, u64)>,
     lab_conditions: i32,
+    xml_conditions: i32,
     known_since: BTreeMap<i32, u64>,
     shoot_acks: VecDeque<(Instant, Vec<Bullet>)>,
     weapon_ticks: VecDeque<(i32, i32, i32)>,
@@ -406,8 +352,9 @@ pub struct Player {
     experience_queue: Option<QueuedExperience>,
     progress_snapshot: Option<Character>,
     pub(crate) level_assists_prepared: Vec<LevelAssist>,
-    clears_queued: [u64; crate::dungeon::DUNGEONS.len()],
+    clears_queued: [u64; ProgressKey::COUNT],
     pub(crate) progress_started: bool,
+    terminal_captures: usize,
     pub death_pending: bool,
     persistence_failure: Option<String>,
     pub(crate) inputs: Option<bot_inputs::Inputs>,
@@ -424,7 +371,6 @@ pub struct Player {
     last_move: i32,
     last_move_at: u64,
     motion: ObservedMotion,
-    white_demon_aim_history: [Pos; 2],
     goto_acks: VecDeque<(bool, Instant)>,
     discarded_attack: Option<(i32, i32)>,
     tick: i32,
@@ -448,29 +394,7 @@ impl Player {
         }
     }
 
-    fn audit_fact(
-        &self,
-        id: i32,
-        world: &str,
-        now: u64,
-        event: &str,
-        values: impl FnOnce() -> serde_json::Value,
-    ) {
-        if self.controller == Controller::Human {
-            crate::audit::combat(
-                serde_json::json!({"event":event,"world":world,"world_ms":now,
-                "identity":[self.character.account,self.character.id,id],"values":values()} ),
-            );
-        }
-    }
-    fn acknowledge_lifetime(&mut self, committed: crate::store::FameLifetime) -> Result<()> {
-        committed.follows(&self.committed_lifetime)?;
-        self.character.lifetime.follows(&self.committed_lifetime)?;
-        self.character.lifetime.merge(&committed)?;
-        // Later live facts remain different from this acknowledged lower bound and must still save.
-        self.committed_lifetime = committed;
-        Ok(())
-    }
+    #[cfg(test)]
     pub(crate) fn queue_experience(
         &mut self,
         amount: i32,
@@ -551,6 +475,29 @@ impl Player {
         self.experience_queued = next;
         Ok(())
     }
+    fn audit_fact(
+        &self,
+        id: i32,
+        world: &str,
+        now: u64,
+        event: &str,
+        values: impl FnOnce() -> serde_json::Value,
+    ) {
+        if self.controller == Controller::Human {
+            crate::audit::combat(
+                serde_json::json!({"event":event,"world":world,"world_ms":now,
+                "identity":[self.character.account,self.character.id,id],"values":values()} ),
+            );
+        }
+    }
+    fn acknowledge_lifetime(&mut self, committed: crate::store::FameLifetime) -> Result<()> {
+        committed.follows(&self.committed_lifetime)?;
+        self.character.lifetime.follows(&self.committed_lifetime)?;
+        self.character.lifetime.merge(&committed)?;
+        // Later live facts remain different from this acknowledged lower bound and must still save.
+        self.committed_lifetime = committed;
+        Ok(())
+    }
     fn owes_credit(&self, giver: i32) -> bool {
         self.level_assists_prepared.iter().any(|a| a.giver == giver)
             || self
@@ -608,9 +555,12 @@ impl Player {
         }
     }
     fn rewards_queued(&self) -> bool {
+        self.terminal_captures > 0 || self.ordinary_rewards_queued()
+    }
+    fn ordinary_rewards_queued(&self) -> bool {
         self.experience_queued != 0
             || self.experience_queue.is_some()
-            || self.clears_queued != [0; crate::dungeon::DUNGEONS.len()]
+            || self.clears_queued != [0; ProgressKey::COUNT]
     }
     fn progress_queued(&self) -> bool {
         self.character.lifetime != self.committed_lifetime || self.rewards_queued()
@@ -703,6 +653,7 @@ impl Player {
 }
 #[derive(Clone)]
 pub struct Bullet {
+    damage_origin: enemy_damage::DamageOrigin,
     pub owner: i32,
     pub source_kind: u16,
     pub id: u8,
@@ -723,7 +674,7 @@ impl Player {
     }
 
     pub(crate) fn conditions(&self, now: u64) -> i32 {
-        self.lab_conditions | crate::condition::mask(&self.statuses, now)
+        self.xml_conditions | self.lab_conditions | crate::condition::mask(&self.statuses, now)
     }
 }
 impl Bullet {
@@ -745,24 +696,42 @@ pub struct Slot {
 }
 // Ordinary entrances last a minute in the June 2012 guide; keys share that window: https://web.archive.org/web/20120609023836/http://forums.wildshadow.com/wiki/realm-mad-god/dungeons
 const DUNGEON_PORTAL_TICKS: u64 = 60_000 / 50;
+/// Loot bag kinds by item bag_type appearance.
+pub(crate) const LOOT_BAGS: [u16; 5] = [0x500, 0x503, 0x507, 0x508, 0x509];
 pub(crate) const PLAYER_VIEW_RADIUS: f32 = 20.;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize)]
 pub struct PortalPlan {
     locked: Option<i32>,
     opened: i32,
+    source: Slot,
+    world: u64,
+    native_lifetime: Option<u64>,
 }
 impl PortalPlan {
-    fn lifetime(self) -> u64 {
-        if self.locked.is_some() {
-            2400
-        } else {
-            DUNGEON_PORTAL_TICKS
-        }
+    fn lifetime(self) -> Option<u64> {
+        self.native_lifetime
     }
 }
-#[derive(Clone)]
+impl InventoryPlan {
+    pub(crate) fn event_id(&self) -> &str {
+        &self.permit.event
+    }
+}
+struct InventoryPermit {
+    count: Arc<std::sync::atomic::AtomicUsize>,
+    event: String,
+}
+impl Drop for InventoryPermit {
+    fn drop(&mut self) {
+        self.count.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+#[derive(Clone, Serialize)]
 pub struct InventoryPlan {
+    accepted_at: u64,
+    #[serde(skip)]
+    permit: Arc<InventoryPermit>,
     ground_dye: Option<ground_dye::Reservation>,
     pub player: i32,
     pub items: Vec<i32>,
@@ -783,6 +752,7 @@ pub struct InventoryPlan {
     pub collected: Option<crate::store::CollectedItem>,
     pub purchase: Option<(i32, crate::store::Purchase)>,
     loot_slot: Option<(i32, usize)>,
+    entitlement_move: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
@@ -807,7 +777,45 @@ struct Admission {
     expires: u64,
     consumed: bool,
 }
+#[cfg(test)]
+pub(crate) fn test_content() -> Content {
+    static GAME: std::sync::LazyLock<Arc<crate::content::game::GameData>> =
+        std::sync::LazyLock::new(|| {
+            let content = Content::load(std::path::Path::new("data")).unwrap();
+            Arc::new(
+                crate::content::game::GameData::load(std::path::Path::new("data"), &content)
+                    .unwrap(),
+            )
+        });
+    let mut content = Content::load(std::path::Path::new("data")).unwrap();
+    content.game = Some(GAME.clone());
+    content
+}
+/// Production worlds draw fresh entropy; unit tests share one fixed seed so long simulations reproduce.
+#[cfg(not(test))]
+fn world_rng() -> rand::rngs::StdRng {
+    rand::rngs::StdRng::from_entropy()
+}
+#[cfg(test)]
+fn world_rng() -> rand::rngs::StdRng {
+    rand::SeedableRng::seed_from_u64(0x5eed)
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorldDomain {
+    Realm,
+    NonRealm,
+}
+
+type InventoryEvent = (
+    InventoryPlan,
+    bool,
+    crate::store::world_events::Event,
+    std::time::Instant,
+    Option<(u64, u64)>,
+);
 pub struct World {
+    inventory_capacity: Arc<std::sync::atomic::AtomicUsize>,
+    xml: xml::Runtime,
     pub content: Arc<Content>,
     pub map: Arc<Map>,
     navigation_geometry: Box<std::cell::RefCell<view::GeometryCache>>,
@@ -823,19 +831,16 @@ pub struct World {
     pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
     // Pool effects and Beach announcements must not scan every actor each tick.
-    world_effect_ids: BTreeSet<i32>,
+    // Snapshots publish after every job; scanning ~10^5 Realm actors for portals cost ~10ms each time.
+    portal_ids: BTreeSet<i32>,
     // Superset of actors that ever received an expiry or parent; mechanic_expiry rechecks the exact predicate.
     timed_ids: BTreeSet<i32>,
     // Quest roots can have neither a parent nor an expiry, so timed_ids cannot cover membership.
     quest_ids: BTreeSet<i32>,
     gun_ids: BTreeSet<i32>,
-    pentaract_ids: BTreeSet<i32>,
     // Terminal deadlines run in every world, including Realms without any Flamers.
-    abyss_flamer_ids: BTreeSet<i32>,
     // Only Malphas carries Abyss landings; scanning every Realm actor for them cost 7-8 ms per spawn check.
-    abyss_boss_ids: BTreeSet<i32>,
     // Only fully dormant ordinary population can leave this set; clocks and unclassified births stay global.
-    npc_global_ids: BTreeSet<i32>,
     non_population_ids: BTreeSet<i32>,
     quests_by_level: BTreeMap<Option<i32>, BTreeSet<i32>>,
     pub players: BTreeMap<i32, Player>,
@@ -843,20 +848,12 @@ pub struct World {
     pub bullets: Vec<Bullet>,
     // Collision callbacks can emit while the original batch is outside this vector.
     detached_bullets: usize,
-    grenades: Vec<mechanics::Grenade>,
-    fauna_births: Vec<fauna_births::Birth>,
-    named_births: Vec<named_births::Birth>,
-    lab_tosses: Vec<lab::Toss>,
-    manor_births: Vec<manor::Toss>,
-    lava_patches: BTreeMap<usize, (u64, u8)>,
-    locker: Option<davy::Locker>,
+    // Client-reported hits refused by terminal capacity outlive their projectile until they land.
+    owed_shots: Vec<(Bullet, i32)>,
     ability_state: abilities::State,
     companions: companions::State,
-    finale: endgame_ai::Actors,
     cells: cell_index::CellIndex,
-    fountains: Vec<(i32, Pos)>,
     merchants: BTreeMap<i32, shop::Offer>,
-    next_fountain_heal: u64,
     rng: rand::rngs::StdRng,
     pub now: u64,
     last_npc_step: u64,
@@ -868,6 +865,7 @@ pub struct World {
     ids: Arc<AtomicI32>,
     pub name: String,
     background: i32,
+    uses_breath: Option<f64>,
     pub safe: bool,
     pub owner: Option<i32>,
     return_route: Option<DungeonReturn>,
@@ -884,12 +882,10 @@ pub struct World {
     reproduction_at: [u64; 20],
     reproduction_bucket: usize,
     npc_paused_since: BTreeMap<i32, u64>,
-    djinn_attacking: BTreeSet<i32>,
     setpieces: Vec<realm_setpieces::Area>,
     ghost_towers: Vec<realm_setpieces::Area>,
     phoenix_pyres: Vec<realm_setpieces::Area>,
     event_sites: Vec<realm_setpieces::EventSite>,
-    portal_requests: Vec<(u16, Pos)>,
     critical_deaths: Vec<i32>,
     critical_killers: BTreeMap<i32, (u16, String)>,
     event_reserves: Vec<realm_events::ReservedEvent>,
@@ -1018,7 +1014,7 @@ struct Grant {
 struct Portal {
     origin: i32,
     destination: Option<i32>,
-    expires: u64,
+    expires: Option<u64>,
 }
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum DungeonReturn {
@@ -1037,6 +1033,9 @@ pub struct Directory {
     ids: Arc<AtomicI32>,
     grants: BTreeMap<Vec<u8>, Grant>,
     portals: BTreeMap<i32, Portal>,
+    terminal_allocations: Arc<std::sync::atomic::AtomicUsize>,
+    inventory_events: BTreeMap<String, InventoryEvent>,
+    inventory_capacity: Arc<std::sync::atomic::AtomicUsize>,
     chat_budgets: BTreeMap<i32, chat::ChatBudget>,
     guild_invites: BTreeMap<i32, guilds::Invitation>,
     endgame: endgame::RealmDirectory,
@@ -1136,26 +1135,43 @@ impl Directory {
 
     #[cfg(test)]
     pub(crate) fn test_with_seed(
-        path: &std::path::Path,
+        _path: &std::path::Path,
         content: Arc<Content>,
         max_players: usize,
         seed: u64,
     ) -> Result<Self> {
-        Self::fixture(path, content, max_players, seed, None)
+        Self::fixture(content, max_players, seed, None)
     }
 
     #[cfg(test)]
     fn fixture(
-        path: &std::path::Path,
         content: Arc<Content>,
         max_players: usize,
         seed: u64,
         prepared_seed: Option<u64>,
     ) -> Result<Self> {
-        // Restored Grove populations need room alongside both finite 65-tile graveyards.
-        let map = Arc::new(crate::terrain::generate(&content, seed, 1024)?);
+        let mut map = crate::terrain::generate(&content, seed, 1024)?;
+        // Contiguous pads give the small procedural test island the sourced Tower and Grove habitats.
+        for (radius, terrain, ground) in [(230., 4, 0x47), (315., 7, 0x56)] {
+            for i in 0..24 {
+                let angle = i as f64 * std::f64::consts::TAU / 24.;
+                let (cx, cy) = (
+                    512 + (radius * angle.cos()) as i32,
+                    512 + (radius * angle.sin()) as i32,
+                );
+                for y in cy - 16..=cy + 16 {
+                    for x in cx - 16..=cx + 16 {
+                        let cell = &mut map.cells[(y * 1024 + x) as usize];
+                        cell.ground = ground;
+                        cell.terrain = terrain;
+                        cell.object = None;
+                        cell.config.clear();
+                    }
+                }
+            }
+        }
+        let map = Arc::new(map);
         Self::configured(
-            path,
             content,
             max_players,
             seed,
@@ -1166,41 +1182,36 @@ impl Directory {
         .with_context(|| format!("test Realm fixture map/layout seed {seed}"))
     }
     pub fn with_seed(
-        path: &std::path::Path,
         content: Arc<Content>,
         max_players: usize,
         seed: u64,
         realm_count: usize,
     ) -> Result<Self> {
         Self::configured(
-            path,
-            content,
+            content.clone(),
             max_players,
             seed,
             None,
-            crate::terrain::realms::sources(path)?,
+            crate::terrain::realms::linked_sources(&content)?,
             realm_count,
         )
     }
     pub(crate) fn prepared(
-        path: &std::path::Path,
         content: Arc<Content>,
         max_players: usize,
         seed: u64,
         realm_count: usize,
     ) -> Result<Self> {
         Self::configured(
-            path,
-            content,
+            content.clone(),
             max_players,
             seed,
             Some(seed),
-            crate::terrain::realms::sources(path)?,
+            crate::terrain::realms::linked_sources(&content)?,
             realm_count,
         )
     }
     fn configured(
-        path: &std::path::Path,
         content: Arc<Content>,
         max_players: usize,
         seed: u64,
@@ -1214,26 +1225,7 @@ impl Directory {
         );
         ensure!(!realms.is_empty(), "Realm layout pool is empty");
         crate::endgame::validate(&content)?;
-        let mut templates = BTreeMap::new();
-        for name in [
-            "tutorial",
-            "kitchen",
-            "nexus",
-            "nexus-limbo",
-            "vault",
-            crate::endgame::CASTLE,
-            crate::endgame::CHAMBER,
-            crate::endgame::CELLAR,
-            "guild-hall-1",
-            "guild-hall-2",
-            "guild-hall-3",
-            "guild-hall-4",
-        ] {
-            templates.insert(
-                name.to_string(),
-                Arc::new(Map::load(&path.join(format!("{name}.wmap")), &content)?),
-            );
-        }
+        let templates = Self::linked_static_maps(&content)?;
         let mut d = Self {
             clock: crate::clock::Clock::default(),
             worlds: execution::Worlds::new(),
@@ -1246,6 +1238,9 @@ impl Directory {
             ids: Arc::new(AtomicI32::new(1000)),
             grants: BTreeMap::new(),
             portals: BTreeMap::new(),
+            terminal_allocations: Arc::default(),
+            inventory_events: BTreeMap::new(),
+            inventory_capacity: Arc::default(),
             chat_budgets: BTreeMap::new(),
             guild_invites: BTreeMap::new(),
             endgame: endgame::RealmDirectory::default(),
@@ -1265,19 +1260,25 @@ impl Directory {
         for (id, template, name, safe) in [
             (-1, "tutorial", "Tutorial", false),
             (-2, "nexus", "Nexus", true),
-            (-3, "realm-shore", "Realm", false),
+            (-3, "realm", "Realm", false),
             (-4, "nexus-limbo", "Nexus Limbo", true),
         ] {
             let world = d.make(template, name, safe, None)?;
+            if template == "nexus" {
+                let game = world.xml_game();
+                let map = &game.maps[game.world_template(template).unwrap().map as usize];
+                d.portal_positions = world
+                    .realm_portal_positions()
+                    .with_context(|| format!("World nexus map={}", map.name))?;
+            }
             d.worlds.insert(id, world);
         }
-        d.portal_positions = d.worlds[&-2].realm_portal_positions()?;
         for slot in 0..realm_count {
             let origin = if slot == 0 {
                 -3
             } else {
                 let id = d.next_world;
-                let world = d.make("realm-shore", "Realm", false, None)?;
+                let world = d.make("realm", "Realm", false, None)?;
                 d.worlds.insert(id, world);
                 d.next_world += 1;
                 id
@@ -1302,6 +1303,35 @@ impl Directory {
         d.sync_realm_portal();
         Ok(d)
     }
+    fn linked_static_maps(content: &Content) -> Result<BTreeMap<String, Arc<Map>>> {
+        let game = content.game.as_ref().context("Directory GameData absent")?;
+        game.worlds
+            .iter()
+            .filter_map(|world| {
+                let binding = &game.maps[world.map as usize];
+                if matches!(binding.geometry, Geometry::Generator(_)) && world.id != "realm"
+                    || matches!(binding.geometry, Geometry::Pool(_)) && world.id == "realm"
+                {
+                    return None;
+                }
+                Some(
+                    (|| {
+                        let Geometry::Encoded(asset) = &binding.geometry else {
+                            bail!("incompatible playable world geometry")
+                        };
+                        ensure!(
+                            !asset.realm && world.id != "realm",
+                            "incompatible encoded world geometry"
+                        );
+                        let map = asset.decode(content)?;
+                        ensure!(!map.spawns.is_empty(), "map has no spawn cells");
+                        Ok((world.id.clone(), Arc::new(map)))
+                    })()
+                    .with_context(|| format!("World {} map={}", world.id, binding.name)),
+                )
+            })
+            .collect()
+    }
     fn make(
         &mut self,
         template: &str,
@@ -1318,75 +1348,67 @@ impl Directory {
         safe: bool,
         owner: Option<i32>,
     ) -> impl FnOnce() -> Result<World> + Send + use<> {
-        let source = (template == "realm-shore")
-            .then(|| self.realms[self.realm_rng.gen_range(0..self.realms.len())].clone());
+        let source = (template == "realm").then(|| {
+            let mut draw = self
+                .realm_rng
+                .gen_range(0..self.realms.iter().map(|s| s.weight()).sum());
+            self.realms
+                .iter()
+                .find(|s| {
+                    if draw < s.weight() {
+                        true
+                    } else {
+                        draw -= s.weight();
+                        false
+                    }
+                })
+                .expect("nonempty linked Realm pool with positive weights")
+                .clone()
+        });
         #[cfg(test)]
         let fixture_seed = source.as_ref().and_then(|source| {
             matches!(&**source, crate::terrain::realms::Source::Fixture(_))
                 .then(|| self.realm_rng.clone().r#gen::<u64>())
         });
+        let terminal_allocations = self.terminal_allocations.clone();
+        let inventory_capacity = self.inventory_capacity.clone();
         let (content, ids, clock) = (self.content.clone(), self.ids.clone(), self.clock.clone());
         let (prepared_seed, next_world, max_players) =
             (self.prepared_seed, self.next_world, self.max_players);
-        let (map, template, name) = (
-            self.templates.get(template).cloned(),
-            template.to_owned(),
-            name.to_owned(),
-        );
+        let map = self.templates.get(template).cloned();
+        let template = template.to_owned();
+        let name = name.to_owned();
         move || {
-            let mut world = World::with_ids(
-                content.clone(),
-                if let Some(source) = &source {
-                    source.open(&content)?
-                } else if template == "pirate-cave" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::pirate::generate(&content, seed)?)
-                } else if template == "abyss-of-demons" {
-                    let seed = match prepared_seed {
-                        Some(seed) => seed ^ next_world as u64,
-                        None => rand::random(),
-                    };
-                    Arc::new(crate::dungeon::abyss::generate(&content, seed)?)
-                } else if template == "manor-of-the-immortals" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::manor::generate(&content, seed)?)
-                } else if template == "beachzone" {
-                    Arc::new(crate::dungeon::beach::generate(&content)?)
-                } else if template == "ocean-trench" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::trench::generate(&content, seed)?)
-                } else if template == "forbidden-jungle" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::jungle::generate(&content, seed)?)
-                } else if template == "spider-den" {
-                    let seed = match prepared_seed {
-                        Some(seed) => seed ^ next_world as u64,
-                        None => rand::random(),
-                    };
-                    Arc::new(crate::dungeon::spider::generate(&content, seed)?)
-                } else if template == "mad-lab" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::lab::generate(&content, seed)?)
-                } else if template == "tomb-of-the-ancients" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::tomb::generate(&content, seed)?)
-                } else if template == "snake-pit" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::snake_pit(&content, seed)?)
-                } else if template == "sprite-world" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::sprite::generate(&content, seed)?)
-                } else if template == crate::dungeon::davy::TEMPLATE {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::davy::generate(&content, seed)?)
-                } else if template == "undead-lair" {
-                    let seed = prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
-                    Arc::new(crate::dungeon::undead::generate(&content, seed)?)
-                } else {
-                    map.context("world template missing")?
-                },
-                ids.clone(),
-            )?;
+            let game = content
+                .game
+                .as_ref()
+                .context("world construction GameData absent")?;
+            let spec = game
+                .world_template(&template)
+                .with_context(|| format!("unknown world template={template}"))?;
+            let binding = &game.maps[spec.map as usize];
+            let domain = if source.is_some() {
+                WorldDomain::Realm
+            } else {
+                WorldDomain::NonRealm
+            };
+            let map = (|| match &binding.geometry {
+                Geometry::Encoded(_) => map.context("linked static map not loaded"),
+                Geometry::Generator(generator) => {
+                    let seed =
+                        || prepared_seed.map_or_else(rand::random, |s| s ^ next_world as u64);
+                    crate::dungeon::generate(&content, spec, generator, seed).map(Arc::new)
+                }
+                Geometry::Pool(_) => source
+                    .as_ref()
+                    .context("linked Realm layout not selected")?
+                    .open(&content),
+                _ => bail!("map is not playable world geometry"),
+            })()
+            .with_context(|| format!("World {template} map={}", binding.name))?;
+            let mut world = World::with_ids_context(content.clone(), map, ids, Some(domain))?;
+            world.inventory_capacity = inventory_capacity;
+            world.xml.terminal_allocations = terminal_allocations;
             world.realm_layout = source.as_ref().map(|source| source.name().to_owned());
             world.clock = clock.clone();
             world.attack_epoch = clock.now();
@@ -1403,6 +1425,12 @@ impl Directory {
                 world.event_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x7265616c6d);
                 world.prepared_seed = Some(seed);
             }
+            world.xml.template = Some(template.clone());
+            world.uses_breath = spec
+                .services
+                .uses_breath
+                .as_ref()
+                .map(|service| service.value);
             world.name = name;
             // Select the client's existing starfield, not dungeon void: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/_H_Z_/Background.as
             world.background = match template.as_str() {
@@ -1413,34 +1441,18 @@ impl Directory {
             world.safe = safe;
             world.owner = owner;
             world.max_players = max_players;
-            world.encounter = matches!(template.as_str(), "realm-shore" | "tutorial" | "kitchen")
-                || template == crate::endgame::CASTLE
-                || crate::dungeon::DUNGEONS
-                    .iter()
-                    .chain(crate::endgame::DUNGEONS)
-                    .any(|(_, name, _, _)| *name == template);
-            if template == "realm-shore" {
+            world.encounter = matches!(template.as_str(), "realm" | "tutorial" | "kitchen")
+                || world
+                    .xml_world_template()
+                    .is_some_and(|t| t.clear.is_some());
+            if template == "realm" {
                 let started = Instant::now();
                 let sites = source.as_ref().context("Realm source missing")?.sites()?;
                 world.populate_authored_sites(&sites)?;
-                // No period numeric rarity survives; keep this a rare inland encounter, not modern fixed Reef spawns.
-                let beach_bum = world.rng.gen_ratio(1, 200);
-                world.populate_tomb_entry()?;
-                world.populate_coil_snakes(&sites)?;
-                if beach_bum {
-                    world.populate_beach_bum()?;
-                }
-                world.populate_realm_heroes(&sites)?;
-                world.populate_named_quests(&sites)?;
-                world.populate_realm_events()?;
-                world.populate_hermit()?;
-                world.populate_manor_entry()?;
-                world.populate_ghost_ship()?;
-                world.populate_lost_lands()?;
+                use crate::content::game::SitePhase;
+                world.populate_named_sites(&sites, SitePhase::Landmarks)?;
                 world.populate_realm_population()?;
-                // Finite crystals must stay outside ordinary respawns: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/SetPieces.cs
-                let crystal = world.place_named_setpiece(0x935, &[1])?;
-                world.spawn_entity(0x935, crystal, vec![])?;
+                world.populate_named_sites(&sites, SitePhase::AfterPopulation)?;
                 world.reserve_realm_events()?;
                 let godland_cells = godland_cells(&world.map, &world.content);
                 let spots = godland_spots(&godland_cells);
@@ -1462,23 +1474,6 @@ impl Directory {
                 );
             }
             world.prepare_endgame()?;
-            if template == crate::dungeon::davy::TEMPLATE {
-                world.prepare_locker()?;
-            }
-            if template == "sprite-world" {
-                let exits: Vec<_> = world
-                    .entities
-                    .values()
-                    .filter(|e| e.kind == 0x70e)
-                    .map(|e| e.id)
-                    .collect();
-                ensure!(
-                    exits.len() == 1,
-                    "Sprite World requires one authored completion exit"
-                );
-                world.entities.get_mut(&exits[0]).unwrap().published = false;
-                world.clear_exit = Some(exits[0]);
-            }
             if world.encounter {
                 let kinds: BTreeSet<_> = world
                     .entities
@@ -1493,18 +1488,18 @@ impl Directory {
                     .collect();
                 for kind in kinds {
                     if !world.content.objects[&kind].passive_destructible() {
-                        crate::encounter::validate(&world.content, kind)?;
+                        world.xml_declared_admission(kind, "construction roster")?;
                     }
-                    crate::loot::validate(&world.content, kind)?;
                 }
             }
             for kind in [
                 0x173, 0x653, 0x918, 0x919, 0xd07, 0xd08, 0xd09, 0xd0a, 0xdaa, 0xdab, 0xdac, 0xdad,
                 0xdae, 0xdaf, 0xdb0, 0xdb1, 0xdb2,
             ] {
-                crate::encounter::validate(&world.content, kind)?;
-                crate::loot::validate(&world.content, kind)?;
+                world.xml_declared_admission(kind, "construction roster")?;
             }
+            // Admission is t0: entering every root state here keeps a ~150ms Realm start off the first tick.
+            world.xml_step()?;
             Ok(world)
         }
     }
@@ -1733,44 +1728,35 @@ impl Directory {
             account.is_none() || return_route.is_none(),
             "private world cannot have a dungeon return route"
         );
+        let registration = self
+            .content
+            .game
+            .as_ref()
+            .and_then(|game| game.world_template(template));
+        let instance = registration.and_then(|t| t.instance.as_ref());
         ensure!(
-            return_route.is_some()
-                || !crate::dungeon::DUNGEONS
-                    .iter()
-                    .any(|(_, name, _, _)| *name == template),
-            "dungeon requires an explicit return route"
+            return_route.is_some() || registration.is_none_or(|t| t.clear_key.is_none()),
+            "dungeon {template} requires an explicit return route"
         );
         ensure!(
             matches!((template, account), ("vault", Some(_)) | ("kitchen", None))
-                || (account.is_none()
-                    && crate::dungeon::DUNGEONS
-                        .iter()
-                        .chain(crate::endgame::DUNGEONS)
-                        .any(|(_, name, _, _)| *name == template)),
-            "invalid private/dungeon instance policy"
+                || account.is_none() && instance.is_some(),
+            "invalid private/dungeon instance policy for {template}"
         );
         if let Some(account) = account
             && let Some((id, _)) = self.worlds.iter().find(|(_, w)| w.owner == Some(account))
         {
             return Ok(*id);
         }
-        let mut world = self.make(
-            template,
-            if template == "vault" {
-                "Vault"
-            } else if template == "kitchen" {
-                "Kitchen"
-            } else {
-                crate::dungeon::DUNGEONS
-                    .iter()
-                    .chain(crate::endgame::DUNGEONS)
-                    .find(|(_, name, _, _)| *name == template)
-                    .context("dungeon registration missing")?
-                    .2
-            },
-            template == "vault",
-            account,
-        )?;
+        let name = match template {
+            "vault" => "Vault".to_owned(),
+            "kitchen" => "Kitchen".to_owned(),
+            _ => instance
+                .context("dungeon instance registration missing")?
+                .name
+                .clone(),
+        };
+        let mut world = self.make(template, &name, template == "vault", account)?;
         // Entrances expire before their dungeons; preserve RECONNECT's exact world identity: https://github.com/moistosaurus/realm-cli/blob/a13c855dc5e09ee301fd0a66fcd303cfb5dff74e/src/kabam/rotmg/messaging/impl/incoming/Reconnect.as
         world.return_route = return_route;
         if let Some(DungeonReturn::Realm(origin)) = return_route
@@ -1795,11 +1781,11 @@ impl Directory {
     }
     fn dungeon_return_from(&self, origin: i32) -> Result<DungeonReturn> {
         let world = &self.worlds[&origin];
-        if world.name == "Realm" {
+        if self.endgame.realms.contains_key(&origin) {
             Ok(DungeonReturn::Realm(origin))
-        } else if crate::dungeon::DUNGEONS
-            .iter()
-            .any(|(_, _, name, _)| *name == world.name)
+        } else if world
+            .xml_world_template()
+            .is_some_and(|t| t.clear_key.is_some())
         {
             world
                 .return_route
@@ -1830,18 +1816,31 @@ impl Directory {
             protocol("character cannot transfer")
         );
         let (account, character) = (p.character.account, p.character.id);
-        let kind = if let Some(id) = portal {
+        let Some(portal) = portal else {
+            // Escape is a protocol command, not use of a physical portal.
+            ensure!(origin != -2, protocol("already in destination world"));
+            return Ok((account, character, -2));
+        };
+        let route = {
             let e = world
                 .entities
-                .get(&id)
+                .get(&portal)
                 .ok_or_else(|| protocol("portal missing"))?;
-            ensure!(e.published, protocol("portal not published"));
+            world.xml_portal_definition(e.kind, "actual Directory portal transfer")?;
+            ensure!(e.published && !e.reserved, protocol("portal not published"));
+            ensure!(
+                !world.xml_terminal_pending(portal)
+                    && world
+                        .xml_portal_expiry(portal)
+                        .is_none_or(|at| at > world.now),
+                protocol("portal XML lifecycle expired or terminal publication pending")
+            );
             // The client sends only a portal ID, so a reach refusal is not a malformed packet: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/net/_1f.as#L509-L513
             let distance = p.pos.distance(e.pos);
             ensure!(distance <= 2., {
                 tracing::info!(
                     player,
-                    portal = id,
+                    portal,
                     player_x = p.pos.x,
                     player_y = p.pos.y,
                     portal_x = e.pos.x,
@@ -1851,17 +1850,20 @@ impl Directory {
                 );
                 controller("portal out of reach")
             });
-            e.kind
-        } else {
-            0x712
+            world
+                .xml_portal_route(e.kind)
+                .map_err(|error| anyhow::Error::new(CloseReason::Protocol).context(error))?
+                .destination
+                .clone()
         };
-        let destination = match kind {
-            0x712 if origin == -2 && portal.is_some() => {
+        use crate::content::game::PortalDestination::*;
+        let destination = match route {
+            NamedRealm => {
                 let (id, record) = self
                     .endgame
                     .realms
                     .iter()
-                    .find(|(_, record)| record.portal == portal)
+                    .find(|(_, record)| record.portal == Some(portal))
                     .ok_or_else(|| protocol("stale named Realm portal"))?;
                 ensure!(
                     record.enabled && self.worlds[id].admission_open,
@@ -1873,17 +1875,12 @@ impl Directory {
                 );
                 *id
             }
-            0x703 if matches!(world.name.as_str(), "Snake Pit" | "Abyss of Demons") => {
-                self.dungeon_realm(world, account)?
-            }
-            0x703 | 0x70d | 0x712 | 0x71d | crate::dungeon::tomb::EXIT => -2,
-            0x704 | 0x70e => self.dungeon_realm(world, account)?,
-            0x71c => self.initial(-3, account)?,
-            // Kitchen destination: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.cs#L387-L416
-            // Reconstruction: a fresh Kitchen per use; Trapped instead caches the first Kitchen on the portal and reuses it.
-            0x71e => self.instance("kitchen", None, None)?,
-            0x720 => self.instance("vault", Some(account), None)?,
-            0x72f => {
+            OriginRealm => self.dungeon_realm(world, account)?,
+            Nexus => -2,
+            RandomRealm => self.initial(-3, account)?,
+            FreshKitchen => self.instance("kitchen", None, None)?,
+            OwnedVault => self.instance("vault", Some(account), None)?,
+            GuildHall => {
                 let guild = p
                     .presentation
                     .guild
@@ -1897,23 +1894,28 @@ impl Directory {
                     .context("Guild Hall has not been initialized.")?
                     .0
             }
-            _ if portal.is_some_and(|id| self.portals.contains_key(&id)) => {
-                let binding = self
-                    .portals
-                    .get(&portal.context("dungeon portal identity missing")?)
-                    .context("dropped portal has no live instance binding")?;
+            Instance(template) => {
+                if let Err(error) = self.bind_journaled_portal(origin, portal) {
+                    tracing::error!(portal, origin, %error, "journaled portal construction refused; same portal/template retained");
+                    return Err(error.context(controller(
+                        "Dungeon construction failed; the portal remains. Try again or use Nexus.",
+                    )));
+                }
+                let binding = self.portals.get(&portal).with_context(|| {
+                    anyhow::Error::new(CloseReason::Protocol).context(format!(
+                        "portal {portal} has no live {template} instance binding"
+                    ))
+                })?;
                 ensure!(
-                    binding.origin == origin && binding.expires > self.tick,
+                    binding.origin == origin
+                        && binding.expires.is_none_or(|expires| expires > self.tick),
                     protocol("dungeon portal binding expired or belongs to another world")
                 );
                 binding
                     .destination
-                    .ok_or_else(|| protocol("This dungeon is not implemented yet."))?
+                    .context("linked instance has no destination")?
             }
-            _ => {
-                return Err(anyhow::anyhow!(CloseReason::Protocol)
-                    .context(format!("unsupported portal destination {kind:#x}")));
-            }
+            Locked => return Err(protocol("portal is locked")),
         };
         ensure!(
             destination != origin,
@@ -2063,26 +2065,26 @@ impl Directory {
         let world = &self.worlds[&source];
         let player = &world.players[&id];
         let grant = self.grants.get(key).context("earned exit grant missing")?;
-        if self.worlds[&grant.destination].name != "Realm" {
+        if !self.endgame.realms.contains_key(&grant.destination) {
             return Ok(());
         }
-        let Some(dungeon) = crate::dungeon::HistoricalDungeon::from_world(&world.name) else {
+        let Some(dungeon) = world.xml_world_template().and_then(|t| t.exit_key) else {
             return Ok(());
         };
         let entity = world
             .entities
             .get(&portal)
             .context("earned exit portal missing")?;
+        if !world.xml_portal_route(entity.kind)?.earned_exit {
+            return Ok(());
+        }
         ensure!(
             player.character.alive
                 && player.character.hp > 0
                 && !player.death_pending
                 && !player.departing
                 && entity.published
-                && player.pos.distance(entity.pos) <= 2.
-                && (matches!(entity.kind, 0x704 | 0x70e | 0x71c)
-                    || entity.kind == 0x703
-                        && matches!(world.name.as_str(), "Snake Pit" | "Abyss of Demons")),
+                && player.pos.distance(entity.pos) <= 2.,
             "earned exit source portal changed"
         );
         ensure!(
@@ -2195,7 +2197,8 @@ impl Directory {
         );
         if grant.exit.is_some() {
             ensure!(
-                destination.name == "Realm" && destination.players.len() < destination.max_players,
+                self.endgame.realms.contains_key(&grant.destination)
+                    && destination.players.len() < destination.max_players,
                 "earned exit destination is full or unavailable"
             );
         }
@@ -2445,49 +2448,32 @@ impl Directory {
         Ok(())
     }
 
-    fn drop_dungeon_portal(&mut self, origin: i32, kind: u16, pos: Pos) -> Result<i32> {
-        let definition = crate::dungeon::DUNGEONS
+    fn retire_expired_portals(&mut self) {
+        let expired_portals: Vec<_> = self
+            .portals
             .iter()
-            .find(|(portal, _, _, _)| *portal == kind)
-            .context("unregistered earned dungeon portal")?;
-        ensure!(
-            self.worlds[&origin].name == "Realm" && self.worlds[&origin].walkable(pos),
-            "dungeon portal must be earned on the walkable Realm"
-        );
-        let destination = self.instance(definition.1, None, Some(DungeonReturn::Realm(origin)))?;
-        let id = self
-            .worlds
-            .get_mut(&origin)
-            .unwrap()
-            .spawn_clear_portal(kind, pos, true)?;
-        self.portals.insert(
-            id,
-            Portal {
-                origin,
-                destination: Some(destination),
-                // The May 2012 Sprite World guide specifies 15 seconds, unlike newer references.
-                expires: self.tick
-                    + if kind == 0x70c {
-                        300
-                    } else {
-                        DUNGEON_PORTAL_TICKS
-                    },
-            },
-        );
-        tracing::info!(
-            portal = id,
-            kind,
-            origin,
-            destination,
-            x = self.worlds[&origin].entities[&id].pos.x,
-            y = self.worlds[&origin].entities[&id].pos.y,
-            requested_x = pos.x,
-            requested_y = pos.y,
-            displacement = pos.distance(self.worlds[&origin].entities[&id].pos),
-            expires_tick = self.portals[&id].expires,
-            "earned dungeon portal dropped"
-        );
-        Ok(id)
+            .filter(|(id, binding)| {
+                binding.expires.is_some_and(|expires| expires <= self.tick)
+                    || !self
+                        .worlds
+                        .summary(&binding.origin)
+                        .expect("portal origin exists")
+                        .portal_ids
+                        .contains(id)
+            })
+            .map(|(id, binding)| (*id, binding.origin))
+            .collect();
+        for (id, origin) in expired_portals {
+            let world = self.worlds.get_mut(&origin).expect("portal origin exists");
+            if world.entities.get(&id).is_none_or(|e| !e.reserved) {
+                if world.entities.contains_key(&id) {
+                    world.remove_entity(id);
+                }
+                self.portals.remove(&id);
+                tracing::info!(portal = id, origin, "dungeon portal expired");
+            }
+            self.worlds.release_world(&origin);
+        }
     }
     fn retire_transfer_grants(&mut self) {
         self.retire_grants(|_, _| {});
@@ -2538,46 +2524,7 @@ impl Directory {
         self.realm_population_step(self.clock.now());
         self.sync_realm_portal();
         self.worlds.release_world(&-2);
-        let requesting: Vec<_> = self
-            .worlds
-            .summaries()
-            .filter(|(id, w)| ready.contains(id) && w.portals_pending)
-            .map(|(id, _)| *id)
-            .collect();
-        let requests: Vec<_> = requesting
-            .into_iter()
-            .flat_map(|id| {
-                std::mem::take(
-                    &mut self
-                        .worlds
-                        .get_mut(&id)
-                        .expect("portal source missing")
-                        .portal_requests,
-                )
-                .into_iter()
-                .map(move |pos| (id, pos))
-            })
-            .collect();
-        for (origin, (kind, pos)) in requests {
-            if let Err(error) = self.drop_dungeon_portal(origin, kind, pos) {
-                tracing::error!(origin,kind,x=pos.x,y=pos.y,%error,"earned dungeon portal creation failed");
-            }
-        }
-        let expired_portals: Vec<_> = self
-            .portals
-            .iter()
-            .filter(|(_, binding)| binding.expires <= self.tick)
-            .map(|(id, binding)| (*id, binding.origin))
-            .collect();
-        for (id, origin) in expired_portals {
-            let world = self.worlds.get_mut(&origin).expect("portal origin exists");
-            if world.entities.get(&id).is_none_or(|e| !e.reserved) {
-                world.remove_entity(id);
-                self.portals.remove(&id);
-                tracing::info!(portal = id, origin, "dungeon portal expired");
-            }
-            self.worlds.release_world(&origin);
-        }
+        self.retire_expired_portals();
         let expired: Vec<_> = self
             .idle
             .iter()
@@ -3022,16 +2969,29 @@ impl World {
     pub fn new(content: Arc<Content>, map: Arc<Map>) -> Result<Self> {
         Self::with_ids(content, map, Arc::new(AtomicI32::new(1000)))
     }
+    #[cfg(test)]
+    fn in_domain(content: Arc<Content>, map: Arc<Map>, domain: WorldDomain) -> Result<Self> {
+        Self::with_ids_context(content, map, Arc::new(AtomicI32::new(1000)), Some(domain))
+    }
     pub(crate) fn with_ids(
         content: Arc<Content>,
         map: Arc<Map>,
         ids: Arc<AtomicI32>,
     ) -> Result<Self> {
+        Self::with_ids_context(content, map, ids, None)
+    }
+    fn with_ids_context(
+        content: Arc<Content>,
+        map: Arc<Map>,
+        ids: Arc<AtomicI32>,
+        domain: Option<WorldDomain>,
+    ) -> Result<Self> {
+        Self::xml_map_admission(&content, &map, domain)?;
+        let mut xml = xml::Runtime::new(&content, domain)?;
         let mut entities = entity_store::Entities::default();
         let mut scenery_templates = BTreeMap::new();
         let mut actor_ids = BTreeSet::new();
         let mut quests_by_level: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
-        let mut fountains = Vec::new();
         let mut merchants = BTreeMap::new();
         let mut cells = cell_index::CellIndex::new(map.width as usize, map.height as usize);
         for (y, row) in map.cells.chunks(map.width as usize).enumerate() {
@@ -3055,33 +3015,16 @@ impl World {
                                 String::new()
                             },
                             goal: None,
-                            motion: None,
-                            following: Following::Unknown,
-                            lair_escort: None,
-                            tomb: tomb::State::for_kind(kind),
-                            follow_remaining: 0,
-                            strict_initialized: false,
-                            charge: None,
-                            script: None,
-                            abyss: None,
                             last_step: Pos { x: 0., y: 0. },
                             phase: 0.,
                             orbit: None,
                             hp: o.hp,
                             size: o.size,
-                            condition: crate::dungeon::manor::initial_condition(kind)
-                                | crate::dungeon::lab::initial_condition(kind)
-                                | crate::dungeon::abyss::initial_condition(kind)
-                                | crate::dungeon::spider::initial_condition(kind)
-                                | crate::dungeon::snake::initial_condition(kind)
-                                | crate::dungeon::jungle::initial_condition(kind)
-                                | crate::dungeon::davy::initial_condition(kind)
-                                | crate::dungeon::tomb::initial_condition(kind)
-                                | if o.stasis_immune {
-                                    crate::condition::bit(crate::condition::STASIS_IMMUNE)
-                                } else {
-                                    0
-                                },
+                            condition: if o.stasis_immune {
+                                crate::condition::bit(crate::condition::STASIS_IMMUNE)
+                            } else {
+                                0
+                            },
                             statuses: BTreeMap::new(),
                             items: o.equipment.clone(),
                             drop_slots: BTreeSet::new(),
@@ -3096,9 +3039,7 @@ impl World {
                             published: true,
                             damage: BTreeMap::new(),
                             next_shot: 0,
-                            attacks: Default::default(),
                             activated: None,
-                            stage: None,
                             parent: Default::default(),
                             camp: None,
                             population_slot: None,
@@ -3110,46 +3051,19 @@ impl World {
                             bullet: 0,
                         })),
                     };
-                    for setting in c.config.split(';').filter(|s| !s.is_empty()) {
-                        let (k, v) = setting.split_once(':').context("malformed map setting")?;
-                        match k {
-                            "name" => e.name = v.into(),
-                            "size" => e.size = v.parse()?,
-                            "eff" | "conn" | "mtype" | "mcount" | "mtime" | "nstar" => {
-                                let value = if let Some(hex) = v.strip_prefix("0x") {
-                                    u32::from_str_radix(hex, 16)? as i32
-                                } else {
-                                    v.parse()?
-                                };
-                                if k == "eff" {
-                                    e.condition |= value;
-                                    continue;
-                                }
-                                let stat = match k {
-                                    "conn" => 41,
-                                    "mtype" => 34,
-                                    "mcount" => 42,
-                                    "mtime" => 43,
-                                    // NameChanger is not a SellableObject in 123.5.1.
-                                    "nstar" => 55,
-                                    _ => unreachable!(),
-                                };
-                                e.extra_stats.push((stat, value));
-                            }
-                            _ => bail!("unsupported map setting {k}"),
-                        }
+                    let settings = Self::xml_map_settings(&content, kind, &c.config)?;
+                    if let Some(name) = settings.name {
+                        e.name = name;
                     }
+                    if let Some(size) = settings.size {
+                        e.size = size;
+                    }
+                    e.condition |= settings.condition;
+                    e.extra_stats.extend(settings.stats);
                     if o.class == "Merchant" {
                         merchants.insert(id, shop::configure(&mut e, &content)?);
                     }
-                    if o.name == "White Fountain" {
-                        fountains.push((id, pos));
-                    }
-                    let actor = !o.passive_destructible()
-                        && (o.enemy
-                            || o.quest
-                            || !o.static_object
-                            || matches!(kind, 0x173 | 0xd7d | 0x802..=0x805));
+                    let actor = Self::actor_kind(&content, kind);
                     cells.insert(y * map.width as usize + x, id, actor);
                     if actor {
                         actor_ids.insert(id);
@@ -3157,28 +3071,36 @@ impl World {
                     if o.quest {
                         quests_by_level.entry(o.quest_level).or_default().insert(id);
                     }
-                    if !actor
-                        && !o.destructible
-                        && o.class == "GameObject"
-                        && o.name != "White Fountain"
-                    {
+                    if !actor && !o.destructible && o.class == "GameObject" {
                         e.share(&mut scenery_templates, &c.config);
                     }
                     entities.insert(id, e);
                 }
             }
         }
+        xml.runnable = actor_ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                !xml::admission::terminal_only(
+                    &content.game.as_ref().unwrap().definitions[&entities[id].kind],
+                )
+            })
+            .collect();
+        xml.awake = xml.runnable.clone();
+        let portal_ids = actor_ids
+            .iter()
+            .copied()
+            .filter(|id| Self::snapshot_portal(&content, entities[id].kind))
+            .collect();
         let gun_ids = actor_ids
             .iter()
             .copied()
             .filter(|id| (0x802..=0x805).contains(&entities[id].kind))
             .collect();
-        let npc_global_ids = actor_ids
-            .iter()
-            .copied()
-            .filter(|id| Self::npc_kind(&content, entities[id].kind))
-            .collect();
         let mut world = Self {
+            inventory_capacity: Arc::default(),
+            xml,
             content,
             map,
             navigation_geometry: Box::default(),
@@ -3189,50 +3111,21 @@ impl World {
             timed_ids: BTreeSet::new(),
             quest_ids: BTreeSet::new(),
             gun_ids,
-            abyss_flamer_ids: actor_ids
-                .iter()
-                .copied()
-                .filter(|id| entities[id].kind == 0x90b)
-                .collect(),
-            abyss_boss_ids: actor_ids
-                .iter()
-                .copied()
-                .filter(|id| entities[id].kind == crate::dungeon::abyss::MALPHAS)
-                .collect(),
-            pentaract_ids: entities
-                .values()
-                .filter(|e| e.kind == 0xd5f)
-                .map(|e| e.id)
-                .collect(),
-            world_effect_ids: actor_ids
-                .iter()
-                .copied()
-                .filter(|id| Self::has_world_effect(entities[id].kind))
-                .collect(),
+            portal_ids,
             entities,
             non_population_ids: actor_ids.clone(),
-            npc_global_ids,
             actor_ids,
             quests_by_level,
             players: BTreeMap::new(),
             guild: None,
             bullets: Vec::new(),
             detached_bullets: 0,
-            grenades: Vec::new(),
-            fauna_births: Vec::new(),
-            named_births: Vec::new(),
-            lab_tosses: Vec::new(),
-            manor_births: Vec::new(),
-            lava_patches: BTreeMap::new(),
-            locker: None,
+            owed_shots: Vec::new(),
             ability_state: abilities::State::default(),
             companions: companions::State::default(),
-            finale: endgame_ai::Actors::default(),
             cells,
-            fountains,
             merchants,
-            next_fountain_heal: 0,
-            rng: rand::rngs::StdRng::from_entropy(),
+            rng: world_rng(),
             now: 0,
             last_npc_step: 0,
             performance: std::cell::RefCell::default(),
@@ -3245,6 +3138,7 @@ impl World {
             ids,
             name: "Development tutorial".into(),
             background: 0,
+            uses_breath: None,
             safe: false,
             owner: None,
             return_route: None,
@@ -3261,18 +3155,16 @@ impl World {
             reproduction_at: [0; 20],
             reproduction_bucket: 0,
             npc_paused_since: BTreeMap::new(),
-            djinn_attacking: BTreeSet::new(),
             setpieces: vec![],
             ghost_towers: vec![],
             phoenix_pyres: vec![],
             event_sites: vec![],
-            portal_requests: vec![],
             critical_deaths: vec![],
             critical_killers: BTreeMap::new(),
             event_reserves: vec![],
             event_waiting: None,
             event_choice: None,
-            event_rng: rand::rngs::StdRng::from_entropy(),
+            event_rng: world_rng(),
             admission_open: true,
             bag_expiry: BTreeMap::new(),
             cleared: false,
@@ -3283,30 +3175,65 @@ impl World {
             trade_requests: BTreeMap::new(),
             recent_market_pairs: BTreeMap::new(),
         };
-        world.jungle_initialize()?;
-        world.tomb_bindings()?;
+        world.xml_admit_all()?;
         Ok(world)
     }
-    pub fn settled(&self) -> Result<bool> {
-        for p in self.players.values() {
+    /// Players whose persistence is still in flight, named with the outstanding flags.
+    pub fn unsettled(&self) -> Result<Vec<String>> {
+        let mut out = Vec::new();
+        for (id, p) in &self.players {
             ensure!(
                 p.persistence_failure.is_none(),
                 "character {} is quarantined",
                 p.character.id
             );
+            let flags = [
+                ("pending", p.pending),
+                (
+                    "lifetime_uncommitted",
+                    p.character.lifetime != p.committed_lifetime,
+                ),
+                ("terminal_captures", p.terminal_captures > 0),
+                ("rewards_queued", p.ordinary_rewards_queued()),
+                ("progress_started", p.progress_started),
+                ("death_pending", p.death_pending),
+                ("departing", p.departing),
+            ];
+            if flags.iter().any(|(_, set)| *set) {
+                out.push(format!(
+                    "world={} player={id} character={} {:?}",
+                    self.name,
+                    p.character.id,
+                    flags
+                        .iter()
+                        .filter(|(_, set)| *set)
+                        .map(|(name, _)| *name)
+                        .collect::<Vec<_>>()
+                ));
+            }
         }
-        Ok(self.players.values().all(|p| {
-            !p.pending
-                && !p.progress_queued()
-                && !p.progress_started
-                && !p.death_pending
-                && !p.departing
-        }))
+        Ok(out)
+    }
+    pub(crate) fn restored_vault(content: Arc<Content>, owner: i32) -> Result<Self> {
+        let mut maps = Directory::linked_static_maps(&content)?;
+        let map = maps
+            .remove("vault")
+            .context("restored Vault lacks linked map")?;
+        let mut world = Self::with_ids(content, map, Arc::new(AtomicI32::new(1000)))?;
+        world.xml.template = Some("vault".into());
+        world.name = "Vault".into();
+        world.owner = Some(owner);
+        Ok(world)
+    }
+    #[cfg(test)]
+    pub(crate) fn set_test_template(&mut self, id: &str) {
+        self.xml.template = Some(id.into());
     }
     pub fn load_vaults(&mut self, vaults: Vec<Vault>) -> Result<()> {
+        self.xml_check_catalog()?;
         let account = self.owner.context("Vault world has no owner")?;
         ensure!(
-            self.name == "Vault"
+            self.template_id() == Some("vault")
                 && !vaults.is_empty()
                 && vaults.len() <= crate::store::VAULT_CHESTS as usize
                 && vaults.iter().all(|v| v.account == account
@@ -3316,6 +3243,13 @@ impl World {
                     && v.revision >= 0),
             "invalid private vault state"
         );
+        for kind in [0x504, 0x505] {
+            self.xml_game().admission(
+                kind,
+                AdmissionRole::Native(NativeService::Container),
+                "private vault load",
+            )?;
+        }
         let count = vaults.len();
         let by_chest: BTreeMap<_, _> = vaults.into_iter().map(|v| (v.chest, v)).collect();
         ensure!(
@@ -3361,10 +3295,35 @@ impl World {
             cells.len() == crate::store::VAULT_CHESTS as usize,
             "Vault map must have exactly twenty chest cells"
         );
+        ensure!(
+            self.xml_live_count() + cells.len() <= xml::ACTOR_LIMIT,
+            "private vault load exceeds native entity capacity: live={} requested={} limit={}",
+            self.xml_live_count(),
+            cells.len(),
+            xml::ACTOR_LIMIT
+        );
+        for (chest, pos) in cells.iter().enumerate() {
+            self.xml_preflight_native_entity(
+                if by_chest.contains_key(&(chest as i32)) {
+                    0x504
+                } else {
+                    0x505
+                },
+                NativeService::Container,
+                *pos,
+                "private vault load preflight",
+            )?;
+        }
         for (chest, pos) in cells.into_iter().enumerate() {
             let chest = chest as i32;
             if let Some(vault) = by_chest.get(&chest) {
-                let id = self.spawn_entity(0x504, pos, vault.items.clone())?;
+                let id = self.insert_native_entity(
+                    0x504,
+                    NativeService::Container,
+                    pos,
+                    vault.items.clone(),
+                    "loaded private vault chest",
+                )?;
                 self.entities
                     .get_mut(&id)
                     .unwrap()
@@ -3372,7 +3331,13 @@ impl World {
                     .push((54, account));
                 self.vaults.insert(id, vault.clone());
             } else {
-                let id = self.spawn_entity(0x505, pos, Vec::new())?;
+                let id = self.insert_native_entity(
+                    0x505,
+                    NativeService::Container,
+                    pos,
+                    Vec::new(),
+                    "loaded private vault sale",
+                )?;
                 // Native stat 54 casts to Container; sellers are owned by this private world's identity map.
                 self.entities.get_mut(&id).unwrap().extra_stats.extend([
                     (36, crate::store::VAULT_PRICE),
@@ -3412,16 +3377,41 @@ impl World {
         Ok(())
     }
     pub fn spawn_entity(&mut self, kind: u16, pos: Pos, items: Vec<i32>) -> Result<i32> {
-        ensure!(self.walkable(pos), "entity spawn is blocked");
         self.insert_entity(kind, pos, items)
     }
     fn insert_entity(&mut self, kind: u16, pos: Pos, items: Vec<i32>) -> Result<i32> {
+        self.xml_raw_admission(kind)?;
+        self.xml_preflight_admission(kind, pos)?;
+        ensure!(
+            self.xml_live_count() < xml::ACTOR_LIMIT,
+            "raw entity capacity exhausted: live={} limit={} kind={kind:#x} world={}",
+            self.xml_live_count(),
+            xml::ACTOR_LIMIT,
+            self.name
+        );
+        ensure!(
+            self.xml_placeable(kind, pos, &[], None)?,
+            "native entity admission geometry blocked"
+        );
+        let id = allocate_id(&self.ids)?;
+        self.insert_entity_with_id(id, kind, pos, items)
+    }
+    fn insert_entity_with_id(
+        &mut self,
+        id: i32,
+        kind: u16,
+        pos: Pos,
+        items: Vec<i32>,
+    ) -> Result<i32> {
+        self.xml_preflight_admission(kind, pos)?;
+        self.insert_entity_data(id, kind, pos, items)
+    }
+    fn insert_entity_data(&mut self, id: i32, kind: u16, pos: Pos, items: Vec<i32>) -> Result<i32> {
         ensure!(
             pos.x.is_finite() && pos.y.is_finite() && self.map.cell(pos.x, pos.y).is_some(),
             "entity spawn outside map"
         );
         let definition = self.content.get(kind)?;
-        let id = allocate_id(&self.ids)?;
         let extra_stats = if definition.class == "Portal" {
             vec![(37, 1)]
         } else {
@@ -3441,39 +3431,16 @@ impl World {
                         String::new()
                     },
                     goal: None,
-                    motion: None,
-                    following: Following::Unknown,
-                    lair_escort: None,
-                    tomb: tomb::State::for_kind(kind),
-                    follow_remaining: 0,
-                    strict_initialized: false,
-                    charge: None,
-                    script: None,
-                    abyss: None,
                     last_step: Pos { x: 0., y: 0. },
                     phase: 0.,
                     orbit: None,
                     hp: definition.hp,
                     size: definition.size,
-                    condition: crate::dungeon::manor::initial_condition(kind)
-                        | crate::dungeon::lab::initial_condition(kind)
-                        | crate::dungeon::abyss::initial_condition(kind)
-                        | crate::dungeon::spider::initial_condition(kind)
-                        | crate::dungeon::snake::initial_condition(kind)
-                        | crate::dungeon::jungle::initial_condition(kind)
-                        | crate::dungeon::davy::initial_condition(kind)
-                        | crate::dungeon::tomb::initial_condition(kind)
-                        | (if kind == 0x91a {
-                            crate::condition::bit(crate::condition::INVULNERABLE)
-                        } else {
-                            0
-                        })
-                        | (if definition.stasis_immune {
-                            crate::condition::bit(crate::condition::STASIS_IMMUNE)
-                        } else {
-                            0
-                        }),
-
+                    condition: if definition.stasis_immune {
+                        crate::condition::bit(crate::condition::STASIS_IMMUNE)
+                    } else {
+                        0
+                    },
                     statuses: BTreeMap::new(),
                     items,
                     drop_slots: BTreeSet::new(),
@@ -3484,9 +3451,7 @@ impl World {
                     published: true,
                     damage: BTreeMap::new(),
                     next_shot: 0,
-                    attacks: Default::default(),
                     activated: None,
-                    stage: None,
                     parent: Default::default(),
                     camp: None,
                     population_slot: None,
@@ -3500,6 +3465,7 @@ impl World {
             },
         );
         self.index_actor(id);
+        self.xml_admit(id)?;
         if self.content.objects[&kind].blocks_sight {
             self.invalidate_sight();
         }
@@ -3508,9 +3474,8 @@ impl World {
     fn index_actor(&mut self, id: i32) {
         let e = &self.entities[&id];
         let kind = e.kind;
-        let definition = &self.content.objects[&kind];
         let cell = e.pos.y.floor() as usize * self.map.width as usize + e.pos.x.floor() as usize;
-        let actor = !definition.passive_destructible();
+        let actor = Self::actor_kind(&self.content, kind);
         self.cells.insert(cell, id, actor);
         if e.parent.is_some() || e.expires.is_some() {
             self.timed_ids.insert(id);
@@ -3522,33 +3487,47 @@ impl World {
             return;
         }
         self.actor_ids.insert(id);
-        if Self::has_world_effect(kind) {
-            self.world_effect_ids.insert(id);
+        if !xml::admission::terminal_only(&self.xml_game().definitions[&e.kind]) {
+            self.xml.runnable.insert(id);
+            self.xml.awake.insert(id);
+        }
+        if Self::snapshot_portal(&self.content, kind) {
+            self.portal_ids.insert(id);
         }
         if (0x802..=0x805).contains(&kind) {
             self.gun_ids.insert(id);
-        }
-        if kind == 0xd5f {
-            self.pentaract_ids.insert(id);
-        }
-        if kind == 0x90b {
-            self.abyss_flamer_ids.insert(id);
-        }
-        if kind == crate::dungeon::abyss::MALPHAS {
-            self.abyss_boss_ids.insert(id);
-        }
-        if Self::npc_kind(&self.content, kind) {
-            self.npc_global_ids.insert(id);
         }
         self.non_population_ids.insert(id);
         if let Some(level) = self.quest_target_level(e) {
             self.quests_by_level.entry(level).or_default().insert(id);
         }
     }
+    #[cfg(test)]
     fn spawn_exit(&mut self, kind: u16, loot: Pos) -> Result<i32> {
         self.spawn_clear_portal(kind, loot, false)
     }
+    #[cfg(test)]
     fn spawn_clear_portal(&mut self, kind: u16, loot: Pos, keep_origin: bool) -> Result<i32> {
+        let pos = self.clear_portal_position(loot, keep_origin)?;
+        self.insert_portal_entity(kind, pos, "validated clear/unlock portal factory")
+    }
+    /// Quest ownership changes an entity's quest-arrow level (Phoenix Egg), so the level index must follow it.
+    pub(super) fn set_quest(&mut self, id: i32, quest: Option<i32>) {
+        if let Some(level) = self.quest_target_level(&self.entities[&id])
+            && let Some(ids) = self.quests_by_level.get_mut(&level)
+        {
+            ids.remove(&id);
+            if ids.is_empty() {
+                self.quests_by_level.remove(&level);
+            }
+        }
+        let e = self.entities.get_mut(&id).expect("quest owner exists");
+        e.quest.set(quest, id, &mut self.quest_ids);
+        if let Some(level) = self.quest_target_level(&self.entities[&id]) {
+            self.quests_by_level.entry(level).or_default().insert(id);
+        }
+    }
+    fn clear_portal_position(&self, loot: Pos, keep_origin: bool) -> Result<Pos> {
         // Keep the reference death point unless loot/portal clearance requires separation: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/DropPortalOnDeath.cs#L42
         let pos = std::iter::once(loot)
             .filter(|_| keep_origin)
@@ -3572,28 +3551,37 @@ impl World {
                         .all(|e| e.pos.distance(*pos) > 1.5)
             })
             .context("portal has no walkable position clear of loot and interactions")?;
-        self.spawn_entity(kind, pos, vec![])
+        Ok(pos)
     }
     pub(crate) fn remove_entity(&mut self, id: i32) -> Entity {
+        assert!(
+            !self.entities[&id].reserved,
+            "cannot remove a reserved container"
+        );
         self.actor_ids.remove(&id);
-        self.world_effect_ids.remove(&id);
+        self.xml.runnable.remove(&id);
+        self.xml.awake.remove(&id);
+        self.portal_ids.remove(&id);
         self.timed_ids.remove(&id);
         self.quest_ids.remove(&id);
         self.gun_ids.remove(&id);
-        self.pentaract_ids.remove(&id);
-        self.abyss_flamer_ids.remove(&id);
-        self.abyss_boss_ids.remove(&id);
-        self.npc_global_ids.remove(&id);
         self.non_population_ids.remove(&id);
-        for entry in 0..population::REPRODUCTION.len() {
-            self.reproduction.remove(&(id, entry));
-        }
         self.summon_waits.remove(&id);
-        self.djinn_attacking.remove(&id);
         self.npc_paused_since.remove(&id);
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
+        if entity.population_slot.is_some() {
+            let entries = self
+                .xml_game()
+                .realm
+                .as_ref()
+                .and_then(|r| r.reproduction.get(&entity.kind))
+                .map_or(0, Vec::len);
+            for entry in 0..entries {
+                self.reproduction.remove(&(id, entry));
+            }
+        }
         if let Some(level) = self.quest_target_level(&entity) {
             let ids = self
                 .quests_by_level
@@ -3616,9 +3604,7 @@ impl World {
                 .checked_sub(1)
                 .expect("population count underflow");
         }
-        self.orphan_satellites(&entity);
-        self.orphan_abyss(&entity);
-        assert!(!entity.reserved, "cannot remove a reserved container");
+        self.xml_forget(id);
         self.bag_expiry.remove(&id);
         if let Some(camp) = entity.camp {
             tracing::debug!(
@@ -3751,17 +3737,38 @@ impl World {
                 .any(|p| p.character.account == ch.account),
             "account already in this world"
         );
-        let id = allocate_id(&self.ids)?;
+        self.xml_game().admission(
+            ch.class,
+            AdmissionRole::Native(NativeService::Player),
+            "authenticated character entry",
+        )?;
+        if let Some(kind) = ch.pet_kind {
+            self.content.permanent_companion(kind)?;
+            self.xml_game().entity_admission(
+                kind,
+                AdmissionRole::Native(NativeService::Companion),
+                "durable character companion entry",
+            )?;
+        }
+        let mut draw = self.rng.clone();
         let pos = if let Some(pos) = position {
             pos
         } else {
             let &(x, y) = self
                 .map
                 .spawns
-                .choose(&mut self.rng)
+                .choose(&mut draw)
                 .context("world has no spawn cells")?;
             Pos { x, y }
         };
+        ensure!(
+            self.walkable(pos),
+            "character entry position is blocked or outside the world"
+        );
+        self.xml_preflight_position(ch.class, pos)?;
+        if let Some(kind) = ch.pet_kind {
+            self.preflight_companion(kind, pos)?;
+        }
         let last_move_at = if controller == Controller::Human {
             self.clock
                 .now()
@@ -3772,8 +3779,9 @@ impl World {
             self.now
         };
         let char_id = ch.id;
+        let id = allocate_id(&self.ids)?;
         if let Some(kind) = ch.pet_kind {
-            self.attach_companion(id, kind, pos)?;
+            self.attach_companion(id, &ch, kind, pos)?;
         }
         self.players.insert(
             id,
@@ -3802,6 +3810,7 @@ impl World {
                 qualified_quest: None,
                 statuses: BTreeMap::new(),
                 lab_conditions: 0,
+                xml_conditions: 0,
                 known_since: BTreeMap::new(),
                 shoot_acks: VecDeque::new(),
                 visible_projectiles: BTreeMap::new(),
@@ -3811,7 +3820,7 @@ impl World {
                 newbie_until: self.now + 3000,
                 bot_damage: VecDeque::new(),
                 volley_margin_ms: Arc::default(),
-                oxygen: if self.name == "Ocean Trench" { 100 } else { -1 },
+                oxygen: if self.uses_breath.is_some() { 100 } else { -1 },
                 tiles: BTreeSet::new(),
                 tile_updates: vec![],
                 tile_scan: None,
@@ -3829,8 +3838,9 @@ impl World {
                 experience_queue: None,
                 progress_snapshot: None,
                 level_assists_prepared: Vec::new(),
-                clears_queued: [0; crate::dungeon::DUNGEONS.len()],
+                clears_queued: [0; ProgressKey::COUNT],
                 progress_started: false,
+                terminal_captures: 0,
                 death_pending: false,
                 persistence_failure: None,
                 inputs: None,
@@ -3852,7 +3862,6 @@ impl World {
                     velocity: Pos { x: 0., y: 0. },
                     at: self.now,
                 },
-                white_demon_aim_history: [pos; 2],
                 goto_acks: VecDeque::new(),
                 discarded_attack: None,
                 tick: 0,
@@ -3863,6 +3872,7 @@ impl World {
                 ability_shot: None,
             },
         );
+        self.rng = draw;
         if let Some(key) = admission {
             self.admissions.remove(&key);
         }
@@ -3874,12 +3884,11 @@ impl World {
         o.i32(id).i32(char_id);
         send(&self.players[&id], wire::CREATE_SUCCESS, o.0);
         self.updates(id, true)?;
-        if self.name == "Realm" {
+        if self.template_id() == Some("realm") {
             let welcome =
                 chat::text_packet("#Oryx the Mad God", -1, 0, "You are food for my minions!");
             send(&self.players[&id], welcome.id, welcome.body);
         }
-        self.locker_key_ui(id);
         tracing::info!(
             player = id,
             character = char_id,
@@ -3903,11 +3912,12 @@ impl World {
         self.cancel_trade(id, "Trade cancelled by departure.");
         let p = self.players.get(&id).context("player not found")?;
         ensure!(
-            !p.pending && !p.death_pending,
-            "inventory or death operation pending"
+            !p.pending && !p.death_pending && p.terminal_captures == 0,
+            "inventory, captured terminal or death operation pending"
         );
         self.clear_companions(id);
         let mut p = self.players.remove(&id).unwrap();
+        self.xml_clear_player_effects(id, p.character.id);
         if p.controller == Controller::Human {
             crate::audit::flush_combat(true);
             p.audit_motion
@@ -4241,6 +4251,12 @@ impl World {
         let player = &self.players[&id];
         let pos = player.pos;
         self.entities_near(pos, PLAYER_VIEW_RADIUS)
+            .chain(
+                self.xml
+                    .visible
+                    .iter()
+                    .filter_map(|id| self.entities.get(id)),
+            )
             .filter(|e| e.accessible(player.character.account))
             .filter(|e| {
                 player
@@ -4383,6 +4399,14 @@ impl World {
         }
         p.known = visible;
         p.tick_stats.retain(&p.known);
+        // The base notified before retargeting (79a4c92b:src/world.rs:6343). Hold even before
+        // journal staging: progress backpressure can leave defeat captured but not yet staged.
+        let quest = match self.players[&id].quest {
+            Some(held) if self.xml_terminal_pending(held) && self.entities.contains_key(&held) => {
+                Some(held)
+            }
+            _ => quest,
+        };
         let quest_identity = quest.map(|id| {
             let e = &self.entities[&id];
             if crate::quest::root(e.kind) || crate::quest::final_root(e.kind) || e.kind == 0x6c2 {
@@ -4740,26 +4764,8 @@ impl World {
                 .expect("simulated entity missing from storage")
         })
     }
-    fn has_world_effect(kind: u16) -> bool {
-        matches!(
-            kind,
-            crate::dungeon::beach::BUM
-                | crate::dungeon::lab::HEXXER
-                | crate::dungeon::lab::DEHEXXER
-        )
-    }
-    fn world_effect_actors(&self) -> impl Iterator<Item = &Entity> {
-        self.world_effect_ids.iter().map(|id| &self.entities[id])
-    }
-    fn quest_entities(&self, tag: i32) -> impl Iterator<Item = &Entity> {
-        self.quest_ids
-            .iter()
-            .map(|id| &self.entities[id])
-            .filter(move |e| e.quest == Some(tag))
-    }
-    fn quest_actors(&self, tag: i32) -> impl Iterator<Item = &Entity> {
-        self.quest_entities(tag)
-            .filter(|e| self.actor_ids.contains(&e.id))
+    fn snapshot_portal(content: &Content, kind: u16) -> bool {
+        content.objects[&kind].is_portal()
     }
     fn summon_entities(&self) -> impl Iterator<Item = &Entity> {
         self.timed_ids
@@ -4880,6 +4886,7 @@ impl World {
         start: Pos,
         angle: f32,
     ) -> Result<NativeInput> {
+        self.xml_check_catalog()?;
         ensure!(angle.is_finite(), protocol("invalid shot angle"));
         ensure!(
             start.x.is_finite() && start.y.is_finite(),
@@ -4903,6 +4910,11 @@ impl World {
                 || ability && p.character.items[1] == kind as i32,
             protocol("weapon does not match equipped item")
         );
+        self.xml_game().admission(
+            kind,
+            AdmissionRole::Native(NativeService::Inventory),
+            "actual equipped weapon projectile",
+        )?;
         let item = self.content.get(kind)?;
         ensure!(item.shots > 0, "weapon projectile count is zero");
         let shot_index = if ability {
@@ -5077,6 +5089,14 @@ impl World {
         };
         let damage = (f64::from(draw) * multiplier) as i32;
         self.bullets.push(Bullet {
+            damage_origin: enemy_damage::DamageOrigin {
+                context: crate::behavior::TerminalContext::PlayerKill {
+                    world: self.xml.world,
+                    player: id,
+                    name: p.character.name.clone(),
+                },
+                character: Some(p.character.id),
+            },
             owner: id,
             source_kind: p.character.class,
             id: bullet,
@@ -5148,7 +5168,7 @@ impl World {
         plan
     }
     pub fn use_item(&mut self, id: i32, slot: Slot, pos: Pos) -> Result<Option<InventoryPlan>> {
-        self.cancel_trade(id, "Trade cancelled by inventory mutation.");
+        self.xml_check_catalog()?;
         let p = self.players.get(&id).context("player missing")?;
         ensure!(!p.paused, controller("Cannot use items while paused."));
         ensure!(
@@ -5169,12 +5189,14 @@ impl World {
                     && self.content.get(bag.kind)?.class == "Container",
                 controller("item container inaccessible")
             );
+            self.xml_container_admission(bag.kind, "owned item source container")?;
             &bag.items
         };
         ensure!(
             source.get(slot.slot) == Some(&slot.kind),
             controller("item ownership mismatch")
         );
+        self.check_entitlement_slot(id, slot)?;
         ensure!(slot.kind >= 0, controller("empty item slot"));
         let item = self.content.get(slot.kind as u16)?.clone();
         // Saving earned XP must not freeze abilities; inventory mutations remain serialized.
@@ -5184,6 +5206,12 @@ impl World {
                 && (!p.pending || p.progress_started && !item.abilities.is_empty()),
             controller("player is busy, departing, quarantined or dead")
         );
+        self.xml_game().admission(
+            item.kind,
+            AdmissionRole::Native(NativeService::Inventory),
+            "owned item activation",
+        )?;
+        let p = &self.players[&id];
         if item.xp_boost {
             ensure!(
                 item.kind == 0xc42 && item.consumable && item.activations == 0,
@@ -5281,7 +5309,7 @@ impl World {
         }
     }
     fn consumable_plan(&mut self, id: i32, slot: Slot, next: i32) -> Result<InventoryPlan> {
-        let mut plan = self.plan(id, self.players[&id].character.items.clone(), None);
+        let mut plan = self.plan(id, self.players[&id].character.items.clone(), None)?;
         if slot.object == id {
             plan.items[slot.slot] = next;
         } else {
@@ -5292,15 +5320,28 @@ impl World {
             plan.loot_slot = Some((slot.object, slot.slot));
         }
         self.bind_vaults(&mut plan)?;
+        self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         for (bag, _) in &plan.bags {
             self.entities.get_mut(bag).unwrap().reserved = true;
         }
         self.players.get_mut(&id).unwrap().pending = true;
         Ok(plan)
     }
-    fn plan(&self, id: i32, items: Vec<i32>, bag: Option<(i32, Vec<i32>)>) -> InventoryPlan {
+    fn plan(
+        &self,
+        id: i32,
+        items: Vec<i32>,
+        bag: Option<(i32, Vec<i32>)>,
+    ) -> Result<InventoryPlan> {
         let p = &self.players[&id];
-        InventoryPlan {
+        self.inventory_capacity.fetch_update(Ordering::AcqRel,Ordering::Acquire,|count|(count<128).then_some(count+1)).map_err(|_|anyhow::anyhow!("inventory journal admission backpressure:128 retained native plans; original events require reconciliation"))?;
+        let permit = Arc::new(InventoryPermit {
+            count: self.inventory_capacity.clone(),
+            event: crate::store::world_events::new_id(),
+        });
+        Ok(InventoryPlan {
+            accepted_at: self.now,
+            permit,
             ground_dye: None,
             player: id,
             items,
@@ -5321,10 +5362,12 @@ impl World {
             collected: None,
             purchase: None,
             loot_slot: None,
-        }
+            entitlement_move: false,
+        })
     }
     pub fn drop_item(&mut self, id: i32, slot: Slot) -> Result<InventoryPlan> {
-        self.cancel_trade(id, "Trade cancelled by inventory mutation.");
+        self.xml_check_catalog()?;
+        self.check_entitlement_slot(id, slot)?;
         let p = self.players.get(&id).context("drop owner missing")?;
         ensure!(
             p.persistence_failure.is_none(),
@@ -5351,6 +5394,7 @@ impl World {
                     && self.content.get(e.kind)?.class == "Container",
                 controller("drop container inaccessible")
             );
+            self.xml_container_admission(e.kind, "owned drop source container")?;
             Some((slot.object, e.items.clone()))
         };
         let inventory = match &mut source {
@@ -5362,21 +5406,36 @@ impl World {
             controller("empty or stale drop slot")
         );
         inventory[slot.slot] = -1;
-        let mut plan = self.plan(id, items, source);
+        let mut plan = self.plan(id, items, source)?;
         self.bind_vaults(&mut plan)?;
-        let dropped = self.reserve_drop(pos, account, slot.kind, false)?;
+        let private = self
+            .xml
+            .bag_entitlements
+            .get(&(slot.object, slot.slot))
+            .is_some_and(|(_, _, owner, _)| {
+                matches!(owner, crate::loot::evaluator::Owner::Character(_))
+            });
+        let dropped = self.reserve_drop(pos, account, slot.kind, private)?;
+        self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         for (source, _) in &plan.bags {
             self.entities.get_mut(source).unwrap().reserved = true;
         }
         self.players.get_mut(&id).unwrap().pending = true;
         if slot.object != id {
             plan.loot_slot = Some((slot.object, slot.slot));
+            plan.entitlement_move = true;
         }
         plan.dropped = Some(dropped);
         Ok(plan)
     }
     fn reserve_drop(&mut self, pos: Pos, account: i32, kind: i32, private: bool) -> Result<i32> {
         let soulbound = self.content.get(u16::try_from(kind)?)?.soulbound;
+        self.xml_preflight_native_entity(
+            if soulbound { 0x503 } else { 0x500 },
+            NativeService::Container,
+            pos,
+            "actual dropped item bag appearance",
+        )?;
         let dropped = self.loot_bag(pos, (soulbound || private).then_some(account), vec![kind])?;
         let bag = self.entities.get_mut(&dropped).unwrap();
         bag.kind = if soulbound { 0x503 } else { 0x500 };
@@ -5385,7 +5444,9 @@ impl World {
         Ok(dropped)
     }
     pub fn swap(&mut self, id: i32, from: Slot, to: Slot) -> Result<InventoryPlan> {
-        self.cancel_trade(id, "Trade cancelled by inventory mutation.");
+        self.xml_check_catalog()?;
+        self.check_entitlement_slot(id, from)?;
+        self.check_entitlement_slot(id, to)?;
         let p = self.players.get(&id).context("player missing")?;
         ensure!(
             p.persistence_failure.is_none(),
@@ -5418,6 +5479,7 @@ impl World {
                     && self.content.get(e.kind)?.class == "Container",
                 controller("container inaccessible")
             );
+            self.xml_container_admission(e.kind, "owned swap source container")?;
             bags.insert(object, e.items.clone());
         }
         let get = |s: &Slot| -> Result<i32> {
@@ -5436,6 +5498,13 @@ impl World {
             a == from.kind && b == to.kind,
             controller("stale inventory offer")
         );
+        for kind in [a, b].into_iter().filter(|kind| *kind >= 0) {
+            self.xml_game().admission(
+                u16::try_from(kind)?,
+                AdmissionRole::Native(NativeService::Inventory),
+                "actual owned inventory swap",
+            )?;
+        }
         let mut replacement = None;
         for (s, k) in [(&from, b), (&to, a)] {
             if s.object != id && k >= 0 {
@@ -5478,21 +5547,20 @@ impl World {
         } else {
             bags.get_mut(&to.object).unwrap()[to.slot] = a
         }
-        let dropped = if let Some(kind) = replacement {
+        let drop_request = if let Some(kind) = replacement {
             // A swap must not put Soulbound gear in public loot or violate the source bag's put flags.
             let source = if from.object == id { to } else { from };
             bags.get_mut(&source.object).unwrap()[source.slot] = -1;
             let private = self.entities[&source.object]
                 .extra_stats
                 .contains(&(54, p.character.account));
-            Some(self.reserve_drop(p.pos, p.character.account, kind, private)?)
+            Some((p.pos, p.character.account, kind, private))
         } else {
             None
         };
-        let mut plan = self.plan(id, items, None);
+        let mut plan = self.plan(id, items, None)?;
         plan.bags = bags.into_iter().collect();
         self.bind_vaults(&mut plan)?;
-        plan.dropped = dropped;
         for (container, _) in &plan.bags {
             let source = if from.object == *container {
                 &from
@@ -5516,6 +5584,10 @@ impl World {
                 }
             }
         }
+        if let Some((pos, account, kind, private)) = drop_request {
+            plan.dropped = Some(self.reserve_drop(pos, account, kind, private)?);
+        }
+        self.cancel_trade(id, "Trade cancelled by inventory mutation.");
         for (container, _) in &plan.bags {
             self.entities.get_mut(container).unwrap().reserved = true;
         }
@@ -5544,8 +5616,6 @@ impl World {
             "portal unlock requires its directory commit"
         );
         let player = plan.player;
-        let source = (plan.character, plan.revision);
-        let companion = plan.companion.clone();
         let ground_dye = plan.ground_dye.as_ref().map(|source| source.bag_id());
         let result = self.publish_inventory(plan, result);
         if let Err(error) = &result {
@@ -5555,10 +5625,6 @@ impl World {
                 // An error may conceal COMMIT; retain even a damaged reservation, never refund the source.
                 bag.reserved = true;
             }
-            self.discard_consumable(source);
-            if let Err(cleanup) = self.discard_companion(&companion) {
-                tracing::error!(player,%cleanup,"companion cleanup failed after rejected publication");
-            }
             self.poison(player, format!("{error:#}"))?;
         }
         result
@@ -5567,6 +5633,18 @@ impl World {
         let revision = result?;
         if plan.ground_dye.is_some() {
             self.validate_ground_dye(&plan)?;
+        }
+        if plan.entitlement_move {
+            let (bag, slot) = plan
+                .loot_slot
+                .context("ground entitlement move lacks source")?;
+            let dropped = plan
+                .dropped
+                .context("ground entitlement move lacks destination")?;
+            ensure!(
+                self.entities[&bag].items.get(slot) == self.entities[&dropped].items.first(),
+                "ground entitlement move changed allocated item"
+            );
         }
         let p = self
             .players
@@ -5581,7 +5659,6 @@ impl World {
                 && plan.revision.checked_add(1) == Some(revision),
             "inventory completion owner, reservation or revision changed"
         );
-        p.pending = false;
         for (id, _) in &plan.bags {
             ensure!(
                 self.entities
@@ -5608,6 +5685,7 @@ impl World {
                 .remove(&slot);
         }
         let mut o = Writer::new();
+        p.pending = false;
         p.character.items = plan.items;
         p.character.revision = revision;
         // Stat growth is silent in the 2013 comparator: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.UseItem.cs#L659-L679
@@ -5709,6 +5787,19 @@ impl World {
             e.reserved = false;
             e.published = true;
             self.bag_expiry.insert(dropped, self.now + 60_000);
+            if plan.entitlement_move
+                && let Some(source) = plan.loot_slot
+                && let Some((event, ordinal, owner, _)) = self.xml.bag_entitlements.remove(&source)
+            {
+                self.xml
+                    .bag_entitlements
+                    .insert((dropped, 0), (event, ordinal, owner, self.now + 60_000));
+            }
+        }
+        if !plan.entitlement_move
+            && let Some(source) = plan.loot_slot
+        {
+            self.xml.bag_entitlements.remove(&source);
         }
         tracing::info!(player = plan.player, revision, "inventory committed");
         let p = &self.players[&plan.player];
@@ -5819,6 +5910,7 @@ impl World {
         let mut plans = Vec::new();
         for (id, p) in &mut self.players {
             if !p.progress_queued()
+                || (p.terminal_captures > 0 && !p.ordinary_rewards_queued())
                 || p.pending
                 || p.death_started
                 || ((p.death_pending || p.departing) && !p.rewards_queued())
@@ -5893,7 +5985,7 @@ impl World {
             p.experience_queue = None;
             p.progress_snapshot = Some(snapshot.clone());
             p.level_assists_prepared = assists;
-            p.clears_queued = [0; crate::dungeon::DUNGEONS.len()];
+            p.clears_queued = [0; ProgressKey::COUNT];
             p.pending = true;
             p.progress_started = true;
             plans.push((*id, snapshot));
@@ -5946,6 +6038,8 @@ impl World {
         let leveled = snapshot.level > p.character.level;
         let announcement = (leveled && snapshot.level == 20)
             .then(|| format!("{} achieved level 20", p.character.name));
+        p.character.kills = p.character.kills.max(snapshot.kills);
+        p.character.quests = p.character.quests.max(snapshot.quests);
         p.character.exp = snapshot.exp;
         p.character.xp_boost = snapshot.xp_boost;
         p.character.fame = snapshot.fame;
@@ -6016,11 +6110,14 @@ impl World {
             tracing::info!(player = id, recipients, "level twenty announced");
         }
         if cleared_dungeon && let Some(exit) = self.clear_exit.take() {
-            if self.name == "Tomb of the Ancients" {
+            if let Some(retire) = self
+                .xml_world_template()
+                .and_then(|world| world.clear.as_ref()?.retire)
+            {
                 let old_exits: Vec<_> = self
                     .entities
                     .values()
-                    .filter(|e| e.kind == crate::dungeon::tomb::EXIT)
+                    .filter(|e| e.kind == retire)
                     .map(|e| e.id)
                     .collect();
                 for id in old_exits {
@@ -6133,6 +6230,7 @@ impl World {
         send(&self.players[&id], 41, out.0);
         self.clear_abilities(id);
         self.clear_companions(id);
+        self.xml_clear_player_effects(id, self.players[&id].character.id);
         Ok(())
     }
     pub(crate) fn stop_controller(&mut self, id: i32) -> Result<()> {
@@ -6264,7 +6362,7 @@ impl World {
             .map(|(i, q)| serde_json::json!({"id":i,"pos":q.pos,"name":q.character.name}))
             .collect();
         Ok(
-            serde_json::json!({"tick":self.tick,"time_ms":self.now,"player":id,"pos":p.pos,"character":p.character,"entities":entities,"players":others,"bullets":self.bullets.len(),"own_projectiles":self.bullets.iter().filter(|b| b.friendly && b.owner == id).map(|b| serde_json::json!({"id":b.id,"start":b.start,"pos":b.pos,"angle":b.angle,"born":b.born})).collect::<Vec<_>>(),"pending":p.pending,"oxygen":p.oxygen}),
+            serde_json::json!({"tick":self.tick,"time_ms":self.now,"player":id,"pos":p.pos,"character":p.character,"entities":entities,"xml":entities.iter().filter_map(|e|self.xml_diagnostics(e.id).map(|d|(e.id.to_string(),d))).collect::<BTreeMap<_,_>>(),"players":others,"bullets":self.bullets.len(),"own_projectiles":self.bullets.iter().filter(|b| b.friendly && b.owner == id).map(|b| serde_json::json!({"id":b.id,"start":b.start,"pos":b.pos,"angle":b.angle,"born":b.born})).collect::<Vec<_>>(),"pending":p.pending,"oxygen":p.oxygen}),
         )
     }
     fn loot_bag(&mut self, pos: Pos, owner: Option<i32>, mut items: Vec<i32>) -> Result<i32> {
@@ -6275,27 +6373,34 @@ impl World {
         );
         let mut appearance = 0;
         for item in &items {
-            let object = self.content.get(*item as u16)?;
+            let kind = u16::try_from(*item).context("loot item outside selected identity range")?;
+            self.xml_game().admission(
+                kind,
+                AdmissionRole::Native(NativeService::Inventory),
+                "actual loot container item",
+            )?;
+            let object = self.content.get(kind)?;
             appearance = appearance.max(object.bag_type);
             ensure!(
                 owner.is_some() || !object.soulbound,
                 "public loot cannot contain soulbound equipment"
             );
         }
-        let kind = match appearance {
-            0 => 0x500,
-            1 => 0x503,
-            2 => 0x507,
-            3 => 0x508,
-            4 => 0x509,
-            _ => bail!("unsupported loot bag appearance"),
-        };
+        let kind = *LOOT_BAGS
+            .get(usize::from(appearance))
+            .context("unsupported loot bag appearance")?;
         ensure!(
             items.len() <= 8,
             "loot exceeds bag capacity; split rewards before packaging"
         );
         items.resize(8, -1);
-        let id = self.spawn_entity(kind, pos, items)?;
+        let id = self.insert_native_entity(
+            kind,
+            NativeService::Container,
+            pos,
+            items,
+            "bounded loot bag ownership factory",
+        )?;
         let bag = self.entities.get_mut(&id).unwrap();
         bag.size = 80;
         if let Some(owner) = owner {
@@ -6305,543 +6410,17 @@ impl World {
         tracing::info!(entity = id, owner, kind, "loot bag allocated");
         Ok(id)
     }
-    fn kept_marked_drops(&mut self, account: i32, items: &[i32]) -> Result<Vec<i32>> {
-        if !self.content.reviewed(account) {
-            return Ok(items.to_vec());
-        }
-        let mut kept = Vec::new();
-        for item in items {
-            let bag = self.content.get(u16::try_from(*item)?)?.bag_type;
-            let keep = match crate::loot::marked_keep_chance(bag) {
-                Some(chance) => self.rng.gen_bool(chance),
-                None => true,
-            };
-            if keep {
-                kept.push(*item);
-            }
-        }
-        Ok(kept)
+    #[cfg(test)]
+    pub(crate) fn defeat_entity(&mut self, id: i32) -> Result<()> {
+        let kind = self
+            .entities
+            .get(&id)
+            .context("terminal actor absent")?
+            .kind;
+        self.xml_declared_admission(kind, "terminal lifecycle")?;
+        self.xml_defeated(id, crate::behavior::TerminalContext::NonPlayer)
     }
-    fn loot_bags(
-        &mut self,
-        pos: Pos,
-        owner: Option<i32>,
-        items: &[i32],
-        source: u16,
-    ) -> Result<()> {
-        let items = match owner {
-            Some(account) => self.kept_marked_drops(account, items)?,
-            None => items.to_vec(),
-        };
-        if items.is_empty() {
-            return Ok(());
-        }
-        let source = self.content.get(source)?.name.clone();
-        for chunk in items.chunks(8) {
-            let bag = self.loot_bag(pos, owner, chunk.to_vec())?;
-            let entity = self.entities.get_mut(&bag).unwrap();
-            entity.drop_slots = (0..chunk.len()).collect();
-            entity.drop_source = Some(source.clone());
-        }
-        Ok(())
-    }
-    fn god_loot_bags(&mut self, pos: Pos, loot: crate::loot::GodLoot, source: u16) -> Result<()> {
-        // Keep Kithio's half-tile scatter selectable and inside the corpse tile; cosmetic RNG must not change rewards: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L142-L146
-        let mut placement =
-            rand::rngs::StdRng::seed_from_u64(self.ids.load(Ordering::Relaxed) as u64);
-        let mut scatter = || {
-            let mut coordinate = |value: f32| {
-                placement.gen_range(
-                    (value - 0.5).max(value.floor())..(value + 0.5).min(value.floor() + 1.),
-                )
-            };
-            Pos {
-                x: coordinate(pos.x),
-                y: coordinate(pos.y),
-            }
-        };
-        for (owner, items) in loot.private {
-            let items: Vec<_> = items.into_iter().map(i32::from).collect();
-            for chunk in items.chunks(8) {
-                self.loot_bags(scatter(), Some(owner), chunk, source)?;
-            }
-        }
-        if !loot.shared_owners.is_empty() {
-            for chunk in loot.shared.chunks(8) {
-                let items: Vec<_> = chunk.iter().copied().map(i32::from).collect();
-                let appearance = items
-                    .iter()
-                    .map(|item| {
-                        self.content
-                            .get(u16::try_from(*item)?)
-                            .map(|object| object.bag_type)
-                    })
-                    .collect::<Result<Vec<_>>>()?
-                    .into_iter()
-                    .max()
-                    .expect("god equipment chunk is nonempty");
-                // Period purple sacks were owner-only, unlike Kithio's shared gear: https://forums.anandtech.com/threads/realm-of-the-mad-god.2228194/post-33073282
-                if appearance == 0 {
-                    let bag = self.loot_bag(scatter(), None, items)?;
-                    let entity = self.entities.get_mut(&bag).unwrap();
-                    entity.bag_owners = loot.shared_owners.clone();
-                    entity.drop_slots = (0..chunk.len()).collect();
-                    entity.drop_source = Some(self.content.get(source)?.name.clone());
-                    tracing::info!(entity = bag, owners = ?entity.bag_owners, "god equipment bag allocated");
-                } else {
-                    let owner = *loot.shared_owners.choose(&mut self.rng).unwrap();
-                    self.loot_bags(scatter(), Some(owner), &items, source)?;
-                }
-            }
-        }
-        Ok(())
-    }
-    fn defeat_entity(&mut self, id: i32) -> Result<()> {
-        self.defeat_entity_with_killer(id, None)
-    }
-    fn defeat_entity_with_killer(&mut self, id: i32, killer: Option<i32>) -> Result<()> {
-        let e = self.remove_entity(id);
-        // Death credit must survive reward errors; the reference also notifies the Realm before loot behaviors: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L54-L60
-        if self.encounter {
-            if crate::endgame::HEROES.contains(&e.kind) {
-                self.critical_deaths.push(e.id);
-            } else if (crate::quest::final_root(e.kind) || matches!(e.kind, 0x678 | 0xd50 | 0xd54))
-                && let Some(original) = *e.quest
-            {
-                self.critical_deaths.push(original);
-            }
-        }
-        let definition = &self.content.objects[&e.kind];
-        // Reference Reproduce suppresses follower XP; Pentaract Spawn explicitly allows eye XP.
-        let reward = if e.kind == crate::dungeon::tomb::ANCHOR
-            || e.script.as_ref().is_some_and(|script| script.no_experience)
-            || (e.quest.is_some() && matches!(e.kind, 0xd57 | 0xd58 | 0xd5a..=0xd5c))
-        {
-            0
-        } else {
-            (definition.hp as f32 * definition.xp_multiplier / 10.).ceil() as i32
-        };
-        for (id, p) in &mut self.players {
-            if p.character.alive && !p.death_pending && !p.departing && p.pos.distance(e.pos) < 25.
-            {
-                // Deliberately omits the 7.0 per-kill cap (10%/50% of the level's XP) so low levels get full XP from strong enemies.
-                if reward != 0 {
-                    p.queue_experience(
-                        reward,
-                        killer,
-                        e.damage
-                            .get(&p.character.id)
-                            .is_some_and(|damage| *damage > 0),
-                    )?;
-                    tracing::debug!(
-                        player = id,
-                        enemy = e.kind,
-                        amount = reward,
-                        "experience queued"
-                    );
-                }
-                let assigned = p.quest == Some(e.id)
-                    || (crate::quest::final_root(e.kind)
-                        && e.quest.is_some()
-                        && p.qualified_quest == *e.quest);
-                if assigned
-                    && p.character.hp > 0
-                    && e.damage
-                        .get(&p.character.id)
-                        .is_some_and(|damage| *damage > 0)
-                {
-                    p.character.lifetime.qualified_quests = p
-                        .character
-                        .lifetime
-                        .qualified_quests
-                        .checked_add(1)
-                        .context("qualified quest counter overflow")?;
-                    p.qualified_quest = None;
-                }
-                if p.quest == Some(e.id) {
-                    // This exact notification also starts the native client's quest-arrow completion delay.
-                    let mut out = Writer::new();
-                    out.i32(*id).utf("Quest Complete!").u32(0xff00ff00);
-                    send(p, wire::NOTIFICATION, out.0);
-                    tracing::debug!(player = id, enemy = e.id, "native quest completed");
-                }
-            }
-        }
-        if self.name == "Realm"
-            && let Some((portal, chance)) = crate::dungeon::portal_drop(e.kind)
-            && self.rng.gen_bool(chance)
-        {
-            self.portal_requests
-                .push((portal, self.ocean_reward_position(&e)?));
-            tracing::info!(
-                enemy = e.kind,
-                entity = id,
-                portal,
-                "defeat earned a dungeon portal"
-            );
-        }
-        if let Err(error) = self.encounter_death(&e) {
-            tracing::error!(enemy=e.kind, %error, "defeat mechanic failed");
-        }
-        if self.encounter
-            && let Err(error) = self.drop_loot(&e)
-        {
-            tracing::error!(enemy=e.kind,%error,"earned encounter loot creation failed");
-        }
-        Ok(())
-    }
-    pub(super) fn finish_timed_defeat(&mut self, id: i32) -> Result<()> {
-        let e = &self.entities[&id];
-        let kind = e.kind;
-        let owner = self
-            .players
-            .iter()
-            .filter(|(_, p)| p.character.alive && !p.death_pending && !p.departing)
-            .filter_map(|(id, p)| {
-                e.damage
-                    .get(&p.character.id)
-                    .filter(|n| **n > 0)
-                    .map(|n| (*id, *n))
-            })
-            .max_by_key(|(_, n)| *n)
-            .map(|(id, _)| id);
-        // Self-destruction has no final player bullet, so the largest eligible contributor owns its kill statistic.
-        if let Some(owner) = owner {
-            let p = self.players.get_mut(&owner).unwrap();
-            p.character.kills += 1;
-            self.record_lifetime_kill(owner, kind, false)?;
-            let p = self.players.get_mut(&owner).unwrap();
-            if self.content.objects[&kind].quest {
-                p.character.quests += 1;
-            }
-        }
-        self.defeat_entity(id)?;
-        tracing::info!(entity = id, kind, ?owner, "timed enemy defeat");
-        Ok(())
-    }
-    fn drop_loot(&mut self, defeated: &Entity) -> Result<()> {
-        if let Some(index) = crate::dungeon::DUNGEONS
-            .iter()
-            .position(|(_, _, name, boss)| *name == self.name && *boss == defeated.kind)
-        {
-            let completion_pos = if defeated.kind == crate::dungeon::tomb::ANCHOR {
-                defeated
-                    .tomb
-                    .as_ref()
-                    .context("Tomb completion state missing")?
-                    .completion_pos
-                    .context("Tomb completion lacks a final boss death")?
-            } else {
-                defeated.pos
-            };
-            ensure!(!self.cleared, "dungeon clear already recorded");
-            self.cleared = true;
-            for (id, p) in self.players.iter_mut().filter(|(_, p)| {
-                p.character.alive
-                    && !p.death_pending
-                    && !p.departing
-                    && p.pos.distance(completion_pos) < 25.
-                    && (index == 0 || defeated.damage.get(&p.character.id).is_some_and(|n| *n > 0))
-            }) {
-                p.clears_queued[index] = p.clears_queued[index]
-                    .checked_add(1)
-                    .context("queued dungeon clear overflow")?;
-                tracing::info!(
-                    player = id,
-                    boss = defeated.id,
-                    "dungeon participation clear queued"
-                );
-            }
-            if self.clear_exit.is_none() {
-                // Dreadstump leaves a Realm Portal: https://www.youtube.com/watch?v=JMZXtUNZ96s (Nov 2012, portal panel at his death taunt)
-                let kind = if matches!(
-                    defeated.kind,
-                    0x927
-                        // Septavius's completion exit returns to the Realm, not Nexus: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
-                        | 0xd90
-                        | crate::dungeon::abyss::MALPHAS
-                        | crate::dungeon::snake::BOSS
-                        // Spider Den is included in period Realm-portal completion guidance: https://anticosmic.blogspot.com/2012/04/fame-farming.html#tunnel_rat
-                        | crate::dungeon::spider::BOSS
-                        | crate::dungeon::jungle::BOSS
-                        | crate::dungeon::beach::BOSS
-                        | crate::dungeon::davy::BOSS
-                        // "Realm Portal [Enter]" after Lord Ruthven in three 2012 fights (YJQPDEw20f4, Dn8ki2prSr0, I0XgIrF-BTQ).
-                        | crate::dungeon::manor::BOSS
-                        | crate::dungeon::tomb::ANCHOR
-                        // Dr Terrible leaves a Realm Portal arch where he dies: t0f0_BWpBtw (2012-09-08) t=927-934.
-                        | crate::dungeon::lab::BOSS
-                ) {
-                    0x704
-                } else {
-                    0x71d
-                };
-                let pos = if defeated.kind == crate::dungeon::manor::BOSS {
-                    let sites: Vec<_> = self
-                        .map
-                        .cells
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, c)| c.object == Some(crate::dungeon::manor::BOSS))
-                        .map(|(i, _)| Pos {
-                            x: (i % self.map.width as usize) as f32 + 0.5,
-                            y: (i / self.map.width as usize) as f32 + 0.5,
-                        })
-                        .collect();
-                    ensure!(
-                        sites.len() == 1,
-                        "Manor completion requires one authored arena marker"
-                    );
-                    sites[0]
-                } else if defeated.kind == crate::dungeon::spider::BOSS {
-                    // The Realm Portal appears at the arena centre (Build 122.3, 2012-03-31; 2 videos), not where she wandered to.
-                    defeated.home
-                } else {
-                    defeated.pos
-                };
-                let exit = self.spawn_exit(kind, pos)?;
-                self.entities.get_mut(&exit).unwrap().published = false;
-                self.clear_exit = Some(exit);
-            }
-            tracing::info!(
-                boss = defeated.id,
-                dungeon = self.name,
-                "dungeon clear and exit staged for durable commit"
-            );
-        }
-        if defeated.kind == crate::dungeon::spider::BOSS {
-            return self.spider_loot(defeated);
-        }
-        if matches!(
-            defeated.kind,
-            crate::dungeon::lab::BOSS | crate::dungeon::lab::CREATION
-        ) {
-            return self.lab_loot(defeated);
-        }
-        if crate::dungeon::abyss::ROSTER.contains(&defeated.kind) {
-            return self.abyss_loot(defeated);
-        }
-        // Rum is outside the comparator's private threshold; roll it once, not once per raider.
-        if defeated.kind == 0xe37
-            && self.players.values().any(|p| {
-                p.character.alive
-                    && !p.death_pending
-                    && !p.departing
-                    && defeated
-                        .damage
-                        .get(&p.character.id)
-                        .is_some_and(|damage| *damage > 0)
-            })
-            && self.rng.gen_bool(0.2)
-        {
-            self.loot_bags(defeated.pos, None, &[0xc25], defeated.kind)?;
-        }
-        let private = crate::loot::private(defeated.kind);
-        let threshold = crate::loot::damage_threshold(&self.content, defeated.kind);
-        let mut eligible: Vec<_> = self
-            .players
-            .values()
-            .filter(|p| p.character.alive && !p.death_pending && !p.departing)
-            .filter_map(|p| {
-                defeated
-                    .damage
-                    .get(&p.character.id)
-                    .filter(|damage| {
-                        if defeated.kind == crate::dungeon::tomb::SPHINX {
-                            **damage >= threshold
-                        } else {
-                            **damage > if private { threshold } else { 0 }
-                        }
-                    })
-                    .map(|damage| (p.character.account, *damage))
-            })
-            .collect();
-        eligible.sort_by_key(|(_, damage)| std::cmp::Reverse(*damage));
-        if eligible.is_empty() {
-            return Ok(());
-        }
-        if defeated.kind == crate::dungeon::beach::BUM {
-            // The selected key is soulbound: preserve one winner without putting bound items in a public bag.
-            return self.loot_bags(defeated.pos, Some(eligible[0].0), &[0xc2e], defeated.kind);
-        }
-        if crate::loot::potion_damage(defeated.kind).is_some()
-            || matches!(defeated.kind, 0x91d | 0x91e)
-        {
-            let loot =
-                crate::loot::god_loot(&self.content, defeated.kind, &eligible, &mut self.rng);
-            return self.god_loot_bags(defeated.pos, loot, defeated.kind);
-        }
-        let mut drops = BTreeMap::<i32, Vec<i32>>::new();
-        let attempts = crate::loot::attempts(defeated.kind, eligible.len());
-        for i in 0..attempts {
-            let mut rewards = crate::loot::rewards(&self.content, defeated.kind, &mut self.rng);
-            if defeated.kind == crate::dungeon::trench::THESSAL
-                && i64::from(eligible[i % eligible.len()].1) * 100
-                    >= i64::from(self.content.objects[&defeated.kind].hp) * 32
-            {
-                rewards.push(0xaea);
-            }
-            for item in rewards {
-                if !crate::loot::item_qualified(
-                    defeated.kind,
-                    item,
-                    eligible[i % eligible.len()].1,
-                    self.content.objects[&defeated.kind].hp,
-                ) {
-                    continue;
-                }
-                let owner = if private {
-                    eligible[i % eligible.len()].0
-                } else {
-                    -1
-                };
-                let items = drops.entry(owner).or_default();
-                if !items.contains(&(item as i32))
-                    || matches!(item, 0xa22 | 0xa23)
-                    || crate::loot::period_boss(defeated.kind)
-                {
-                    items.push(item as i32);
-                }
-            }
-        }
-        // Split after existing rolls/dedup, retaining their odds/count: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/loot/Loots.cs#L65-L70
-        if defeated.kind == 0x921
-            && let Some(shared) = drops.get_mut(&-1)
-            && let Some(index) = shared.iter().position(|item| *item == 0xb0c)
-        {
-            let item = shared.remove(index);
-            let owner = eligible
-                .choose(&mut self.rng)
-                .expect("nonempty Ent contributors")
-                .0;
-            drops.entry(owner).or_default().push(item);
-        }
-        let required = match defeated.kind {
-            crate::dungeon::trench::HERMIT => Some([0xa34, 0xa4c]),
-            // Sphinx's 1%-threshold potion rolls also have required counts: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.Sphinx.cs
-            crate::dungeon::tomb::SPHINX => Some([0xa34, 0xa35]),
-            _ => None,
-        };
-        if let Some(required) = required {
-            // NumRequired is an encounter-wide private floor, not a pair per raider: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/loot/Loots.cs
-            for item in required {
-                if !drops.values().any(|items| items.contains(&item)) {
-                    let owner = eligible
-                        .choose(&mut self.rng)
-                        .expect("nonempty event contributors")
-                        .0;
-                    drops.entry(owner).or_default().push(item);
-                }
-            }
-        }
-        if !crate::loot::fauna_private_table(defeated.kind).is_empty() {
-            for (owner, item) in crate::loot::fauna_private_rewards(
-                &self.content,
-                defeated.kind,
-                &eligible,
-                &mut self.rng,
-            ) {
-                drops.entry(owner).or_default().push(i32::from(item));
-            }
-        }
-        for (owner, items) in drops {
-            let pos = self.ocean_bag_position(defeated)?;
-            self.loot_bags(pos, (owner >= 0).then_some(owner), &items, defeated.kind)?;
-        }
-        Ok(())
-    }
-    fn move_entity_colliding(
-        &mut self,
-        id: i32,
-        goal: Pos,
-        distance: f32,
-        slide: bool,
-    ) -> Result<()> {
-        let old = self.entities[&id].pos;
-        let length = old.distance(goal);
-        if length <= 0.001 {
-            self.entities.get_mut(&id).unwrap().last_step = Pos { x: 0., y: 0. };
-            return Ok(());
-        }
-        let distance = distance.min(length);
-        let pos = Pos {
-            x: old.x + (goal.x - old.x) / length * distance,
-            y: old.y + (goal.y - old.y) / length * distance,
-        };
-        let samples = (distance / 0.1).ceil().max(1.) as usize;
-        let step = Pos {
-            x: (pos.x - old.x) / samples as f32,
-            y: (pos.y - old.y) / samples as f32,
-        };
-        let kind = self.entities[&id].kind;
-        let godlands = {
-            let object = &self.content.objects[&kind];
-            object.god && object.terrain == 1
-        };
-        let home = self.entities[&id].home;
-        let started_inside = godlands && self.inside_god_exclusion(old);
-        let mut resolved = old;
-        for i in 1..=samples {
-            let next = if slide {
-                Pos {
-                    x: resolved.x + step.x,
-                    y: resolved.y + step.y,
-                }
-            } else {
-                Pos {
-                    x: old.x + step.x * i as f32,
-                    y: old.y + step.y * i as f32,
-                }
-            };
-            let horizontal = Pos {
-                x: next.x,
-                y: resolved.y,
-            };
-            let vertical = Pos {
-                x: resolved.x,
-                y: next.y,
-            };
-            let clear = |pos: Pos| {
-                let open = (kind != crate::dungeon::trench::HERMIT
-                    && self.jungle_walkable(kind, pos))
-                    || self.ocean_walkable(kind, pos);
-                open && (!godlands
-                    || !self.inside_god_exclusion(pos)
-                    || (started_inside && pos.distance(home) + 0.05 < old.distance(home)))
-            };
-            let x_clear = clear(horizontal);
-            let y_clear = clear(vertical);
-            if clear(next) && (!slide || x_clear || y_clear) {
-                resolved = next;
-            } else if slide {
-                // Wall contact removes the blocked component, not the entire movement step.
-                resolved = if x_clear && (!y_clear || step.x.abs() >= step.y.abs()) {
-                    horizontal
-                } else if y_clear {
-                    vertical
-                } else {
-                    break;
-                };
-            } else {
-                bail!("NPC movement crosses a blocked tile");
-            }
-        }
-        ensure!(
-            distance == 0. || resolved.distance(old) > 0.,
-            "NPC movement blocked on both axes"
-        );
-        if slide && resolved.distance(pos) > 0.001 {
-            tracing::debug!(
-                entity = id,
-                kind,
-                ?old,
-                ?pos,
-                ?resolved,
-                "NPC movement projected along obstacle"
-            );
-        }
-        self.position_entity(id, resolved)
-    }
+
     fn position_entity(&mut self, id: i32, pos: Pos) -> Result<()> {
         ensure!(
             pos.x.is_finite() && pos.y.is_finite() && self.map.cell(pos.x, pos.y).is_some(),
@@ -6863,859 +6442,40 @@ impl World {
         };
         Ok(())
     }
-    // Follow owns its acquisition clock; encounter age must not restart a pursuit.
-    // https://github.com/moistosaurus/realm-src/tree/1855c017eab870d13f0b61b1cf0b9e66a01922ff
-    fn follow_goal(
-        &mut self,
-        id: i32,
-        target: Option<Pos>,
-        motion: crate::encounter::Motion,
-        delta: u64,
-    ) -> Option<Pos> {
-        let crate::encounter::Motion::Follow {
-            sight,
-            stop,
-            duration,
-            cooldown,
-            ..
-        } = motion
-        else {
-            unreachable!("Follow goal requires Follow motion");
-        };
-        let pos = self.entities[&id].pos;
-        let e = self.entities.get_mut(&id).unwrap();
-        let old = e.following;
-        let target = target.filter(|p| pos.distance(*p) < sight);
-        match e.following {
-            Following::Unknown => {
-                if target.is_some() && e.follow_remaining == 0 {
-                    e.following = Following::Acquired;
-                    e.follow_remaining = duration;
-                } else {
-                    e.follow_remaining = e.follow_remaining.saturating_sub(delta);
-                }
-            }
-            Following::Resting => match target {
-                None => {
-                    e.following = Following::Unknown;
-                    e.follow_remaining = duration;
-                }
-                Some(p) if pos.distance(p) > stop + 1. => {
-                    e.following = Following::Acquired;
-                    e.follow_remaining = duration;
-                }
-                _ => {}
-            },
-            Following::Acquired => {}
+    /// Native timed scenery (gravestones) expires here; XML actors own their lifetime through XML Decay.
+    fn native_expiry(&mut self) {
+        let expired: Vec<_> =
+            self.timed_ids
+                .iter()
+                .copied()
+                .filter(|id| {
+                    let e = &self.entities[id];
+                    e.expires.is_some_and(|at| at <= self.now)
+                        && !e.reserved
+                        && !self.xml_terminal_custody(*id)
+                        && !self.bag_expiry.contains_key(id)
+                        && self.xml_game().definitions.get(&e.kind).is_none_or(|d| {
+                            d.disposition == crate::content::game::Disposition::Native
+                        })
+                })
+                .collect();
+        for id in expired {
+            tracing::debug!(
+                entity = id,
+                kind = self.entities[&id].kind,
+                "native timed entity expired"
+            );
+            self.remove_entity(id);
         }
-        if e.following == Following::Acquired {
-            match target {
-                None => {
-                    e.following = Following::Unknown;
-                    e.follow_remaining = 0;
-                }
-                Some(_) if duration > 0 && e.follow_remaining == 0 => {
-                    e.following = Following::Unknown;
-                    e.follow_remaining = cooldown;
-                }
-                Some(target) => {
-                    e.follow_remaining = e.follow_remaining.saturating_sub(delta);
-                    if pos.distance(target) <= stop {
-                        e.following = Following::Resting;
-                        e.follow_remaining = 0;
-                    }
-                }
-            }
-        }
-        if old != e.following {
-            e.goal = None;
-        }
-        (e.following == Following::Acquired)
-            .then_some(target)
-            .flatten()
     }
-    fn npc_step(&mut self) -> Vec<(i32, Vec<u8>)> {
-        use crate::encounter::{Motion, profile};
-        let mut packets = Vec::new();
-        if !self.encounter || self.safe {
-            return packets;
-        }
-        self.beach_notice();
-        // Kithio's next-slot history index makes TryGetHistory(100) read the previous 50 ms sample.
-        for p in self.players.values_mut() {
-            p.white_demon_aim_history.rotate_left(1);
-            p.white_demon_aim_history[1] = p.pos;
-        }
-        let delta = self.now.saturating_sub(self.last_npc_step);
-        self.last_npc_step = self.now;
-        // Player conditions are read once per tick, not once per NPC and player pair.
-        let seen: Vec<_> = self
-            .players
-            .values()
-            .filter(|p| p.character.alive && !p.death_pending && !p.departing && !p.paused)
-            .map(|p| {
-                let conditions = p.conditions(self.now);
-                (
-                    p.pos,
-                    conditions & crate::condition::bit(crate::condition::INVISIBLE) != 0
-                        || p.newbie_until > self.now,
-                    conditions & crate::condition::bit(crate::condition::PARALYZED) != 0,
-                )
-            })
-            .collect();
-        let decoys: Vec<_> = self.decoy_positions().collect();
-        let audience: Vec<_> = seen
-            .iter()
-            .map(|(pos, ..)| *pos)
-            .chain(decoys.iter().copied())
-            .collect();
-        let ids = self.npc_candidates(&audience);
-        'entities: for id in ids {
-            let Some(entity) = self.entities.get(&id) else {
-                continue;
-            };
-            let kind = entity.kind;
-            let _context = crate::supervision::npc(id, kind);
-            let pos = entity.pos;
-            // A dormant Haunted Armor wakes when damaged or when a player comes within reach (bBQRbAoRP_g 2012-04-01 t=150-166).
-            if entity.hp == self.content.objects[&kind].hp
-                && (kind == crate::dungeon::abyss::IDOL
-                    || kind == 0xd7e
-                        && entity.stage.is_none()
-                        && !seen
-                            .iter()
-                            .any(|(p, ..)| pos.distance(*p) <= crate::endgame::ARMOR_WAKE_RANGE))
-            {
-                continue;
-            }
-            let profile = profile(kind).expect("validated encounter profile");
-            // Self-destruction is a deadline, not target acquisition or a weapon cooldown.
-            let shield_burst = self.shield_burst(id);
-            let armed_abyss_missile = kind == 0x909 && entity.stage == Some(1);
-            let armed_abyss_flamer = kind == 0x90b && Self::abyss_flamer_armed(entity);
-            let burst = shield_burst
-                || (matches!(kind, 0x91a | crate::dungeon::manor::MINE)
-                    && entity.expires == Some(self.now + 50)
-                    && self.now >= entity.next_shot);
-            if !burst
-                && !armed_abyss_flamer
-                && entity.conditions(self.now) & crate::condition::bit(crate::condition::STASIS)
-                    != 0
-            {
-                self.suspend_npc(id, delta);
-                continue;
-            }
-            let nearest = seen
-                .iter()
-                .filter(|(_, invisible, _)| {
-                    matches!(kind, 0x6d8 | crate::dungeon::manor::MINE) || !invisible
-                })
-                .map(|&(p, _, paralyzed)| {
-                    (
-                        kind == crate::dungeon::davy::BOSS
-                            && entity.reaction_until > self.now
-                            && pos.distance(p) < 12.
-                            && paralyzed,
-                        p,
-                    )
-                })
-                .chain(decoys.iter().map(|p| (false, *p)))
-                .min_by(|(ap, a), (bp, b)| {
-                    bp.cmp(ap)
-                        .then_with(|| pos.distance(*a).total_cmp(&pos.distance(*b)))
-                })
-                .map(|(_, p)| p);
-            let wake = match kind {
-                crate::dungeon::manor::KAGE
-                | crate::dungeon::manor::BAT
-                | crate::dungeon::manor::CHASER
-                | crate::dungeon::manor::DECOY
-                | 0x1727 => 20.,
-                crate::dungeon::snake::GUARD | crate::dungeon::snake::DART => 25.,
-                kind if crate::dungeon::tomb::contains(kind) => 30.,
-                0x953 | 0x954 => 6.,
-                0x619 => 8.,
-                0x609 | 0xd06 | crate::dungeon::abyss::MALPHAS => 11.,
-                // Build118 independently documents this gate: https://web.archive.org/web/20120502020343id_/http://forums.wildshadow.com/wiki/realm-mad-god/hobbit-mage
-                0x617 => 12.,
-                // Rings wake beyond aimed-shot range: https://web.archive.org/web/20120122074638id_/http://forums.wildshadow.com/wiki/realm-mad-god/undead-hobbit-mage
-                0x61a => 12.,
-                0x6d8 => 12.,
-                crate::dungeon::davy::BOSS => davy::SIGHT,
-                0x91a => 7.,
-                crate::dungeon::spider::BOSS => crate::dungeon::spider::WAKE,
-                crate::dungeon::lab::BOSS => 12.,
-                0xd90 | 0xd7e => 8.,
-                0xd82 | 0xd83 => 10.,
-                0x925 => 30.,
-                crate::endgame::ORYX => 20.,
-                0x65a..=0x65d => 15.,
-                _ => 12.,
-            };
-            // Activated enemies keep the same sight radius; they do not keep
-            // shooting once the player leaves that radius.
-            let abyss = crate::dungeon::abyss::ROSTER.contains(&kind)
-                || kind == 0x651 && self.name == "Abyss of Demons";
-            let radius = if abyss
-                && (entity.activated.is_some() || kind != crate::dungeon::abyss::MALPHAS)
-            {
-                20.
-            } else {
-                wake
-            };
-            let target = if burst && kind == crate::dungeon::manor::MINE {
-                nearest.filter(|p| pos.distance(*p) < 60.)
-            } else if burst {
-                Some(pos)
-            } else {
-                nearest.filter(|p| pos.distance(*p) < radius)
-            };
-            // Visible mobs need simulation, not longer-range targeting: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/Collision.cs#L187-L215
-            let simulation_radius =
-                if self.content.objects[&kind].quest && entity.activated.is_none() {
-                    radius
-                } else {
-                    radius.max(20.)
-                };
-            let nearby = seen
-                .iter()
-                .any(|(p, ..)| pos.distance(*p) < simulation_radius);
-            let persistent_clock = (crate::dungeon::manor::ROSTER.contains(&kind)
-                || kind == 0x925
-                || kind == 0xd64
-                || kind == crate::endgame::ORYX)
-                && entity.activated.is_some();
-            if !burst
-                && !armed_abyss_missile
-                && !armed_abyss_flamer
-                && target.is_none()
-                && !nearby
-                && !persistent_clock
-            {
-                self.suspend_npc(id, delta);
-                continue;
-            }
-            if kind == 0x91a {
-                // Kithio Djinn leaves Idle with a player within 8 tiles and returns once none is within 13.
-                let near = |r: f32| self.players.values().any(|p| p.pos.distance(pos) < r);
-                if near(8.) {
-                    self.djinn_attacking.insert(id);
-                } else if !near(13.) {
-                    self.djinn_attacking.remove(&id);
-                }
-            }
-            let activated = *self
-                .entities
-                .get_mut(&id)
-                .unwrap()
-                .activated
-                .get_or_insert(self.now);
-            let elapsed = self.now - activated;
-            match self.encounter_mechanics(id, target, elapsed) {
-                Ok(()) => {
-                    if self.summon_waits.remove(&id) {
-                        tracing::info!(entity = id, kind, "encounter summon room restored");
-                    }
-                }
-                Err(error) if error.is::<SummonBudget>() => {
-                    if self.summon_waits.insert(id) {
-                        tracing::warn!(entity = id, kind, %error, "encounter waits for summon room");
-                    }
-                }
-                Err(error) => {
-                    tracing::error!(entity=id, kind, %error, "encounter mechanic refused");
-                    continue;
-                }
-            }
-            let Some(current) = self.entities.get(&id) else {
-                continue;
-            };
-            let elapsed = self.now - current.activated.expect("activated encounter");
-            let flags = current.conditions(self.now);
-            let lair_escort = matches!(kind, 0xdaa | 0xdac);
-            let queued_hero = kind == 0x668 || matches!(kind, 0x67e..=0x682);
-            let mut hero_continue = false;
-            let mut target = target;
-            let (mut motion, mut speed) = if crate::encounter::tutorial::ROSTER.contains(&kind) {
-                crate::encounter::tutorial::movement(
-                    kind,
-                    if kind == crate::encounter::tutorial::CHEF {
-                        current.stage.expect("Kitchen movement phase missing")
-                    } else {
-                        0
-                    },
-                )
-            } else if lair_escort {
-                if let Err(error) = self.lair_escort_step(id, target, delta) {
-                    self.entities.get_mut(&id).unwrap().last_step = Pos { x: 0., y: 0. };
-                    tracing::error!(entity=id, %error, "Lair escort movement refused");
-                    continue;
-                }
-                (Motion::Stationary, 0.)
-            } else if crate::dungeon::lab::ROSTER.contains(&kind) {
-                self.lab_movement(id)
-            } else if crate::dungeon::abyss::ROSTER.contains(&kind) {
-                match self.abyss_movement(id) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"Abyss movement refused");
-                        continue;
-                    }
-                }
-            } else if queued_hero {
-                match self.hero_movement(id, target, delta) {
-                    Ok((motion, speed, completed)) => {
-                        hero_continue = completed;
-                        (motion, speed)
-                    }
-                    Err(error) => {
-                        tracing::error!(entity=id, %error, "Realm hero movement refused");
-                        continue;
-                    }
-                }
-            } else if crate::dungeon::davy::profile(kind).is_some() {
-                self.locker_movement(id, elapsed)
-            } else if crate::dungeon::jungle::ROSTER.contains(&kind) {
-                crate::encounter::jungle::movement(
-                    kind,
-                    current.stage.expect("Jungle movement phase"),
-                    current.parent.is_some(),
-                )
-            } else if crate::dungeon::manor::ROSTER.contains(&kind) {
-                self.manor_movement(id, target, elapsed)
-            } else if crate::dungeon::tomb::contains(kind) {
-                match self.tomb_movement(id, target) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"Tomb movement refused");
-                        continue;
-                    }
-                }
-            } else if crate::dungeon::trench::ROSTER.contains(&kind) {
-                self.ocean_movement(id, target, elapsed)
-            } else if crate::encounter::landmarks::ROSTER.contains(&kind) {
-                match self.landmark_movement(id, target, elapsed) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"landmark movement refused");
-                        continue;
-                    }
-                }
-            } else if current.quest.is_some() && !crate::endgame::HEROES.contains(&kind) {
-                self.quest_movement(id, target, elapsed)
-            } else if crate::encounter::fauna::ROSTER.contains(&kind) {
-                match self.fauna_movement(id, target, elapsed) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"fauna movement refused");
-                        continue;
-                    }
-                }
-            } else if kind == 0x6c6 || (self.entities[&id].camp.is_some() && midlands::member(kind))
-            {
-                match self.midland_movement(id, target, elapsed) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"inland family movement refused");
-                        continue;
-                    }
-                }
-            } else if gods::GODS.contains(&kind)
-                || gods::CONSTRUCTS.contains(&kind)
-                || (kind == 0x653 && self.entities[&id].camp.is_some())
-            {
-                match self.god_movement(id, target, elapsed) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"Godlands movement refused");
-                        continue;
-                    }
-                }
-            } else if golems::ROOTS.contains(&kind) || matches!(kind, 0x6d2..=0x6d7) {
-                match self.golem_movement(id, elapsed) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"golem movement refused");
-                        continue;
-                    }
-                }
-            } else if self.entities[&id].camp.is_some() {
-                match self.family_movement(id, target, elapsed) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"family movement refused");
-                        continue;
-                    }
-                }
-            } else if crate::endgame::ROSTER.contains(&kind) {
-                match self.finale_movement(id, elapsed) {
-                    Ok(movement) => movement,
-                    Err(error) => {
-                        tracing::error!(entity=id,%error,"endgame movement refused");
-                        continue;
-                    }
-                }
-            } else {
-                crate::encounter::movement(kind, self.entities[&id].hp, elapsed)
-            };
-            // Completion invokes at most one successor, after publishing the first motor step.
-            // https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/Behavior.cs
-            for invocation in 0..2 {
-                if lair_escort {
-                    break;
-                }
-                let pos = self.entities[&id].pos;
-                if target.is_none()
-                    && matches!(
-                        motion,
-                        Motion::Chase { .. }
-                            | Motion::Maintain { .. }
-                            | Motion::Retreat { .. }
-                            | Motion::Orbit {
-                                anchor: crate::encounter::Anchor::Player,
-                                ..
-                            }
-                            | Motion::Protect {
-                                anchor: crate::encounter::Anchor::Player,
-                                ..
-                            }
-                    )
-                {
-                    motion = Motion::Wander;
-                    speed = 4.;
-                }
-                let e = self.entities.get_mut(&id).unwrap();
-                if e.motion != Some(motion) {
-                    e.motion = Some(motion);
-                    e.following = Following::Unknown;
-                    e.follow_remaining = 0;
-                    e.strict_initialized = false;
-                    e.charge = None;
-                    e.goal = None;
-                    if matches!(motion, Motion::Pace { .. }) {
-                        e.phase = 1.;
-                    }
-                    tracing::debug!(entity = id, kind, ?motion, speed, "NPC movement entered");
-                }
-                let planned_motion =
-                    if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
-                        if let Some(charge) = &mut e.charge {
-                            charge.suspend(delta);
-                        }
-                        Motion::Stationary
-                    } else {
-                        motion
-                    };
-                let goal = match planned_motion {
-                    Motion::Wander if kind == crate::dungeon::abyss::MALPHAS => {
-                        match self.abyss_malphas_goal(id, target) {
-                            Ok(goal) => Some(goal),
-                            Err(error) => {
-                                tracing::error!(entity=id,%error,"Abyss movement goal refused");
-                                continue;
-                            }
-                        }
-                    }
-
-                    Motion::Stationary => {
-                        speed = 0.;
-                        Some(pos)
-                    }
-                    Motion::Charge { .. } => self.charge_goal(id, target, motion, speed),
-                    Motion::WanderHome { radius } => {
-                        let e = self.entities.get_mut(&id).unwrap();
-                        if e.goal.is_none_or(|p| {
-                            p.distance(e.pos) < 0.1 || p.distance(e.home) > radius + 0.01
-                        }) {
-                            let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
-                            let distance = self.rng.gen_range(0. ..radius);
-                            e.goal = Some(Pos {
-                                x: e.home.x + distance * angle.cos(),
-                                y: e.home.y + distance * angle.sin(),
-                            });
-                        }
-                        e.goal
-                    }
-                    Motion::Follow { idle, .. } => {
-                        let target = if kind == crate::dungeon::snake::SWARM {
-                            match self.orbit_anchor(id, crate::encounter::Anchor::Parent, target) {
-                                Ok(parent) => Some(parent),
-                                Err(error) => {
-                                    tracing::error!(entity=id, %error, "swarm protection anchor refused");
-                                    continue 'entities;
-                                }
-                            }
-                        } else {
-                            target
-                        };
-                        if let Some(target) = self.follow_goal(id, target, motion, delta) {
-                            Some(if kind == 0x651 && self.name != "Abyss of Demons" {
-                                Pos {
-                                    x: target.x - self.rng.gen_range(-2..2) as f32 / 2.,
-                                    y: target.y - self.rng.gen_range(-2..2) as f32 / 2.,
-                                }
-                            } else {
-                                target
-                            })
-                        } else if idle == 0. {
-                            speed = 0.;
-                            Some(pos)
-                        } else {
-                            None
-                        }
-                    }
-                    Motion::Pace { distance } => {
-                        let e = self.entities.get_mut(&id).unwrap();
-                        Some(match e.goal {
-                            Some(goal) if pos.distance(goal) > 0.001 => goal,
-                            _ => {
-                                if e.goal.is_some() {
-                                    e.phase = -e.phase;
-                                }
-                                Pos {
-                                    x: pos.x + distance * e.phase,
-                                    y: pos.y,
-                                }
-                            }
-                        })
-                    }
-                    Motion::Tangential => {
-                        let step = self.entities[&id].last_step;
-                        let length = step.x.hypot(step.y);
-                        if length == 0. {
-                            speed = 0.;
-                            Some(pos)
-                        } else {
-                            Some(Pos {
-                                x: pos.x + step.x / length,
-                                y: pos.y + step.y / length,
-                            })
-                        }
-                    }
-                    Motion::Maintain { sight, distance }
-                        if target.is_some_and(|p| pos.distance(p) < sight) =>
-                    {
-                        let target = target.expect("acquired maintain-distance target");
-                        let angle = (pos.y - target.y).atan2(pos.x - target.x);
-                        Some(Pos {
-                            x: target.x + distance * angle.cos(),
-                            y: target.y + distance * angle.sin(),
-                        })
-                    }
-                    Motion::Retreat { distance } => {
-                        let target = target.expect("target-dependent retreat guarded");
-                        if pos.distance(target) >= distance
-                            || matches!(kind, 0x67e..=0x682)
-                                && pos.x == target.x
-                                && pos.y == target.y
-                        {
-                            speed = 0.;
-                        }
-                        let angle = (pos.y - target.y).atan2(pos.x - target.x);
-                        // Retracting gates at radius 8 without clamping the final outward step.
-                        let distance = if matches!(kind, 0x67e..=0x682) {
-                            pos.distance(target) + 1.
-                        } else {
-                            distance
-                        };
-                        Some(Pos {
-                            x: target.x + distance * angle.cos(),
-                            y: target.y + distance * angle.sin(),
-                        })
-                    }
-                    Motion::Protect { anchor, distance } => {
-                        let leader = match self.orbit_anchor(id, anchor, target) {
-                            Ok(leader) => leader,
-                            Err(error) => {
-                                tracing::error!(entity=id, %error, "protection anchor refused");
-                                continue 'entities;
-                            }
-                        };
-                        if pos.distance(leader) <= distance {
-                            speed = 0.;
-                        }
-                        Some(leader)
-                    }
-                    Motion::Chase { sight, stop }
-                        if target.is_some_and(|p| pos.distance(p) < sight) =>
-                    {
-                        let target = target.expect("acquired chase target");
-                        if pos.distance(target) <= stop {
-                            speed = 0.;
-                        }
-                        // Per-tick aim jitter keeps chasers from pinning on one wall point: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/movement/Chasing.cs
-                        Some(Pos {
-                            x: target.x + self.rng.gen_range(-2..2) as f32 / 2.,
-                            y: target.y + self.rng.gen_range(-2..2) as f32 / 2.,
-                        })
-                    }
-                    Motion::Orbit { anchor, radius } | Motion::StrictOrbit { anchor, radius } => {
-                        let target = match self.orbit_anchor(id, anchor, target) {
-                            Ok(target) => target,
-                            Err(error) => {
-                                tracing::error!(entity=id, %error, "orbit anchor refused");
-                                continue 'entities;
-                            }
-                        };
-                        let e = self.entities.get_mut(&id).unwrap();
-                        let shield_formation = matches!(kind, 0x900 | 0x902)
-                            && matches!(motion, Motion::StrictOrbit { .. });
-                        if shield_formation && !e.strict_initialized {
-                            e.phase = self.rng.gen_range(0. ..std::f32::consts::TAU);
-                            e.strict_initialized = true;
-                            speed = 0.;
-                            Some(pos)
-                        } else {
-                            let direction = if let Some(orbit) = e.orbit {
-                                // Tomb's target angle must keep moving at pillars: https://github.com/Club559/ROTMGServer/blob/f112a71caa5e73f3013d9bff88527669519f178c/wServer/logic/movement/Circling.cs#L63-L85
-                                if !crate::dungeon::tomb::BOSSES.contains(&kind)
-                                    && pos.distance(target) > 0.001
-                                {
-                                    e.phase = (pos.y - target.y).atan2(pos.x - target.x);
-                                }
-                                orbit.direction
-                            } else {
-                                if !shield_formation && e.goal.is_none() {
-                                    e.phase = if matches!(motion, Motion::StrictOrbit { .. }) {
-                                        self.rng.gen_range(0. ..std::f32::consts::TAU)
-                                    } else {
-                                        (pos.y - target.y).atan2(pos.x - target.x)
-                                    };
-                                }
-                                1.
-                            };
-                            // This older shield formation clock ignores the slowed motor.
-                            let angular_speed = if shield_formation {
-                                speed
-                            } else if e.quest.is_some()
-                                || e.orbit.is_some()
-                                || matches!(motion, Motion::StrictOrbit { .. })
-                            {
-                                (if e.quest.is_some() || e.orbit.is_some() {
-                                    speed / 1.5
-                                } else {
-                                    speed
-                                }) * if flags & crate::condition::bit(crate::condition::SLOWED) != 0
-                                {
-                                    0.5
-                                } else {
-                                    1.
-                                }
-                            } else {
-                                speed
-                            };
-                            if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
-                                e.phase = (e.phase + direction * angular_speed / radius * 0.05)
-                                    % std::f32::consts::TAU;
-                            }
-                            Some(Pos {
-                                x: target.x + e.phase.cos() * radius,
-                                y: target.y + e.phase.sin() * radius,
-                            })
-                        }
-                    }
-                    Motion::Circle => {
-                        let boss = self
-                            .actors()
-                            .find(|e| e.kind == 0x927 && pos.distance(e.pos) < 10.)
-                            .map(|e| e.pos);
-                        boss.map(|boss| {
-                            let e = self.entities.get_mut(&id).unwrap();
-                            if e.goal.is_none() {
-                                e.phase = self.rng.gen_range(0. ..std::f32::consts::TAU);
-                            }
-                            e.phase = (e.phase + profile.speed / 3. * 0.05) % std::f32::consts::TAU;
-                            Pos {
-                                x: boss.x + e.phase.cos() * 3.,
-                                y: boss.y + e.phase.sin() * 3.,
-                            }
-                        })
-                    }
-                    _ => None,
-                };
-                let goal = if kind == 0xd06 && pos.distance(self.entities[&id].home) > 7. {
-                    speed = 7.8;
-                    Some(
-                        self.orbit_anchor(id, crate::encounter::Anchor::Home, target)
-                            .expect("live boss home"),
-                    )
-                } else {
-                    goal
-                };
-                let goal = if let Some(goal) = goal {
-                    goal
-                } else {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    speed = match motion {
-                        Motion::Wander | Motion::Maintain { .. } => speed,
-                        Motion::Follow { idle, .. } | Motion::Charge { idle, .. } => idle,
-                        Motion::Chase { .. } if kind == 0x600 => 4.,
-                        Motion::Chase { .. } if !(0x687..=0x689).contains(&kind) => 4.,
-                        Motion::Protect { .. } => profile.speed,
-                        _ => 2.,
-                    };
-                    let realm = self.name == "Realm";
-                    if e.goal.is_none_or(|goal| {
-                        goal.distance(e.pos) < 0.1
-                            || if realm {
-                                goal.distance(e.pos) > 1.01
-                            } else {
-                                goal.distance(e.home) > 2.01
-                            }
-                    }) {
-                        let angle = self.rng.gen_range(0. ..std::f32::consts::TAU);
-                        let (center, radius) = if realm {
-                            (e.pos, 1.)
-                        } else {
-                            (e.home, self.rng.gen_range(0. ..2.))
-                        };
-                        e.goal = Some(if realm && e.pos.distance(e.home) > 24. {
-                            e.home
-                        } else {
-                            Pos {
-                                x: center.x + angle.cos() * radius,
-                                y: center.y + angle.sin() * radius,
-                            }
-                        });
-                    }
-                    e.goal.expect("wander destination assigned")
-                };
-                if flags & crate::condition::bit(crate::condition::PARALYZED) != 0 {
-                    speed = 0.;
-                } else if flags & crate::condition::bit(crate::condition::SLOWED) != 0 {
-                    speed *= 0.5;
-                }
-                if flags & crate::condition::bit(crate::condition::PARALYZED) == 0 {
-                    self.entities.get_mut(&id).unwrap().goal = Some(goal);
-                }
-                let distance = if matches!(motion, Motion::StrictOrbit { .. }) && speed > 0. {
-                    pos.distance(goal)
-                } else {
-                    speed / 1.5 * 0.05
-                };
-                if let Err(error) = self.move_entity_colliding(
-                    id,
-                    goal,
-                    distance,
-                    !matches!(motion, Motion::Charge { .. } | Motion::StrictOrbit { .. }),
-                ) {
-                    let e = self.entities.get_mut(&id).unwrap();
-                    e.goal = None;
-                    e.last_step = Pos { x: 0., y: 0. };
-                    tracing::debug!(entity=id,%error,"NPC movement blocked; retargeting");
-                }
-                if !hero_continue || invocation == 1 {
-                    break;
-                }
-                let pos = self.entities[&id].pos;
-                target = self
-                    .players
-                    .values()
-                    .filter(|p| {
-                        p.character.alive
-                            && !p.death_pending
-                            && !p.departing
-                            && !p.paused
-                            && p.newbie_until <= self.now
-                            && p.conditions(self.now)
-                                & crate::condition::bit(crate::condition::INVISIBLE)
-                                == 0
-                    })
-                    .map(|p| p.pos)
-                    .chain(self.decoy_positions())
-                    .filter(|p| pos.distance(*p) < 20.)
-                    .min_by(|a, b| pos.distance(*a).total_cmp(&pos.distance(*b)));
-                match self.hero_movement(id, target, delta) {
-                    Ok((next_motion, next_speed, completed)) => {
-                        motion = next_motion;
-                        speed = next_speed;
-                        hero_continue = completed;
-                    }
-                    Err(error) => {
-                        tracing::error!(entity=id, %error, "Realm hero continuation refused");
-                        break;
-                    }
-                }
-            }
-            if queued_hero {
-                let e = self.entities.get_mut(&id).unwrap();
-                e.last_step = Pos {
-                    x: e.pos.x - pos.x,
-                    y: e.pos.y - pos.y,
-                };
-            }
-            let e = &self.entities[&id];
-            let schedule = if burst && kind != crate::dungeon::manor::MINE {
-                None
-            } else {
-                match self.npc_attack_schedule(id, elapsed) {
-                    Ok(schedule) => schedule,
-                    Err(error) => {
-                        tracing::error!(entity=id,kind,%error,"NPC attack schedule refused");
-                        continue;
-                    }
-                }
-            };
-            if profile.interval == 0
-                || e.activated.is_none()
-                || (!burst
-                    && ((schedule.is_none()
-                        && (self.now < e.next_shot
-                            || target.is_none_or(|p| e.pos.distance(p) > profile.range)))
-                        || flags & crate::condition::bit(crate::condition::STUNNED) != 0))
-            {
-                continue;
-            }
-            let result = if let Some(schedule) = &schedule {
-                self.scheduled_attacks(id, target, schedule)
-            } else {
-                let Some(target) = target else { continue };
-                self.legacy_enemy_shots(id, target, elapsed)
-            };
-            let shots = match result {
-                Ok(shots) => shots,
-                Err(error) => {
-                    tracing::error!(entity=id, kind, %error, "NPC projectiles refused");
-                    continue;
-                }
-            };
-            let shots = if schedule.is_none()
-                && flags & crate::condition::bit(crate::condition::DAZED) != 0
-            {
-                enemy_shots::dazed(shots)
-            } else {
-                shots
-            };
-            let interval = match kind {
-                0x633 if elapsed % 10000 >= 5000 => 500,
-                0xd06 if elapsed % 43300 >= 32300 => 1300,
-                0xd06 if elapsed % 43300 >= 12300 => 500,
-                0xd90 if (elapsed / 13000) % 4 == 1 => 2000,
-                0xd90 if (elapsed / 13000) % 4 >= 2 => 1000,
-                _ => profile.interval,
-            };
-            if schedule.is_none() {
-                self.entities.get_mut(&id).unwrap().next_shot = self.now + interval;
-            }
-            if shield_burst {
-                self.entities.get_mut(&id).unwrap().stage = Some(3);
-                tracing::debug!(entity = id, kind, "Shield Orc final command selected");
-            }
-            if self.bullets.len() + shots.len() > 2048 {
-                tracing::warn!(
-                    entity = id,
-                    active = self.bullets.len(),
-                    "NPC shot refused at global projectile limit"
-                );
-                continue;
-            }
-            packets.extend(
-                self.emit_enemy_shots(id, shots)
-                    .into_iter()
-                    .map(|body| (id, body)),
+    fn npc_step(&mut self) {
+        if let Err(error) = self.xml_step() {
+            // Quarantined actors were already logged and retired; anything else is a world invariant.
+            assert!(
+                error.is::<xml::ActorsQuarantined>(),
+                "validated XML world execution: {error:?}"
             );
         }
-        packets
     }
     pub(super) fn emit_enemy_shots(&mut self, id: i32, shots: Vec<(u8, f32)>) -> Vec<Vec<u8>> {
         let kind = self.entities[&id].kind;
@@ -7729,6 +6489,7 @@ impl World {
             let e = self.entities.get_mut(&id).unwrap();
             e.bullet = e.bullet.wrapping_add(1);
             let bullet = Bullet {
+                damage_origin: enemy_damage::DamageOrigin::nonplayer(),
                 owner: id,
                 source_kind: kind,
                 id: e.bullet,
@@ -7763,20 +6524,6 @@ impl World {
             }
             self.bullets.push(bullet);
         }
-        // Shoot then retire, independent of the proximity poll; keep the owner until publication: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/db/BehaviorDb.UndeadLair.cs#L462-L480
-        if matches!(kind, 0xda2 | 0xda3) && !notices.is_empty() {
-            self.entities.get_mut(&id).unwrap().expires.set(
-                Some(self.now + 50),
-                id,
-                &mut self.timed_ids,
-            );
-            tracing::debug!(
-                entity = id,
-                kind,
-                shots = notices.len(),
-                "Lair trap detonated"
-            );
-        }
         enemy_shots::packets(id, &notices)
     }
     pub fn step(&mut self) {
@@ -7800,12 +6547,10 @@ impl World {
             }
         }
         self.merchant_step();
-        self.lab_step();
         self.expire_consumable_boosts();
         self.companion_step()
             .expect("validated companion simulation");
         self.trade_step();
-        self.fountain_heal();
         self.expire_goto_acks();
         self.expire_native_projectiles();
         let ids: Vec<_> = self.players.keys().copied().collect();
@@ -7988,76 +6733,24 @@ impl World {
             .borrow_mut()
             .work("transients", transient_started);
         let mechanics_started = crate::performance::Measure::start();
-        self.mechanic_expiry();
-        self.abyss_step();
-        if let Err(error) = self.locker_step() {
-            tracing::error!(%error, "Davy Locker progression refused");
-        }
         self.ground_step();
-        self.ocean_step();
-        self.event_step();
-        self.ability_step();
+        self.breath_step();
+        if let Err(error) = self.ability_step() {
+            tracing::error!(error=%format!("{error:#}"), "native ability deadline failed");
+        }
+        self.owed_shot_step();
         self.performance
             .borrow_mut()
             .work("mechanics", mechanics_started);
         let npc_started = crate::performance::Measure::start();
-        let shots = self.npc_step();
+        self.npc_step();
+        self.native_expiry();
         self.performance.borrow_mut().work("npc", npc_started);
         let combat_started = crate::performance::Measure::start();
-        self.grenade_step();
         for id in &ids {
             if let Err(e) = self.updates(*id, false) {
                 tracing::error!(player=id,error=%e,"world update failed");
             }
-        }
-        for (owner, shot) in shots {
-            self.send_enemy_shot(owner, shot);
-        }
-        let guns: Vec<_> = self
-            .gun_ids
-            .iter()
-            .filter(|id| self.now >= self.entities[id].next_shot)
-            .copied()
-            .collect();
-        for id in guns {
-            let e = self.entities.get_mut(&id).unwrap();
-            e.next_shot = self.now + self.rng.gen_range(2000..3500);
-            e.bullet = e.bullet.wrapping_add(1);
-            let angle = match e.kind {
-                0x0802 => std::f32::consts::FRAC_PI_2,
-                0x0804 => 0.,
-                0x0805 => std::f32::consts::PI,
-                _ => 0.,
-            };
-            let spec = self.content.objects[&e.kind]
-                .projectiles
-                .get(&0)
-                .cloned()
-                .expect("validated tutorial gun projectile zero");
-            let b = Bullet {
-                owner: id,
-                source_kind: e.kind,
-                id: e.bullet,
-                friendly: false,
-                start: e.pos,
-                pos: e.pos,
-                angle,
-                born: self.now,
-                damage: spec.min,
-                spec,
-                hit: BTreeSet::new(),
-                hit_enemy: false,
-            };
-            let mut o = Writer::new();
-            o.u8(b.id)
-                .i32(id)
-                .u8(0)
-                .f32(b.start.x)
-                .f32(b.start.y)
-                .f32(angle)
-                .i16(b.damage as i16);
-            self.bullets.push(b);
-            self.send_enemy_shot(id, o.0);
         }
         let mut bullets = std::mem::take(&mut self.bullets);
         self.detached_bullets = bullets.len();
@@ -8221,7 +6914,7 @@ impl World {
     }
     fn report_performance(&mut self, world_id: i32) {
         if let Some(timings) = self.performance.get_mut().report() {
-            if self.name == "Realm" {
+            if self.template_id() == Some("realm") {
                 let mean_us = timings["timings"]["step"]["mean_us"]
                     .as_u64()
                     .expect("Realm tick report missing step mean");
@@ -8276,12 +6969,17 @@ impl World {
             && self.content.objects[&e.kind].destructible
             && !b.hit.contains(&e.id)
     }
-    /// Returns whether the owner was paused, which consumes the bullet without damage.
+    /// A stop flag keeps a custody-blocked projectile available without claiming a hit.
     pub(super) fn bullet_hit(&mut self, b: &mut Bullet, target: i32) -> bool {
-        b.hit.insert(target);
         if self.players.get(&b.owner).is_some_and(|p| p.paused) {
+            b.hit.insert(target);
             return true;
         }
+        if let Err(error) = self.reserve_terminal_damage(target, b.damage, b.spec.armor_piercing) {
+            tracing::warn!(player=b.owner,actor=target,%error,"terminal backpressure retains unspent projectile hit");
+            return true;
+        }
+        b.hit.insert(target);
         if !b.hit_enemy && self.content.objects[&self.entities[&target].kind].enemy {
             b.hit_enemy = true;
             if let Some(p) = self
@@ -8297,8 +6995,8 @@ impl World {
                     .expect("lifetime projectile hit overflow");
             }
         }
-        self.damage_enemy(
-            b.owner,
+        self.damage_enemy_from(
+            &b.damage_origin,
             target,
             b.damage,
             b.spec.armor_piercing,
@@ -8329,13 +7027,9 @@ mod combat_tests;
 mod cooperative_tests;
 #[cfg(test)]
 mod movement_tests;
-#[cfg(test)]
-mod snake_tests;
 
 #[cfg(test)]
 mod death_chat_tests;
-#[cfg(test)]
-mod lab_tests;
 
 #[cfg(test)]
 mod reward_accuracy_tests;
@@ -8370,10 +7064,6 @@ mod mystic_tests;
 mod class_quest_tests;
 #[cfg(test)]
 mod ghost_ship_tests;
-#[cfg(test)]
-mod ocean_tests;
-#[cfg(test)]
-mod pentaract_tests;
 #[cfg(test)]
 mod quest_tests;
 
@@ -8449,8 +7139,7 @@ mod prepared_native_transition_tests {
     }
     impl Fixture {
         async fn new() -> Self {
-            let data = std::path::Path::new("data");
-            let content = Arc::new(Content::load(data).unwrap());
+            let content = Arc::new(test_content());
             let store =
                 crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
             let account = store
@@ -8461,7 +7150,7 @@ mod prepared_native_transition_tests {
                 .create(account.id, content.get(crate::content::WIZARD).unwrap())
                 .await
                 .unwrap();
-            let mut d = Directory::fixture(data, content, 16, 1344, Some(1344)).unwrap();
+            let mut d = Directory::fixture(content, 16, 1344, Some(1344)).unwrap();
             let (packets, mut inbox) = mpsc::channel(256);
             let (lost, _) = watch::channel(None);
             let player = d

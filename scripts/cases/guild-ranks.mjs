@@ -91,7 +91,10 @@ export async function run(game){
   await open(0,'founder-restores-leader');for(const rank of [10,20,30])await change(0,2,'promote',rank);await close(0);
   const original=await game.observe();await game.act({keys:['Insert'],duration_ms:700});await game.act({keys:[],duration_ms:500});
   game.check('ordinary Nexus reconnect keeps Founder and living character',(await game.observe()).world==='Nexus'&&(await game.observe()).session.character===original.session.character&&(await rows()).find(r=>r[1]===names[0])[2]===40);
-  await walk(0,{x:78.5,y:41.5});await walk(0,{x:109.5,y:42.2});await ui(0,'renounce-dialog',()=>click(0,700,575));await ui(0,'renounce-cancel',()=>click(0,325,338));
+  for(const [x,y] of [[78.5,41.5],[107.5,41.5],[107.5,42.5],[109.5,42.2]])await walk(0,{x,y});
+  const registerApproach=(await game.observe()).position;
+  assert(Math.hypot(registerApproach.x-109.5,registerApproach.y-41.5)<1,'Native Register approach must be inside panel range');
+  await ui(0,'renounce-dialog',()=>click(0,700,575));await ui(0,'renounce-cancel',()=>click(0,325,338));
   game.check('cancelled renunciation preserves Founder',(await rows()).find(r=>r[1]===names[0])[2]===40);
   await ui(0,'renounce-confirm',()=>click(0,700,575));await ui(0,'founder-renounced',()=>click(0,475,338));
   const remaining=await rows();game.check('Founder departure leaves both Leaders without automatic succession',remaining.length===2&&remaining.every(r=>r[2]===30));

@@ -24,7 +24,16 @@ export async function prepare(api){
 export async function run(game){
   const samples=[],shots=new Map(),enemy=s=>s.diagnostic.entities.find(e=>e.id===root.id);
   const record=s=>{samples.push(s);for(const p of s.view.projectiles.filter(p=>p.owner===root.id))shots.set(p.id,p);};
+  let serial=0,shielded=0;
   async function act(input,capture){
+    let now=(await game.observe()).game_ms;
+    // Protection cannot be renewed while active, and loaded acts can overrun: idle out the window, then renew.
+    while(now<shielded&&shielded-now<input.duration_ms+5000){await game.act({keys:[],duration_ms:Math.min(10000,Math.max(50,shielded-now))});now=(await game.observe()).game_ms;}
+    if(now>=shielded){
+      const path=output('protection-'+serial+'.json');
+      await writeFile(path,JSON.stringify({id:'beholder-protection-'+serial++,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+      execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);shielded=now+60000;
+    }
     let pending,error;
     const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},100);
     try{await game.act(input,capture);}finally{clearInterval(timer);if(pending)await pending;}
@@ -33,9 +42,8 @@ export async function run(game){
   try{
     const arrival=await game.inspect();
     game.check('natural mountain Beholder admitted at selected 1500 HP',enemy(arrival)?.hp===1500&&arrival.view.session.world===1);
-    const path=output('protection.json');
-    await writeFile(path,JSON.stringify({id:'beholder-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
-    execFileSync(process.execPath,[resolve('scripts/game.mjs'),output('native/native.json'),path]);
+    // XML Beholders spawn as a group (actors.xml:1624 Spawn Min 2), so the encounter is every Beholder near the chosen root.
+    const group=arrival.diagnostic.entities.filter(e=>e.kind===0x656&&Math.hypot(e.pos.x-root.pos.x,e.pos.y-root.pos.y)<10).map(e=>e.id);
     await act({keys:[],duration_ms:2000},{name:'beholder-arrival',when:()=>true});
     await act({keys:[],duration_ms:6000},{name:'beholder-blind',when:()=>true});
     const combat=await game.inspect();
@@ -48,17 +56,26 @@ export async function run(game){
       for(const p of s.view.projectiles.filter(p=>p.owner===root.id&&p.speed===50)){const key=p.start.x+':'+p.start.y+':'+p.start_time_ms;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p.angle);}
       return [...groups.values()].some(a=>a.length===5&&a.sort((a,b)=>a-b).slice(1).every((v,i)=>Math.abs(v-a[i]-2*Math.PI/5)<.001));
     }));
-    for(let n=0;n<100&&enemy(await game.inspect());n++){
-      const s=await game.inspect(),e=enemy(s),dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
-      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>5;
-      const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
-      await act({keys,duration_ms:200,target:{entity:root.id,camera_angle:-Math.PI/4,fire:!approach}});
+    async function defeat(id){
+      for(let n=0;n<100;n++){
+        const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===id);if(!e)break;
+        const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;
+        const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,approach=Math.hypot(dx,dy)>5;
+        const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
+        // Preserve the observed bearing if a previous native shot finishes the target before input resumes.
+        const scale=90/Math.max(1,Math.hypot(dx,dy));
+        await act({keys,duration_ms:200,...(!approach?{mouse:{x:300+x*scale,y:325+y*scale}}:{})});
+      }
     }
+    await defeat(root.id);
     await act({keys:[],duration_ms:500},{name:'beholder-defeated',when:()=>true});
     const dead=await game.inspect();
     game.check('ordinary native staff defeats natural Beholder and earns XP',!enemy(dead)&&dead.view.character.experience>=combat.view.character.experience+150);
+    for(const id of group)await defeat(id);
+    const cleared=await game.inspect();
+    game.check('ordinary native staff defeats the rest of its natural Beholder group',!cleared.diagnostic.entities.some(e=>group.includes(e.id)));
     await act({keys:[],duration_ms:6500},{name:'beholder-recovery',when:()=>true});const end=await game.inspect();
-    game.check('defeated Beholder stays absent without repeated XP',!enemy(end)&&end.view.character.experience===dead.view.character.experience);
+    game.check('defeated Beholder stays absent without repeated XP',!enemy(end)&&end.view.character.experience===cleared.view.character.experience);
     game.check('Blind expires after encounter',!(end.view.character.conditions&(1<<7)));
     game.check('same prepared living Wizard remains in the Realm',end.view.lifecycle.alive&&end.view.session.world===1&&end.view.session.character===arrival.view.session.character);
     await writeFile(output('outcomes.json'),JSON.stringify({arrival,combat,dead,end}));

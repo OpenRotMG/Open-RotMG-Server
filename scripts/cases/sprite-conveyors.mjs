@@ -15,9 +15,10 @@ export async function verify(game,directions){
     const {worldSeed,...prepared}=fixture;
     const peer=await game.join({...prepared,world:before.session.world,seed:12352+samples.length,position:{x:tile.x+.5,y:tile.y+.5}});
     // A fresh relative vector is null until controls are primed: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Player.as#L183-L191
-    await peer.act({keys:['a','d'],duration_ms:25});const start=await peer.observe(),trajectory=[start];let pending,error;
-    const timer=setInterval(()=>{if(!pending)pending=peer.observe().then(v=>trajectory.push(v)).catch(e=>{error=e;}).finally(()=>pending=null);},50);
-    try{await peer.act({keys:[],duration_ms:100});}finally{clearInterval(timer);if(pending)await pending;}if(error)throw error;
+    const start=await peer.observe(),trajectory=[start];let pending,error;
+    // Start sampling before neutral priming: the selected flow may traverse the runway before the first action returns.
+    const timer=setInterval(()=>{if(!pending)pending=peer.observe().then(v=>trajectory.push(v)).catch(e=>{error=e;}).finally(()=>pending=null);},25);
+    try{await peer.act([{actor:peer.actor,input:{keys:['a','d'],duration_ms:25}},{actor:peer.actor,input:{keys:[],duration_ms:100}}]);}finally{clearInterval(timer);if(pending)await pending;}if(error)throw error;
     const end=await peer.observe();trajectory.push(end);
     const segments=trajectory.slice(1).map((v,i)=>{const u=trajectory[i];return{start:u,end:v,along:(v.position.x-u.position.x)*dx+(v.position.y-u.position.y)*dy,across:(v.position.x-u.position.x)*dy-(v.position.y-u.position.y)*dx};}).filter(s=>[s.start,s.end].every(v=>at(Math.floor(v.position.x),Math.floor(v.position.y))===kind));
     samples.push({kind,tile,start,end,segments});await writeFile(join(process.env.QA_RESULTS_DIR,'sprite-push.json'),JSON.stringify(samples,null,2));

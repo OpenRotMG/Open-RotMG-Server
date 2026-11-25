@@ -11,6 +11,9 @@ export async function run(game){
   const peer=await game.join({...fixture,world:start.view.session.world,position:spot});
   const target=await peer.inspect();
   game.check('two living players begin apart in Spider Den',start.view.map.name==='Spider Den'&&target.view.session.world===start.view.session.world&&target.view.lifecycle.alive&&Math.hypot(start.view.position.x-target.view.position.x,start.view.position.y-target.view.position.y)>3);
+  // Spawn shares the Portal of Cowardice tile (spider.rs), whose panel hides the player list; step toward the peer first.
+  const dx=spot.x-start.view.position.x,dy=spot.y-start.view.position.y,sx=(dx-dy)/Math.SQRT2,sy=(dx+dy)/Math.SQRT2;
+  await game.act({keys:[Math.abs(sx)>=Math.abs(sy)?(sx>0?'d':'a'):(sy>0?'s':'w')],duration_ms:250});
   await game.act({keys:[],duration_ms:800});
   await game.act({keys:[],mouse:{x:650,y:520},duration_ms:800},{name:'spider-teleport-menu',when:()=>true});
   const before=await game.inspect();

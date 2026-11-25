@@ -1,7 +1,9 @@
 import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
-export const fixture={class:0x300,level:20,seed:888,world:'mad-lab',worldSeed:12351,position:{x:73.5,y:15.5},equipment:[0xa14,0xb27,-1,-1],backpack:[0xc41,0xc41,0xc41,0xc41,-1,-1,-1,-1],stats:null};
+// Seed12351 Mad Lab: a quiet corridor four tiles north of a DeHexxer (actors.xml: ClearConditionEffectAura range2), six-plus from Hexxers.
+const start={x:229.5,y:204.5},cure={x:229.5,y:208.5};
+export const fixture={class:0x300,level:20,seed:888,world:'mad-lab',worldSeed:12351,position:start,equipment:[0xa14,0xb27,-1,-1],backpack:[0xc41,0xc41,0xc41,0xc41,-1,-1,-1,-1],stats:null};
 const HEXED=1<<27,INVISIBLE=1<<12,SPEEDY=1<<14,STUNNED=1<<6;
 export async function run(game){
   const samples=[];
@@ -14,18 +16,17 @@ export async function run(game){
     game.check(name+' preserves stats and spends no mana',JSON.stringify(after.character.stats)===JSON.stringify(before.character.stats)&&after.character.mp>=before.character.mp);
     return after;
   }
-  async function walk(axis,target){
+  async function walk(point,range){
     for(let n=0;n<30;n++){
-      const value=(await game.observe()).position[axis];
-      if(Math.abs(value-target)<.65)return;
-      const keys=axis==='x'?(value<target?['d','s']:['a','w']):(value<target?['a','s']:['d','w']);
-      await game.act({keys,duration_ms:150});
+      const v=await game.observe(),dx=point.x-v.position.x,dy=point.y-v.position.y;if(Math.hypot(dx,dy)<range)return;
+      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+      await game.act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:150});
     }
-    throw Error('Native walk did not reach '+axis+'='+target);
+    throw Error('Native walk did not reach '+JSON.stringify(point));
   }
   const before=await save('initial');
   await game.act({keys:[],duration_ms:1000},{name:'transformation-before',when:v=>!(v.character.conditions&(HEXED|INVISIBLE))});
-  await game.act({keys:[' '],duration_ms:200});
+  await game.act({keys:[' '],mouse:{x:300,y:300},duration_ms:200});
   game.check('ordinary cloak applies Invisible',Boolean((await game.observe()).character.conditions&INVISIBLE));
   const useStarted=(await game.observe()).game_ms;
   const transformed=await use('1','transformation-hexed');
@@ -47,13 +48,13 @@ export async function run(game){
   await game.act({keys:[],duration_ms:800},{name:'transformation-expired',when:v=>!(v.character.conditions&HEXED)});
   game.check('Hexed expires after the selected 30 seconds',!((await save('expired')).character.conditions&HEXED));
   game.check('second potion applies Hexed before the blue cure',Boolean((await use('2','transformation-second')).character.conditions&HEXED));
-  await walk('x',75.5);await walk('y',12.5);
+  await walk(cure,1.5);
   await game.act({keys:[],duration_ms:800},{name:'transformation-blue',when:v=>!(v.character.conditions&HEXED)});
   const blue=await save('blue');
-  game.check('ordinary blue-pool entry clears potion Hexed before expiry',!(blue.character.conditions&HEXED)&&blue.position.x>74&&blue.position.y<14);
+  game.check('ordinary DeHexxer approach clears potion Hexed before expiry',!(blue.character.conditions&HEXED)&&Math.hypot(blue.position.x-cure.x,blue.position.y-cure.y)<2);
   const onBlue=await use('3','transformation-on-blue');
-  game.check('potion on blue is consumed but immediately cured',!(onBlue.character.conditions&HEXED));
-  await walk('y',15.5);
+  game.check('potion beside the DeHexxer is consumed but immediately cured',!(onBlue.character.conditions&HEXED));
+  await walk(start,.5);
   await use('4','transformation-before-travel');
   game.check('dry-ground use transforms again',Boolean((await game.observe()).character.conditions&HEXED));
   const retained=await game.observe();

@@ -53,6 +53,8 @@ export async function run(game){
   game.check('optional treasure remains outside the objective gate',gated.map.entities.some(e=>e.kind===0xd2c));
   await squad(final);
   for(let n=0;n<30;n++){await combat();if(!(await map()).entities.some(e=>e.kind===0xd29))break;}
+  // actors.xml:7765-7793: the three statues Metamorphose 0, 2 and 4 seconds after ComeAlive.
+  await advance(4500);
   const awakened=await save('awakened'),bosses=awakened.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind));
   game.check('last real objective death replaces all three statues exactly once',!awakened.map.entities.some(e=>e.kind===0xd29)&&bosses.length===3&&new Set(bosses.map(e=>e.kind)).size===3&&statues.every(e=>!awakened.map.entities.some(x=>x.id===e.id)));
   game.check('awakening does not grant completion credit',awakened.state.diagnostic.character.tombs===0);
@@ -65,6 +67,8 @@ export async function run(game){
   const joined=await late.inspect();await writeFile(join(out,'late-join.json'),JSON.stringify(joined));
   game.check('late native join sees the same three living boss identities without statues',bosses.every(e=>joined.view.objects.some(x=>x.id===e.id&&x.kind===e.kind))&&!joined.view.objects.some(e=>[0xd3d,0xd3e,0xd3f].includes(e.kind))&&joined.diagnostic.character.tombs===0);
   const repeated=await save('after-late-join');game.check('late admission does not duplicate or replace awakened bosses',repeated.map.entities.filter(e=>[0xd26,0xd27,0xd28].includes(e.kind)).length===3&&bosses.every(e=>repeated.map.entities.some(x=>x.id===e.id)));
+  // XML Nut only makes artifacts from NextPhase->Artifacts below 50% HP after InBetween (actors.xml:6217-6300); the boosted squads would kill it first.
+  for(const [n,actor] of support.entries())await api({op:'cheat',actor,change:{kind:'teleport',position:{x:objectives[n%objectives.length].pos.x,y:objectives[n%objectives.length].pos.y+2}}});
   const nut=bosses.find(e=>e.kind===0xd26),phases=[];let artifact,modifier=0;
   const browser=config.native.find(n=>n.actor===game.actor);assert(browser,'Native combat browser missing');
   const connection=await connect({...browser,url:config.origin+'/',helper:config.browserTools});

@@ -1,76 +1,29 @@
-use crate::{
-    content::{Cell, Content, Map},
-    encounter::{Motion, Profile},
-};
+use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng, seq::SliceRandom};
-use std::f32::consts::TAU;
 
 pub const PORTAL: u16 = 0x72c;
 pub const SPHINX: u16 = 0xd54;
+#[cfg(test)]
 pub const NUT: u16 = 0xd26;
+#[cfg(test)]
 pub const GEB: u16 = 0xd27;
+#[cfg(test)]
 pub const BES: u16 = 0xd28;
-pub const BOSSES: [u16; 3] = [NUT, GEB, BES];
+#[cfg(test)]
 pub const STATUES: [u16; 3] = [0xd3d, 0xd3e, 0xd3f];
 pub const ANCHOR: u16 = 0xd25;
+#[cfg(test)]
 pub const SARCOPHAGUS: u16 = 0xd29;
-pub const TREASURE: u16 = 0xd2c;
+#[cfg(test)]
 pub const SWITCH: u16 = 0xd37;
+#[cfg(test)]
 pub const TRAP: u16 = 0xd38;
+#[cfg(test)]
 pub const DISABLED_TRAP: u16 = 0xd39;
-pub const EXIT: u16 = 0xd40;
 pub const QUICKSAND: u8 = 0xbf;
 pub const MISSING_TILE: u8 = 0xe3;
 pub const WALL: u16 = 0x1dd;
-
-pub fn immortal(kind: u16) -> bool {
-    matches!(kind, ANCHOR | 0xd31..=0xd39 | 0xd3d..=0xd3f)
-}
-
-pub fn initial_condition(kind: u16) -> i32 {
-    if matches!(kind, ANCHOR | SWITCH | TRAP | 0xd3d..=0xd3f) {
-        crate::condition::bit(crate::condition::INVULNERABLE)
-    } else if BOSSES.contains(&kind) {
-        crate::condition::bit(crate::condition::ARMORED)
-    } else {
-        0
-    }
-}
-
-pub fn contains(kind: u16) -> bool {
-    (0xd10..=0xd3f).contains(&kind)
-}
-
-pub fn profile(kind: u16) -> Option<Profile> {
-    contains(kind).then_some(Profile {
-        motion: Motion::Stationary,
-        speed: 0.,
-        interval: 50,
-        range: 30.,
-    })
-}
-
-pub fn validate(content: &Content, kind: u16) -> Result<()> {
-    ensure!(contains(kind), "unknown Tomb actor {kind:#x}");
-    let count = match kind {
-        NUT => 9,
-        GEB => 6,
-        BES => 5,
-        0xd11 | 0xd13 | 0xd15 | 0xd3c => 4,
-        0xd3a => 3,
-        0xd1a | 0xd1b | 0xd1c..=0xd1e | 0xd2a | 0xd2b | 0xd3b => 2,
-        ANCHOR | TREASURE | 0xd2d..=0xd30 | SWITCH..=0xd3f => 0,
-        _ => 1,
-    };
-    for index in 0..count {
-        ensure!(
-            content.get(kind)?.projectiles.contains_key(&index),
-            "Tomb actor {kind:#x} lacks selected projectile {index}"
-        );
-    }
-    Ok(())
-}
 
 fn center(room: usize) -> (i32, i32) {
     (16 + room as i32 % 5 * 32, 16 + room as i32 / 5 * 32)
@@ -142,7 +95,27 @@ fn put(map: &mut Map, x: i32, y: i32, kind: u16) -> Result<()> {
     Ok(())
 }
 
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    let [anchor, exit, sarcophagus, treasure_actor, switch] = generator.placements("landmarks")?;
+    let statues = generator.placements::<3>("statues")?;
+    let desert = generator.placements::<3>("desert-pack")?;
+    let giant = generator.placements::<2>("giant-pack")?;
+    let scarab = generator.placements::<3>("scarab-pack")?;
+    let pyramid = generator.placements::<3>("pyramid-pack")?;
+    let royal = generator.placements::<3>("royal-pack")?;
+    let archer = generator.placements::<3>("archer-pack")?;
+    let packs = [
+        desert.as_slice(),
+        giant.as_slice(),
+        scarab.as_slice(),
+        pyramid.as_slice(),
+        royal.as_slice(),
+        archer.as_slice(),
+    ];
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let rooms: Vec<usize> = (0..25).filter(|r| ![7, 11, 13, 17].contains(r)).collect();
     let mut joined = vec![12];
@@ -211,6 +184,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     events.push(treasure);
     let footprints = footprint_centers(seed, &events);
     let mut map = Map {
+        elevation: None,
         width: 164,
         height: 164,
         cells: vec![
@@ -289,12 +263,12 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
             for (dx, dy) in [(-7, -7), (7, -7), (-7, 7), (7, 7)] {
                 put(&mut map, cx + dx, cy + dy, WALL)?;
             }
-            put(&mut map, cx, cy, ANCHOR)?;
-            put(&mut map, cx, cy + 1, EXIT)?;
+            put(&mut map, cx, cy, anchor)?;
+            put(&mut map, cx, cy + 1, exit)?;
             for (dx, dy, kind) in [
-                (-3, -2, STATUES[0]),
-                (-2, 4, STATUES[1]),
-                (4, 0, STATUES[2]),
+                (-3, -2, statues[0]),
+                (-2, 4, statues[1]),
+                (4, 0, statues[2]),
             ] {
                 put(&mut map, cx + dx, cy + dy, kind)?;
             }
@@ -327,49 +301,24 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 &mut map,
                 cx,
                 cy,
-                if treasure { TREASURE } else { SARCOPHAGUS },
+                if treasure {
+                    treasure_actor
+                } else {
+                    sarcophagus
+                },
             )?;
             if !treasure {
-                // Preserve later room generation when removing the variable sentry count.
+                // Preserve later room generation: the removed sentry count consumed one draw.
                 let _ = rng.gen_range(8..=12);
-                let count = 8;
-                for n in 0..count {
-                    let angle = n as f32 * TAU / count as f32;
-                    let radius = if n % 2 == 0 { 3. } else { 5. };
-                    put(
-                        &mut map,
-                        cx + (radius * angle.cos()).round() as i32,
-                        cy + (radius * angle.sin()).round() as i32,
-                        if n % 2 == 0 { 0xd2a } else { 0xd2b },
-                    )?;
-                }
             }
             continue;
         }
+        // dungeons.xml:1532/1569 place only the switch or Sarcophagus; their ObjectToss supplies traps and priests.
         let family = room % 7;
         if family == 0 {
-            put(&mut map, cx, cy, SWITCH)?;
-            for (dx, dy) in [
-                (-4, -4),
-                (0, -5),
-                (4, -4),
-                (5, 0),
-                (4, 4),
-                (0, 5),
-                (-4, 4),
-                (-5, 0),
-            ] {
-                put(&mut map, cx + dx, cy + dy, TRAP)?;
-            }
+            put(&mut map, cx, cy, switch)?;
         } else {
-            let pack: &[u16] = match family {
-                1 => &[0xd11, 0xd13, 0xd15],
-                2 => &[0xd19, 0xd19],
-                3 => &[0xd3a, 0xd3b, 0xd3c],
-                4 => &[0xd1a, 0xd1a, 0xd1b],
-                5 => &[0xd31, 0xd32, 0xd33],
-                _ => &[0xd34, 0xd35, 0xd36],
-            };
+            let pack = packs[family - 1];
             for (n, kind) in pack.iter().enumerate() {
                 put(&mut map, cx - 3 + n as i32 * 3, cy, *kind)?;
             }
@@ -436,7 +385,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         sarcophagi = map
             .cells
             .iter()
-            .filter(|c| c.object == Some(SARCOPHAGUS))
+            .filter(|c| c.object == Some(sarcophagus))
             .count(),
         "generated reconstructed Tomb layout"
     );

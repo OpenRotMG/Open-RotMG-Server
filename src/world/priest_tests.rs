@@ -2,8 +2,9 @@ use super::*;
 use crate::condition;
 
 fn fixture(tome: u16) -> (World, [i32; 3]) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 32,
         height: 32,
         cells: vec![
@@ -53,7 +54,7 @@ fn cast(world: &mut World, id: i32) -> Result<()> {
 
 #[tokio::test]
 async fn priest_unlock_requires_wizard_five_and_keeps_dead_characters_dead() {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     for level in [4, 5] {
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
         let guid = format!("priest-unlock-{level}");

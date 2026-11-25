@@ -1,0 +1,42 @@
+{
+  "qualification": "Independent migration oracle, not a legacy trace or historical certification. Phase1 validates inputs/expectations only; later executor/loot tests must compare actual outputs to these events.",
+  "state": {
+    "step_ms": 50,
+    "inputs": [{"at_ms": 0, "enter": true}, {"at_ms": 50}, {"at_ms": 100}, {"at_ms": 150}, {"at_ms": 200}, {"at_ms": 250}, {"at_ms": 300}, {"at_ms": 350}, {"at_ms": 400}, {"at_ms": 450}, {"at_ms": 500}, {"at_ms": 550}, {"at_ms": 600}],
+    "events": [
+      [0, "enter", "Active/First"],
+      [0, "condition-add", "Invulnerable"],
+      [0, "shoot", "Active/First/Pulse[0]:0"],
+      [100, "shoot", "Active/First/Pulse[1]:0"],
+      [200, "shoot", "Active/First/Pulse[0]:0"],
+      [200, "exit", "Active/First"],
+      [200, "enter", "Active/Second"],
+      [250, "shoot", "Active/Second:1"],
+      [350, "shoot", "Active/Second:1"],
+      [400, "exit", "Active/Second"],
+      [400, "condition-remove", "Invulnerable"],
+      [400, "exit", "Active"],
+      [400, "enter", "Done"],
+      [600, "despawn", "dropLoot=false,giveXP=false"]
+    ],
+    "retained_ancestor_until_ms": 400,
+    "root_movement_ticks_ms": [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550]
+  },
+  "bucket": {
+    "ordered": ["Charge", "Wander"],
+    "when_charge_succeeds": ["Charge", "Shoot"],
+    "when_charge_fails": ["Charge:failed", "Wander", "Shoot"],
+    "while_shoot_cooling": ["Charge", "Shoot:cooling"]
+  },
+  "units": {"rate_per_200ms": 0.2, "delta_ms": 50, "expected_size_delta": 0.05},
+  "loot": {
+    "qualification": "Allocation/threshold defaults are authored migration semantics because the original loot engine is absent; literal recovered probabilities/min/max remain source facts.",
+    "max_hp": 1000, "threshold": 0.15,
+    "damage_by_character": [[11, 149], [12, 150], [13, 151]], "eligible": [12, 13],
+    "probability": 0.3, "draws": [[12, 0.3], [13, 0.299]], "bernoulli_owners": [13],
+    "minimum": 2, "top_up_owner_order": [12, 13], "final_owners": [13, 12],
+    "maximum_one_final_owners": [13],
+    "repeated_rows_same_draw": [0.2, 0.2], "repeated_rows_expected_items": 2,
+    "no_eligible_expected_items": 0
+  }
+}

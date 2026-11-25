@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import argparse
 import base64
+from collections import Counter
 from contextlib import closing
 import datetime
 import gzip
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -64,7 +66,10 @@ PORTABLE_TABLES = {
 }
 PORTABLE_GAME = {**DISCORD_GOLD_GAME, **PORTABLE_TABLES}
 COLLECTION_GAME = {**PORTABLE_GAME, 'collections': ('account', 'item', 'found_at', 'source')}
-GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: PORTABLE_GAME, 23: COLLECTION_GAME, 24: COLLECTION_GAME}
+WORLD_SQL = "CREATE TABLE world_events(event TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN ('terminal','inventory','stamp')),version INTEGER NOT NULL CHECK(version=1),content_fp TEXT NOT NULL,payload TEXT NOT NULL CHECK(json_valid(payload)),payload_hash TEXT NOT NULL,status INTEGER NOT NULL CHECK(status BETWEEN 0 AND 3),result TEXT CHECK(result IS NULL OR json_valid(result)));\nCREATE TABLE world_entitlements(event TEXT NOT NULL REFERENCES world_events(event),ordinal INTEGER NOT NULL CHECK(ordinal>=0),owner_character INTEGER,item INTEGER NOT NULL CHECK(item BETWEEN 0 AND 65535),pickup_operation TEXT UNIQUE,status INTEGER NOT NULL CHECK(status IN (0,1,2,3)),PRIMARY KEY(event,ordinal));"
+WORLD_TABLES = {'world_events': ('event', 'kind', 'version', 'content_fp', 'payload', 'payload_hash', 'status', 'result'), 'world_entitlements': ('event', 'ordinal', 'owner_character', 'item', 'pickup_operation', 'status')}
+WORLD_GAME = {**COLLECTION_GAME, **WORLD_TABLES}
+GAME_SCHEMAS = {1: LEGACY_GAME, 2: GAME, 3: SHORE_GAME, 4: HISCORES_GAME, 5: ACTIONS_GAME, 6: SOCIAL_GAME, 7: UPDATES_GAME, 8: GOLD_GAME, 9: GUILDS_GAME, 10: REWARDS_GAME, 11: REWARDS_GAME, 12: SLOTS_GAME, 13: VAULTS_GAME, 14: FAME_GAME, 15: PICTURES_GAME, 16: COMMUNITY_GAME, 17: DEATH_FAME_GAME, 18: DEATH_FAME_GAME, 19: DISCORD_GOLD_GAME, 20: DISCORD_GOLD_GAME, 21: DISCORD_GOLD_GAME, 22: PORTABLE_GAME, 23: COLLECTION_GAME, 24: COLLECTION_GAME, 25: WORLD_GAME}
 AUTH_GAME = {**GAME, 'credentials': ('account', 'email', 'password_hash')}
 AUTH_SHORE_GAME = {**SHORE_GAME, 'credentials': AUTH_GAME['credentials']}
 AUTH_HISCORES_GAME = {**HISCORES_GAME, 'credentials': AUTH_GAME['credentials'], 'discord_codes': ('account', 'hash', 'issued_at', 'expires_at')}
@@ -86,7 +91,8 @@ RELOADED_EMAIL_GAME = {**RELOADED_DISCORD_GOLD_GAME, **EMAIL_TABLES}
 RESET_GAME = {**RELOADED_EMAIL_GAME, **RESET_TABLES}
 PRE_PORTABLE_GAME = {**RESET_GAME, **REALM_CLOSE_TABLES}
 RELOADED_PORTABLE_GAME = {**PRE_PORTABLE_GAME, **PORTABLE_TABLES}
-RELOADED_GAME = {**RELOADED_PORTABLE_GAME, 'collections': COLLECTION_GAME['collections']}
+RELOADED_COLLECTION_GAME = {**RELOADED_PORTABLE_GAME, 'collections': COLLECTION_GAME['collections']}
+RELOADED_GAME = {**RELOADED_COLLECTION_GAME, **WORLD_TABLES}
 DISCORD = {'levels': ('guild_id', 'user_id', 'username', 'xp', 'last_xp_at', 'last_message_id')}
 
 
@@ -230,6 +236,12 @@ def snapshot(path, schema, *, include_schema=False):
                     name = definition.strip().split()[2].split('(')[0]
                     if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (name,)).fetchone() != (definition.strip(),):
                         raise ValueError('Unsupported portable save metadata: ' + name)
+        if 'world_events' in schema:
+            for definition in WORLD_SQL.split(';'):
+                if definition.strip():
+                    name = definition.strip().split()[2].split('(')[0]
+                    if db.execute('SELECT sql FROM sqlite_schema WHERE name=?', (name,)).fetchone() != (definition.strip(),):
+                        raise ValueError('Unsupported world event metadata: ' + name)
         result = {}
         for table, columns in schema.items():
             if table in {'credentials', 'discord_codes', 'recovery_codes', 'password_resets', *EMAIL_TABLES, *RESET_TABLES, *REALM_CLOSE_TABLES}:
@@ -464,6 +476,148 @@ def validate_community(game):
         raise ValueError('Release community validator returned an invalid receipt')
 
 
+def gameplay_fields(value):
+    if isinstance(value, dict):
+        for name, nested in value.items():
+            name = name.lower()
+            if any(part in name for part in ['password', 'secret', 'credential', 'recovery', 'token', 'auth']) or name in {'guid', 'key', 'keys', 'grant', 'grants'}:
+                raise ValueError('Sensitive field cannot enter gameplay journal/backup: ' + name)
+            gameplay_fields(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            gameplay_fields(nested)
+
+
+def validate_world_events(game):
+    events, operations, identities = {}, set(), set()
+    characters = {row['id'] for row in game['characters']}
+    for row in game['world_events']:
+        if (not isinstance(row['event'], str) or not re.fullmatch('[0-9a-f]{32}', row['event'])
+                or row['event'] in events or row['kind'] not in {'terminal', 'inventory', 'stamp'}
+                or type(row['version']) is not int or row['version'] != 1
+                or not isinstance(row['content_fp'], str) or not re.fullmatch('[0-9a-f]{64}', row['content_fp'])
+                or type(row['status']) is not int or row['status'] not in {0, 1, 2, 3}
+                or not isinstance(row['payload'], str) or len(row['payload'].encode()) > 8 * 1024 * 1024
+                or not isinstance(row['payload_hash'], str) or not re.fullmatch('[0-9a-f]{64}', row['payload_hash'])):
+            raise ValueError('Invalid world event identity/hash/state')
+        payload = json.loads(row['payload'])
+        gameplay_fields(payload)
+        # Settled history keeps the original payload hash; only its payload is replaced by this tombstone.
+        if set(payload) == {'compacted'}:
+            tombstone, result = payload['compacted'], json.loads(row['result'] or '{}')
+            if (not isinstance(tombstone, dict) or set(tombstone) != {'instance', 'characters', 'seed'} or row['status'] != 2
+                    or not (tombstone['instance'] is None or isinstance(tombstone['instance'], str))
+                    or not isinstance(tombstone['characters'], list) or any(type(c) is not int or c <= 0 for c in tombstone['characters'])
+                    or not (type(tombstone['seed']) is int if row['kind'] == 'terminal' else tombstone['seed'] is None)
+                    or type(result.get('published_unix')) is not int or result['published_unix'] <= 0):
+                raise ValueError('Invalid compacted world event tombstone')
+            events[row['event']] = row
+            continue
+        if hashlib.sha256(row['payload'].encode()).hexdigest() != row['payload_hash']:
+            raise ValueError('Invalid world event identity/hash/state')
+        if (set(payload) != {'id', 'kind', 'content', 'payload'}
+                or payload['id'] != row['event'] or payload['kind'] != row['kind'] or payload['content'] != row['content_fp']):
+            raise ValueError('World event payload differs from journal identity')
+        if set(payload['payload']) != {'type', 'data'} or payload['payload']['type'] != row['kind']:
+            raise ValueError('World event typed payload differs from journal kind')
+        if row['result'] is not None:
+            json.loads(row['result'])
+        if row['status'] == 0 and row['result'] is not None or row['status'] in {1, 2, 3} and row['result'] is None:
+            raise ValueError('World event result/state mismatch')
+        if row['status'] == 3:
+            reconciliation = json.loads(row['result']).get('reconciliation', {})
+            previous = reconciliation.get('previous_status')
+            if type(previous) is not int or previous not in {0, 1, 2}:
+                raise ValueError('Invalid reconciliation prior state')
+            if 'disposition' in reconciliation:
+                expected = 'aborted_origin_lost' if previous == 0 else 'committed_effect_origin_lost' if row['kind'] == 'inventory' else 'origin_lost'
+                data = payload['payload']['data']
+                source = data.get('actions', {}).get('instance') if row['kind'] == 'terminal' else data.get('origin', {}).get('instance')
+                if (reconciliation['disposition'] != expected or reconciliation.get('source') != source
+                        or type(reconciliation.get('at')) is not int or reconciliation['at'] <= 0 or not reconciliation.get('reason')):
+                    raise ValueError('Invalid origin-loss disposition/source/time')
+        events[row['event']] = row
+    for row in game['world_entitlements']:
+        key = (row['event'], row['ordinal'])
+        if (row['event'] not in events or events[row['event']]['kind'] != 'terminal'
+                or events[row['event']]['status'] == 0 or type(row['ordinal']) is not int or row['ordinal'] < 0
+                or key in identities or type(row['item']) is not int or not 0 <= row['item'] <= 65535
+                or type(row['status']) is not int or row['status'] not in {0, 1, 2, 3}
+                or row['owner_character'] is not None and (type(row['owner_character']) is not int or row['owner_character'] <= 0
+                    or row['status'] == 0 and row['owner_character'] not in characters)):
+            raise ValueError('Invalid world entitlement identity/owner/state')
+        identities.add(key)
+        parent = json.loads(events[row['event']]['payload'])
+        owner = row['owner_character']
+        if 'compacted' in parent:
+            if row['status'] == 0:
+                raise ValueError('Compacted world event has a deliverable entitlement')
+        else:
+            terminal = parent['payload']['data']
+            plan = terminal['allocation']
+            if (plan['seed'] != terminal['seed'] or plan['defeat'] != terminal['defeat']
+                    or plan['content_fingerprint'] != events[row['event']]['content_fp']
+                    or row['ordinal'] >= len(plan['allocations'])):
+                raise ValueError('Entitlement plan seed/context/ordinal differs from journal')
+            allocation = plan['allocations'][row['ordinal']]
+            owner = None if allocation['owner'] == 'Public' else allocation['owner']['Character']
+            if owner != row['owner_character'] or allocation['item'] != row['item']:
+                raise ValueError('Entitlement allocation differs from original plan')
+        operation = row['pickup_operation']
+        if row['status'] == 0:
+            if operation is not None:
+                raise ValueError('Unpicked entitlement has pickup operation')
+        elif row['status'] == 2:
+            result = json.loads(events[row['event']]['result'])
+            proof = result.get('expired', {}).get(str(row['ordinal']), {})
+            valid = (type(proof.get('bag')) is int and proof['bag'] > 0 and type(proof.get('deadline')) is int
+                     and type(proof.get('now')) is int and proof['now'] >= proof['deadline'] >= 0
+                     and proof.get('reason') == 'published native bag lifetime ended')
+            if operation is not None or (result.get('reconciliation', {}).get('disposition') != 'origin_lost' and not valid):
+                raise ValueError('Expired entitlement lacks native bag/origin receipt')
+        elif row['status'] == 3:
+            result = json.loads(events[row['event']]['result'])
+            # Origin-loss reconciliation keeps the commit result under previous_result.
+            withheld = result['withheld'] if 'withheld' in result else result.get('reconciliation', {}).get('previous_result', {}).get('withheld', {})
+            proof = withheld.get(str(row['ordinal']), {})
+            if (operation is not None or owner is None or proof.get('disposition') != 'moderation_withheld'
+                    or type(proof.get('account')) is not int or proof['account'] <= 0 or proof.get('bag_type') not in (3, 4)):
+                raise ValueError('Withheld entitlement lacks moderation receipt')
+        elif (not isinstance(operation, str) or not re.fullmatch('[0-9a-f]{32}', operation)
+                or operation in operations or operation not in events
+                or events[operation]['kind'] != 'inventory' or events[operation]['status'] == 0
+                or 'compacted' in json.loads(events[operation]['payload'])):
+            raise ValueError('Invalid or duplicate entitlement pickup operation')
+        else:
+            pickup = json.loads(events[operation]['payload'])['payload']['data']
+            if pickup.get('entitlement') != [row['event'], row['ordinal']] and pickup.get('claims') != [row['event'], row['ordinal']]:
+                raise ValueError('Pickup operation differs from entitlement binding')
+            operations.add(operation)
+    counts = Counter(event for event, ordinal in identities)
+    for event, row in events.items():
+        if row['kind'] != 'terminal':
+            continue
+        payload = json.loads(row['payload'])
+        if 'compacted' in payload:
+            if counts[event] != json.loads(row['result']).get('allocations'):
+                raise ValueError('Compacted terminal entitlement count differs from its commit receipt')
+            continue
+        payload = payload['payload']['data']
+        plan = payload['allocation']
+        if plan is None:
+            actions = payload['actions']
+            if (actions.get('loot') is not False and not isinstance(actions.get('planning_error'), str)) or actions.get('actor') != payload['defeat']['actor'] or len(actions.get('instance', '')) != 32:
+                raise ValueError('Terminal without loot has invalid native actions')
+        elif plan['seed'] != payload['seed'] or plan['defeat'] != payload['defeat'] or plan['content_fingerprint'] != row['content_fp']:
+            raise ValueError('Terminal plan seed/context/content differs from journal')
+        state = row['status']
+        if state == 3:
+            state = json.loads(row['result'])['reconciliation']['previous_status']
+        expected = 0 if state == 0 or plan is None else len(plan['allocations'])
+        if counts[event] != expected:
+            raise ValueError('Terminal journal entitlement count differs from original plan')
+
+
 def validate(bundle):
     if set(bundle) != {'schema', 'created_at', 'revisions', 'game', 'discord'} or type(bundle['schema']) is not int or bundle['schema'] not in GAME_SCHEMAS:
         raise ValueError('Unsupported backup envelope')
@@ -478,6 +632,8 @@ def validate(bundle):
             allowed = set(columns) - {'guid'}
             if not isinstance(data[table], list) or any(not isinstance(r, dict) or set(r) != allowed for r in data[table]):
                 raise ValueError('Unsupported backup fields: ' + table)
+    if bundle['schema'] >= 25:
+        validate_world_events(bundle['game'])
     if bundle['schema'] >= 22:
         game = bundle['game']
         namespace = game['save_namespace']
@@ -616,7 +772,7 @@ def gold_reward_sql(version):
 
 
 def export(game, discord, output, server_revision, bot_revision, validator_revision):
-    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, PRE_PORTABLE_GAME, RELOADED_PORTABLE_GAME, RELOADED_GAME], include_schema=True)
+    game_data, matched, stored_version = snapshot(game, [*GAME_SCHEMAS.values(), AUTH_GAME, AUTH_SHORE_GAME, AUTH_HISCORES_GAME, AUTH_ACTIONS_GAME, AUTH_SOCIAL_GAME, AUTH_UPDATES_GAME, AUTH_GOLD_GAME, AUTH_GUILDS_GAME, AUTH_REWARDS_GAME, AUTH_SLOTS_GAME, AUTH_VAULTS_GAME, RELOADED_FAME_GAME, RELOADED_PICTURES_GAME, RELOADED_COMMUNITY_GAME, RELOADED_DEATH_FAME_GAME, RELOADED_DISCORD_GOLD_GAME, RELOADED_EMAIL_GAME, RESET_GAME, PRE_PORTABLE_GAME, RELOADED_PORTABLE_GAME, RELOADED_COLLECTION_GAME, RELOADED_GAME], include_schema=True)
     if 'credentials' in matched and (('email_verifications' in matched) != (stored_version >= 20)):
         raise ValueError('Unsupported email verification schema version')
     if 'credentials' in matched and (('email_password_resets' in matched) != (stored_version >= 21)):
@@ -714,6 +870,8 @@ CREATE TABLE vaults(account INTEGER NOT NULL REFERENCES accounts(id),chest INTEG
         definitions['game'] += '\n' + PORTABLE_SQL
     if bundle['schema'] >= 23:
         definitions['game'] += "\nALTER TABLE collections ADD COLUMN source TEXT CHECK(source IS NULL OR (typeof(source)='text' AND length(trim(source)) BETWEEN 1 AND 128));"
+    if bundle['schema'] >= 25:
+        definitions['game'] += '\n' + WORLD_SQL
     for name, filename in [('game', 'game.db'), ('discord', 'levels.sqlite')]:
         with closing(sqlite3.connect(':memory:')) as db, db:
             db.execute('PRAGMA foreign_keys=ON')

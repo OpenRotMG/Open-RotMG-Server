@@ -6,6 +6,8 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile);
 const out=process.env.QA_RESULTS_DIR;
+// The first earned Realm event draws uniformly among 7 reserved kinds; this seed's first draw is the shrine.
+export const realmSeed=24;
 const spec={class:0x31d,level:20,seed:819,world:1,position:'spawn',equipment:[0xb0b,0xb29,0xa7b,-1],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
 let admissionActor,safePosition;
 export async function prepare(api){
@@ -31,10 +33,12 @@ export async function run(observer){
   async function map(){
     const state=await game.observe(),response=await fetch(config.origin+'/dev/map?player='+state.session.player,{headers});
     assert(response.ok);const scene=await response.json();
-    return shrine?{entities:scene.entities.filter(e=>e.quest===shrine.id)}:scene;
+    // XML MakeMinions/ObjectToss own children by parent, not the legacy quest encounter field.
+    return shrine?{entities:scene.entities.filter(e=>e.id===shrine.id||e.parent===shrine.id)}:scene;
   }
   async function save(label){const state=await game.inspect();records.push({label,state});await writeFile(join(out,'encounter.json'),JSON.stringify(records));return state;}
-  const protectedUntil=new Map();
+  // Every joined native stays near the skulls; seed-24 take 6a15d9f8 lost the idle peer when only the actor renewed.
+  const protectedUntil=new Map(),guarded=new Set([observer]);
   async function protect(actor){
     const before=await actor.observe();let now=before.game_ms,restore;const until=protectedUntil.get(actor.actor)??0;
     if(actor.actor===admissionActor&&now<until&&until-now<6000){
@@ -47,7 +51,7 @@ export async function run(observer){
     if(restore)await cheat(actor,{kind:'teleport',position:restore});
   }
   async function fire(actor,id,ms=500){
-    await protect(observer);await protect(actor);
+    for(const a of new Set([...guarded,actor]))await protect(a);
     const state=await actor.inspect(),target=state.diagnostic.entities.find(e=>e.id===id);assert(target,'Living visible native target required');
     if(Math.hypot(target.pos.x-state.view.position.x,target.pos.y-state.view.position.y)>2)await approach(actor,target.pos,1.5);
     await actor.act({keys:[],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}});
@@ -70,7 +74,7 @@ export async function run(observer){
     for(let n=0;n<80;n++){
       await protect(observer);await protect({actor:admissionActor,observe:()=>api({op:'observe',actor:admissionActor})});
       const scene=await api({op:'inspect',actor:admissionActor});
-      const target=scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x929,0x91d].includes(e.kind))||scene.diagnostic.entities.find(e=>e.id===candidate.id)||scene.diagnostic.entities.find(e=>e.quest===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
+      const target=scene.diagnostic.entities.find(e=>e.parent===candidate.id&&[0x929,0x91d].includes(e.kind))||scene.diagnostic.entities.find(e=>e.id===candidate.id)||scene.diagnostic.entities.find(e=>e.parent===candidate.id&&[0x920,0x91c,0x6c1,0x92d].includes(e.kind));
       if(!target)break;
       const position=approachPoint(target.pos);
       await cheat({actor:admissionActor},{kind:'teleport',position});
@@ -81,12 +85,15 @@ export async function run(observer){
   }
   assert(admission,'Bounded ordinary hero defeats did not admit a Skull Shrine');
   shrine={id:admission.entity,kind:0xd56,pos:{x:admission.x,y:admission.y}};
+  // Its protection lapses during the encounter; take 11b0009d lost it to a Cyclops Noble beside the defeated hero.
+  await cheat({actor:admissionActor},{kind:'teleport',position:safePosition});
   blocked=null;candidates.length=0;
   const logs=await events();
   game.check('ordinary qualifying defeat admits the reserved shrine exactly once',!!admission&&logs.filter(f=>f.message==='quest defeat summoned a Realm event'&&f.entity===shrine.id).length===1);
   await writeFile(join(out,'admission.json'),JSON.stringify({shrine,admission}));
-  game=await observer.join({...spec,seed:820,position:{x:shrine.pos.x+8,y:shrine.pos.y}});
-  for(let n=0;n<12&&(await game.observe()).character.hp===770;n++)await game.act({keys:[],duration_ms:200});
+  game=await observer.join({...spec,seed:820,position:{x:shrine.pos.x+8,y:shrine.pos.y}});guarded.add(game);
+  // The recovered 40-skull group lands ~60 HP per 50 ms; sample finely so the first hits are observed before a lethal volley.
+  for(let n=0;n<48&&(await game.observe()).character.hp===770;n++)await game.act({keys:[],duration_ms:50});
   const vulnerable=await game.observe();
   game.check('unprotected native shrine encounter removes HP without killing the character',vulnerable.character.hp<770&&vulnerable.lifecycle.alive);
   await writeFile(join(out,'unprotected.json'),JSON.stringify(vulnerable));
@@ -100,36 +107,50 @@ export async function run(observer){
   const sampling=(async()=>{while(!done){samples.push(await game.inspect());await new Promise(ok=>setTimeout(ok,60));}})();
   for(const result of await Promise.allSettled([action,sampling]))if(result.status==='rejected')throw result.reason;
   await writeFile(join(out,'movement-attacks.json'),JSON.stringify(samples));
-  const full=await map(),children=full.entities.filter(e=>e.quest===shrine.id&&[0xd57,0xd58].includes(e.kind));
+  const full=await map(),children=full.entities.filter(e=>e.parent===shrine.id&&[0xd57,0xd58].includes(e.kind));
   await writeFile(join(out,'population-map.json'),JSON.stringify(full));
-  // Keep the later per-colour cap distinct from the period grouped five-second policy: https://web.archive.org/web/20120117000123id_/http://forums.wildshadow.com/wiki/realm-mad-god/skull-shrine
-  for(const kind of [0xd57,0xd58])game.check('current shrine replenishes colour '+kind+' to its 20-skull density cap',children.filter(e=>e.kind===kind).length===20);
+  // Recovered MakeMinions caps the mixed Flaming Skulls group at 40, not 20 per colour (encounters.xml:654).
+  game.check('shrine fills its 40-skull Flaming Skulls group with both colours',children.length===40&&[0xd57,0xd58].every(kind=>children.some(e=>e.kind===kind)));
   game.check('shrine remains stationary',samples.every(s=>{const e=root(s);return e&&Math.hypot(e.pos.x-shrine.pos.x,e.pos.y-shrine.pos.y)<.01;}));
   const shots=samples.flatMap(s=>s.view.projectiles),owners=new Map([[shrine.id,0xd56],...children.map(e=>[e.id,e.kind])]);
   for(const kind of [0xd56,0xd57,0xd58])game.check('native client receives selected shrine-family projectile '+kind,shots.some(p=>owners.get(p.owner)===kind&&p.speed===100&&p.lifetime_ms===2400));
   for(const kind of [0xd57,0xd58]){
-    const seen=new Map();for(const s of samples)for(const e of s.diagnostic.entities.filter(e=>e.quest===shrine.id&&e.kind===kind)){const old=seen.get(e.id);if(old&&Math.hypot(old.x-e.pos.x,old.y-e.pos.y)>.5)seen.set(e.id,{...e.pos,moved:true});else if(!old)seen.set(e.id,e.pos);}
+    const seen=new Map();for(const s of samples)for(const e of s.diagnostic.entities.filter(e=>e.parent===shrine.id&&e.kind===kind)){const old=seen.get(e.id);if(old&&Math.hypot(old.x-e.pos.x,old.y-e.pos.y)>.5)seen.set(e.id,{...e.pos,moved:true});else if(!old)seen.set(e.id,e.pos);}
     game.check('native client observes moving skull colour '+kind,[...seen.values()].some(p=>p.moved));
   }
   const victim=children.filter(e=>e.kind===0xd57).sort((a,b)=>Math.hypot(a.pos.x-shrine.pos.x,a.pos.y-shrine.pos.y)-Math.hypot(b.pos.x-shrine.pos.x,b.pos.y-shrine.pos.y))[0];assert(victim);
+  // The shrine's PlaceMap arena (geometry.xml skull_shrine_map.jm) sets single Rock Grey covers; step around any on the line.
+  const rocks=(await map()).entities.filter(e=>e.kind===0x107).map(e=>e.pos);assert.equal(rocks.length,4,'Shrine PlaceMap arena covers');
+  function around(from,point){
+    const dx=point.x-from.x,dy=point.y-from.y,length=Math.hypot(dx,dy),u={x:dx/length,y:dy/length};let detour=point,nearest=Infinity;
+    for(const r of rocks){
+      const along=(r.x-from.x)*u.x+(r.y-from.y)*u.y,px=r.x-from.x-along*u.x,py=r.y-from.y-along*u.y,off=Math.hypot(px,py);
+      if(along>0&&along<length&&off<1&&along<nearest){nearest=along;detour=off>1e-3?{x:r.x-px/off*1.6,y:r.y-py/off*1.6}:{x:r.x-u.y*1.6,y:r.y+u.x*1.6};}
+    }
+    return detour;
+  }
   async function approach(actor,point,range=.5){
     for(let n=0;n<80;n++){
-      await protect(observer);await protect(actor);const view=await actor.observe(),dx=point.x-view.position.x,dy=point.y-view.position.y;if(Math.hypot(dx,dy)<range)return;
+      for(const a of new Set([...guarded,actor]))await protect(a);const view=await actor.observe();if(Math.hypot(point.x-view.position.x,point.y-view.position.y)<range)return;
+      const step=around(view.position,point),dx=step.x-view.position.x,dy=step.y-view.position.y;
       const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2,keys=[];
       if(Math.abs(x)>=Math.abs(y)*.4142)keys.push(x>0?'d':'a');
       if(Math.abs(y)>=Math.abs(x)*.4142)keys.push(y>0?'s':'w');
       await actor.act({keys,duration_ms:Math.max(50,Math.min(200,Math.round(Math.hypot(dx,dy)/(4+5.6*view.character.stats.speed/75)*1000)))});
     }
-    throw Error('Native walking did not reach the observed shrine target');
+    throw Error('Native walking did not reach the observed shrine target '+JSON.stringify({point,actual:(await actor.observe()).position,rocks}));
   }
   await approach(game,victim.pos,1.5);
   for(let n=0;n<12&&(await game.inspect()).diagnostic.entities.some(e=>e.id===victim.id);n++)await fire(game,victim.id,250);
   await approach(game,{x:shrine.pos.x+2,y:shrine.pos.y});
-  await game.act({keys:[],duration_ms:1000});
-  const replenished=(await map()).entities.filter(e=>e.quest===shrine.id&&e.kind===0xd57);
-  game.check('defeated red skull is replaced with a new owned identity',!replenished.some(e=>e.id===victim.id)&&replenished.length===20&&replenished.some(e=>!children.some(old=>old.id===e.id)));
+  // MakeMinions refills one skull per 5 s cooldown.
+  let replenished=[];for(let n=0;n<7&&replenished.length<40;n++){await game.act({keys:[],duration_ms:1000});replenished=(await map()).entities.filter(e=>e.parent===shrine.id&&[0xd57,0xd58].includes(e.kind));}
+  game.check('defeated red skull is replaced with a new owned identity',!replenished.some(e=>e.id===victim.id)&&replenished.length===40&&replenished.some(e=>!children.some(old=>old.id===e.id)));
   const peer=await observer.join({...spec,seed:821,position:{x:shrine.pos.x-2,y:shrine.pos.y}});
-  await protect(peer);
+  guarded.add(peer);await protect(peer);
+  // Independent defense covers the contributor's renewal gap under the recovered skull volleys
+  // (encounters.xml:654ff). The first actor's earlier unprotected damage assertion is unchanged.
+  await cheat(peer,{kind:'stat_modifier',index:3,amount:100,duration_ms:60000});
   const before=await Promise.all([game.observe(),peer.observe()]);
   for(const actor of [game,peer])for(let n=0;n<12;n++){
     const e=root(await game.inspect());assert(e,'Shrine must survive both qualification contributions');
@@ -142,29 +163,37 @@ export async function run(observer){
   const after=await Promise.all([game.inspect(),peer.inspect()]);
   game.check('native sword fire defeats shrine',!root(after[0]));
   game.check('both contributors receive defeat XP',after[0].view.character.experience>before[0].character.experience&&after[1].view.character.experience>before[1].character.experience);
-  const orphaned=(await map()).entities.filter(e=>e.quest===shrine.id&&[0xd57,0xd58].includes(e.kind));
-  const bag=after[1].diagnostic.entities.find(e=>e.extra_stats.some(([stat,account])=>stat===54&&account===after[1].view.session.account)&&e.items?.some(item=>item!==-1));
-  assert(bag,'Observed shrine roll must supply a peer reward for the pickup check');
+  async function settle(ms){
+    for(let elapsed=0;elapsed<ms;elapsed+=250){
+      for(const actor of guarded)await protect(actor);
+      await game.act({keys:[],duration_ms:Math.min(250,ms-elapsed)});
+    }
+  }
+  const orphaned=(await map()).entities.filter(e=>e.parent===shrine.id&&[0xd57,0xd58].includes(e.kind));
+  await settle(3000);
+  const end=await map(),xp=(await game.observe()).character.experience;
+  game.check('defeated shrine does not respawn or replenish skulls',!end.entities.some(e=>e.id===shrine.id)&&end.entities.filter(e=>e.parent===shrine.id&&[0xd57,0xd58].includes(e.kind)).every(e=>orphaned.some(c=>c.id===e.id)));
+  game.check('owned orphan skulls survive shrine defeat',end.entities.some(e=>orphaned.some(c=>c.id===e.id)));
+  await settle(2000);
+  game.check('defeat XP cannot repeat',(await game.observe()).character.experience===xp);
+  // Each contributor rolls the recovered rows independently (~55% for any item), so exercise whichever contributor was rewarded.
+  const privateBag=state=>state.diagnostic.entities.find(e=>e.extra_stats.some(([stat,account])=>stat===54&&account===state.view.session.account)&&e.items?.some(item=>item!==-1));
+  const winner=[0,1].find(i=>privateBag(after[i])),rewardee=[game,peer][winner],bag=winner===undefined?undefined:privateBag(after[winner]);
+  assert(bag,'Observed shrine roll must supply a contributor reward for the pickup check');
   await cheat({actor:admissionActor},{kind:'teleport',position:bag.pos});
   const outsider=await api({op:'inspect',actor:admissionActor});
-  game.check('nearby direct noncontributor cannot see the peer private reward',!outsider.diagnostic.entities.some(e=>e.id===bag.id));
-  await approach(peer,bag.pos,.4);
-  await peer.act({keys:[],duration_ms:500},{name:'shrine-eligible-reward',when:()=>true});
-  const inventory=(await peer.observe()).character,item=bag.items[0];assert(item!==-1);
-  await peer.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
-  const picked=await peer.inspect();
+  game.check('nearby direct noncontributor cannot see the contributor private reward',!outsider.diagnostic.entities.some(e=>e.id===bag.id));
+  await approach(rewardee,bag.pos,.4);
+  await rewardee.act({keys:[],duration_ms:500},{name:'shrine-eligible-reward',when:()=>true});
+  const inventory=(await rewardee.observe()).character,item=bag.items[0];assert(item!==-1);
+  await rewardee.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
+  const picked=await rewardee.inspect();
   game.check('native pickup commits one eligible reward',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===inventory.inventory_revision+1);
-  await peer.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
-  game.check('repeated empty-slot drag cannot duplicate reward',(await peer.observe()).character.inventory_revision===picked.view.character.inventory_revision);
-  await peer.act({keys:['Insert'],duration_ms:250});
-  const retained=await peer.observe();
+  await rewardee.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
+  game.check('repeated empty-slot drag cannot duplicate reward',(await rewardee.observe()).character.inventory_revision===picked.view.character.inventory_revision);
+  await rewardee.act({keys:['Insert'],duration_ms:250});
+  const retained=await rewardee.observe();
   game.check('normal Nexus reconnect preserves acquired reward',retained.world==='Nexus'&&retained.session.character===picked.view.session.character&&retained.character.items[4]===item&&retained.character.inventory_revision===picked.view.character.inventory_revision);
-  await game.act({keys:[],duration_ms:3000});
-  const end=await map(),xp=(await game.observe()).character.experience;
-  game.check('defeated shrine does not respawn or replenish skulls',!end.entities.some(e=>e.id===shrine.id)&&end.entities.filter(e=>e.quest===shrine.id&&[0xd57,0xd58].includes(e.kind)).every(e=>orphaned.some(c=>c.id===e.id)));
-  game.check('owned orphan skulls survive shrine defeat',end.entities.some(e=>orphaned.some(c=>c.id===e.id)));
-  await game.act({keys:[],duration_ms:2000});
-  game.check('defeat XP cannot repeat',(await game.observe()).character.experience===xp);
   await writeFile(join(out,'rewards.json'),JSON.stringify({before,contributions,after,orphaned,end,picked,retained}));
   await save('finished');
 }

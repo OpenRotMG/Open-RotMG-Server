@@ -116,6 +116,8 @@ pub struct PlayerView {
 #[derive(Serialize)]
 pub struct MapInfo {
     pub name: String,
+    #[serde(skip)]
+    pub template: Option<String>,
     pub width: i32,
     pub height: i32,
     pub allow_teleport: bool,
@@ -370,15 +372,16 @@ impl World {
             })
             .collect();
         let throws = w
-            .grenades
+            .xml
+            .blasts
             .iter()
-            .filter(|g| g.position.distance(p.pos) < 20.)
+            .filter(|g| g.pos.distance(p.pos) < 20.)
             .map(|g| VisibleThrow {
                 source_kind: g.kind,
-                position: g.position,
+                position: g.pos,
                 radius: g.radius,
                 damage: g.damage,
-                lands_ms: g.deadline,
+                lands_ms: g.at,
             })
             .collect();
         let view = PlayerView {
@@ -419,6 +422,7 @@ impl World {
             quest: p.quest.filter(|quest| p.known.contains(quest)),
             map: MapInfo {
                 name: w.name.clone(),
+                template: w.template_id().map(str::to_owned),
                 width: w.map.width,
                 height: w.map.height,
                 allow_teleport: w.allow_teleport(),
@@ -563,7 +567,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_support_public_conditions_and_actual_ability_benefits() {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let content = Arc::new(crate::world::test_content());
         let map =
             Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();

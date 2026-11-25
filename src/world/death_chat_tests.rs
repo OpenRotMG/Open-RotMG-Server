@@ -6,7 +6,7 @@ async fn fixture() -> (
     [i32; 2],
     Vec<mpsc::Receiver<Packet>>,
 ) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
     let mut world = World::new(content, map).unwrap();
@@ -227,4 +227,29 @@ async fn death_chat_is_world_wide_once_and_only_after_successful_persistence() {
         assert!(world.finish_death(victim).is_err());
         assert!(messages(&mut inbox).is_empty());
     }
+}
+
+#[tokio::test]
+async fn native_expiry_keeps_reserved_or_terminal_custody_entities_past_their_deadline() {
+    let (mut world, _, _, _) = fixture().await;
+    let pos = world.map.spawns[0];
+    let grave = world
+        .spawn_entity(0x723, Pos { x: pos.0, y: pos.1 }, vec![])
+        .unwrap();
+    let deadline = world.now + 50;
+    world.entities.get_mut(&grave).unwrap().expires.set(
+        Some(deadline),
+        grave,
+        &mut world.timed_ids,
+    );
+    world.entities.get_mut(&grave).unwrap().reserved = true;
+    world.step();
+    world.step();
+    assert!(
+        world.entities.contains_key(&grave),
+        "reserved native entity must outlive its deadline"
+    );
+    world.entities.get_mut(&grave).unwrap().reserved = false;
+    world.step();
+    assert!(!world.entities.contains_key(&grave));
 }
