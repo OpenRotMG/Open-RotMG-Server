@@ -1611,7 +1611,7 @@ async fn handle_inner(
                             );
                             Ok((world, None, None, d.hold_initial_entry(world)?))
                         } else {
-                            let mut world = d.initial(game)?;
+                            let mut world = d.initial(game, id)?;
                             // Reconnecting straight to the Realm skipped the portal's lockout.
                             if d.realm_lockout(id, world) > 0 {
                                 world = -2;
@@ -2292,7 +2292,11 @@ async fn reconnect(
                 Reconnect::Tutorial => {
                     d.chat_permit(id, received)?;
                     let p = &d.worlds[&d.location(id)?].players[&id];
-                    (p.character.account, p.character.id, d.initial(-1)?)
+                    (
+                        p.character.account,
+                        p.character.id,
+                        d.initial(-1, p.character.account)?,
+                    )
                 }
                 Reconnect::Portal(portal) => {
                     if portal.is_none() && d.location(id)? == -2 {
@@ -2989,7 +2993,7 @@ async fn bot_create(
             let (destination, entry_hold) = a
                 .world
                 .directory(move |d| {
-                    let destination = d.initial(input.world)?;
+                    let destination = d.initial(input.world, acc.id)?;
                     Ok((destination, d.hold_initial_entry(destination)?))
                 })
                 .await?;
