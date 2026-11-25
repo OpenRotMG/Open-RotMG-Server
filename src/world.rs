@@ -819,6 +819,7 @@ pub struct World {
     /// The terrain tag alone does not make a tile safe for a Godlands landing.
     pub(crate) godland_tiles: Arc<BTreeSet<(i16, i16)>>,
     performance: std::cell::RefCell<crate::performance::Window>,
+    realm_tick_mean: Option<(Instant, u64)>,
     pub entities: entity_store::Entities,
     actor_ids: BTreeSet<i32>,
     // Pool effects and Beach announcements must not scan every actor each tick.
@@ -1115,8 +1116,15 @@ impl Directory {
             .flat_map(|(_, w)| w.players.values())
             .filter(|p| p.controller == Controller::Autonomous)
             .count();
+        let busiest_realm_tick_mean_us = worlds
+            .iter()
+            .filter_map(|(_, w)| w.realm_tick_mean)
+            .filter(|(at, _)| at.elapsed() <= Duration::from_secs(90))
+            .map(|(_, mean_us)| mean_us)
+            .max();
         serde_json::json!({
             "status":"development","uptime_seconds":started.elapsed().as_secs(),
+            "busiest_realm_tick_mean_us":busiest_realm_tick_mean_us,
             "worlds":worlds.len(),"players":self.human_player_count(),"bots":bots,"qa_actors":qa_actors,
             "entities":worlds.iter().map(|(_,w)|w.entities).sum::<usize>(),
             "projectiles":worlds.iter().map(|(_,w)|w.bullets).sum::<usize>(),
@@ -3215,6 +3223,7 @@ impl World {
             now: 0,
             last_npc_step: 0,
             performance: std::cell::RefCell::default(),
+            realm_tick_mean: None,
             attack_epoch: Instant::now(),
             clock: crate::clock::Clock::default(),
             new_tick_at: Instant::now(),
@@ -8197,8 +8206,14 @@ impl World {
             .work("tick_packets", packets_started);
         self.performance.borrow_mut().work("step", started);
     }
-    fn report_performance(&self, world_id: i32) {
-        if let Some(timings) = self.performance.borrow_mut().report() {
+    fn report_performance(&mut self, world_id: i32) {
+        if let Some(timings) = self.performance.get_mut().report() {
+            if self.name == "Realm" {
+                let mean_us = timings["timings"]["step"]["mean_us"]
+                    .as_u64()
+                    .expect("Realm tick report missing step mean");
+                self.realm_tick_mean = Some((Instant::now(), mean_us));
+            }
             tracing::info!(world_id,world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
                 bullets=self.bullets.len(),compact_entities=self.entities.shared(),scenery_promotions=self.entities.promotions,spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
                 native_lag=%serde_json::json!(self.players.iter().filter(|(_,p)|p.controller==Controller::Human).map(|(id,p)|serde_json::json!({"player":id,"metrics":p.native_lag.snapshot(Instant::now(),false)})).collect::<Vec<_>>()),

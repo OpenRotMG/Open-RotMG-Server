@@ -10,6 +10,26 @@ fn directory() -> Directory {
     Directory::test_with_seed(std::path::Path::new("data"), content, 16, 12351).unwrap()
 }
 
+#[test]
+fn health_reports_the_highest_fresh_realm_tick_mean() {
+    let mut d = directory();
+    let now = Instant::now();
+    let key = "busiest_realm_tick_mean_us";
+    assert!(d.health(now)[key].is_null());
+    for (id, samples) in [(-2, [25, 35]), (-3, [10, 18]), (1, [2, 8])] {
+        let world = d.worlds.get_mut(&id).unwrap();
+        let window = world.performance.get_mut();
+        window.record("scheduling_lateness", Duration::from_secs(61));
+        for ms in samples {
+            window.record("step", Duration::from_millis(ms));
+        }
+        world.report_performance(id);
+    }
+    assert_eq!(d.health(now)[key], 14_000);
+    d.worlds.get_mut(&-3).unwrap().realm_tick_mean = Some((now - Duration::from_secs(91), 14_000));
+    assert_eq!(d.health(now)[key], 5_000);
+}
+
 #[tokio::test]
 async fn directory_loan_outlives_borrows_without_stalling_other_worlds() {
     let directory = directory();
