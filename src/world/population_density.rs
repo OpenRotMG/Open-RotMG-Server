@@ -301,6 +301,44 @@ impl World {
             self.compact_population()?;
             // Each terrain only fills or culls its own slots, so one pass serves all twelve checks.
             let counts = self.oryx_counts();
+            if !self.godland_tiles.is_empty() {
+                // Live: a day-old Realm counted its full 374 Godlands roots, yet farmers crossing 35 of 45 areas met 14 gods in 25 minutes.
+                let on = |pos: Pos| self.godland_tiles.contains(&(pos.x as i16, pos.y as i16));
+                let counted = self.oryx_counted(1);
+                let gods: Vec<_> = self
+                    .entities
+                    .values()
+                    .filter(|e| {
+                        self.content
+                            .objects
+                            .get(&e.kind)
+                            .is_some_and(|o| o.god && o.terrain == 1)
+                    })
+                    .map(|e| e.pos)
+                    .collect();
+                let mut areas = BTreeMap::new();
+                for pos in gods.iter().filter(|pos| on(**pos)) {
+                    *areas
+                        .entry((pos.x as i32 / 80, pos.y as i32 / 80))
+                        .or_insert(0) += 1;
+                }
+                tracing::info!(
+                    target = self.population_regions[1].target,
+                    counted = counted.len(),
+                    counted_on_godlands = counted
+                        .iter()
+                        .filter(|id| self.entities.get(id).is_some_and(|e| on(e.pos)))
+                        .count(),
+                    gods = gods.len(),
+                    gods_on_godlands = areas.values().sum::<usize>(),
+                    gods_in_player_view = gods
+                        .iter()
+                        .filter(|pos| !self.outside_player_view(**pos))
+                        .count(),
+                    ?areas,
+                    "Godlands population census"
+                );
+            }
             for terrain in 1..=12 {
                 let target = self.population_regions[terrain as usize].target;
                 // Kithio culls above 150% and refills below 75%: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Oryx.cs#L298-L357
