@@ -299,6 +299,7 @@ impl World {
         if self.now >= self.population_next {
             self.population_next = self.now + 60000;
             self.compact_population()?;
+            let recalled = self.recall_godlands_strays();
             // Each terrain only fills or culls its own slots, so one pass serves all twelve checks.
             let counts = self.oryx_counts();
             if !self.godland_tiles.is_empty() {
@@ -335,6 +336,7 @@ impl World {
                         .iter()
                         .filter(|pos| !self.outside_player_view(**pos))
                         .count(),
+                    recalled,
                     ?areas,
                     "Godlands population census"
                 );
@@ -385,6 +387,25 @@ impl World {
         }
         counts
     }
+    /// Live: gods lured off the Godlands still filled its quota; two hours into a Realm a third of them stood elsewhere.
+    /// A stray leaves once nobody can see it, and the same check restocks the Godlands itself.
+    pub(super) fn recall_godlands_strays(&mut self) -> usize {
+        let strays: Vec<_> = self
+            .oryx_counted(1)
+            .into_iter()
+            .filter(|id| {
+                let e = &self.entities[id];
+                self.map
+                    .cell(e.pos.x, e.pos.y)
+                    .is_none_or(|c| c.terrain != 1)
+                    && self.outside_player_view(e.pos)
+            })
+            .collect();
+        for id in &strays {
+            self.remove_entity(*id);
+        }
+        strays.len()
+    }
     pub(super) fn cull_population(&mut self, terrain: u8) {
         let mut counted = self.oryx_counted(terrain);
         // Compaction stores families first, so slot order culled every Sprite God; oldest bodies go first instead.
@@ -428,6 +449,49 @@ impl World {
             "Realm ordinary population culled"
         );
     }
+}
+
+#[cfg(test)]
+#[test]
+fn gods_lured_off_the_godlands_leave_once_nobody_sees_them() -> Result<()> {
+    let (mut world, player) = movement_tests::fixture(0x18, false);
+    for cell in &mut Arc::make_mut(&mut world.map).cells {
+        cell.terrain = 1;
+    }
+    let pos = world.players[&player].pos;
+    let far = |offset: f32| Pos {
+        x: if pos.x < 16. { 30.5 } else { 1.5 },
+        y: if pos.y < 16. {
+            30.5 - offset
+        } else {
+            1.5 + offset
+        },
+    };
+    let (lured, home, watched) = (
+        far(0.),
+        far(4.),
+        Pos {
+            x: pos.x + 3.,
+            y: pos.y,
+        },
+    );
+    assert!(lured.distance(pos) >= PLAYER_VIEW_RADIUS && home.distance(pos) >= PLAYER_VIEW_RADIUS);
+    for spot in [lured, home, watched] {
+        world.place_population_solo(0x6d8, spot)?;
+    }
+    for spot in [lured, watched] {
+        let i = spot.y as usize * world.map.width as usize + spot.x as usize;
+        Arc::make_mut(&mut world.map).cells[i].terrain = 2;
+    }
+    assert_eq!(world.recall_godlands_strays(), 1);
+    let left: Vec<_> = world
+        .oryx_counted(1)
+        .iter()
+        .map(|id| world.entities[id].pos)
+        .collect();
+    assert_eq!(left.len(), 2);
+    assert!(left.iter().all(|p| p.distance(lured) > 1.));
+    Ok(())
 }
 
 #[cfg(test)]
