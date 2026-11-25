@@ -85,7 +85,7 @@ async fn initial_selection_and_hold_are_atomic_with_coordinator_retirement() {
     let h = Handle::spawn(d);
     let hold = h
         .directory(move |d| {
-            let id = d.initial(-3)?;
+            let id = d.initial(-3, 0)?;
             assert_eq!(id, -3);
             let hold = d.hold_initial_entry(id)?.unwrap();
             d.cancel_admission(1, key)?;
@@ -283,7 +283,12 @@ fn eight_current_slots_refuse_growth_even_when_closed_without_rerouting() {
     d.coordinator_step();
     assert_eq!(d.current_realm_count(), 8);
     assert!(d.realm_population.preparing.is_none());
-    assert!(d.initial(-3).unwrap_err().to_string().contains("capacity"));
+    assert!(
+        d.initial(-3, 0)
+            .unwrap_err()
+            .to_string()
+            .contains("capacity")
+    );
     let names: BTreeSet<_> = d.endgame.realms.values().map(|r| r.name).collect();
     let slots: BTreeSet<_> = d.endgame.realms.values().map(|r| r.portal_slot).collect();
     assert_eq!(names.len(), 8);
@@ -622,7 +627,7 @@ fn eight_current_slots_keep_free_hard_admission_without_an_empty_spare() {
         d.coordinator_step();
         assert_eq!(d.realm_population.bound_reported, None);
         assert_eq!(d.available_realms().len(), 8);
-        assert!(d.initial(-3).is_ok());
+        assert!(d.initial(-3, 0).is_ok());
         assert!(d.realm_population.preparing.is_none());
         assert_eq!(d.next_world, next);
     }
@@ -632,7 +637,7 @@ fn eight_current_slots_keep_free_hard_admission_without_an_empty_spare() {
     }
     d.coordinator_step();
     assert_eq!(d.realm_population.bound_reported, Some("closed"));
-    assert!(d.initial(-3).is_err());
+    assert!(d.initial(-3, 0).is_err());
     assert_eq!(d.current_realm_count(), 8);
     assert!(d.realm_population.preparing.is_none());
 }
@@ -694,7 +699,7 @@ fn token_closed_realms_keep_closure_identity_and_allocate_an_admissible_spare() 
     d.realm_population_step(t + IDLE_GRACE * 2);
     assert_eq!(d.current_realm_count(), 3);
     assert_eq!(d.available_realms(), vec![(next, 0)]);
-    assert!(d.initial(-3).is_ok());
+    assert!(d.initial(-3, 0).is_ok());
     for realm in [-3, 1] {
         assert!(
             d.worlds.contains_key(&realm),
@@ -705,5 +710,50 @@ fn token_closed_realms_keep_closure_identity_and_allocate_an_admissible_spare() 
             crate::endgame::RealmStage::Closing { .. }
         ));
         assert!(d.endgame.realms[&realm].replacement.is_none());
+    }
+}
+
+#[test]
+fn marked_accounts_only_enter_the_least_populated_realm() {
+    let data = std::path::Path::new("data");
+    let mut content = Content::load(data).unwrap();
+    content.reviewed_accounts =
+        crate::content::reviews::Reviews::new(vec![crate::content::reviews::Review {
+            account: 7,
+            reviewed_on: "2026-11-24".into(),
+        }]);
+    let mut d = Directory::test_with_seed(data, Arc::new(content), 72, 1344).unwrap();
+    let realms = d.available_realms();
+    assert!(realms.len() >= 2, "{realms:?}");
+    let busy = realms[0].0;
+    for account in 100..103 {
+        d.issue(account, account, busy).unwrap();
+    }
+    let quietest = d
+        .available_realms()
+        .into_iter()
+        .min_by_key(|(id, occupancy)| (*occupancy, *id))
+        .unwrap()
+        .0;
+    assert_ne!(quietest, busy);
+    for _ in 0..20 {
+        assert_eq!(d.initial(-3, 7).unwrap(), quietest);
+    }
+    let mut ch = Character::fresh(d.content.get(crate::content::WIZARD).unwrap()).unwrap();
+    ch.id = 70;
+    ch.account = 7;
+    let player = d.worlds.get_mut(&-2).unwrap().enter(ch, None).unwrap();
+    let pos = d.worlds[&-2].players[&player].pos;
+    for (realm, admitted) in [(busy, false), (quietest, true)] {
+        let portal = d.endgame.realms[&realm].portal.unwrap();
+        d.worlds
+            .get_mut(&-2)
+            .unwrap()
+            .entities
+            .get_mut(&portal)
+            .unwrap()
+            .pos = pos;
+        let result = d.destination(player, Some(portal));
+        assert_eq!(result.is_ok(), admitted, "{realm}: {result:?}");
     }
 }

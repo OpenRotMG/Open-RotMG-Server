@@ -1640,10 +1640,19 @@ impl Directory {
             })
             .collect()
     }
-    pub fn initial(&self, game: i32) -> Result<i32> {
+    /// Marked cheaters share one Realm: the open Realm with the fewest occupants.
+    fn quietest_realm(&self) -> Result<i32> {
+        self.available_realms()
+            .into_iter()
+            .min_by_key(|(id, occupancy)| (*occupancy, *id))
+            .map(|(id, _)| id)
+            .ok_or_else(|| controller("no open Realm has capacity"))
+    }
+    pub fn initial(&self, game: i32, account: i32) -> Result<i32> {
         let destination = match game {
             0 | -2 => -2,
             -1 => -1,
+            -3 if self.content.reviewed(account) => self.quietest_realm()?,
             -3 => self
                 .available_realms()
                 .choose(&mut rand::thread_rng())
@@ -1799,9 +1808,9 @@ impl Directory {
             Ok(DungeonReturn::Random)
         }
     }
-    fn dungeon_realm(&self, world: &World) -> Result<i32> {
+    fn dungeon_realm(&self, world: &World, account: i32) -> Result<i32> {
         match world.return_route.context("dungeon has no return route")? {
-            DungeonReturn::Random => self.initial(-3),
+            DungeonReturn::Random => self.initial(-3, account),
             DungeonReturn::Realm(id) => {
                 ensure!(
                     self.endgame.realms.get(&id).is_some_and(|r| r.enabled)
@@ -1858,14 +1867,18 @@ impl Directory {
                     record.enabled && self.worlds[id].admission_open,
                     controller("Realm is closed")
                 );
+                ensure!(
+                    !self.content.reviewed(account) || *id == self.quietest_realm()?,
+                    controller("Your account may only enter the least populated Realm.")
+                );
                 *id
             }
             0x703 if matches!(world.name.as_str(), "Snake Pit" | "Abyss of Demons") => {
-                self.dungeon_realm(world)?
+                self.dungeon_realm(world, account)?
             }
             0x703 | 0x70d | 0x712 | 0x71d | crate::dungeon::tomb::EXIT => -2,
-            0x704 | 0x70e => self.dungeon_realm(world)?,
-            0x71c => self.initial(-3)?,
+            0x704 | 0x70e => self.dungeon_realm(world, account)?,
+            0x71c => self.initial(-3, account)?,
             // Kitchen destination: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/realm/entities/player/Player.cs#L387-L416
             // Reconstruction: a fresh Kitchen per use; Trapped instead caches the first Kitchen on the portal and reuses it.
             0x71e => self.instance("kitchen", None, None)?,
