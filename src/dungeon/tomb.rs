@@ -10,17 +10,7 @@ pub const NUT: u16 = 0xd26;
 pub const GEB: u16 = 0xd27;
 #[cfg(test)]
 pub const BES: u16 = 0xd28;
-#[cfg(test)]
-pub const STATUES: [u16; 3] = [0xd3d, 0xd3e, 0xd3f];
 pub const ANCHOR: u16 = 0xd25;
-#[cfg(test)]
-pub const SARCOPHAGUS: u16 = 0xd29;
-#[cfg(test)]
-pub const SWITCH: u16 = 0xd37;
-#[cfg(test)]
-pub const TRAP: u16 = 0xd38;
-#[cfg(test)]
-pub const DISABLED_TRAP: u16 = 0xd39;
 pub const QUICKSAND: u8 = 0xbf;
 pub const MISSING_TILE: u8 = 0xe3;
 pub const WALL: u16 = 0x1dd;

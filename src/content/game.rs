@@ -29,15 +29,6 @@ pub(crate) fn compile_fixture(
     compile::compile(content, inputs)
 }
 
-#[cfg(test)]
-pub(crate) fn compile_fixture_at(
-    content: &Content,
-    inputs: BTreeMap<String, Vec<u8>>,
-    root: &Path,
-) -> Result<GameData> {
-    compile::compile_at(content, inputs, Some(root))
-}
-
 pub type StateId = u32;
 pub type LocalId = u32;
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]

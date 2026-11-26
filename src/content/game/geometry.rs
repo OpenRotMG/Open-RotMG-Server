@@ -416,14 +416,6 @@ pub struct EncodedMap {
     pub bytes: Arc<[u8]>,
 }
 impl EncodedMap {
-    #[cfg(test)]
-    pub(crate) fn retained_encoded_bytes(&self) -> usize {
-        self.bytes.len()
-            + self
-                .elevation
-                .as_ref()
-                .map_or(0, |e| e.retained_encoded_bytes())
-    }
     pub fn decode(&self, content: &Content) -> Result<super::super::Map> {
         let mut map = if self.realm {
             super::super::Map::decode_realm_cells(&self.bytes, content, [2100, 2100])

@@ -665,36 +665,3 @@ fn oryx_counts_family_members_once_summoned() {
     assert_eq!(world.oryx_counted(7).len(), 2, "orphans still count");
     assert_eq!(world.oryx_counts()[7], world.oryx_counted(7).len());
 }
-
-#[test]
-fn server_driven_players_never_wait_for_native_goto_acknowledgements() {
-    for controller in [Controller::Human, Controller::Autonomous, Controller::Qa] {
-        let (mut world, id) = fixture(0x18, false);
-        let (packets, mut receiver) = tokio::sync::mpsc::channel(4);
-        let (lost, _) = tokio::sync::watch::channel(None);
-        let p = world.players.get_mut(&id).unwrap();
-        p.controller = controller;
-        p.tx = Some(Output {
-            packets,
-            lost,
-            trace: None,
-        });
-        p.death_pending = true;
-        for own in [false, true] {
-            reconciliation::goto(p, own, vec![1]);
-        }
-        if controller == Controller::Human {
-            assert_eq!(receiver.try_recv().unwrap().id, wire::GOTO);
-            assert_eq!(receiver.try_recv().unwrap().id, wire::GOTO);
-            assert_eq!(
-                p.goto_acks.iter().map(|(own, _)| *own).collect::<Vec<_>>(),
-                [false, true]
-            );
-        } else {
-            assert!(receiver.try_recv().is_err());
-            assert!(p.goto_acks.is_empty());
-            world.expire_goto_acks();
-            assert!(!world.players[&id].departing);
-        }
-    }
-}

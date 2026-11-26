@@ -694,9 +694,17 @@ async fn funded_bots_settle_through_native_exchange() {
         if packets[3] == 2 {
             break;
         }
-        // Both native endpoints must actually publish their offers before the settling delay.
         if packets[2] == 2 && !offers_settled {
-            tokio::time::sleep(Duration::from_millis(3150)).await;
+            // Settlement needs both the shared clock and simulated time; wall sleep alone races slow ticks.
+            let settled_at = app.world.player_view(buyer).await.unwrap().time_ms + 3000;
+            tokio::time::timeout(Duration::from_secs(15), async {
+                tokio::time::sleep(Duration::from_millis(3000)).await;
+                while app.world.player_view(buyer).await.unwrap().time_ms < settled_at {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .expect("Nexus did not advance through the native trade settlement window");
             offers_settled = true;
         }
     }

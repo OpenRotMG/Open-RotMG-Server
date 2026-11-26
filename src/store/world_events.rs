@@ -1131,32 +1131,6 @@ impl Store {
         scoped.world_operation = Some(event);
         Ok(scoped)
     }
-    #[cfg(test)]
-    pub(crate) async fn commit_inventory_event(
-        &self,
-        event: Event,
-        write: InventoryWrite,
-    ) -> Result<Record> {
-        ensure!(
-            event.native_payload()?.get("write") == Some(&serde_json::to_value(&write)?),
-            "inventory journal does not bind exact write"
-        );
-        if let Some(record) = self.world_event(event.id.clone()).await? {
-            ensure!(
-                record.event == event,
-                "inventory replay differs from journal"
-            );
-            if matches!(record.status, 1 | 2) {
-                return Ok(record);
-            }
-        }
-        self.for_world_event(event.clone())?
-            .exchange(vec![write], vec![])
-            .await?;
-        self.world_event(event.id)
-            .await?
-            .context("committed inventory event disappeared")
-    }
     pub(crate) async fn publish_world_event(&self, event: Event) -> Result<Record> {
         self.call(move |db| {
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1348,15 +1322,6 @@ impl Store {
             Ok((pruned, entitlements))
         })
         .await
-    }
-    #[cfg(test)]
-    pub(crate) async fn reconcile_lost_world_events(
-        &self,
-        live: Vec<String>,
-    ) -> Result<Vec<(String, String)>> {
-        // Component fixtures own their complete world census; production confirms each candidate through Directory.
-        self.reconcile_confirmed_lost_events(self.lost_world_candidates(live).await?)
-            .await
     }
     pub(crate) async fn expire_world_entitlements(
         &self,

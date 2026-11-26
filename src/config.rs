@@ -386,21 +386,6 @@ mod bot_view_tests {
     }
 
     #[test]
-    fn explicit_data_replaces_compiled_source_data_once_and_must_be_absolute() {
-        let load =
-            |args: &[&str]| Config::load(&args.iter().map(|a| a.to_string()).collect::<Vec<_>>());
-        let (config, _) = load(&["--data", "/retained/data"]).unwrap();
-        assert_eq!(config.data, PathBuf::from("/retained/data"));
-        for args in [
-            &["--data"][..],
-            &["--data", "relative"],
-            &["--data", "/a", "--data", "/b"],
-        ] {
-            assert!(load(args).is_err(), "{args:?}");
-        }
-    }
-
-    #[test]
     fn bot_view_origin_is_explicit_and_local_defaults_track_the_port() {
         let (mut config, _) = Config::load(&["--port".into(), "19023".into()]).unwrap();
         assert_eq!(

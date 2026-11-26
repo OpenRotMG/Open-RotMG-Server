@@ -34,9 +34,9 @@ strip = "symbols"
 lto = "thin"
 codegen-units = 1
 
-# Keep test hot paths fast and backtraces useful without full debugger metadata.
+# Production closure rebuilds Realm geometry; keep assertions and optimize its test execution.
 [profile.test]
-opt-level = 1
+opt-level = 3
 debug = "line-tables-only"
 
 [dev-dependencies]

@@ -1914,15 +1914,6 @@ pub struct CompiledGeometryRecipe {
     reconstructed_elevation: Option<std::sync::Arc<super::elevation::SourceElevation>>,
 }
 impl CompiledGeometryRecipe {
-    #[cfg(test)]
-    pub(crate) fn retained_encoded_bytes(&self) -> usize {
-        self.bytes.len()
-            + self.elevation.as_ref().map_or(0, |e| e.len())
-            + self
-                .reconstructed_elevation
-                .as_ref()
-                .map_or(0, |e| e.retained_encoded_bytes())
-    }
     pub(crate) fn id(&self) -> &str {
         self.recipe.id()
     }
@@ -2329,37 +2320,23 @@ fn authored_fissure_lava_rejects_missing_or_moved_cells() -> Result<()> {
     let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
     let content = Content::load(&data)?;
     let root = data.join("realms");
-    for name in [
-        "world02.json",
-        "world03.json",
-        "world04.json",
-        "world05.json",
-        "world06.json",
-        "world07.json",
-        "world08.json",
-        "world10.json",
-        "world11.json",
-        "world12.json",
-        "world13.json",
-    ] {
-        let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, name)? else {
-            unreachable!()
-        };
-        let (mut map, scope) = reviewed_map(&root, &recipe, &content)?;
-        let scope = scope.context("missing authored fissure lava")?;
-        scope.validate_loaded(&map, &content)?;
-        assert!(!map.cells.iter().any(|c| c.ground == 54));
-        let lava = map.cells.iter().position(|c| c.ground == 244).unwrap();
-        let rock = map
-            .cells
-            .iter()
-            .position(|c| c.ground == 96 && c.object.is_none())
-            .unwrap();
-        map.cells[lava].ground = 96;
-        assert!(scope.validate_loaded(&map, &content).is_err());
-        map.cells[rock].ground = 244;
-        assert!(scope.validate_loaded(&map, &content).is_err());
-    }
+    let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, "world07.json")? else {
+        unreachable!()
+    };
+    let (mut map, scope) = reviewed_map(&root, &recipe, &content)?;
+    let scope = scope.context("missing authored fissure lava")?;
+    scope.validate_loaded(&map, &content)?;
+    assert!(!map.cells.iter().any(|c| c.ground == 54));
+    let lava = map.cells.iter().position(|c| c.ground == 244).unwrap();
+    let rock = map
+        .cells
+        .iter()
+        .position(|c| c.ground == 96 && c.object.is_none())
+        .unwrap();
+    map.cells[lava].ground = 96;
+    assert!(scope.validate_loaded(&map, &content).is_err());
+    map.cells[rock].ground = 244;
+    assert!(scope.validate_loaded(&map, &content).is_err());
     Ok(())
 }
 

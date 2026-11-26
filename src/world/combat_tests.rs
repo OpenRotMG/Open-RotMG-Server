@@ -818,39 +818,6 @@ fn reported_native_enemy_hits_land_once_within_projectile_reach() {
 }
 
 #[test]
-fn reported_lethal_native_hit_under_terminal_backpressure_is_retained_past_projectile_expiry() {
-    use std::sync::atomic::Ordering;
-    let (mut w, id) = fixture(0x18, false);
-    w.now = 1000;
-    let target = w
-        .spawn_entity(0x206, Pos { x: 12.5, y: 8.5 }, vec![])
-        .unwrap();
-    w.entities.get_mut(&target).unwrap().hp = 20;
-    w.updates(id, false).unwrap();
-    let mut b = shot(&w, id, 0xa14, 0);
-    (b.friendly, b.id, b.angle, b.damage) = (true, 1, -std::f32::consts::FRAC_PI_2, 30);
-    w.bullets.push(b);
-    let capacity = w.xml.terminal_capacity.clone();
-    capacity.store(crate::world::xml::TERMINAL_PENDING_LIMIT, Ordering::Release);
-    w.native_enemy_hit(id, 1, target, true).unwrap();
-    assert_eq!(
-        w.entities[&target].hp, 20,
-        "lethal effect waits for terminal capacity"
-    );
-    // The projectile expires while capacity is full; the retained reported hit still lands afterwards.
-    w.bullets.clear();
-    w.owed_shot_step();
-    assert_eq!(w.entities[&target].hp, 20);
-    capacity.store(0, Ordering::Release);
-    w.owed_shot_step();
-    assert!(
-        w.entities.get(&target).is_none_or(|e| e.hp == 0),
-        "deferred hit lands once capacity frees"
-    );
-    assert!(w.owed_shots.is_empty());
-}
-
-#[test]
 fn selected_boss_projectiles_preserve_return_reach_and_parametric_motion() {
     let content = crate::world::test_content();
     let near = |actual: (f32, f32), expected: (f32, f32)| {

@@ -33,6 +33,29 @@ pub struct Keys {
     private: RsaPrivateKey,
 }
 impl Keys {
+    #[cfg(test)]
+    pub(crate) fn fixture(dir: &Path) -> std::sync::Arc<Self> {
+        use std::{
+            os::unix::fs::OpenOptionsExt,
+            sync::{Arc, LazyLock},
+        };
+        static KEY: LazyLock<Arc<Keys>> = LazyLock::new(|| {
+            Arc::new(Keys {
+                private: RsaPrivateKey::new(&mut OsRng, 2048).unwrap(),
+            })
+        });
+        // Socket tests encrypt with the key provisioned for their isolated server directory.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(dir.join("server.pem"))
+            .unwrap()
+            .write_all(KEY.private.to_pkcs8_pem(LineEnding::LF).unwrap().as_bytes())
+            .unwrap();
+        KEY.clone()
+    }
+
     pub fn load(dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(dir)?;
         let path = dir.join("server.pem");

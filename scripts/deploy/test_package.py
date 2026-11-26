@@ -44,7 +44,7 @@ class PackageTests(unittest.TestCase):
             'data/reference/release-7.0/original.zip',
             'data/reference/deca-xml-documentation/original-html.tar.gz',
             'data/game/unselected.xml', 'data/game/123.5.1/unselected.xml',
-            'tests/fixtures/xml_runtime/build.py', 'tests/fixtures/xml_runtime/archive-hashes.json',
+            'tests/fixtures/xml_runtime/build.py',
             'data/realm-catalog.json', 'data/realm-sites.json', 'data/realms/world07.json',
             'data/realm-elevations.json',
             *[f'data/realm-fsod-{i}.elevation.zlib' for i in range(1, 4)],

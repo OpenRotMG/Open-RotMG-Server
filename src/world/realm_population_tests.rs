@@ -207,7 +207,7 @@ fn entrance_lease_requires_every_closed_hidden_condition_and_valid_metadata() {
 #[test]
 fn closed_hidden_predecessors_release_space_without_deleting_owned_entities() {
     let content = Arc::new(crate::world::test_content());
-    let mut d = Directory::prepared(content, 16, 1344, 8).unwrap();
+    let mut d = Directory::fixture(content, 16, 1344, Some(1344), 8).unwrap();
     let origins: Vec<_> = d.endgame.realms.keys().copied().collect();
     let mut holds = Vec::new();
     let mut bindings = Vec::new();

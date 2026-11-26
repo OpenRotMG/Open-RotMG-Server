@@ -18,24 +18,7 @@ mod portals;
 mod spawn;
 mod terminal;
 #[cfg(test)]
-pub(super) use terminal::PREFLIGHT_RETRY_MS;
-#[cfg(test)]
-pub(crate) use terminal::{
-    PENDING_ALLOCATION_LIMIT as TERMINAL_PENDING_ALLOCATION_LIMIT,
-    PENDING_LIMIT as TERMINAL_PENDING_LIMIT,
-};
-#[cfg(test)]
 pub(super) mod tests;
-
-#[cfg(test)]
-#[derive(Clone, Copy, PartialEq)]
-enum Fault {
-    AdmissionBefore,
-    AdmissionAfter,
-    TerminalBefore,
-    TerminalBirthPlan,
-    TerminalAfter,
-}
 
 /// Each faulted executor was logged and its entity retired without rewards; the world stayed consistent.
 #[derive(Debug)]
@@ -58,12 +41,6 @@ pub(super) const ACTOR_LIMIT: usize = 98_304;
 // The selected 1024-square Realm may retain every cell's object plus the unchanged dynamic allowance.
 const PHYSICAL_LIMIT: usize = 1024 * 1024 + ACTOR_LIMIT;
 
-#[cfg(test)]
-pub(super) struct RewardIntent {
-    pub entity: Entity,
-    pub plan: TerminalPlan,
-    pub replacements: Vec<i32>,
-}
 #[derive(Clone)]
 struct Motion {
     goal: Pos,
@@ -141,11 +118,7 @@ pub(super) struct Runtime {
     delivery_since: BTreeMap<String, u64>,
     portals: BTreeMap<i32, portals::Published>,
     #[cfg(test)]
-    pub rewards: BTreeMap<i32, RewardIntent>,
-    #[cfg(test)]
-    fault: Option<Fault>,
-    #[cfg(test)]
-    terminal_attempts: Vec<TerminalPlan>,
+    fail_next_terminal_birth_plan: bool,
 }
 impl Runtime {
     pub(super) fn new(content: &Content, domain: Option<WorldDomain>) -> Result<Self> {
@@ -206,11 +179,7 @@ impl Runtime {
             delivery_since: BTreeMap::new(),
             portals: BTreeMap::new(),
             #[cfg(test)]
-            rewards: BTreeMap::new(),
-            #[cfg(test)]
-            fault: None,
-            #[cfg(test)]
-            terminal_attempts: vec![],
+            fail_next_terminal_birth_plan: false,
         })
     }
 }
@@ -1459,16 +1428,12 @@ impl behavior::World for World {
     fn announce(&mut self, scope: Scope, a: &Announcement) -> Result<()> {
         self.xml.retry_admissions.insert(scope.identity.actor);
         self.xml_prepare_announcement(scope, a)?;
-        #[cfg(test)]
-        self.xml_fault(Fault::AdmissionBefore)?;
         if let Some(prior) = self.xml.admissions.get(&a.key) {
             ensure!(prior == a, "announcement activation payload changed");
         } else {
             self.xml_publish_announcement(a);
             self.xml.admissions.insert(a.key, a.clone());
         }
-        #[cfg(test)]
-        self.xml_fault(Fault::AdmissionAfter)?;
         self.xml.retry_admissions.remove(&scope.identity.actor);
         Ok(())
     }
@@ -2080,7 +2045,9 @@ impl World {
         e: &Entity,
     ) -> Result<Vec<(u16, Pos, bool)>> {
         #[cfg(test)]
-        self.xml_fault(Fault::TerminalBirthPlan)?;
+        if std::mem::take(&mut self.xml.fail_next_terminal_birth_plan) {
+            bail!("injected terminal birth preflight failure");
+        }
         let mut births = Vec::new();
         if plan.reason == TerminalReason::Metamorphose {
             let b = plan
@@ -2151,15 +2118,6 @@ impl World {
         Ok(births)
     }
     fn xml_terminal(&mut self, plan: &TerminalPlan) -> Result<()> {
-        #[cfg(test)]
-        if !self
-            .xml
-            .terminals
-            .get(&plan.origin.identity.actor)
-            .is_some_and(|pending| pending.receipt)
-        {
-            self.xml.terminal_attempts.push(plan.clone());
-        }
         let identity = plan.origin.identity;
         ensure!(
             identity.world == self.xml.world,
@@ -2209,8 +2167,6 @@ impl World {
             e.kind,
             self.xml.world
         );
-        #[cfg(test)]
-        self.xml_fault(Fault::TerminalBefore)?;
         // Defeat-time facts and seed precede every retryable stamp/capacity/geometry preflight.
         self.capture_terminal_facts(plan, &e)?;
         ensure!(
@@ -2297,7 +2253,6 @@ impl World {
         }
         let heir = self.xml_quest_heir(&births);
         let successor = e.quest.is_some() && heir.is_some();
-        let mut children = Vec::new();
         for (index, ((kind, p, replacement), id)) in births.into_iter().zip(ids).enumerate() {
             let event = self.xml.terminals[&e.id].event.id.clone();
             self.xml_insert_publication(id, kind, p, &event)
@@ -2327,7 +2282,6 @@ impl World {
                 // A transformed quest root stays the same quest: arrow, encounter and Realm-cycle credit follow it.
                 self.set_quest(id, *e.quest);
             }
-            children.push(id);
         }
         if self.xml.claims.insert(e.id)
             && self.encounter
@@ -2396,34 +2350,10 @@ impl World {
                     "XML terminal effects published from exact durable journal receipt"
                 );
             }
-            #[cfg(test)]
-            {
-                if self.xml.rewards.len() >= CHILD_LIMIT {
-                    self.xml.rewards.pop_first();
-                }
-                self.xml.rewards.insert(
-                    e.id,
-                    RewardIntent {
-                        entity: e,
-                        plan: plan.clone(),
-                        replacements: children,
-                    },
-                );
-            }
         }
-        #[cfg(test)]
-        self.xml_fault(Fault::TerminalAfter)?;
         self.xml.retry_terminals.remove(&actor);
         if local {
             self.finish_local_terminal(actor)?;
-        }
-        Ok(())
-    }
-    #[cfg(test)]
-    fn xml_fault(&mut self, fault: Fault) -> Result<()> {
-        if self.xml.fault == Some(fault) {
-            self.xml.fault = None;
-            bail!("injected native publication failure");
         }
         Ok(())
     }

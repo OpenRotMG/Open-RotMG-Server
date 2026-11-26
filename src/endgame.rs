@@ -9,8 +9,6 @@ pub const REPLACEMENT_DELAY_MS: u64 = 2_000;
 pub const CASTLE: &str = "oryx-castle";
 #[cfg(test)]
 pub const CHAMBER: &str = "oryx-chamber";
-#[cfg(test)]
-pub const CELLAR: &str = "wine-cellar";
 pub const GUARDIANS: [u16; 2] = [0xd78, 0xd79];
 pub const ORYX: u16 = 0x1740;
 pub const ORYX2: u16 = 0x932;

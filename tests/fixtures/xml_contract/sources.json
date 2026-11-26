@@ -1,23 +1,4 @@
 {
-  "qualification": "Selected 123.5.1 properties; Release 7.0 XML and later DECA documentation are qualified server-rule/semantic inputs, not authenticated 2012 behavior. Fixtures are independently authored, not extracted proprietary C++.",
-  "sha256": {
-    "data/objects.xml": "90ab4dbddadfc5adfa77f87746c376d6c611b7b3e02ec0ed8ab4f0ad91534b72",
-    "data/grounds.xml": "436b596b062c141112790bb3702e4b25e639a5a27541f2a591c462cf9e1b15f7",
-    "data/reference/release-7.0/xml/realm/shore.xml": "04587d6b90eef5e1b28853512e1b3a2ee747933661d5b3aef212d6799bcbc7bc",
-    "data/reference/release-7.0/xml/dungeons/snakePit.xml": "03617e1143b890fdaaab6d130c4a8162672eea4ce99faedebce7268903fd31fb",
-    "data/reference/release-7.0/xml/dungeons/oceanTrench.xml": "cddcf96e044bd6864ff66c511facade7ed6f0e2ed6eda5703798dac356fd27e4",
-    "data/reference/release-7.0/xml/dungeons/oryxCastle.xml": "da27e3bedae638f39e445c0bd72834a90f7be11d5e15c56c65b631c2f7c330d3",
-    "data/reference/release-7.0/BehaviorsAndTransitions.txt": "213cf5a902016d5c2fae7f78f5cae2b558728ede4e2e8bdf58beed1cdcc32bde",
-    "data/reference/deca-xml-documentation/xml-guide/states-and-transitions.md": "a635282f501e0777ecc93b6ab957459362b13908145c0c64ff19e16b7ee8597e",
-    "data/reference/deca-xml-documentation/xml-guide/behaviors-and-buckets.md": "d5c899575445156cdcc51495da4d1db41ea00141faeaf77cc39f68335a93f768",
-    "data/reference/deca-xml-documentation/xml-guide/orders.md": "6b28000d90b97b72e6235436b26c83cd8f7e68b25f695c4a2f42a6857a39a6fc",
-    "data/reference/deca-xml-documentation/behaviors-transitions-list/shoot.md": "8ae547ee244bc0765de29031f544eda1a75f27510052f20859baca5146865ae6",
-    "data/reference/deca-xml-documentation/behaviors-transitions-list/conditioneffect.md": "d2bd35a29a325ddd196068a5581cbbca02a619288174d426843056039359aa0d",
-    "data/reference/release-7.0/xml/dungeons/ghostShip.xml": "ffe4ce03515ab724a02b169a80e45c761bdd8a4d9b27321995c16155a0f93e11",
-    "data/reference/release-7.0/xml/realm/mountains.xml": "0c7a4ee4b013f8923e99ab724e4c7bad84ae6d629702b71701786fe03b779885",
-    "data/reference/release-7.0/xml/testingObjects.xml": "2b1557d2928d083bcd0a732ac0e18cfcfe73e0f0cc2d4466e2c904dc3a6f9901"
-  },
-  "experimental_selection": "Exact-ID recovered testingObjects.xml rules for 33 already-selected family identities are qualified inputs, not missing definitions. Reviewed dependency closure and selected-client properties override filename-based inclusion/exclusion. Revised/ready-for-testing labels are retained; no authenticated-2012 acceptance.",
   "frozen_performance_oracle": {
     "qa_job": "d7245f1ce7d748c5ad2490fb6ece0cad",
     "result": "results/xml-load-scenes.json",

@@ -244,11 +244,23 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
             }
-            let mut content = content::Content::load(Path::new(data))?;
-            content.game = Some(std::sync::Arc::new(content::game::GameData::load(
-                Path::new(data),
-                &content,
-            )?));
+            #[cfg(test)]
+            let content = {
+                ensure!(
+                    *data == "data",
+                    "unit backup fixture requires the shared data directory"
+                );
+                crate::world::test_content()
+            };
+            #[cfg(not(test))]
+            let content = {
+                let mut content = content::Content::load(Path::new(data))?;
+                content.game = Some(std::sync::Arc::new(content::game::GameData::load(
+                    Path::new(data),
+                    &content,
+                )?));
+                content
+            };
             let store = store::Store::open(&directory.join("game.db"), &content)?;
             for alive in [true, false] {
                 let guid = format!("BACKUP_FIXTURE_SECRET_{alive}");

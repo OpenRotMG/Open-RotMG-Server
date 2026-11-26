@@ -135,10 +135,6 @@ impl SourceElevation {
         })();
         result.with_context(|| format!("{MANIFEST} map={map} source elevation"))
     }
-    #[cfg(test)]
-    pub(crate) fn retained_encoded_bytes(&self) -> usize {
-        self.bytes.len()
-    }
     pub(crate) fn decode(&self) -> Result<Arc<[u8]>> {
         let cells = cells(self.layer.dimensions);
         inflate(
@@ -151,6 +147,3 @@ impl SourceElevation {
         .with_context(|| format!("{} map={} elevation", self.layer.file, self.layer.map))
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -1319,256 +1319,10 @@ impl World {
 }
 
 #[cfg(test)]
-#[tokio::test]
-async fn realm_hermit_death_credit_closes_and_replaces_the_realm() {
-    let content = Arc::new(crate::world::test_content());
-    let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
-    let account = store.list("closure-error-witness".into()).await.unwrap();
-    let character = store
-        .create(account.id, content.get(crate::content::WIZARD).unwrap())
-        .await
-        .unwrap();
-    let mut directory = Directory::prepared(content.clone(), 16, 12351, 2).unwrap();
-    let mut map = Map {
-        elevation: None,
-        width: 40,
-        height: 40,
-        cells: vec![
-            crate::content::Cell {
-                ground: 0xbc,
-                object: None,
-                config: String::new(),
-                terrain: 0,
-                region: 0,
-            };
-            1600
-        ],
-        spawns: vec![(14.5, 20.5)],
-    };
-    map.cells[20 * 40 + 14].ground = 0x46;
-    let mut world = World::with_ids(content, Arc::new(map), directory.ids.clone()).unwrap();
-    world.name = "Realm".into();
-    world.xml.template = Some("realm".into());
-    world.encounter = true;
-    let root = world
-        .insert_entity(
-            crate::dungeon::trench::HERMIT,
-            Pos { x: 20.5, y: 20.5 },
-            vec![],
-        )
-        .unwrap();
-    world
-        .entities
-        .get_mut(&root)
-        .unwrap()
-        .quest
-        .set(Some(root), root, &mut world.quest_ids);
-    let (packets, mut inbox) = mpsc::channel(64);
-    let (lost, _) = watch::channel(None);
-    let player = world
-        .enter(
-            character.clone(),
-            Some(Output {
-                trace: None,
-                packets,
-                lost,
-            }),
-        )
-        .unwrap();
-    while inbox.try_recv().is_ok() {}
-    directory.worlds.insert(-3, world);
-    let portal = directory.endgame.realms.remove(&-3).unwrap().portal;
-    directory
-        .bind_realm_heroes(-3, BTreeSet::from([root]))
-        .unwrap();
-    directory.endgame.realms.get_mut(&-3).unwrap().portal = portal;
-    let world = directory.worlds.get_mut(&-3).unwrap();
-    world.defeat_entity(root).unwrap();
-    for _ in 0..8 {
-        crate::world::xml::tests::drain_events(world).unwrap();
-    }
-    assert!(!world.entities.contains_key(&root));
-    directory.endgame_step(&[-3]);
-    directory.endgame_step(&[-3]);
-    let closed = chat::text_packet(
-        "#Oryx the Mad God",
-        -1,
-        0,
-        "I HAVE CLOSED THIS REALM! YOU WILL NOT LIVE TO SEE THE LIGHT OF DAY!",
-    );
-    assert_eq!(
-        std::iter::from_fn(|| inbox.try_recv().ok())
-            .filter(|p| p.id == closed.id && p.body == closed.body)
-            .count(),
-        1
-    );
-    assert!(!directory.worlds[&-3].admission_open);
-    assert!(directory.endgame.realms[&-3].cycle.remaining.is_empty());
-    assert!(directory.issue(account.id, character.id, -3).is_err());
-    directory.tick = 2399;
-    directory.endgame_step(&[-3]);
-    assert!(directory.forced_transfer(player).unwrap().is_none());
-    assert!(matches!(
-        inbox.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    ));
-    directory.tick = 2400;
-    directory.endgame_step(&[-3]);
-    let notices: Vec<_> = std::iter::from_fn(|| inbox.try_recv().ok()).collect();
-    assert_eq!(notices.iter().filter(|p| p.id == wire::TEXT).count(), 3);
-    let effects: Vec<_> = notices
-        .iter()
-        .filter(|p| p.id == wire::SHOW_EFFECT)
-        .collect();
-    assert_eq!(effects.len(), 1);
-    let mut effect = wire::Reader::new(&effects[0].body);
-    assert_eq!(effect.u8().unwrap(), 14, "selected-client camera jitter");
-    assert_eq!(effect.i32().unwrap(), -1);
-    for _ in 0..4 {
-        assert_eq!(effect.f32().unwrap(), 0.);
-    }
-    assert_eq!(effect.i32().unwrap(), -1);
-    effect.done().unwrap();
-    assert!(directory.forced_transfer(player).unwrap().is_none());
-    directory.endgame_step(&[-3]);
-    assert!(matches!(
-        inbox.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    ));
-    directory.tick = 2559;
-    directory.endgame_step(&[-3]);
-    assert!(matches!(
-        inbox.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    ));
-    assert!(directory.endgame.realms[&-3].castle.is_none());
-    let other_portal = directory.endgame.realms[&1].portal.unwrap();
-    let other_pos = directory.worlds[&-2].entities[&other_portal].pos;
-    directory.tick = 2560;
-    for _ in 0..1000 {
-        directory.endgame_step(&[-3]);
-        if directory.endgame.realms[&-3].castle.is_some() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    let record = &directory.endgame.realms[&-3];
-    let castle = record
-        .castle
-        .expect("normal replacement construction completed");
-    let replacement = record.replacement.unwrap();
-    let replacement_portal = directory.endgame.realms[&replacement].portal.unwrap();
-    let old_portal = directory.endgame.realms[&-3].portal.unwrap();
-    let other_position = directory.worlds[&-2].entities[&other_portal].pos;
-    assert_eq!(other_position.distance(other_pos), 0.);
-    let replacement_position = directory.worlds[&-2].entities[&replacement_portal].pos;
-    assert!(!directory.worlds[&-2].entities[&replacement_portal].published);
-    assert!(
-        directory.worlds[&-2].entities[&old_portal]
-            .pos
-            .distance(replacement_position)
-            >= 4.
-    );
-    assert!(other_position.distance(replacement_position) >= 4.);
-    assert!(!directory.worlds[&replacement].admission_open);
-    // Hermit XP already settled through the journaled terminal drained above.
-    let character = directory.worlds[&-3].players[&player].character.clone();
-    let transfer = directory.forced_transfer(player).unwrap().unwrap();
-    assert_eq!(transfer.destination, Some(castle));
-    assert_eq!(transfer.name, "Oryx's Castle");
-    assert_eq!(transfer.packet().id, 39);
-    assert!(directory.forced_transfer(player).unwrap().is_none());
-    assert!(
-        directory
-            .consume(account.id, castle, transfer.key_time, transfer.key.clone())
-            .is_err()
-    );
-    let mut reservation = directory.reserve_transfer(transfer.key.clone()).unwrap();
-    let snapshot = directory
-        .begin_source_departure(player, Some(&transfer.key))
-        .unwrap()
-        .unwrap();
-    directory
-        .accept_source_write(player, &transfer.key)
-        .unwrap();
-    let persisted = store.progress(snapshot.clone()).await;
-    directory
-        .worlds
-        .get_mut(&-3)
-        .unwrap()
-        .committed(player, persisted)
-        .unwrap();
-    directory
-        .finish_source_departure(player, snapshot, Some(transfer.key.clone()))
-        .unwrap();
-    reservation.disarm();
-    directory.realm_departed(-3, player);
-    let (id, arrival) = directory
-        .consume(account.id, castle, transfer.key_time, transfer.key.clone())
-        .unwrap();
-    assert_eq!(id, character.id);
-    directory
-        .admit_transfer(arrival, account.id, id, castle)
-        .unwrap();
-    let saved = store.load(account.id, id).await.unwrap();
-    assert_eq!(saved, character);
-    let arrived = directory
-        .worlds
-        .get_mut(&castle)
-        .unwrap()
-        .enter_admitted(
-            saved,
-            Some(transfer.output),
-            None,
-            store.presentation(account.id).await.unwrap(),
-            store.is_legend(account.id).await.unwrap(),
-            Some(transfer.key.clone()),
-            Controller::Human,
-        )
-        .unwrap();
-    let current = &directory.worlds[&castle].players[&arrived].character;
-    assert!(
-        current.tiles > character.tiles,
-        "Castle entry discovers new tiles"
-    );
-    let mut expected = character;
-    expected.lifetime.tiles += current.tiles - expected.tiles;
-    expected.tiles = current.tiles;
-    assert_eq!(*current, expected);
-    assert!(
-        directory
-            .consume(account.id, castle, transfer.key_time, transfer.key)
-            .is_err()
-    );
-    directory.tick = 2599;
-    directory.endgame_step(&[castle]);
-    assert!(!directory.worlds[&replacement].admission_open);
-    directory.tick = 2600;
-    directory.endgame_step(&[castle]);
-    assert!(directory.worlds[&replacement].admission_open);
-    assert!(directory.worlds[&-2].entities.contains_key(&old_portal));
-    directory.retire_transfer_grants();
-    directory.endgame_step(&[castle]);
-    assert!(!directory.worlds[&-2].entities.contains_key(&old_portal));
-    assert_eq!(
-        directory.worlds[&-2].entities[&replacement_portal]
-            .pos
-            .distance(replacement_position),
-        0.
-    );
-    assert_eq!(
-        directory.worlds[&-2].entities[&other_portal]
-            .pos
-            .distance(other_position),
-        0.
-    );
-}
-
-#[cfg(test)]
 #[test]
 fn prepare_realm_closure_preserves_other_cycle_and_refuses_reservations() {
     let content = Arc::new(crate::world::test_content());
-    let mut d = Directory::prepared(content, 16, 12351, 2).unwrap();
+    let mut d = Directory::fixture(content, 16, 12351, Some(12351), 2).unwrap();
     d.clock.set_paused(true);
     let other = d.endgame.realms[&1].cycle.remaining.clone();
     let other_spawns = d.worlds[&1].map.spawns.clone();
@@ -1597,7 +1351,7 @@ fn prepare_realm_closure_preserves_other_cycle_and_refuses_reservations() {
 #[test]
 fn eight_realm_closures_keep_held_predecessors_across_two_replacement_generations() {
     let content = Arc::new(crate::world::test_content());
-    let mut d = Directory::prepared(content, 16, 1344, 8).unwrap();
+    let mut d = Directory::fixture(content, 16, 1344, Some(1344), 8).unwrap();
     let mut holds = Vec::new();
     for generation in 0..2 {
         let current: Vec<_> = d
@@ -1698,7 +1452,7 @@ async fn realm_close_token_starts_the_ordinary_closure_once() {
         .create(account.id, content.get(crate::content::WIZARD).unwrap())
         .await
         .unwrap();
-    let mut directory = Directory::prepared(content.clone(), 16, 12351, 2).unwrap();
+    let mut directory = Directory::fixture(content.clone(), 16, 12351, Some(12351), 2).unwrap();
     let map = Map {
         elevation: None,
         width: 40,
@@ -1763,9 +1517,8 @@ async fn realm_close_token_starts_the_ordinary_closure_once() {
 #[cfg(test)]
 #[test]
 fn pending_event_does_not_block_other_defeats_in_the_realm_cycle() {
-    let data = std::path::Path::new("data");
     let content = Arc::new(crate::world::test_content());
-    let mut directory = Directory::test_with_seed(data, content.clone(), 85, 787901).unwrap();
+    let mut directory = Directory::populated_fixture(content.clone(), 85, 787901).unwrap();
     let initial = directory.endgame.realms[&-3].cycle.remaining.clone();
     let other = directory.endgame.realms[&1].cycle.remaining.clone();
     let world = directory.worlds.get_mut(&-3).unwrap();
@@ -1810,207 +1563,6 @@ fn pending_event_does_not_block_other_defeats_in_the_realm_cycle() {
 }
 
 #[cfg(test)]
-#[test]
-fn realm_killer_is_named_once_by_oryx_for_heroes_and_event_bosses() {
-    for event in [false, true] {
-        let content = Arc::new(crate::world::test_content());
-        let mut directory =
-            Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 85, 1344)
-                .unwrap();
-        let mut character = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
-        (
-            character.name,
-            character.id,
-            character.account,
-            character.level,
-        ) = ("Slayer".into(), 1, 1, 20);
-        let (packets, mut inbox) = mpsc::channel(4096);
-        let (lost, _) = watch::channel(None);
-        let world = directory.worlds.get_mut(&-3).unwrap();
-        let player = world
-            .enter(
-                character,
-                Some(Output {
-                    trace: None,
-                    packets,
-                    lost,
-                }),
-            )
-            .unwrap();
-        world.players.get_mut(&player).unwrap().lab_conditions =
-            crate::condition::bit(crate::condition::INVINCIBLE);
-        let hero = if event {
-            // Skull Shrine's recovered OryxTaunt killed list names the killer itself.
-            let pos = world.players[&player].pos;
-            let shrine = world.spawn_entity(0xd56, pos, vec![]).unwrap();
-            world.set_quest(shrine, Some(shrine));
-            let cycle = &mut directory.endgame.realms.get_mut(&-3).unwrap().cycle;
-            assert!(cycle.remaining.insert(shrine));
-            shrine
-        } else {
-            *directory.endgame.realms[&-3]
-                .cycle
-                .remaining
-                .iter()
-                .find(|id| HEROES.contains(&directory.worlds[&-3].entities[id].kind))
-                .expect("seeded Realm has a Hero of Oryx")
-        };
-        let world = directory.worlds.get_mut(&-3).unwrap();
-        let kind = world.entities[&hero].kind;
-        world.players.get_mut(&player).unwrap().pos = world.entities[&hero].pos;
-        let e = world.entities.get_mut(&hero).unwrap();
-        (e.hp, e.condition) = (1, 0);
-        while inbox.try_recv().is_ok() {}
-        let _ = world.damage_enemy(player, hero, 1_000_000, true, &[], None);
-        for _ in 0..8 {
-            crate::world::xml::tests::drain_events(world).unwrap();
-        }
-        assert!(!world.entities.contains_key(&hero));
-        assert_eq!(
-            world.critical_killers.get(&hero),
-            Some(&(kind, "Slayer".to_string()))
-        );
-        directory.endgame_step(&[-3]);
-        let named = std::iter::from_fn(|| inbox.try_recv().ok())
-            .filter(|packet| {
-                packet.id == crate::wire::TEXT
-                    && packet.body.windows(6).any(|w| w == b"Slayer")
-                    && packet.body.windows(16).any(|w| w == b"Oryx the Mad God")
-            })
-            .count();
-        assert_eq!(named, 1, "one Oryx notice names the killer (event={event})");
-        assert!(directory.worlds[&-3].critical_killers.is_empty());
-    }
-}
-
-#[cfg(test)]
-#[test]
-fn oryx_remaining_taunts_render_recovered_one_many_lists() {
-    use crate::content::game::TextPart;
-    let content = Arc::new(crate::world::test_content());
-    let directory =
-        Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 85, 1344).unwrap();
-    let world = &directory.worlds[&-3];
-    let game = world.xml_game();
-    let names: BTreeSet<_> = (0..=u16::MAX)
-        .filter_map(super::realm_voice::family_name)
-        .collect();
-    assert_eq!(names.len(), 14);
-    for name in names {
-        let list = game.string_lists.iter().find(|l| l.name == name).unwrap();
-        assert!(list.categories.contains_key("one"), "{name}");
-        assert_eq!(
-            list.categories.contains_key("many"),
-            name != "Ghost Ship",
-            "{name}"
-        );
-    }
-    let (_, count, text) = world
-        .remaining_taunt(&directory.endgame.realms[&-3].cycle.remaining)
-        .unwrap()
-        .unwrap();
-    let rendered = |parts: &Vec<TextPart>| {
-        parts
-            .iter()
-            .map(|p| match p {
-                TextPart::Literal(s) => s.clone(),
-                TextPart::Count => count.to_string(),
-                p => panic!("unbound {p:?}"),
-            })
-            .collect::<String>()
-    };
-    assert!(
-        game.string_lists
-            .iter()
-            .flat_map(|l| [l.categories.get("one"), l.categories.get("many")])
-            .flatten()
-            .flatten()
-            .any(|parts| rendered(parts) == text),
-        "{text}"
-    );
-}
-
-#[cfg(test)]
-#[test]
-fn instant_damage_quest_clear_starts_closure() {
-    let content = Arc::new(crate::world::test_content());
-    let mut directory =
-        Directory::test_with_seed(std::path::Path::new("data"), content.clone(), 85, 1344).unwrap();
-    let other = directory.endgame.realms[&1].cycle.remaining.clone();
-    let mut character = Character::fresh(content.get(crate::content::WIZARD).unwrap()).unwrap();
-    character.name = "Closer".into();
-    character.id = 1;
-    character.account = 1;
-    character.level = 20;
-    let world = directory.worlds.get_mut(&-3).unwrap();
-    let player = world.enter(character, None).unwrap();
-    world.players.get_mut(&player).unwrap().lab_conditions =
-        crate::condition::bit(crate::condition::INVINCIBLE);
-    // Fixture movement and instant damage isolate actual quest/death accounting from raid navigation.
-    let mut seen = std::collections::BTreeMap::new();
-    for _ in 0..100_000 {
-        if !directory.endgame.realms[&-3].cycle.admits() {
-            assert!(directory.endgame.realms[&-3].cycle.remaining.is_empty());
-            assert!(!directory.worlds[&-3].admission_open);
-            assert_eq!(directory.endgame.realms[&1].cycle.remaining, other);
-            return;
-        }
-        let world = directory.worlds.get_mut(&-3).unwrap();
-        let family = world.quest_target(player).map(|id| {
-            let root = world.entities[&id].quest.unwrap_or(id);
-            // Kinds of every targeted quest line make a non-closing family diagnosable.
-            for e in world
-                .actors()
-                .filter(|e| e.id == root || e.quest == Some(root))
-            {
-                seen.entry(e.id).or_insert(e.kind);
-            }
-            world
-                .actors()
-                .filter(|e| e.id == root || e.quest == Some(root) || e.parent == Some(root))
-                .map(|e| e.id)
-                .collect::<Vec<_>>()
-        });
-        if let Some(ids) = family {
-            world.players.get_mut(&player).unwrap().pos = world.entities[&ids[0]].pos;
-            for id in ids {
-                if world.entities.contains_key(&id) {
-                    world
-                        .damage_enemy(player, id, 1_000_000, true, &[], None)
-                        .unwrap();
-                    crate::world::xml::tests::drain_events(world).unwrap();
-                }
-            }
-        } else {
-            let (x, y) = world.map.spawns[0];
-            world.players.get_mut(&player).unwrap().pos = Pos { x, y };
-        }
-        world.step();
-        directory.tick += 1;
-        directory.endgame_step(&[-3]);
-    }
-    let w = &directory.worlds[&-3];
-    let detail: Vec<_> = directory.endgame.realms[&-3]
-        .cycle
-        .remaining
-        .iter()
-        .map(|id| {
-            let line: Vec<_> = w
-                .entities
-                .values()
-                .filter(|e| *e.quest == Some(*id))
-                .map(|e| (e.id, e.kind, e.hp, e.conditions(w.now)))
-                .collect();
-            (*id, seen.get(id).copied(), line)
-        })
-        .collect();
-    panic!(
-        "quest-guided clear never closed Realm; remaining (root, first kind, live line): {detail:x?}; target={:?}",
-        w.quest_target(player)
-    );
-}
-
-#[cfg(test)]
 #[tokio::test]
 async fn earthquake_sends_marked_players_to_the_nexus_instead_of_the_castle() {
     let mut content = crate::world::test_content();
@@ -2031,7 +1583,7 @@ async fn earthquake_sends_marked_players_to_the_nexus_instead_of_the_castle() {
             reviewed_on: "2026-11-18".into(),
         }]);
     let content = Arc::new(content);
-    let mut directory = Directory::prepared(content.clone(), 16, 12351, 2).unwrap();
+    let mut directory = Directory::fixture(content.clone(), 16, 12351, Some(12351), 2).unwrap();
     let map = Map {
         elevation: None,
         width: 40,

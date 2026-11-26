@@ -21,7 +21,7 @@ fn fixture_with_control(native: bool) -> (PathBuf, App) {
         super::super::testing::Testing::open(&dir).unwrap().unwrap()
     });
     let directory = if native {
-        crate::world::Directory::prepared(content.clone(), 16, 12351, 2)
+        crate::world::Directory::fixture(content.clone(), 16, 12351, Some(12351), 2)
     } else {
         crate::world::Directory::test_with_seed(
             std::path::Path::new("data"),
@@ -46,7 +46,7 @@ fn fixture_with_control(native: bool) -> (PathBuf, App) {
         cctv: Arc::default(),
         store: Store::open(&dir.join("game.db"), &content).unwrap(),
         world: Handle::spawn(directory),
-        keys: Arc::new(Keys::load(&dir).unwrap()),
+        keys: Keys::fixture(&dir),
         content,
         swf: Arc::default(),
         origin: "http://127.0.0.1:1".into(),

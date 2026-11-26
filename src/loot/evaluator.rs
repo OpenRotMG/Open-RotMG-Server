@@ -92,10 +92,6 @@ impl AllocationPlan {
     pub fn content_fingerprint(&self) -> &str {
         &self.content_fingerprint
     }
-    #[cfg(test)]
-    pub fn rules_fingerprint(&self) -> &str {
-        &self.rules_fingerprint
-    }
 
     /// Exact sampled item demand. Native packing/reservation/8-slot and 128-live-bag limits
     /// belong to the coordinator; low availability must retain this plan, not redraw it.

@@ -1003,7 +1003,14 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             classes: std::sync::Arc::new(content.classes.clone()),
             content: std::sync::Arc::new(content.clone()),
             hashes: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
+            #[cfg(not(test))]
             dummy_hash: accounts::hash("unknown-account")?,
+            #[cfg(test)]
+            dummy_hash: {
+                static HASH: std::sync::LazyLock<String> =
+                    std::sync::LazyLock::new(|| accounts::hash("unknown-account").unwrap());
+                HASH.clone()
+            },
             dyes: std::sync::Arc::new(
                 content
                     .objects

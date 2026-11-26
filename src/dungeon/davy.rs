@@ -10,8 +10,6 @@ pub const BOSS: u16 = 0xe32;
 #[cfg(test)]
 pub const UNLIT: u16 = 0xe35;
 #[cfg(test)]
-pub const LIT: u16 = 0xe36;
-#[cfg(test)]
 pub const KEYS: [u16; 4] = [0xe3e, 0xe3f, 0xe40, 0xe41];
 #[cfg(test)]
 pub const DOORS: [u16; 4] = [0x186a, 0x186c, 0x1868, 0x186e];

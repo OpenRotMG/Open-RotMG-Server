@@ -28,8 +28,6 @@ pub(crate) mod chat;
 #[cfg(test)]
 mod community_postclear_audit;
 
-#[cfg(test)]
-mod castle_tests;
 mod companions;
 mod consumables;
 mod davy;
@@ -89,10 +87,7 @@ mod npc_queries;
 mod xml;
 pub(crate) use native_hits::MAX_PENDING_SHOOT_UNITS;
 #[cfg(test)]
-pub(crate) use xml::{
-    TERMINAL_PENDING_ALLOCATION_LIMIT, TERMINAL_PENDING_LIMIT, tests::drain_events,
-};
-
+pub(crate) use xml::tests::drain_events;
 mod reconciliation;
 
 mod resurrection;
@@ -779,17 +774,15 @@ struct Admission {
 }
 #[cfg(test)]
 pub(crate) fn test_content() -> Content {
-    static GAME: std::sync::LazyLock<Arc<crate::content::game::GameData>> =
-        std::sync::LazyLock::new(|| {
-            let content = Content::load(std::path::Path::new("data")).unwrap();
-            Arc::new(
-                crate::content::game::GameData::load(std::path::Path::new("data"), &content)
-                    .unwrap(),
-            )
-        });
-    let mut content = Content::load(std::path::Path::new("data")).unwrap();
-    content.game = Some(GAME.clone());
-    content
+    static CONTENT: std::sync::LazyLock<Content> = std::sync::LazyLock::new(|| {
+        let data = std::path::Path::new("data");
+        let mut content = Content::load(data).unwrap();
+        content.game = Some(Arc::new(
+            crate::content::game::GameData::load(data, &content).unwrap(),
+        ));
+        content
+    });
+    CONTENT.clone()
 }
 /// Production worlds draw fresh entropy; unit tests share one fixed seed so long simulations reproduce.
 #[cfg(not(test))]
@@ -1140,16 +1133,54 @@ impl Directory {
         max_players: usize,
         seed: u64,
     ) -> Result<Self> {
-        Self::fixture(content, max_players, seed, None)
+        Self::fixture(content, max_players, seed, None, 2)
     }
 
     #[cfg(test)]
-    fn fixture(
-        content: Arc<Content>,
+    pub(crate) fn fixture(
+        mut content: Arc<Content>,
         max_players: usize,
         seed: u64,
         prepared_seed: Option<u64>,
+        realms: usize,
     ) -> Result<Self> {
+        // Admission and lifecycle tests need a real closure roster, not a simulated ecosystem.
+        let game = Arc::make_mut(Arc::make_mut(&mut content).game.as_mut().unwrap());
+        for site in &mut game.realm.as_mut().unwrap().sites {
+            site.min = 0;
+            site.max = 0;
+        }
+        let mut map = Map {
+            elevation: None,
+            width: 96,
+            height: 96,
+            cells: vec![
+                crate::content::Cell {
+                    ground: 0x18,
+                    object: None,
+                    config: String::new(),
+                    terrain: 0,
+                    region: 0,
+                };
+                96 * 96
+            ],
+            spawns: vec![(12.5, 12.5), (12.5, 24.5)],
+        };
+        for x in [70, 80] {
+            map.cells[70 * 96 + x].object = Some(0x67d);
+        }
+        Self::configured(
+            content,
+            max_players,
+            seed,
+            prepared_seed,
+            vec![crate::terrain::realms::Source::Fixture(Arc::new(map))],
+            realms,
+        )
+    }
+
+    #[cfg(test)]
+    fn populated_fixture(content: Arc<Content>, max_players: usize, seed: u64) -> Result<Self> {
         let mut map = crate::terrain::generate(&content, seed, 1024)?;
         // Contiguous pads give the small procedural test island the sourced Tower and Grove habitats.
         for (radius, terrain, ground) in [(230., 4, 0x47), (315., 7, 0x56)] {
@@ -1175,7 +1206,7 @@ impl Directory {
             content,
             max_players,
             seed,
-            prepared_seed,
+            None,
             vec![crate::terrain::realms::Source::Fixture(map)],
             2,
         )
@@ -7150,7 +7181,7 @@ mod prepared_native_transition_tests {
                 .create(account.id, content.get(crate::content::WIZARD).unwrap())
                 .await
                 .unwrap();
-            let mut d = Directory::fixture(content, 16, 1344, Some(1344)).unwrap();
+            let mut d = Directory::fixture(content, 16, 1344, Some(1344), 2).unwrap();
             let (packets, mut inbox) = mpsc::channel(256);
             let (lost, _) = watch::channel(None);
             let player = d

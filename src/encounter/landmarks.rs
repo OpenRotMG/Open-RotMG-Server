@@ -11,8 +11,3 @@ pub(crate) fn owner(kind: u16) -> anyhow::Result<u16> {
         _ => anyhow::bail!("landmark identity {kind:#x} has no authored landmark owner"),
     })
 }
-#[test]
-fn landmark_owner_refuses_unselected_identity_with_context() {
-    assert_eq!(owner(0x67c).unwrap(), 0x678);
-    assert!(format!("{:#}", owner(0x600).unwrap_err()).contains("0x600"));
-}

@@ -18,10 +18,6 @@ pub const CAGE: u16 = 0x892;
 pub const TESLA: u16 = 0x188a;
 #[cfg(test)]
 pub const EMERGENCY: u16 = 0x18c2;
-/// Recovered Mad Lab Open Wall (madLab.xml:1145): deletes the Emergency Walls within 4 tiles once Dr Terrible and
-/// every Tesla Coil are gone.
-#[cfg(test)]
-pub const OPEN_WALL: u16 = 0x992;
 #[cfg(test)]
 pub const CREATION: u16 = 0x5e1c;
 pub const BUBBLE: u16 = 0x1e22;

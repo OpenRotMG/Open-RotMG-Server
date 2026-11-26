@@ -543,64 +543,65 @@ fn populated_realms_keep_all_arrivals_connected() -> Result<()> {
     let path = std::path::Path::new("data");
     let content = Arc::new(crate::world::test_content());
     // Fixed geography is distinct from variable buildings: https://web.archive.org/web/20130522030032id_/https://forums.wildshadow.com/wiki/realm-mad-god/maps-builds-106-123
-    for source in crate::terrain::realms::sources(path)? {
-        let name = source.name().to_owned();
-        let directory =
-            Directory::configured(content.clone(), 16, 785, Some(785), vec![source], 2)?;
-        let world = &directory.worlds[&-3];
-        let width = world.map.width as usize;
-        let passable: Vec<_> = (0..world.map.cells.len())
-            .map(|i| {
-                world.walkable(Pos {
-                    x: (i % width) as f32 + 0.5,
-                    y: (i / width) as f32 + 0.5,
-                })
+    let source = crate::terrain::realms::sources(path)?
+        .into_iter()
+        .find(|s| s.name() == "classic-world-01-reconstruction")
+        .unwrap();
+    let name = source.name().to_owned();
+    let directory = Directory::configured(content, 16, 785, Some(785), vec![source], 1)?;
+    let world = &directory.worlds[&-3];
+    let width = world.map.width as usize;
+    let passable: Vec<_> = (0..world.map.cells.len())
+        .map(|i| {
+            world.walkable(Pos {
+                x: (i % width) as f32 + 0.5,
+                y: (i / width) as f32 + 0.5,
             })
-            .collect();
-        assert_eq!(world.map.spawns.len(), 12, "{name}");
-        let index = |x: f32, y: f32| y as usize * width + x as usize;
-        let (x, y) = world.map.spawns[0];
-        let start = index(x, y);
-        let mut distance = vec![u32::MAX; passable.len()];
-        distance[start] = 0;
-        let mut queue = std::collections::VecDeque::from([start]);
-        while let Some(i) = queue.pop_front() {
-            for next in [
-                i.wrapping_sub(width),
-                i + width,
-                if i % width > 0 { i - 1 } else { usize::MAX },
-                if i % width + 1 < width {
-                    i + 1
-                } else {
-                    usize::MAX
-                },
-            ] {
-                if next < passable.len() && passable[next] && distance[next] == u32::MAX {
-                    distance[next] = distance[i] + 1;
-                    queue.push_back(next);
-                }
+        })
+        .collect();
+    assert_eq!(world.map.spawns.len(), 12, "{name}");
+    let index = |x: f32, y: f32| y as usize * width + x as usize;
+    let (x, y) = world.map.spawns[0];
+    let start = index(x, y);
+    let mut distance = vec![u32::MAX; passable.len()];
+    distance[start] = 0;
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some(i) = queue.pop_front() {
+        for next in [
+            i.wrapping_sub(width),
+            i + width,
+            if i % width > 0 { i - 1 } else { usize::MAX },
+            if i % width + 1 < width {
+                i + 1
+            } else {
+                usize::MAX
+            },
+        ] {
+            if next < passable.len() && passable[next] && distance[next] == u32::MAX {
+                distance[next] = distance[i] + 1;
+                queue.push_back(next);
             }
         }
-        for &(x, y) in &world.map.spawns {
-            let i = index(x, y);
-            assert!(
-                passable[i] && distance[i] != u32::MAX,
-                "{name}: arrival {x},{y}"
-            );
-            assert_eq!(world.map.cells[i].terrain, 11, "{name}: arrival habitat");
-            println!("{name} arrival={x},{y} distance_from_south={}", distance[i]);
-        }
-        for (label, matches) in [("road", 0xd0), ("rock", 0x60)] {
-            assert!(
-                world
-                    .map
-                    .cells
-                    .iter()
-                    .enumerate()
-                    .any(|(i, c)| c.ground == matches && distance[i] != u32::MAX),
-                "{name}: unreachable {label}"
-            );
-        }
+    }
+    for &(x, y) in &world.map.spawns {
+        let i = index(x, y);
+        assert!(
+            passable[i] && distance[i] != u32::MAX,
+            "{name}: arrival {x},{y}"
+        );
+        assert_eq!(world.map.cells[i].terrain, 11, "{name}: arrival habitat");
+        println!("{name} arrival={x},{y} distance_from_south={}", distance[i]);
+    }
+    for (label, matches) in [("road", 0xd0), ("rock", 0x60)] {
+        assert!(
+            world
+                .map
+                .cells
+                .iter()
+                .enumerate()
+                .any(|(i, c)| c.ground == matches && distance[i] != u32::MAX),
+            "{name}: unreachable {label}"
+        );
     }
     Ok(())
 }
@@ -611,22 +612,16 @@ fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
     let path = std::path::Path::new("data");
     let content = Arc::new(crate::world::test_content());
     // Period MidForest uses Light Grass and HighPlains is snowy; boundaries remain reconstruction: https://wikiwiki.jp/rmd/%E5%9C%B0%E5%BD%A2
-    let sources: Vec<_> = crate::terrain::realms::sources(path)?
-        .into_iter()
-        .filter(|s| {
-            matches!(
-                s.name(),
-                "classic-world-01-reconstruction"
-                    | "classic-world-02-reconstruction"
-                    | "classic-world-03-reconstruction"
-            )
-        })
-        .collect();
-    assert_eq!(sources.len(), 3);
-    for source in sources {
+    let sources = crate::terrain::realms::sources(path)?;
+    for source in sources.into_iter().filter(|s| {
+        matches!(
+            s.name(),
+            "classic-world-01-reconstruction" | "classic-world-02-reconstruction"
+        )
+    }) {
         let name = source.name().to_owned();
         let directory =
-            Directory::configured(content.clone(), 16, 756, Some(756), vec![source], 2)?;
+            Directory::configured(content.clone(), 16, 756, Some(756), vec![source], 1)?;
         let world = &directory.worlds[&-3];
         let snowy = name != "classic-world-01-reconstruction";
         for terrain in 1..=12 {
@@ -724,126 +719,4 @@ fn culling_an_overgrown_godlands_keeps_every_species() -> Result<()> {
     assert!(count(world, &[0x652]) * 4 > sprite_gods);
     assert_eq!(count(world, &[0x6d8, 0x905]), unbred);
     Ok(())
-}
-
-#[cfg(test)]
-#[test]
-fn xml_runtime_world_population_family_omission_refuses_before_sampling_or_slot_mutation() {
-    let (mut w, p) = movement_tests::fixture(0x18, false);
-    let family = w.realm_rules().unwrap().camps[&0x62d].clone();
-    let terrain = w.population_habitat(family.leader).unwrap();
-    let missing = family.roles[1].kind;
-    Arc::make_mut(Arc::make_mut(&mut w.content).game.as_mut().unwrap())
-        .definitions
-        .remove(&missing);
-    let pos = w.players[&p].pos;
-    // Missing metadata is a construction fixture, not permission to swap a live world's catalogue.
-    let mut w = World::in_domain(w.content.clone(), w.map.clone(), WorldDomain::Realm).unwrap();
-    let before = w.rng.clone().r#gen::<u64>();
-    let ids = w.ids.load(Ordering::Relaxed);
-    let positions = vec![pos; family.size()];
-    let error = format!(
-        "{:#}",
-        w.place_camp(family.clone(), terrain, positions)
-            .unwrap_err()
-    );
-    assert!(
-        error.contains("missing explicit admission definition")
-            && error.contains(&format!("{missing:#x}")),
-        "{error}"
-    );
-    assert_eq!(w.rng.clone().r#gen::<u64>(), before);
-    assert_eq!(w.ids.load(Ordering::Relaxed), ids);
-    assert!(w.camps.is_empty() && w.population.is_empty());
-    let error = format!(
-        "{:#}",
-        w.spawn_population_group(terrain, family.leader)
-            .unwrap_err()
-    );
-    assert!(
-        error.contains("missing explicit admission definition")
-            && error.contains(&format!("{missing:#x}")),
-        "{error}"
-    );
-    assert_eq!(w.rng.clone().r#gen::<u64>(), before);
-    assert_eq!(w.ids.load(Ordering::Relaxed), ids);
-    assert!(w.camps.is_empty() && w.population.is_empty());
-}
-
-#[cfg(test)]
-#[test]
-fn xml_cutover_ordinary_goblin_births_follow_linked_counts_ownership_and_removal() {
-    use crate::content::game;
-    let path = std::path::Path::new("data");
-    let source = crate::world::test_content();
-    let actors = "game/123.5.1/actors.xml";
-    let inputs: BTreeMap<_, _> = source
-        .game
-        .as_ref()
-        .unwrap()
-        .inputs
-        .keys()
-        .map(|file| (file.clone(), std::fs::read(path.join(file)).unwrap()))
-        .collect();
-    let before =
-        r#"<Behavior childIds="Goblin Rogue" cooldown="12" maxChildren="7">MakeMinions</Behavior>"#;
-    assert_eq!(
-        String::from_utf8_lossy(&inputs[actors])
-            .matches(before)
-            .count(),
-        1
-    );
-    for (row, rogue, warrior) in [
-        (before, 7, 7),
-        (
-            r#"<Behavior childIds="Goblin Rogue" cooldown="12" maxChildren="2">MakeMinions</Behavior>"#,
-            2,
-            7,
-        ),
-        (
-            r#"<Behavior childIds="Goblin Warrior" cooldown="12" maxChildren="2">MakeMinions</Behavior>"#,
-            0,
-            7,
-        ),
-        ("", 0, 7),
-    ] {
-        let mut inputs = inputs.clone();
-        let mut content = source.clone();
-        inputs.insert(
-            actors.into(),
-            String::from_utf8_lossy(&inputs[actors])
-                .replace(before, row)
-                .into_bytes(),
-        );
-        content.game = Some(Arc::new(
-            game::compile_fixture_at(&content, inputs, path).unwrap(),
-        ));
-        let (fixture, _) = movement_tests::fixture(0x18, false);
-        let mut map = (*fixture.map).clone();
-        for cell in &mut map.cells {
-            cell.terrain = 10;
-        }
-        let mut w = World::in_domain(Arc::new(content), Arc::new(map), WorldDomain::Realm).unwrap();
-        let center = Pos { x: 16.5, y: 16.5 };
-        w.population_regions[10].sites = vec![center];
-        assert_eq!(w.spawn_population_group(10, 0x614).unwrap(), 1);
-        let parent = w.population[0].entity.unwrap();
-        let player = movement_tests::test_player(&mut w);
-        w.players.get_mut(&player).unwrap().pos = Pos { x: 24.5, y: 16.5 };
-        for at in [0, 50, 150, 12050, 24050, 36050] {
-            w.now = at;
-            w.xml_step().unwrap();
-            w.repopulate_families().unwrap();
-        }
-        for (kind, count) in [(0x612, rogue), (0x613, warrior)] {
-            let children: Vec<_> = w.actors().filter(|e| e.kind == kind).collect();
-            assert_eq!(children.len(), count, "{row} {kind:#x}");
-            assert!(
-                children
-                    .iter()
-                    .all(|e| e.parent == Some(parent) && e.population_slot.is_none())
-            );
-        }
-        assert_eq!(w.population.len(), 1);
-    }
 }

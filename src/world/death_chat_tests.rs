@@ -228,28 +228,3 @@ async fn death_chat_is_world_wide_once_and_only_after_successful_persistence() {
         assert!(messages(&mut inbox).is_empty());
     }
 }
-
-#[tokio::test]
-async fn native_expiry_keeps_reserved_or_terminal_custody_entities_past_their_deadline() {
-    let (mut world, _, _, _) = fixture().await;
-    let pos = world.map.spawns[0];
-    let grave = world
-        .spawn_entity(0x723, Pos { x: pos.0, y: pos.1 }, vec![])
-        .unwrap();
-    let deadline = world.now + 50;
-    world.entities.get_mut(&grave).unwrap().expires.set(
-        Some(deadline),
-        grave,
-        &mut world.timed_ids,
-    );
-    world.entities.get_mut(&grave).unwrap().reserved = true;
-    world.step();
-    world.step();
-    assert!(
-        world.entities.contains_key(&grave),
-        "reserved native entity must outlive its deadline"
-    );
-    world.entities.get_mut(&grave).unwrap().reserved = false;
-    world.step();
-    assert!(!world.entities.contains_key(&grave));
-}

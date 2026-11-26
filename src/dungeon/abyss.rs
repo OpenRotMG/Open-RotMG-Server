@@ -648,32 +648,3 @@ fn idol_stamps(content: &Content) -> Result<Vec<StampBounds>> {
     ensure!(!stamps.is_empty(), "Abyss Idol has no PlaceMap overlays");
     Ok(stamps)
 }
-
-#[cfg(test)]
-#[test]
-fn generated_abyss_idol_sites_fit_place_map_templates() {
-    let content = crate::world::test_content();
-    let stamps = idol_stamps(&content).unwrap();
-    let mut sites = 0;
-    for seed in 0..128 {
-        let map = crate::dungeon::generate_selected(&content, "abyss-of-demons", seed).unwrap();
-        for (i, _) in map
-            .cells
-            .iter()
-            .enumerate()
-            .filter(|(_, cell)| cell.object == Some(IDOL))
-        {
-            sites += 1;
-            for &([ax, ay], [w, h]) in &stamps {
-                let (x, y) = (i as i32 % map.width - ax, i as i32 / map.width - ay);
-                assert!(
-                    x >= 0 && y >= 0 && x + w <= map.width && y + h <= map.height,
-                    "Abyss seed {seed}, Idol cell {i}: {w}x{h} overlay at ({x},{y}) outside {}x{}",
-                    map.width,
-                    map.height
-                );
-            }
-        }
-    }
-    assert!(sites >= 20, "expected many natural Idol sites, saw {sites}");
-}

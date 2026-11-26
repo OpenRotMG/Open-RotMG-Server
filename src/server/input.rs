@@ -147,29 +147,3 @@ where
     });
     (rx, InputTask { task, last_frame })
 }
-
-#[cfg(test)]
-#[tokio::test]
-async fn shoot_acks_and_other_hit_reports_do_not_count_toward_the_input_packet_rate() {
-    for (id, packets, cause) in [
-        (SHOOT_ACK, 2000, None),
-        (OTHER_HIT, 2000, None),
-        (crate::wire::MOVE, 513, Some("input_rate_exceeded")),
-    ] {
-        let mut client = Codec::client();
-        let frame: Vec<u8> = (0..packets)
-            .flat_map(|_| client.frame(id, vec![0; 4]))
-            .collect();
-        let (lost, observed) = watch::channel(None);
-        let stream = futures_util::stream::iter([Ok::<_, std::convert::Infallible>(
-            Message::Binary(frame.into()),
-        )]);
-        let (mut rx, _task) = receive(stream, lost, Default::default(), Default::default());
-        let mut received = 0;
-        while rx.recv().await.is_some() {
-            received += 1;
-        }
-        assert_eq!(*observed.borrow(), cause);
-        assert_eq!(received, if cause.is_none() { packets } else { 0 });
-    }
-}

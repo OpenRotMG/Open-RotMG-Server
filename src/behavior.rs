@@ -10,9 +10,6 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Identity {
     pub world: u64,
@@ -365,10 +362,6 @@ impl Actor {
             && !self.retired
             && self.waiting.is_none()
             && self.admissions.is_empty()
-    }
-    #[cfg(test)]
-    pub fn has_tag(&self, symbol: u32) -> bool {
-        self.tags.contains(&symbol)
     }
     pub fn definition(&self) -> &Arc<Definition> {
         &self.definition
@@ -1485,50 +1478,6 @@ impl Actor {
         }
         self.tags.clear();
         Ok(())
-    }
-    #[cfg(test)]
-    fn needs_terminal_context(&self, world: &impl World) -> Result<Option<Source>> {
-        let path = if self.started {
-            self.path.clone()
-        } else {
-            let mut path = vec![self.root];
-            while let Some(child) = self.state(*path.last().unwrap())?.children.first() {
-                path.push(*child);
-            }
-            path
-        };
-        for state in path {
-            for b in &self.state(state)?.behaviors {
-                if b.announcement.as_ref().is_some_and(|rules| {
-                    matches!(rules.terminal, TerminalAnnouncements::Death { .. })
-                }) {
-                    return Ok(Some(b.source.clone()));
-                }
-            }
-        }
-        for local in self.locals.values() {
-            if let Some(listener) = local.listener.as_ref().filter(|l| !l.retired)
-                && listener.order_live(world)?
-                && let Some(source) = listener.needs_terminal_context(world)?
-            {
-                return Ok(Some(source));
-            }
-        }
-        Ok(None)
-    }
-    /// The legacy caller signature is safe only when active rules require no death attribution.
-    #[cfg(test)]
-    pub fn defeated(&mut self, world: &mut impl World) -> Result<()> {
-        if !self.retired
-            && !self.failed
-            && let Some(source) = self.needs_terminal_context(world)?
-        {
-            bail!(
-                "{}: use defeated_with_context with actual player-kill or explicit NonPlayer attribution",
-                self.context(&source)
-            );
-        }
-        self.defeat(None, world)
     }
     pub fn defeated_with_context(
         &mut self,

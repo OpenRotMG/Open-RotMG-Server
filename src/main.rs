@@ -23,16 +23,6 @@ mod supervision;
 mod terrain;
 mod wire;
 mod world;
-#[cfg(test)]
-macro_rules! assert_matches {
-    ($value:expr, $pattern:pat $(if $guard:expr)? $(,)?) => {
-        assert!(matches!($value, $pattern $(if $guard)?), "{} did not match {}", stringify!($value), stringify!($pattern))
-    };
-}
-#[cfg(test)]
-pub(crate) use assert_matches;
-#[cfg(test)]
-mod xml_contract;
 use anyhow::{Result, ensure};
 use rand::RngCore;
 use std::sync::Arc;

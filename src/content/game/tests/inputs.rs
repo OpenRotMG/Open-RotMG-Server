@@ -1,4 +1,4 @@
-use super::{GameData, Path};
+use super::Path;
 use std::collections::BTreeMap;
 
 pub(crate) fn selected<const N: usize>(files: [(&str, Vec<u8>); N]) -> BTreeMap<String, Vec<u8>> {
@@ -11,12 +11,5 @@ pub(crate) fn selected<const N: usize>(files: [(&str, Vec<u8>); N]) -> BTreeMap<
                 std::fs::read(Path::new("data").join(file)).unwrap(),
             )
         }))
-        .collect()
-}
-
-pub(crate) fn production(game: &GameData, root: &Path) -> BTreeMap<String, Vec<u8>> {
-    game.inputs
-        .keys()
-        .map(|file| (file.clone(), std::fs::read(root.join(file)).unwrap()))
         .collect()
 }

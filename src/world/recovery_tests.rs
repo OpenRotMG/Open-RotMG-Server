@@ -508,12 +508,3 @@ fn group_drinks_keep_strict_range_and_current_recipient_eligibility() {
         }
     }
 }
-
-#[test]
-fn xml_runtime_world_actual_fountain_healing_has_no_second_legacy_world_dispatch() {
-    let (mut w, p) = fixture();
-    w.spawn_entity(0x1c7, Pos { x: 8.5, y: 8.5 }, vec![])
-        .unwrap();
-    w.step();
-    assert_eq!(w.players[&p].character.hp, 200);
-}

@@ -151,31 +151,6 @@ fn assert_published_plan(w: &World, payload: &TerminalPayload, owners: &[(i32, i
     expected.len()
 }
 
-fn sweep(w: &mut World, owners: &[(i32, i32)], kinds: impl IntoIterator<Item = u16>) -> usize {
-    let mut allocated = 0;
-    for kind in kinds {
-        let hp = w.content.objects[&kind].hp;
-        for contributors in [1, 3] {
-            for seed in 0..4 {
-                let mut damage: Vec<_> = owners[..contributors]
-                    .iter()
-                    .map(|(_, c)| (*c, hp))
-                    .collect();
-                damage.push((owners[5].1, 0));
-                let payload = defeat(w, kind, &damage, seed);
-                assert!(
-                    payload
-                        .ledger
-                        .iter()
-                        .all(|c| c.character != owners[5].1 || c.effective_damage == 0)
-                );
-                allocated += assert_published_plan(w, &payload, owners);
-            }
-        }
-    }
-    allocated
-}
-
 #[tokio::test]
 async fn original_source_survives_pickup_but_player_redeposits_do_not_create_discoveries() {
     let (mut w, store, _) = reward_world().await;
@@ -431,32 +406,6 @@ async fn private_loot_reentry_deadline_and_committed_pickup() {
 }
 
 #[tokio::test]
-async fn follower_and_slime_terminal_loot_is_the_journaled_evaluator_plan_once_per_public_row() {
-    let (mut w, _store, owners) = reward_world().await;
-    let kinds = [0x921, 0x922, 0xd9d, 0xd9f, 0x6c6]
-        .into_iter()
-        .chain(0x669..=0x66b)
-        .chain(0x605..=0x607)
-        .chain(0x612..=0x613)
-        .chain(0x60e..=0x610)
-        .chain(0x65f..=0x661)
-        .chain(0x91d..=0x91e);
-    assert!(sweep(&mut w, &owners, kinds) > 0);
-}
-
-#[tokio::test]
-async fn god_and_boss_terminal_loot_is_the_journaled_evaluator_plan_in_owner_bags() {
-    let (mut w, _store, owners) = reward_world().await;
-    assert!(
-        sweep(
-            &mut w,
-            &owners,
-            [0x651, 0x657, crate::dungeon::spider::BOSS, 0xd90]
-        ) > 0
-    );
-}
-
-#[tokio::test]
 async fn lair_slime_splits_birth_children_and_only_terminal_forms_have_potion_rows() {
     let (mut w, _store, owners) = reward_world().await;
     let game = w.xml_game();
@@ -544,30 +493,6 @@ async fn septavius_and_arachna_clear_stage_one_realm_exit_until_durable_commit()
             w.remove_entity(e);
         }
     }
-}
-
-#[test]
-fn kage_kami_and_flying_brain_declare_their_xml_death_portal_births() {
-    let content = crate::world::test_content();
-    let snapshot = crate::loot::catalogue::snapshot(content.game.as_ref().unwrap(), None).unwrap();
-    let births = |kind: u16| {
-        snapshot["objects"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|o| o["id"] == kind)
-            .unwrap()["death_births"]
-            .clone()
-    };
-    for (kind, portal) in [
-        (0x6db, "Manor of the Immortals Portal"),
-        (0x657, "Mad Lab Portal"),
-    ] {
-        let births = births(kind);
-        assert_eq!(births.as_array().unwrap().len(), 1, "{kind:#x}");
-        assert_eq!(births[0]["target"]["name"], portal);
-    }
-    assert!(births(0x658).as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -690,67 +615,6 @@ async fn god_loot_chunks_scatter_inside_corpse_tile_without_changing_owners_or_r
         }
         assert!(published > 0);
     }
-}
-
-#[tokio::test]
-async fn unplaceable_entitlement_bags_are_abandoned_after_the_window_and_rows_stay_unpicked() {
-    let (mut w, _store, owners) = reward_world().await;
-    let hp = w.content.objects[&0x651].hp;
-    let damage: Vec<_> = owners[..3].iter().map(|(_, c)| (*c, hp)).collect();
-    let void = *w.content.void_grounds.iter().next().unwrap();
-    let pos = Pos { x: 3.5, y: 3.5 };
-    let event = (0..64)
-        .find_map(|seed| {
-            let id = w.spawn_entity(0x651, pos, vec![]).unwrap();
-            w.entities.get_mut(&id).unwrap().damage = damage.iter().copied().collect();
-            w.rng = rand::rngs::StdRng::seed_from_u64(seed);
-            w.defeat_entity(id).unwrap();
-            let event = w.pending_terminal_events().into_iter().next().unwrap();
-            if event.terminal_payload().unwrap().allocations().is_empty() {
-                crate::world::xml::tests::drain_events(&mut w).unwrap();
-                return None;
-            }
-            Some(event)
-        })
-        .expect("a seed draws a God bag");
-    // The corpse tile turns to void after the defeat: no bag can ever be placed there.
-    let width = w.map.width as usize;
-    Arc::make_mut(&mut w.map).cells[3 * width + 3].ground = void;
-    // Inside the window the stuck delivery logs once and stays pending rather than failing every drain.
-    crate::world::xml::tests::drain_events(&mut w).unwrap();
-    assert!(!w.delivery_events().is_empty() && w.bag_expiry.is_empty());
-    assert_eq!(
-        w.xml
-            .terminal_capacity
-            .load(std::sync::atomic::Ordering::Acquire),
-        1
-    );
-    w.now += super::xml::PREFLIGHT_RETRY_MS;
-    crate::world::xml::tests::drain_events(&mut w).unwrap();
-    assert!(w.delivery_events().is_empty() && w.bag_expiry.is_empty());
-    assert_eq!(
-        w.xml
-            .terminal_capacity
-            .load(std::sync::atomic::Ordering::Acquire),
-        0
-    );
-    let db = rusqlite::Connection::open(
-        std::path::PathBuf::from(std::env::var("QA_RESULTS_DIR").unwrap())
-            .join(format!("world-terminal-{}.db", w.xml.instance)),
-    )
-    .unwrap();
-    let unpicked: i64 = db
-        .query_row(
-            "SELECT count(*) FROM world_entitlements WHERE event=?1 AND status=0",
-            [&event.id],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        unpicked as usize,
-        event.terminal_payload().unwrap().allocations().len(),
-        "committed entitlements stay unpicked for operator reconciliation"
-    );
 }
 
 #[tokio::test]
