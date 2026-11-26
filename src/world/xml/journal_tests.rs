@@ -5,8 +5,7 @@ use rand::SeedableRng;
 async fn xml_hard_scripted_birth_preflight_replays_without_reroll() {
     use crate::store::Store;
     let content = Arc::new(crate::world::test_content());
-    let path = std::path::PathBuf::from(std::env::var("QA_RESULTS_DIR").unwrap())
-        .join(format!("hard-preflight-{}.db", rand::random::<u64>()));
+    let path = std::env::temp_dir().join(format!("hard-preflight-{}.db", rand::random::<u64>()));
     let store = Store::open(&path, &content).unwrap();
     let account = store.list("hard-preflight".into()).await.unwrap();
     let ch = store

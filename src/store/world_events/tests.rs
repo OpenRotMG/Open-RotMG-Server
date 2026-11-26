@@ -2,8 +2,7 @@ use super::*;
 use crate::loot::evaluator;
 
 fn path(name: &str) -> std::path::PathBuf {
-    let dir = std::path::PathBuf::from(std::env::var("QA_RESULTS_DIR").unwrap())
-        .join(format!("journal-{name}-{}", rand::random::<u64>()));
+    let dir = std::env::temp_dir().join(format!("journal-{name}-{}", rand::random::<u64>()));
     std::fs::create_dir(&dir).unwrap();
     dir.join("game.db")
 }

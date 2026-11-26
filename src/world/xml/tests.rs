@@ -45,7 +45,7 @@ pub(crate) fn drain_events(w: &mut World) -> Result<()> {
         scope.spawn(||->Result<()> {
         let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build()?;
         runtime.block_on(async {
-            let path=std::path::PathBuf::from(std::env::var("QA_RESULTS_DIR")?).join(format!("world-terminal-{}.db",w.xml.instance));
+            let path=std::env::temp_dir().join(format!("world-terminal-{}-{}.db",std::process::id(),w.xml.instance));
             let store=crate::store::Store::open(&path,&w.content)?;
             let db=rusqlite::Connection::open(&path)?;
             for p in w.players.values() {
