@@ -2,8 +2,9 @@ use super::*;
 use crate::condition::{BLEEDING, HEALING, QUIET, SICK};
 
 fn fixture() -> (World, i32) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 16,
         height: 16,
         cells: vec![
@@ -130,7 +131,8 @@ fn potion_publication_is_silent_atomic_and_reports_only_actual_restoration() {
 fn fountain_cadence_recipients_range_sickness_and_caps() {
     let (mut w, near) = fixture();
     w.players.get_mut(&near).unwrap().pos = Pos { x: 8.5, y: 8.5 };
-    w.fountains = vec![(999, Pos { x: 8.5, y: 8.5 })];
+    w.spawn_entity(0x1c7, Pos { x: 8.5, y: 8.5 }, vec![])
+        .unwrap();
     let mut ids = vec![near];
     for account in 2..=5 {
         let mut ch = w.players[&near].character.clone();
@@ -143,24 +145,32 @@ fn fountain_cadence_recipients_range_sickness_and_caps() {
     let [_, ally, boundary, sick, pending] = ids[..] else {
         unreachable!()
     };
+    w.players.get_mut(&near).unwrap().character.hp = 670;
     w.players.get_mut(&ally).unwrap().character.hp = 669;
     w.players.get_mut(&boundary).unwrap().pos.x += 5.;
     w.apply_condition(sick, SICK, 10000).unwrap();
     w.players.get_mut(&pending).unwrap().pending = true;
-    w.fountain_heal();
+    w.xml_step().unwrap();
     let hp = |w: &World| {
         ids.iter()
             .map(|id| w.players[id].character.hp)
             .collect::<Vec<_>>()
     };
-    assert_eq!(hp(&w), [200, 670, 100, 100, 100]);
+    // Recovered HealZap (behavior.cc:1995-2027) zaps only the closest damaged player, capped at its maximum.
+    assert_eq!(hp(&w), [670, 670, 100, 100, 100]);
     assert!(ids.iter().all(|id| w.players[id].character.mp == 100));
     w.now = 999;
-    w.fountain_heal();
-    assert_eq!(hp(&w), [200, 670, 100, 100, 100]);
+    w.xml_step().unwrap();
+    assert_eq!(hp(&w), [670, 670, 100, 100, 100]);
+    // The closest damaged player is now sick, so this zap heals nobody.
     w.now = 1000;
-    w.fountain_heal();
-    assert_eq!(hp(&w), [300, 670, 100, 100, 100]);
+    w.xml_step().unwrap();
+    assert_eq!(hp(&w), [670, 670, 100, 100, 100]);
+    // Then the range-boundary player; the pending one is never a recipient.
+    w.players.get_mut(&sick).unwrap().pos.x += 6.;
+    w.now = 2000;
+    w.xml_step().unwrap();
+    assert_eq!(hp(&w), [670, 670, 200, 100, 100]);
 }
 
 #[test]

@@ -50,8 +50,9 @@ export async function run(game){
   }
   game.check('selected projectile speed and lifetime reach the native session',[...volleys.values()].some(v=>[...v.values()].every(p=>p.speed===speed&&p.lifetime_ms===lifetime)));
   game.check('complete reconstructed fan has '+count+' rays spaced seven degrees',[...volleys.values()].some(v=>{const a=[...v.values()].map(p=>p.angle).sort((a,b)=>a-b);return a.length===count&&a.slice(1).every((n,i)=>Math.abs(n-a[i]-7*Math.PI/180)<.001);}));
-  const deadlines=[...new Set(samples.map(s=>entity(s)?.next_shot).filter(Number.isFinite))].sort((a,b)=>a-b);
-  game.check('reconstructed attack clock advances by '+interval+' ms',deadlines.some((t,i)=>i&&t-deadlines[i-1]===interval));
+  // Volley births reconstructed from flight distance; Fire Sprite cooldown 0.3 (actors.xml:790), default Shoot cooldown 1s otherwise.
+  const births=[...new Set(samples.flatMap(s=>s.view.projectiles.filter(p=>p.owner===sprite.id).map(p=>Math.round((s.view.time_ms-Math.hypot(p.position.x-p.start.x,p.position.y-p.start.y)/(p.speed/10000))/50)*50)))].sort((a,b)=>a-b);
+  game.check('observed attack clock advances by '+interval+' ms',births.some((t,i)=>i&&t-births[i-1]===interval));
   const xp=hit.view.character.experience;
   for(let n=0;n<80;n++){
     const s=await game.inspect(),e=entity(s);if(!e)break;

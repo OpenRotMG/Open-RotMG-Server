@@ -5,7 +5,6 @@ use rand::{Rng, SeedableRng, seq::SliceRandom};
 pub const BOSS: u16 = 0x927;
 const WALL: u16 = 0x1ce;
 const PALM: u16 = 0x18e;
-const EXIT: u16 = 0x703;
 const FLOOR: u8 = 0x0c;
 const SAND: u8 = 0xbd;
 const WATER: u8 = 0x73;
@@ -13,30 +12,39 @@ const COMPOSITE: u8 = 0xfd;
 const SPACE: u8 = 0xfe;
 const MAX_SIDE: i32 = 336;
 const MAX_ACTORS: usize = 103;
-const OFFICERS: &[u16] = &[0x683, 0x684, 0x685, 0x686];
-const PIRATES: &[u16] = &[0x687, 0x688, 0x689];
-const PETS: &[u16] = &[0x68a, 0x68b, 0x68c, 0x68d, 0x68e, 0x68f];
 const DIRECTIONS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
 // Reconstruction, not official RNG/distributions. Comparator: realm-src 1855c017,
 // DungeonGen/Templates/PirateCave, Copyright (C) 2015 creepylava, AGPL-3.0-or-later.
 // Uses this server's Rust room/corridor and wall-configuration patterns, not a C# port or assets.
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
-    build(content, seed).with_context(|| format!("Pirate Cave generation seed {seed}"))
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    build(content, generator, seed).with_context(|| format!("Pirate Cave generation seed {seed}"))
 }
 
-fn build(content: &Content, seed: u64) -> Result<Map> {
+fn build(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    let [boss_kind, retreat] = generator.placements("boss-and-exit")?;
+    let officers = generator.placements::<4>("officers")?;
+    let pirates = generator.placements::<3>("pirates")?;
+    let pets = generator.placements::<6>("pets")?;
     for ground in [FLOOR, SAND, WATER, COMPOSITE, SPACE] {
         ensure!(
             content.grounds.contains_key(&ground),
             "unknown ground {ground:#x}"
         );
     }
-    for kind in [BOSS, WALL, PALM, EXIT]
+    for kind in [boss_kind, WALL, PALM, retreat]
         .iter()
-        .chain(OFFICERS)
-        .chain(PIRATES)
-        .chain(PETS)
+        .chain(&officers)
+        .chain(&pirates)
+        .chain(&pets)
     {
         content.get(*kind)?;
     }
@@ -90,6 +98,7 @@ fn build(content: &Content, seed: u64) -> Result<Map> {
         "map {width}x{height} exceeds {MAX_SIDE}x{MAX_SIDE}"
     );
     let mut map = Map {
+        elevation: None,
         width,
         height,
         cells: vec![
@@ -201,9 +210,15 @@ fn build(content: &Content, seed: u64) -> Result<Map> {
     for (room, population) in populations.iter_mut().enumerate().skip(1) {
         let boss = room == boss_room;
         for (family, count) in [
-            (OFFICERS, rng.gen_range(if boss { 4..=7 } else { 0..=1 })),
-            (PIRATES, rng.gen_range(if boss { 4..=7 } else { 3..=5 })),
-            (PETS, if boss { 0 } else { rng.gen_range(0..=2) }),
+            (
+                officers.as_slice(),
+                rng.gen_range(if boss { 4..=7 } else { 0..=1 }),
+            ),
+            (
+                pirates.as_slice(),
+                rng.gen_range(if boss { 4..=7 } else { 3..=5 }),
+            ),
+            (pets.as_slice(), if boss { 0 } else { rng.gen_range(0..=2) }),
         ] {
             for _ in 0..count {
                 let i = population.pop().context("room has no population site")?;
@@ -216,11 +231,11 @@ fn build(content: &Content, seed: u64) -> Result<Map> {
         map.cells[index(sx + dx, sy + dy)].object = Some(PALM);
     }
     let spawn = &mut map.cells[index(sx, sy)];
-    spawn.object = Some(EXIT);
+    spawn.object = Some(retreat);
     spawn.region = 1;
     map.spawns.push((sx as f32 + 0.5, sy as f32 + 0.5));
     let (bx, by) = centers[boss_room];
-    map.cells[index(bx, by)].object = Some(BOSS);
+    map.cells[index(bx, by)].object = Some(boss_kind);
     let actors = map
         .cells
         .iter()

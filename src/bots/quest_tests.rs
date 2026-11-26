@@ -51,6 +51,7 @@ fn adventure(brain: &mut Brain, v: &PlayerView, c: &Content) -> Decision {
 fn geared_rushers_pass_trash_but_inexperienced_or_unprepared_bots_clear() {
     let (c, mut v) = fixture();
     v.map.name = "Snake Pit".into();
+    v.map.template = Some("snake-pit".into());
     v.character.level = 20;
     v.character.stats[3] = 25;
     v.objects[0].kind = 0x917;
@@ -86,8 +87,10 @@ fn geared_rushers_pass_trash_but_inexperienced_or_unprepared_bots_clear() {
     assert_eq!(adventure(&mut brain, &v, &c).goal, Goal::Fight(3));
     v.character.hp = 500;
     v.map.name = "Realm".into();
+    v.map.template = Some("realm".into());
     assert_eq!(adventure(&mut brain, &v, &c).goal, Goal::Fight(3));
     v.map.name = "Undead Lair".into();
+    v.map.template = Some("undead-lair".into());
     v.objects[0].kind = 0x678;
     v.objects[0].condition_mask = Some(0);
     let rushing = adventure(&mut brain, &v, &c);
@@ -99,6 +102,7 @@ fn geared_rushers_pass_trash_but_inexperienced_or_unprepared_bots_clear() {
     v.objects[0].position = Pos { x: 10.5, y: 14.5 };
     assert_eq!(adventure(&mut brain, &v, &c).goal, Goal::Fight(2));
     v.map.name = "Snake Pit".into();
+    v.map.template = Some("snake-pit".into());
     v.objects[0].position = Pos { x: 10.5, y: 90.5 };
     v.objects[1].kind = 0x223;
     v.character.level = 14;
@@ -151,6 +155,7 @@ fn portal_callers_wait_instead_of_entering_on_the_calling_decision() {
 fn nexus_realm_portal_approach_survives_a_detour_out_of_sight() {
     let (c, mut v) = fixture();
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.position = center((21, 24));
     v.quest = None;
     let portal = &mut v.objects[0];
@@ -200,6 +205,7 @@ fn nexus_realm_portal_approach_survives_a_detour_out_of_sight() {
 fn nexus_explore_enters_its_target_tile_before_retargeting() {
     let (c, mut v) = fixture();
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.position = Pos {
         x: 114.17,
         y: 49.40,
@@ -227,6 +233,7 @@ fn nexus_explore_fixture(
     let (c, mut v) = fixture();
     let map = crate::content::Map::load(std::path::Path::new("data/nexus.wmap"), &c).unwrap();
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     (v.map.width, v.map.height) = (map.width, map.height);
     v.position = center(start);
     v.quest = None;
@@ -318,6 +325,7 @@ fn nexus_explore_leaves_the_hedge_courtyard_in_one_bounded_leg() {
 fn explore_prefers_local_ground_over_the_far_side_of_a_hairpin() {
     let (c, mut v) = fixture();
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.quest = None;
     v.objects.clear();
     let mut ground = vec![255; 128 * 128];
@@ -473,7 +481,7 @@ fn realm_hunt_keeps_a_route_that_already_dodges_the_shot() {
 }
 
 pub(super) fn fixture() -> (Content, PlayerView) {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     let geometry = crate::navigation::Geometry::new(
         (128, 128),
         vec![1; 128 * 128],
@@ -503,6 +511,7 @@ pub(super) fn fixture() -> (Content, PlayerView) {
         quest: Some(2),
         map: MapInfo {
             name: "Realm".into(),
+            template: Some("realm".into()),
             width: 128,
             height: 128,
             allow_teleport: true,
@@ -590,6 +599,7 @@ fn recovering_wizard_nova_respects_target_protection_and_mana() {
         let mut world = World::new(
             content.clone(),
             Arc::new(Map {
+                elevation: None,
                 width: 128,
                 height: 128,
                 cells: vec![
@@ -607,6 +617,7 @@ fn recovering_wizard_nova_respects_target_protection_and_mana() {
         )
         .unwrap();
         let mut character = Character::fresh(content.get(view.character.class).unwrap()).unwrap();
+        character.name = "Recoverer".into();
         character.id = view.session.character;
         character.account = view.session.account;
         character.base = view.character.base_stats;
@@ -675,7 +686,8 @@ fn recovering_wizard_nova_respects_target_protection_and_mana() {
             assert_eq!(world.entities[&target].condition & protection, protection);
         }
         assert!(world.players[&player].pos.distance(backstep) < 0.1);
-        assert!(world.bullets.is_empty());
+        // XML Oasis minions keep shooting; only the nova's own projectiles must have expired.
+        assert!(world.bullets.iter().all(|b| b.owner != player));
         if casts {
             assert!(world.entities[&target].hp < hp);
         } else {
@@ -693,6 +705,7 @@ fn recovering_wizard_nova_respects_target_protection_and_mana() {
 fn rusher_fixture() -> (Content, PlayerView) {
     let (content, mut view) = fixture();
     view.map.name = "Abyss of Demons".into();
+    view.map.template = Some("abyss-of-demons".into());
     view.objects[0].kind = 0x927;
     view.objects[0].position = Pos { x: 110.5, y: 10.5 };
     view.player_markers.push(PlayerMarker {
@@ -708,14 +721,14 @@ fn rusher_fixture() -> (Content, PlayerView) {
 fn dungeon_quest_uses_a_public_rusher_without_abandoning_its_goal() {
     let (content, mut view) = rusher_fixture();
     for world in [
-        "Pirate Cave",
-        "Snake Pit",
-        "Sprite World",
-        "Undead Lair",
-        "Abyss of Demons",
-        "Ocean Trench",
+        "pirate-cave",
+        "snake-pit",
+        "sprite-world",
+        "undead-lair",
+        "abyss-of-demons",
+        "ocean-trench",
     ] {
-        view.map.name = world.into();
+        view.map.template = Some(world.into());
         let mut brain = Brain::new(ARCHETYPES[0], &view);
         let decision = brain.decide(&view, &content).unwrap();
         assert_eq!(decision.goal, Goal::Hunt(2), "{world}");
@@ -769,6 +782,7 @@ fn dungeon_rusher_does_not_override_safety_or_teleport_policy() {
 fn wavelength_vault_errand_banks_before_leaving() {
     let (c, mut v) = fixture();
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.quest = None;
     let (sword, potion) = (0xa47, 0xa1f);
     let stat = progression::potion_index(&c, potion).unwrap().unwrap();
@@ -787,6 +801,7 @@ fn wavelength_vault_errand_banks_before_leaving() {
         .plan
         .start(plan::now(), plan::Owner::Bank, "Vault".into());
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     chest.kind = 0x504;
     chest.hp = 0;
     chest.position = Pos { x: 11.5, y: 10.5 };
@@ -1062,9 +1077,9 @@ fn unreachable_hunt_is_travel_that_aborts_not_engagement() {
 
 #[test]
 fn realm_wedge_loops_but_nexus_spawn_congestion_does_not() {
-    for (map, looping) in [("Nexus", false), ("Realm", true)] {
+    for (map, looping) in [("nexus", false), ("realm", true)] {
         let (c, mut v) = fixture();
-        v.map.name = map.into();
+        v.map.template = Some(map.into());
         v.quest = None;
         v.objects.clear();
         let mut brain = Brain::new(ARCHETYPES[0], &v);
@@ -1271,12 +1286,13 @@ fn bots_escape_before_a_second_volley_when_a_potion_cannot_cover_it() {
         damage: 120,
         armor_piercing: false,
     });
-    for (world, level, enemy) in [
-        ("Realm", 8, 0x650),
-        ("Snake Pit", 14, 0x225),
-        ("Realm", 20, 0x659),
+    for (world, template, level, enemy) in [
+        ("Realm", "realm", 8, 0x650),
+        ("Snake Pit", "snake-pit", 14, 0x225),
+        ("Realm", "realm", 20, 0x659),
     ] {
         v.map.name = world.into();
+        v.map.template = Some(template.into());
         v.character.level = level;
         v.objects[0].kind = enemy;
         // Each hit does 110, so a potion can buy a safe retreat at 260 HP, but not at 200 HP.
@@ -1531,6 +1547,7 @@ fn unsellable_gear_leaves_the_vault_for_a_nexus_bag() {
     let (falchion, sword) = (0xa6e, 0xa47);
     let (c, mut v) = fixture();
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     v.objects[0].kind = 0x504;
     v.objects[0].position = v.position;
     v.objects[0].contents = vec![falchion, sword, -1, -1, -1, -1, -1, -1];
@@ -1546,6 +1563,7 @@ fn unsellable_gear_leaves_the_vault_for_a_nexus_bag() {
     v.character.items[4] = falchion;
     assert!(!progression::stash(&v, &c, None).unwrap());
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.objects.clear();
     let d = Brain::new(ARCHETYPES[0], &v).decide(&v, &c).unwrap();
     assert!(matches!(d.item, Some(Action::Drop { slot }) if slot.kind == falchion));
@@ -1562,6 +1580,7 @@ fn full_bag_does_not_leave_the_realm_to_bank_into_a_full_vault() {
         v.character.items[4..].copy_from_slice(&[sword; 8]);
         let (_, mut vault) = fixture();
         vault.map.name = "Vault".into();
+        vault.map.template = Some("vault".into());
         vault.objects[0].kind = 0x504;
         vault.objects[0].contents = vec![if full { sword } else { -1 }; 8];
         let mut brain = Brain::new(ARCHETYPES[0], &v);
@@ -1662,6 +1681,7 @@ fn a_hurt_bot_backs_off_only_near_enemies() {
         v.character.hp = v.character.stats[0] / 10;
         if nexus {
             v.map.name = "Nexus".into();
+            v.map.template = Some("nexus".into());
             v.objects.clear();
         } else {
             v.objects[0].position = Pos { x: 14.5, y: 10.5 };
@@ -2159,6 +2179,7 @@ fn lava_reflex_resumes_after_crossing_is_interrupted_and_respects_visible_protec
 fn snake_pit_cover_attempt_expires_across_interrupting_hunts() {
     let (c, mut v) = fixture();
     v.map.name = "Snake Pit".into();
+    v.map.template = Some("snake-pit".into());
     v.objects[0].kind = 0x917;
     v.objects[0].condition_mask = Some(crate::condition::bit(crate::condition::INVULNERABLE));
     let (blocked_quest, reachable_quest) = (center((24, 10)), center((23, 10)));

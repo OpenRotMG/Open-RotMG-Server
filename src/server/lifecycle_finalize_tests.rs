@@ -542,15 +542,18 @@ async fn slow_command_keeps_delivering_queued_output() {
         .await
         .unwrap();
     let world = a.world.for_player(id);
+    let (entered, ready) = tokio::sync::oneshot::channel();
+    let (release, held) = std::sync::mpsc::channel();
     let busy = tokio::spawn(async move {
         world
-            .call(|_| {
-                std::thread::sleep(Duration::from_millis(1500));
+            .call(move |_| {
+                entered.send(()).unwrap();
+                held.recv_timeout(Duration::from_secs(10))?;
                 Ok(())
             })
             .await
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    ready.await.unwrap();
     let mut body = Writer::new();
     body.i32(0).i32(1).f32(pos.x).f32(pos.y).i16(0);
     socket
@@ -559,14 +562,13 @@ async fn slow_command_keeps_delivering_queued_output() {
             body: body.0,
         })
         .await;
-    for nonce in 0..200 {
-        out.try_send(Packet {
-            id: wire::PING,
-            body: i32::to_be_bytes(nonce).to_vec(),
-        })
-        .expect("outbound queue filled while a command waited on its world");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    let ping = Packet {
+        id: wire::PING,
+        body: 42_i32.to_be_bytes().to_vec(),
+    };
+    out.send(ping.clone()).await.unwrap();
+    assert_eq!(socket.receive(wire::PING).await.body, ping.body);
+    release.send(()).unwrap();
     busy.await.unwrap().unwrap();
     drop(socket);
     server.abort();

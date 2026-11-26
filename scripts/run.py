@@ -162,10 +162,18 @@ def main():
     bots.add_argument("--no-shore-bots", action="store_true", help="Disable autonomous Wizards for isolated testing")
     parser.add_argument("--bot-llm", action="store_true", help="Enable Nemotron social dialogue; requires AI_GATEWAY_API_KEY")
     parser.add_argument("--release", action="store_true", help="Build optimized gameplay")
+    parser.add_argument("--server-binary", type=Path, metavar="FILE", help="Run this retained absolute executable instead of building; requires --data")
+    parser.add_argument("--data", type=Path, metavar="DIR", help="Absolute game data directory for --server-binary")
     parser.add_argument("--realm-seed", type=int, help="Reproduce Realm layout selection and prepared populations")
     args = parser.parse_args()
     if args.realm_seed is not None and not 0 <= args.realm_seed <= 2**64 - 1:
         parser.error("--realm-seed must be an unsigned 64-bit integer")
+    if (args.server_binary is None) != (args.data is None) or (args.server_binary is not None and args.release):
+        parser.error("--server-binary and --data must be given together, without --release")
+    if args.server_binary is not None and not (args.server_binary.is_absolute() and args.server_binary.is_file() and os.access(args.server_binary, os.X_OK)):
+        parser.error(f"--server-binary must be an absolute executable file: {args.server_binary}")
+    if args.data is not None and not (args.data.is_absolute() and args.data.is_dir()):
+        parser.error(f"--data must be an absolute directory: {args.data}")
     if shutil.which("cargo") is None:
         parser.error("Cargo not found. Install Rust/Cargo from https://rustup.rs/ and rerun.")
     global LOG
@@ -198,15 +206,21 @@ def main():
                 code = run([sys.executable, str(prepare), "--prepare-only"], client, log)
                 if code:
                     raise RuntimeError(f"Client preparation exited with status {code}. See the error above and {LOG}.")
-            print(f"Building and starting your local game. Logs: {LOG}", flush=True)
-            binary = state / 'server-build' / 'openrotmg'
-            build = [sys.executable, guard, '--output', str(binary), 'build', '--locked']
-            if args.release:
-                build.append('--release')
-            code = run(build, ROOT, log)
-            if code:
-                raise RuntimeError(f'Server build exited with status {code}. See {LOG}.')
+            if args.server_binary is not None:
+                binary = args.server_binary
+                print(f"Starting selected server binary {binary} with data {args.data}. Logs: {LOG}", flush=True)
+            else:
+                print(f"Building and starting your local game. Logs: {LOG}", flush=True)
+                binary = state / 'server-build' / 'openrotmg'
+                build = [sys.executable, guard, '--output', str(binary), 'build', '--locked']
+                if args.release:
+                    build.append('--release')
+                code = run(build, ROOT, log)
+                if code:
+                    raise RuntimeError(f'Server build exited with status {code}. See {LOG}.')
             command = [str(binary), "--client", str(client / "web"), "--port", str(args.port), "--test-state" if args.test_state is not None else "--state", str(state)]
+            if args.data is not None:
+                command.extend(["--data", str(args.data)])
             if args.realm_seed is not None:
                 command.extend(["--realm-seed", str(args.realm_seed)])
             if args.dev_control:

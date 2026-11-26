@@ -5,6 +5,7 @@ use std::time::Duration;
 fn spider_den_teleport_requires_an_eligible_observed_target() {
     let (mut world, sender) = movement_tests::fixture(0x18, false);
     world.name = "Spider Den".into();
+    world.xml.template = Some("spider-den".into());
     let mut character = world.players[&sender].character.clone();
     character.id = 2;
     character.account = 2;
@@ -53,6 +54,7 @@ fn spider_den_teleport_requires_an_eligible_observed_target() {
 fn manor_advertises_player_teleport_in_mapinfo() {
     let (mut world, _) = movement_tests::fixture(0x18, false);
     world.name = "Manor of the Immortals".into();
+    world.xml.template = Some("manor-of-the-immortals".into());
     let packet = world.map_info();
     let mut reader = wire::Reader::new(&packet);
     reader.i32().unwrap();
@@ -67,6 +69,7 @@ fn manor_advertises_player_teleport_in_mapinfo() {
 fn manor_permits_teleport_to_observed_player_destination() {
     let (mut world, sender) = movement_tests::fixture(0x18, false);
     world.name = "Manor of the Immortals".into();
+    world.xml.template = Some("manor-of-the-immortals".into());
     let mut character = world.players[&sender].character.clone();
     character.id = 2;
     character.account = 2;
@@ -94,6 +97,7 @@ fn teleport_to_progress_save_target_preserves_its_reservation_and_commit() {
     for controller in [Controller::Human, Controller::Autonomous] {
         let (mut world, sender) = movement_tests::fixture(0x18, false);
         world.name = "Nexus".into();
+        world.xml.template = Some("nexus".into());
         let mut ch = world.players[&sender].character.clone();
         ch.id = 2;
         ch.account = 2;
@@ -174,6 +178,7 @@ fn progress_save_target_teleport_keeps_all_other_refusals_and_quarantine() {
     ] {
         let (mut w, sender) = movement_tests::fixture(0x18, false);
         w.name = "Nexus".into();
+        w.xml.template = Some("nexus".into());
         let mut ch = w.players[&sender].character.clone();
         ch.id = 2;
         ch.account = 2;
@@ -282,6 +287,7 @@ fn progress_save_target_teleport_keeps_all_other_refusals_and_quarantine() {
 fn teleport_refusals_preserve_cooldown_and_success_uses_current_target_position() {
     let (mut world, sender) = movement_tests::fixture(0x18, false);
     world.name = "Nexus".into();
+    world.xml.template = Some("nexus".into());
     let mut ch = world.players[&sender].character.clone();
     ch.id = 2;
     ch.account = 2;
@@ -321,7 +327,7 @@ fn teleport_refusals_preserve_cooldown_and_success_uses_current_target_position(
                 3 => {
                     w.players.get_mut(&sender).unwrap().known.remove(&target);
                 }
-                5 => w.name = "Vault".into(),
+                5 => w.xml.template = Some("vault".into()),
                 6 => w.players.get_mut(&sender).unwrap().paused = true,
                 _ => {}
             }
@@ -340,6 +346,7 @@ fn teleport_refusals_preserve_cooldown_and_success_uses_current_target_position(
             p.paused = false;
             p.known.insert(target);
             w.name = "Nexus".into();
+            w.xml.template = Some("nexus".into());
         }
     }
     let receipt = d.teleport(sender, target, received).unwrap();

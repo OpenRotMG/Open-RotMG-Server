@@ -1,8 +1,9 @@
 use super::*;
 
 fn scene(kind: i32) -> (World, i32, Slot) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut map = Map {
+        elevation: None,
         width: 96,
         height: 32,
         cells: vec![

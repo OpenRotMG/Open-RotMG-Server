@@ -39,7 +39,11 @@ pub(super) fn attack_cooldown(
 }
 
 pub(super) fn goto(p: &mut Player, own: bool, body: Vec<u8>) {
-    if own && p.controller == Controller::Human {
+    // Server-driven players already read authoritative positions; no client needs to rebase.
+    if p.controller != Controller::Human {
+        return;
+    }
+    if own {
         p.audit_motion.boundary();
     }
     let Some(output) = &p.tx else { return };
@@ -189,13 +193,30 @@ impl World {
         }
         let mut bullets = std::mem::take(&mut self.bullets);
         self.detached_bullets = bullets.len();
-        self.bullet_hit(&mut bullets[index], target);
+        if self.bullet_hit(&mut bullets[index], target) && !bullets[index].hit.contains(&target) {
+            // Retain the reported hit itself, so it still lands if the projectile expires first.
+            self.owed_shots.push((bullets[index].clone(), target));
+            bullets[index].hit.insert(target);
+        }
         bullets.append(&mut self.bullets);
         self.bullets = bullets;
         self.detached_bullets = 0;
         Ok(())
     }
 
+    pub(super) fn owed_shot_step(&mut self) {
+        for (mut bullet, target) in std::mem::take(&mut self.owed_shots) {
+            if !self.entities.contains_key(&target) {
+                tracing::warn!(
+                    player = bullet.owner,
+                    actor = target,
+                    "owed reported hit dropped: target already gone"
+                );
+            } else if self.bullet_hit(&mut bullet, target) && !bullet.hit.contains(&target) {
+                self.owed_shots.push((bullet, target));
+            }
+        }
+    }
     fn native_predicted_enemy_death(&mut self, id: i32, bullet: u8, target: i32) -> Result<()> {
         self.players
             .get(&id)
@@ -325,23 +346,6 @@ impl World {
             crate::server::lifecycle::controller("native position is outside world bounds")
         );
         Ok(())
-    }
-
-    pub fn acknowledge_autonomous_goto(&mut self, id: i32) -> Result<()> {
-        ensure!(
-            self.players
-                .get(&id)
-                .context("GOTO ACK player missing")?
-                .controller
-                == Controller::Autonomous,
-            "GOTO ACK requires autonomous ownership"
-        );
-        self.acknowledge_goto(
-            id,
-            self.now
-                .try_into()
-                .context("autonomous GOTO clock overflow")?,
-        )
     }
 
     pub fn acknowledge_goto(&mut self, id: i32, time: i32) -> Result<()> {

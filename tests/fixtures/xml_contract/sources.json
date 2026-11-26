@@ -1,0 +1,8 @@
+{
+  "frozen_performance_oracle": {
+    "qa_job": "d7245f1ce7d748c5ad2490fb6ece0cad",
+    "result": "results/xml-load-scenes.json",
+    "sha256": "e5bd19b53c69f5a906c49b12287237b7f9fe0146639471228d812c3a51ae0b06",
+    "qualification": "Original unpublished baseline budgets, not candidate-regenerated acceptance limits. This points to existing evidence, not a second capability database."
+  }
+}

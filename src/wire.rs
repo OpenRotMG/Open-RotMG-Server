@@ -10,6 +10,7 @@ pub const UPDATE_ACK: u8 = 11;
 pub const NEW_TICK: u8 = 62;
 pub const MOVE: u8 = 7;
 pub const PLAYER_SHOOT: u8 = 38;
+pub const SHOOT_ACK: u8 = 22;
 pub const PING: u8 = 6;
 pub const PONG: u8 = 16;
 pub const PLAYER_TEXT: u8 = 69;

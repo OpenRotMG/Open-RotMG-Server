@@ -57,7 +57,13 @@ export async function run(game){
     game.check('Leviathan activates, moves and fires while the only nearby native Rogue is cloaked',samples.some(s=>(s.view.character.conditions&(1<<12))&&enemy(s)?.activated!==null&&Math.hypot(enemy(s).pos.x-root.pos.x,enemy(s).pos.y-root.pos.y)>.2&&groups(s).length>0));
     await act({keys:[],duration_ms:5500},{name:'leviathan-fans',when:()=>true});
     const volleys=samples.flatMap(groups);
-    for(const [count,speed,lifetime] of [[9,67,1700],[12,67,1700],[2,85,1800]])game.check('native volley '+count+' has selected speed and lifetime',volleys.some(g=>g.length===count&&g.every(p=>p.speed===speed&&p.lifetime_ms===lifetime)));
+    for(const [count,speed,lifetime] of [[12,67,1700],[2,85,1800]])game.check('native volley '+count+' has selected speed and lifetime',volleys.some(g=>g.length===count&&g.every(p=>p.speed===speed&&p.lifetime_ms===lifetime)));
+    game.check('native aqua pattern contains three four-shot fans separated by 120 degrees',volleys.some(g=>{
+      if(g.length!==12||!g.every(p=>p.speed===67))return false;
+      const angles=g.map(p=>(p.angle+2*Math.PI)%(2*Math.PI)).sort((a,b)=>a-b);
+      const gaps=angles.map((a,i)=>(angles[(i+1)%12]-a+2*Math.PI)%(2*Math.PI));
+      return gaps.filter(gap=>Math.abs(gap-Math.PI/20)<.001).length===9&&gaps.filter(gap=>Math.abs(gap-93*Math.PI/180)<.001).length===3;
+    }));
     game.check('native blue pairs have fifteen-degree spacing',volleys.some(g=>g.length===2&&g[0].speed===85&&Math.abs(Math.abs(g[0].angle-g[1].angle)-Math.PI/12)<.0001));
     for(let n=0;n<60;n++){
       const s=await game.inspect(),e=enemy(s);if(!e)break;

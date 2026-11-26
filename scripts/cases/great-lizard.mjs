@@ -38,16 +38,28 @@ export async function run(game){
   await writeFile(join(process.env.QA_RESULTS_DIR,'attacks.json'),JSON.stringify(samples));
   game.check('natural Lizard activates and moves',samples.some(s=>entity(s)?.activated!==null&&Math.hypot(entity(s).pos.x-lizard.pos.x,entity(s).pos.y-lizard.pos.y)>.2));
   for(const [index,speed,lifetime] of [[0,65,1700],[1,55,530]])game.check(index+': selected native projectile is observed',samples.some(s=>s.view.projectiles.some(p=>p.owner===lizard.id&&p.speed===speed&&p.lifetime_ms===lifetime)));
-  // This verifies the Trapped reconstruction, not the conflicting Kithio or period attack counts: https://github.com/trapped/rotmg_svr/blob/593e490803fe0ad168ead408cacd5287d778acfe/wServer/logic/db/BehaviorDb.Midland.cs#L687-L717
-  const shots=samples.slice(1).map((s,i)=>({age:s.diagnostic.time_ms-entity(s).activated,count:(entity(s).bullet-entity(samples[i]).bullet+256)%256}));
-  await writeFile(join(process.env.QA_RESULTS_DIR,'shot-counts.json'),JSON.stringify(shots));
-  game.check('aimed singles or pairs are observed',shots.some(s=>s.count===1||s.count===2));
-  game.check('twenty-shot ring volleys are observed',shots.some(s=>s.count>=20&&s.count%20===0));
-  game.check('short pause between ring and next cycle is observed',shots.some(s=>s.age%8100>=7350&&s.age%8100<8100&&s.count===0));
-  game.check('planewalk reaches the stationary native player',samples.some((s,i)=>i>0&&entity(s).reaction_until>entity(samples[i-1]).reaction_until&&Math.hypot(entity(s).pos.x-s.view.position.x,entity(s).pos.y-s.view.position.y)<.6&&Math.hypot(entity(samples[i-1]).pos.x-s.view.position.x,entity(samples[i-1]).pos.y-s.view.position.y)>1));
+  // XML Great Lizard cycles idle/charge/spit/flame_ring/pause (actors.xml:4794-4825); it has no planewalk or fixed 8100ms clock.
+  const states=s=>(s.diagnostic.xml[lizard.id]?.states??[]).map(x=>x.name),volleys=(speed,size)=>samples.some(s=>{
+    const groups=new Map();for(const p of s.view.projectiles.filter(p=>p.owner===lizard.id&&p.speed===speed)){const k=p.start.x+':'+p.start.y;groups.set(k,(groups.get(k)??0)+1);}
+    return [...groups.values()].includes(size);
+  });
+  // The 0.2s charge is often between samples, so prove a full cycle as flame_ring followed by a later spit.
+  const ring=samples.findIndex(s=>states(s).includes('flame_ring'));
+  game.check('Lizard cycles spit and flame_ring states',ring>=0&&samples.slice(ring).some(s=>states(s).includes('spit')));
+  game.check('spit fires aimed single and paired Fire Missiles',volleys(65,1)&&volleys(65,2));
+  game.check('flame_ring fires thirty-shot rings (actors.xml:4816)',volleys(55,30));
   game.check('same Lizard has no dependent actors during combat',samples.every(s=>entity(s)?.kind===0x952&&!s.diagnostic.entities.some(e=>e.parent===lizard.id)));
   const before=await game.observe();
-  for(let n=0;n<30&&(await game.inspect()).diagnostic.entities.some(e=>e.id===lizard.id);n++)await game.act({keys:[],duration_ms:300,target:{entity:lizard.id,camera_angle:-Math.PI/4,fire:true}});
+  // The charge and retreat can leave the Wizard stationary 16–18 tiles away (AC e5ad142d, c73c5da7).
+  // Staff of Horror only travels 8.55 tiles (objects.xml:6097–6104); close the gap before taking another shot.
+  for(let n=0;n<60;n++){
+    const s=await game.inspect(),e=entity(s);if(!e)break;
+    const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=dx-dy,y=dx+dy;
+    const approach=Math.hypot(dx,dy)>4||!s.view.objects.some(o=>o.id===lizard.id&&o.hp>0);
+    const keys=approach?[Math.abs(x)>=Math.abs(y)*.4142?(x>0?'d':'a'):null,Math.abs(y)>=Math.abs(x)*.4142?(y>0?'s':'w'):null].filter(Boolean):[];
+    const scale=90/Math.max(1,Math.hypot(x,y));
+    await game.act({keys,duration_ms:250,...(!approach?{mouse:{x:300+x*scale,y:325+y*scale}}:{})});
+  }
   await game.act({keys:[],duration_ms:300},{name:'lizard-defeated',when:()=>true});
   const dead=await save('defeated');
   game.check('ordinary native staff defeats Lizard and awards XP',!entity(dead)&&dead.view.character.experience>before.character.experience);

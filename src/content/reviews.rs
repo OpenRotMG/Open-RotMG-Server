@@ -163,9 +163,26 @@ fn valid_date(text: &str) -> bool {
     (1..=days).contains(&day)
 }
 
+/// White bags are bag type 4. Potion bags are bag type 3. A marked account keeps half of its white-bag items and three quarters of its potion-bag items.
+pub(crate) fn marked_keep_chance(bag_type: u8) -> Option<f64> {
+    match bag_type {
+        4 => Some(0.5),
+        3 => Some(0.75),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn marked_accounts_keep_half_of_whites_and_three_quarters_of_potions() {
+        assert_eq!(marked_keep_chance(4), Some(0.5));
+        assert_eq!(marked_keep_chance(3), Some(0.75));
+        for bag in [0, 1, 2, 5] {
+            assert_eq!(marked_keep_chance(bag), None, "{bag}");
+        }
+    }
     #[test]
     fn only_explicit_unique_account_decisions_are_accepted() {
         assert!(parse("[]").unwrap().is_empty());

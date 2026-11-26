@@ -14,12 +14,13 @@ export async function prepare(api){
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
   king=map.entities.find(e=>e.kind===0x61f&&Array.from({length:9},(_,i)=>[-1,0,1].every(j=>!blocked.has([Math.floor(e.pos.x)-i,Math.floor(e.pos.y)+j].join(',')))).every(Boolean));
   assert(king,'No natural Dwarf King with a clear approach');
-  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(e=>e.camp===king.camp)));
+  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-camp.json'),JSON.stringify(map.entities.filter(e=>e.id===king.id||e.parent===king.id)));
   return {...spec,position:{x:king.pos.x-8,y:king.pos.y}};
 }
 export async function run(game){
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
-  const family=s=>s.diagnostic.entities.filter(e=>e.camp===king.camp),entity=(s,id)=>family(s).find(e=>e.id===id);
+  // XML Dwarf King MakeMinions draws ten children from its Dwarves group (actors.xml:719); they are owned by parent, not the camp.
+  const family=s=>s.diagnostic.entities.filter(e=>e.id===king.id||e.parent===king.id),entity=(s,id)=>family(s).find(e=>e.id===id),owned=s=>family(s).filter(e=>e.parent===king.id);
   let protectedUntil=0;
   const act=async(input,capture)=>{
     await protect();
@@ -27,9 +28,11 @@ export async function run(game){
     return game.act(input,capture);
   };
   const begin=await save('arrival');
-  game.check('natural MidForest family has selected initial HP and composition',[[0x61f,1,320],[0x61c,2,80],[0x61d,1,80],[0x61e,1,100]].every(([k,n,hp])=>family(begin).filter(e=>e.kind===k&&e.hp===hp).length===n));
+  game.check('ordinary Realm places the selected root without a legacy camp',begin.diagnostic.entities.some(e=>e.id===king.id&&e.camp==null&&e.hp===320));
   for(let n=0;n<16&&(await game.observe()).character.hp===begin.view.character.hp;n++)await game.act({keys:[],duration_ms:500});
   game.check('unprotected native Wizard receives encounter damage',(await game.observe()).character.hp<begin.view.character.hp);
+  const escorts=await save('escorts');
+  game.check('activated King makes ten selected-HP Dwarves',owned(escorts).length===10&&owned(escorts).every(e=>e.hp===({0x61c:80,0x61d:80,0x61e:100})[e.kind]));
   const protect=async()=>{
     const now=(await game.observe()).game_ms;if(now<protectedUntil)return;
     const path=join(process.env.QA_RESULTS_DIR,'protection.json');
@@ -40,9 +43,13 @@ export async function run(game){
   const samples=[];
   for(let n=0;n<32;n++){await act({keys:[],duration_ms:500},n===16?{name:'dwarf-encounter',when:()=>true}:undefined);samples.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'movement-and-attacks.json'),JSON.stringify(samples));
-  for(const [kind,speed,lifetime] of [[0x61f,60,900],[0x61c,60,600],[0x61d,35,3500],[0x61e,60,600]]){
-    const ids=new Set(family(begin).filter(e=>e.kind===kind).map(e=>e.id));
-    game.check(kind+': natural actor activates and moves',samples.some(s=>family(s).some(e=>ids.has(e.id)&&e.activated!==null&&Math.hypot(e.pos.x-family(begin).find(p=>p.id===e.id).pos.x,e.pos.y-family(begin).find(p=>p.id===e.id).pos.y)>.2)));
+  const first=new Map();for(const s of [escorts,...samples])for(const e of family(s))if(!first.has(e.id))first.set(e.id,e.pos);
+  // The group draw picks each child's role at random (actors.xml:719), so check the roles this King drew.
+  const drawn=new Set(owned(escorts).map(e=>e.kind));
+  game.check('King draws at least two roles from its XML Dwarves group',drawn.size>=2&&[...drawn].every(k=>[0x61c,0x61d,0x61e].includes(k)));
+  for(const [kind,speed,lifetime] of [[0x61f,60,900],[0x61c,60,600],[0x61d,35,3500],[0x61e,60,600]].filter(([k])=>k===0x61f||drawn.has(k))){
+    const ids=new Set([escorts,...samples].flatMap(family).filter(e=>e.kind===kind).map(e=>e.id));
+    game.check(kind+': actor activates and moves from where it first appeared',samples.some(s=>family(s).some(e=>ids.has(e.id)&&e.activated!==null&&Math.hypot(e.pos.x-first.get(e.id).x,e.pos.y-first.get(e.id).y)>.2)));
     game.check(kind+': selected projectile executes during native combat',samples.some(s=>s.view.projectiles.some(p=>ids.has(p.owner)&&p.speed===speed&&p.lifetime_ms===lifetime)));
   }
   const mages=new Set(samples.flatMap(family).filter(e=>e.kind===0x61d).map(e=>e.id));
@@ -54,9 +61,9 @@ export async function run(game){
     return {owner:p.owner,id:p.id,age,across,expected};
   }));
   await writeFile(join(process.env.QA_RESULTS_DIR,'mage-trajectories.json'),JSON.stringify(waves));
-  game.check('Mage shots execute both sides of the selected sinusoidal trajectory',waves.some(p=>p.across>.5)&&waves.some(p=>p.across<-.5));
-  const caps=s=>[[0x61c,3],[0x61d,2],[0x61e,2]].every(([k,n])=>family(s).filter(e=>e.kind===k).length<=n);
-  game.check('current escort caps hold throughout observed combat',samples.every(caps));
+  if(drawn.has(0x61d))game.check('Mage shots execute both sides of the selected sinusoidal trajectory',waves.some(p=>p.across>.5)&&waves.some(p=>p.across<-.5));
+  const caps=s=>owned(s).length<=10;
+  game.check('XML ten-Dwarf cap holds throughout observed combat',samples.every(caps));
   async function defeat(id){
     const xp=(await game.observe()).character.experience;
     for(let n=0;n<80;n++){
@@ -68,7 +75,7 @@ export async function run(game){
     }
     const after=await game.inspect();game.check(id+': native shooting defeats target and awards XP',!entity(after,id)&&after.view.character.experience>xp);return after;
   }
-  const victim=family(samples.at(-1)).find(e=>e.kind===0x61c);assert(victim);
+  const victim=owned(samples.at(-1))[0];assert(victim);
   const previous=new Set(family(samples.at(-1)).map(e=>e.id));await defeat(victim.id);
   for(let n=0;n<40;n++){
     const p=(await game.observe()).position,dx=king.pos.x-p.x,dy=king.pos.y-p.y,distance=Math.hypot(dx,dy);if(distance<.4)break;
@@ -77,9 +84,9 @@ export async function run(game){
     await act({keys,duration_ms:Math.min(500,Math.max(50,Math.round(distance*120)))});
   }
   game.check('native movement returns to the original walkable MidForest camp',Math.hypot((await game.observe()).position.x-king.pos.x,(await game.observe()).position.y-king.pos.y)<.4);
-  for(let n=0;n<16&&!family(await game.inspect()).some(e=>e.kind===0x61c&&!previous.has(e.id));n++)await act({keys:[],duration_ms:1000});
+  for(let n=0;n<16&&!owned(await game.inspect()).some(e=>!previous.has(e.id));n++)await act({keys:[],duration_ms:1000});
   const replenished=await save('replenished');
-  game.check('living King replenishes a defeated escort within current caps',entity(replenished,king.id)&&caps(replenished)&&family(replenished).some(e=>e.kind===0x61c&&!previous.has(e.id)));
+  game.check('living King replenishes a defeated escort within current caps',entity(replenished,king.id)&&caps(replenished)&&owned(replenished).some(e=>!previous.has(e.id)));
   await protect();await defeat(king.id);
   const dead=await save('king-defeated');
   await game.act({keys:[],duration_ms:1000},{name:'dwarf-defeated',when:()=>true});

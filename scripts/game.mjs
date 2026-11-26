@@ -19,6 +19,7 @@ Native CONFIG also requires browserTools:"/absolute/managed/direct-cdp.mjs" and 
 pauseAfter defaults to true: the whole isolated session does not progress while you inspect and think. Native pause requires Ruffle suspension, pause-adjusted page clocks and server pause; simulation-only pause is not native acceptance. Initialize while Ruffle is playing; an earlier untracked pause requires normal reconnection of the same living character. Native operations cannot return unpaused: capture during a bounded action. A lost controller's 1500ms lease stops the prepared simulation and closes native connections; expiry makes that session terminal.
 Starting context only: prepare_realm_capacity {limit} lowers only the active Realm once, before any enrollment/ownership claims, with the prepared clock paused and 1 <= limit < global capacity. Normal portal publication and guarded admission remain authoritative; capabilities returns the prepared receipt. Other worlds/global capacity are unchanged.
 Explicit paused mutations: world {template}; cheat {actor,change:{kind:"stats",values}|{kind:"item",slot,item}|{kind:"teleport",position}|{kind:"stat_modifier",index,amount,duration_ms}|{kind:"protection",condition,duration_ms}|{kind:"guild",name,members:[actorIds]}|{kind:"pause",paused:boolean}}. Protection permits invincible, stasis or invulnerable for 1–60000ms, with no overlapping active protection. Stat modifiers require panel index2–7, nonzero amount -100–100, duration1–60000ms and no active prepared modifier; base stats and inventory are unchanged. Guild setup creates a real, unearned relation for the selected founder and listed registered actors without changing wallets or stars; normal guild eligibility is unchanged. Guild client publication is deferred until the next ordinary unpaused tick (for native clients, use a normal bounded native action); paused success confirms the persisted/server relation, not rendered client state. Actor pause requires a direct actor and a changed desired state; it invokes ordinary /pause safety policy, without advancing time or changing guild membership. Actor pause status publication also waits for the next ordinary unpaused tick; the immediate ordinary chat reply is not client status proof. These are recorded cheats, never earned gameplay.
+Native permanent death: act with permit_death:true and one keys/mouse input or same-actor sequence; only that actor may die under the lease. It returns death_committed once the death is durable, or survived. The selected client's own Continue/new-character UI then creates the replacement; native_rebind {actor} adopts it only when the dead actor's own account owns the single connected unregistered native session and that browser target echoes its PING. The dead identity stays terminal.
 A reached time window is not a dungeon clear. Inspect actual effects and goal_reached. cancel {request} addresses a running server request by stable id. Compact receipts point to bounded evidence in STATE/testing; preserve failed receipts and dead characters.
 `;
 const [configPath, commandPath] = process.argv.slice(2);
@@ -44,7 +45,9 @@ if(mutating) {
     if(saved.status==='running'){console.error(JSON.stringify({id,status:'uncertain',error:'Request has no confirmed result; inspect server trace and actor state instead of replaying effects'}));process.exit(1);}
     console.log(JSON.stringify({...saved.result,evidence:path}));process.exit(saved.result.status==='failed'?1:0);
   }
-  if((await readdir(`${config.state}/testing`)).filter(n=>n.endsWith('.client.json')).length>=256)throw new Error('Native receipt budget reached; preserve this evidence and create a new owned test state');
+  const limit=config.receiptLimit??256;
+  if(!Number.isInteger(limit)||limit<256||limit>448)throw new Error('Native receipt limit must be 256–448');
+  if((await readdir(`${config.state}/testing`)).filter(n=>n.endsWith('.client.json')).length>=limit)throw new Error('Native receipt budget reached; preserve this evidence and create a new owned test state');
   await writeFile(path,JSON.stringify({command,status:'running'}),{flag:'wx',mode:0o600,flush:true});ownsIntent=true;await syncDirectory();
 }
 const save=async result=>{if(ownsIntent){await writeFile(`${path}.tmp`,JSON.stringify({command,status:'complete',result}),{flag:'wx',mode:0o600,flush:true});await rename(`${path}.tmp`,path);await syncDirectory();}};
@@ -63,7 +66,7 @@ const api = async (value, requestId=`${id}-ctl${++sequence}`) => {
   } finally {const ended=performance.now();console.error(JSON.stringify({event:'native_http_timing',op:value.op,phase,request:id,ctl:requestId,actor:value.actor??null,actors:value.actors??null,status:httpStatus??null,stage:value.actor===undefined?null:nativeStages.get(value.actor)??null,start_ms:started,end_ms:ended,wall_ms:ended-started}));}
 };
 const clients = [];
-let nativePhase='operation', nativeRuntime;
+let nativePhase='operation', nativeRuntime, expectedDeath;
 const nativeIdentities=new Map(), nativeStages=new Map();
 async function eachClient(selected, action) {
   const results=await Promise.allSettled(selected.map(action));
@@ -120,7 +123,7 @@ async function connect(spec) {
 let leaseStarted=false, leaseTimer, leaseRenewal, leaseError;
 async function startLease(){
   if(leaseStarted)return;
-  await api({op:'native_lease',owner:id,operation:'begin',actors:clients.map(c=>c.actor)});leaseStarted=true;
+  await api({op:'native_lease',owner:id,operation:'begin',actors:clients.map(c=>c.actor),...(expectedDeath===undefined?{}:{terminal:expectedDeath})});leaseStarted=true;
   leaseTimer=setInterval(()=>{
     if(leaseRenewal||leaseError)return;
     leaseRenewal=api({op:'native_lease',owner:id,operation:'renew'}).catch(e=>{leaseError=e;for(const c of clients)c.abort(e);}).finally(()=>{leaseRenewal=null;});
@@ -146,6 +149,11 @@ function validateNativeState(state) {
   for(const row of state.actors){
     if(!row||!Number.isSafeInteger(row.actor)||!expected.has(row.actor)||seen.has(row.actor))fail('foreign or duplicate actor');seen.add(row.actor);nativeStages.set(row.actor,row.stage);
     if(row.player!==undefined){if(!Number.isSafeInteger(row.player)||row.player<=0||players.has(row.player))fail('invalid or duplicate current session');players.add(row.player);}
+    if(row.actor===expectedDeath&&['dead','dying','lost'].includes(row.stage)){
+      const original=nativeIdentities.get(row.actor);
+      if(row.character!==row.actor||row.account!==null&&row.account!==original?.account)fail('dying original identity changed');
+      continue;
+    }
     if(!['ready','loading','busy','transferring'].includes(row.stage))fail('actor '+row.actor+' terminal or unproved stage '+row.stage);
     if(row.character!==row.actor||!Number.isSafeInteger(row.account)||row.account<=0)fail('original identity missing');
     if((row.stage!=='transferring'||row.player!==undefined)&&!Number.isSafeInteger(row.class))fail('missing/invalid connected original class; matching API/SDK required');
@@ -308,7 +316,8 @@ async function nativeAct(value) {
         const known=(await api({op:'inspect',actor:client.actor})).view;
         const target=known.objects.find(e=>e.id===input.target.entity&&e.hp>0);
         if(!target)throw Error('Native target is not in the actual client neighborhood');
-        const a=input.target.camera_angle,dx=target.position.x-known.position.x,dy=target.position.y-known.position.y,x=50*(dx*Math.cos(a)+dy*Math.sin(a)),y=50*(-dx*Math.sin(a)+dy*Math.cos(a)),scale=Math.max(1,Math.hypot(x,y)/270);
+        // Preserve bearing without aiming into the pinned client's chat or side panels.
+        const a=input.target.camera_angle,dx=target.position.x-known.position.x,dy=target.position.y-known.position.y,x=50*(dx*Math.cos(a)+dy*Math.sin(a)),y=50*(-dx*Math.sin(a)+dy*Math.cos(a)),scale=Math.max(1,Math.hypot(x,y)/110);
         from={x:300+x/scale,y:325+y/scale};
       }
       mouse={x:rect.x+from.x,y:rect.y+from.y};
@@ -339,6 +348,60 @@ async function nativeAct(value) {
   const effects={distance:world_changed?null:Math.hypot(after.position.x-before.position.x,after.position.y-before.position.y),shots:after.verification.shots-before.verification.shots,hp:after.character.hp-before.character.hp,mp:after.character.mp-before.character.mp,inventory_changed:JSON.stringify(after.character.items)!==JSON.stringify(before.character.items),world_changed};
   return {id,steps:stepEvidence,status:value.expect?'outcome_complete':'input_complete',execution:'native',effects,paused:after.paused,pause_scope:'server_and_native',native_clock:'pause_adjusted_page_time',actor:value.actor,state:after};
 }
+async function nativeDeath(value) {
+  if(Object.keys(value).some(k=>!['op','actor','input','sequence','permit_death','pauseAfter'].includes(k))||value.pauseAfter===false||value.permit_death!==true||Boolean(value.input)===Boolean(value.sequence))throw Error('Death-permitted native act takes one input or a sequence of the same actor and pauses afterwards');
+  const inputs=value.sequence??[value.input];
+  if(!Array.isArray(inputs)||!inputs.length||inputs.length>32||inputs.some(i=>i?.drag||i?.target||i?.chat!==undefined)||inputs.reduce((sum,i)=>sum+i.duration_ms,0)>10000)throw Error('Death-permitted native act takes 1–32 keys/mouse inputs totalling at most 10 seconds');
+  const steps=inputs.map(input=>nativeStep(value.actor,input)),client=steps[0].client;
+  nativePhase='before';
+  const deadline=Date.now()+5000,initial=await states(true,undefined,undefined,deadline),before=atomicObservation(initial,value.actor);
+  expectedDeath=value.actor;
+  const row=async()=>validateNativeState(await api({op:'native_state',actors:clients.map(c=>c.actor)})).actors.find(r=>r.actor===value.actor);
+  nativePhase='resume';await resumeAll(initial,deadline);
+  let primary,death,last;const cleanup=[];
+  try{
+    await client.evaluate('document.querySelector("ruffle-player").focus({preventScroll:true})');
+    const rect=await client.evaluate('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()');
+    if(rect.width!==800||rect.height!==600)throw Error('Native client is clipped or scaled');
+    for(const {input} of steps){
+      const mouse=input.mouse&&{x:rect.x+input.mouse.x,y:rect.y+input.mouse.y};
+      if(mouse)await client.call('Input.dispatchMouseEvent',{type:'mouseMoved',...mouse});
+      nativePhase='hold';
+      const press=await client.hold(input.keys,mouse,input.duration_ms,undefined,undefined,Date.now()+5000);
+      for(const result of await press.down)if(result.status==='rejected')throw result.reason;
+      // Later steps would click the death screen; stop at the first non-ready sample.
+      if((last=await row()).stage!=='ready')break;
+    }
+    nativePhase='death';const end=Date.now()+15000;
+    for(;;){
+      if(leaseError)throw leaseError;
+      if(last.stage==='dead'&&last.death_committed===true){death=last;break;}
+      if(last.stage==='ready')break;
+      if(Date.now()>=end)throw Error('Native death neither committed nor recovered before its deadline: '+JSON.stringify(last));
+      await wait(100);last=await row();
+    }
+    // The dead actor's page stays on its death screen; only living participants pause.
+    if(death){clients.splice(clients.indexOf(client),1);client.close();}
+  }catch(error){primary=error;}
+  nativePhase='pause';
+  try{await pauseAll();}catch(error){cleanup.push(String(error));}
+  if(primary||cleanup.length)throw Error(JSON.stringify({primary:primary?String(primary):null,cleanup}));
+  return {id,status:death?'death_committed':'survived',execution:'native',actor:value.actor,before,death:death??null,paused:true,pause_scope:'server_and_native'};
+}
+async function nativeRebind(value) {
+  if(Object.keys(value).some(k=>!['op','actor'].includes(k)))throw Error('native_rebind takes only the dead native actor');
+  const client=clients.find(c=>c.actor===value.actor),original=nativeIdentities.get(value.actor);
+  if(!client||!original)throw Error('native_rebind requires the configured dead actor and its browser target');
+  const found=(await api({op:'native_rebind',actor:value.actor})).result;
+  if(found.account!==original.account)throw Error('Replacement account differs from the dead original');
+  const proof=await api({op:'native_sync',actors:[found.replacement]}),ack=proof.acknowledged[0],end=Date.now()+1000;
+  while(!client.frames.includes(ack.frame_sha256)&&Date.now()<end)await wait(10);
+  verifiedNativeAck({runtime:nativeRuntime,actor:found.replacement,player:found.player},ack,client.frames,leaseError,bytes=>writeSync(2,bytes));
+  const bound=(await api({op:'native_rebind',actor:value.actor,replacement:found.replacement})).result;
+  if(JSON.stringify(bound)!==JSON.stringify(found))throw Error('Replacement session changed during UI confirmation');
+  await client.evaluate('globalThis[Symbol.for("openrotmg.testing.binding.v1")]='+JSON.stringify({runtime:nativeRuntime,actor:bound.replacement,player:bound.player,account:bound.account,character:bound.replacement,class:bound.class}));
+  return {id,status:'rebound',execution:'native',...bound};
+}
 let result,pauseError;
 async function pauseOnError(){
   if(mayProgress) try {await pauseAll();await endLease();} catch(e){pauseError=String(e);try{await abortLease();}catch(halt){pauseError+='; native safety halt unconfirmed: '+halt;}}
@@ -347,7 +410,9 @@ async function operation(){
  try{
   if(command.op==='pause') result=await pauseAll();
   else if(command.op==='resume') {if(clients.length)throw Error('Native resume requires a bounded action with automatic pause');await resumeAll();result={paused:false};}
+  else if(command.op==='act'&&command.permit_death) result=await nativeDeath(command);
   else if(command.op==='act'&&(command.input||command.sequence)) result=await nativeAct(command);
+  else if(command.op==='native_rebind') result=await nativeRebind(command);
   else if(['act','run'].includes(command.op)&&clients.length&&command.pauseAfter!==false) {
     await resumeAll();
     let primary;

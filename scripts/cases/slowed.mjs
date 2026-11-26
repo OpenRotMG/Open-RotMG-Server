@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {arachnaThread} from './combat-status.mjs';
 const out=process.argv[process.argv.indexOf('--run-dir')+1];
-export const fixture={class:0x31d,level:20,seed:937,world:'spider-den',worldSeed:12351,position:{x:60.5,y:34.5},equipment:[0xa00,0xa6b,-1,-1],backpack:[0xc21,-1,-1,-1,-1,-1,-1,-1],stats:[770,252,75,25,50,50,75,50]};
+export const fixture={class:0x31d,level:20,seed:937,world:'spider-den',worldSeed:12351,position:'spawn',equipment:[0xa00,0xa6b,-1,-1],backpack:[0xc21,-1,-1,-1,-1,-1,-1,-1],stats:[770,252,75,25,50,50,75,50]};
 const has=(v,n)=>Boolean(v.character.conditions&(1<<(n-1)));
 export async function run(observer){
   const config=JSON.parse(await readFile(join(out,'native.json'),'utf8'));
@@ -14,10 +15,12 @@ export async function run(observer){
   }
   await prepare(observer.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
   const start=await observer.observe(),{worldSeed,...spec}=fixture;
-  const game=await observer.join({...spec,world:start.session.world,position:{x:75.5,y:16.5}});
+  const info=await (await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'world_info',world:start.session.world}}),signal:AbortSignal.timeout(10000)})).json();
+  const thread=arachnaThread(info),game=await observer.join({...spec,world:start.session.world,position:thread});
   async function save(label){const s=await game.inspect();records.push({label,state:s});await writeFile(join(out,'slowed.json'),JSON.stringify(records,null,2));return s.view;}
   async function web(){
-    for(let n=0;n<30;n++){await game.act({keys:[],duration_ms:500});if(has(await game.observe(),4))return await save('natural-web-hit');}
+    // Speed/cleanse checks walk along the 6-tile east-west thread; 'a'+'w' / 'd'+'s' walk back onto it.
+    for(let n=0;n<30;n++){const dx=(await game.observe()).position.x-thread.x;await game.act({keys:dx>.5?['a','w']:dx<-.5?['d','s']:[],duration_ms:500});if(has(await game.observe(),4))return await save('natural-web-hit');}
     throw Error('Natural Arachna web did not apply Slowed');
   }
   async function unprotected(){

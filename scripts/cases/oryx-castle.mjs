@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 
 const mode=process.env.CASTLE_MODE??'armor';
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),marks=(w,kind)=>w.encounter_markers.filter(m=>m.kind===kind).map(m=>m.position);
@@ -21,7 +22,9 @@ export async function run(game){
   const initial=await save('initial');
   if(mode==='tower'){
     await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
-    await game.act({keys:[],duration_ms:1000},{name:'castle-quiet',when:()=>true});
+    // The recovered Target state switches to the close-range ring only after 1.6 s.
+    for(let n=0;n<15&&!((await game.observe()).character.conditions&2);n++)await game.act({keys:[],duration_ms:400});
+    await game.act({keys:[],duration_ms:100},{name:'castle-quiet',when:v=>!!(v.character.conditions&2)});
     const hit=await save('tower-hit');
     game.check('natural Living Floor projectile applies Quiet and drains MP',!!(hit.view.character.conditions&2)&&hit.view.character.mp===0);
     game.check('selected tower does not add the later-guide Weak condition',!(hit.view.character.conditions&4)&&hit.view.lifecycle.alive);
@@ -41,7 +44,16 @@ export async function run(game){
       if(!present){
         const end=await game.inspect();
         assert(end.diagnostic.character.kills>start.diagnostic.character.kills&&(original.expires===null||end.view.time_ms<original.expires),'Target disappeared without a credited native defeat before expiry');
-        await writeFile(join(root,'defeat-'+original.id+'.json'),JSON.stringify({original,start,end}));return end;
+        const progress=JSON.parse(execFileSync('python3',['-c',`
+import json,sqlite3,sys
+with sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True) as db:
+    events=db.execute("SELECT payload FROM world_events WHERE status=2 AND kind='terminal' ORDER BY rowid")
+    print(json.dumps([[p['defeat']['actor'],c['exp'],c['fame']] for (raw,) in events if (p:=json.loads(raw).get('payload',{}).get('data',{})).get('actions') for c,_ in p['actions']['progress'] if c['id']==int(sys.argv[2])]))
+`,join(config.state,'game.db'),String(end.view.session.character)],{encoding:'utf8'}));
+        const index=progress.findIndex(([id])=>id===original.id);assert(index>=0,'Armor defeat must have a durable receipt');
+        const [,xp,fame]=progress[index],previous=progress[index-1]??[null,start.view.character.experience,start.diagnostic.character.fame];
+        await writeFile(join(root,'defeat-'+original.id+'.json'),JSON.stringify({original,start,end,progress}));
+        return xp===previous[1]&&fame===previous[2];
       }
       await game.act({keys:[],duration_ms:350,target:{entity:original.id,camera_angle:-Math.PI/4,fire:true}});
     }
@@ -50,13 +62,13 @@ export async function run(game){
   const first=await kill(armor);
   await save('armor-defeated');
   // The release note names respawns; selected XML also excludes authored armor: https://wikiwiki.jp/rmd/version/build123.4.4
-  game.check('actual '+mode+' armor defeat grants no XP or base fame',first.view.character.experience===before.view.character.experience&&first.diagnostic.character.fame===before.diagnostic.character.fame);
+  game.check('actual '+mode+' armor defeat grants no XP or base fame',first);
   if(mode==='armor'){
     await game.act({keys:[],duration_ms:4000});
     const replacement=(await map()).entities.find(e=>e.kind===0xd7e&&e.parent===armor.parent&&e.id!==armor.id);assert(replacement,'Same spawner did not replace its defeated armor');
     const second=await kill(replacement);
     await save('replacement-defeated');
-    game.check('same spawner replacement has a fresh identity and still grants no XP/fame',second.view.character.experience===first.view.character.experience&&second.diagnostic.character.fame===first.diagnostic.character.fame);
+    game.check('same spawner replacement has a fresh identity and still grants no XP/fame',second);
     await writeFile(join(root,'castle-armor-identities.json'),JSON.stringify({armor,replacement}));
   }
   const final=await game.observe();

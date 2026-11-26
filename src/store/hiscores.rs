@@ -220,7 +220,7 @@ mod tests {
         )
         .unwrap();
         drop(store);
-        db.execute_batch("ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=22")
+        db.execute_batch("DROP TABLE world_entitlements; DROP TABLE world_events; ALTER TABLE collections DROP COLUMN source; PRAGMA user_version=22")
             .unwrap();
         let store = Store::open(&path, &content).unwrap();
         let old = store.collection(account).await.unwrap()["items"][0].clone();

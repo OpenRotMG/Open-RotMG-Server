@@ -4,6 +4,7 @@ use crate::content::{Content, Map};
 use anyhow::Result;
 #[cfg(test)]
 use anyhow::{Context, ensure};
+pub(crate) mod elevation;
 pub(crate) mod prepare;
 pub(crate) mod realms;
 #[cfg(test)]
@@ -201,6 +202,13 @@ pub fn generate(content: &Content, seed: u64, size: i32) -> Result<Map> {
         spawns.push((x as f32 + 0.5, y as f32 + 0.5));
     }
     let map = Map {
+        // Authored fixture units only: depth/radius 0..1 maps to 0..255; ocean is clamped to 0.
+        elevation: Some(
+            heights
+                .into_iter()
+                .map(|h| (h.clamp(0., 1.) * 255.).round() as u8)
+                .collect(),
+        ),
         width: size,
         height: size,
         cells,

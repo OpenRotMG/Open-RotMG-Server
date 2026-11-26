@@ -31,6 +31,7 @@ impl Area {
             || self.y + self.height + 2 <= other.y
             || other.y + other.height + 2 <= self.y
     }
+    #[cfg(test)]
     pub(super) fn contains(&self, p: Pos) -> bool {
         p.x >= self.x as f32
             && p.y >= self.y as f32
@@ -110,7 +111,7 @@ impl Piece {
         };
         out
     }
-    fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Self {
+    fn build(kind: u16, rng: &mut rand::rngs::StdRng) -> Result<Self> {
         let mut p = match kind {
             crate::dungeon::tomb::SPHINX => {
                 let mut p = Self::new(81, 81);
@@ -678,7 +679,7 @@ impl Piece {
                 }
                 p
             }
-            _ => unreachable!("named setpiece kind validated by caller"),
+            _ => bail!("no named setpiece geometry for {kind:#x}"),
         };
         if matches!(kind, 0x91b | 0x928 | 0x67d | 0x668 | 0xdc2 | 0x925) {
             for _ in 0..rng.gen_range(0..4) {
@@ -710,9 +711,10 @@ impl Piece {
                 p.temple_ground[p.boss.1 * p.width + p.boss.0] = GroundWrite::Set(0xc5);
             }
         }
-        p
+        Ok(p)
     }
     fn tile(kind: u16, mark: u8) -> (u8, Option<u16>) {
+        // Solid non-interactive silhouettes are the native stamp geometry, not actor rosters.
         match (kind, mark) {
             (crate::dungeon::tomb::SPHINX, 1) => (0xf5, None),
             (crate::dungeon::tomb::SPHINX, 2) => (0xf7, None),
@@ -727,7 +729,7 @@ impl Piece {
             (crate::dungeon::manor::KAGE, 4) => (0x57, Some(0x181b)),
             (crate::dungeon::manor::KAGE, 5) => (0x57, Some(0x181c)),
             (crate::dungeon::manor::KAGE, 6) => (0xf1, None),
-            (crate::dungeon::manor::KAGE, 7) => (0x57, Some(crate::dungeon::manor::GRAVE)),
+            (crate::dungeon::manor::KAGE, 7) => (0x57, None),
             (0xdc2, 1) => (0xc5, None),
             (0xdc2, 2) => (0xc5, Some(0x1f4)),
             (0xdc2, 3) => (0xc5, Some(0x1f2)),
@@ -740,7 +742,7 @@ impl Piece {
             (0x91f, 2) => (0x46, Some(0x194)),
             (0x91b, 1) => (0xad, None),
             (0x91b, 2) => (0xad, Some(0x160)),
-            (0x91b, 3) => (0xad, Some(0x162)),
+            (0x91b, 3) => (0xad, None),
             (0x91b, 4) => (0xad, Some(0x17d)),
             (0x91b, 5) => (0xad, Some(0x182)),
             (0x928, 1) => (0x60, None),
@@ -753,14 +755,14 @@ impl Piece {
             (0x67d, 2) => (0x73, None),
             (0x67d, 3) => (0xbc, None),
             (0x67d, 4) => (0x60, Some(0x120)),
-            (0x67d, 5) => (0x60, Some(0x122)),
+            (0x67d, 5) => (0x60, None),
             (0x67d, 6) => (0xcb, None),
             (0x925, 1 | 7) => (0x48, None),
             (0x925, 2) => (0x48, Some(0x120)),
-            (0x925, 3) => (0x48, Some(0x122)),
+            (0x925, 3) => (0x48, None),
             (0x925, 4) => (0x48, Some(0x184)),
             (0x668, 1) => (0xf4, None),
-            (0x668, 2) => (0xf4, Some(0x153)),
+            (0x668, 2) => (0xf4, None),
             (0xd56, 1) => (0x57, None),
             (0xd56, 2) => (0x19, None),
             (0xd56, 3) => (0x18, None),
@@ -775,13 +777,48 @@ impl Piece {
     }
 }
 impl World {
+    #[cfg(test)]
+    pub(super) fn inside_ghost_tower(&self, pos: Pos) -> bool {
+        self.ghost_towers.iter().any(|area| area.contains(pos))
+    }
     pub(super) fn spawn_landmark_chests(&mut self, kind: u16, pos: Pos) -> Result<()> {
-        let items = crate::loot::landmark_chest(&self.content, kind, &mut self.rng)?;
+        let container = self
+            .xml_game()
+            .landmark_chests
+            .get(&kind)
+            .with_context(|| format!("missing linked LandmarkChest for {kind:#x}"))?
+            .container;
+        self.xml_preflight_native_entity(
+            container,
+            NativeService::Container,
+            pos,
+            "validated setpiece loot container",
+        )?;
+        let source = format!("{} chest", self.content.get(kind)?.name);
+        // Construction-time contents have no contributors and die with the Realm, so no journal event: pickups are journaled.
+        let seed = self.rng.r#gen::<u64>();
+        let mut items: Vec<i32> =
+            crate::loot::evaluator::landmark_chest(self.xml_game(), kind, seed)?
+                .into_iter()
+                .map(i32::from)
+                .collect();
+        let looted = items.len();
+        let count = looted.div_ceil(8).max(1);
+        items.resize(count * 8, -1);
+        ensure!(
+            self.xml_live_count() + count <= xml::ACTOR_LIMIT,
+            "setpiece container capacity exhausted: live={} requested={count} limit={}",
+            self.xml_live_count(),
+            xml::ACTOR_LIMIT
+        );
+        let ids = self.xml_reserve_ids(count)?;
         // Independent period rolls can exceed one container; never discard earned items.
-        for chunk in items.chunks(8) {
+        for (chunk, id) in items.chunks(8).zip(ids) {
             let mut slots = chunk.to_vec();
             slots.resize(8, -1);
-            let id = self.spawn_entity(0x501, pos, slots)?;
+            let id = self
+                .insert_entity_data(id, container, pos, slots)
+                .expect("preflighted setpiece loot container");
             let chest = self.entities.get_mut(&id).unwrap();
             chest.drop_slots = chunk
                 .iter()
@@ -789,9 +826,9 @@ impl World {
                 .filter(|(_, item)| **item >= 0)
                 .map(|(slot, _)| slot)
                 .collect();
-            chest.drop_source = Some(format!("{} chest", self.content.get(kind)?.name));
+            chest.drop_source = Some(source.clone());
         }
-        tracing::info!(kind, count = items.len(), "landmark chest rewards created");
+        tracing::info!(kind, seed, count = looted, "landmark chest rewards created");
         Ok(())
     }
     pub(super) fn setpiece_scenery_clear(&self, index: usize) -> bool {
@@ -842,6 +879,12 @@ impl World {
             .collect();
         Ok(site)
     }
+    pub(super) fn preflight_event_scenery(&self, site: &EventSite) -> Result<()> {
+        for entity in &site.scenery {
+            self.xml_preflight_admission(entity.kind, entity.pos)?;
+        }
+        Ok(())
+    }
     pub(super) fn swap_event_site(&mut self, incoming: &EventSite) -> Result<EventSite> {
         let previous =
             self.capture_event_site(incoming.area, incoming.cells.iter().map(|(i, _)| *i))?;
@@ -853,6 +896,7 @@ impl World {
                 .all(|e| !self.entities.contains_key(&e.id) || retiring.contains(&e.id)),
             "reserved event scenery identity reused"
         );
+        self.preflight_event_scenery(incoming)?;
         for id in retiring {
             self.remove_entity(id);
         }
@@ -866,6 +910,8 @@ impl World {
                 "event scenery identity changed after preflight"
             );
             self.index_actor(id);
+            self.xml_admit(id)
+                .expect("preflighted restored event scenery");
         }
         Ok(previous)
     }
@@ -896,12 +942,6 @@ impl World {
             "Ghost King tower released from godlands"
         );
         self.ghost_towers.push(area);
-    }
-    pub(super) fn inside_ghost_tower(&self, pos: Pos) -> bool {
-        self.ghost_towers.iter().any(|area| area.contains(pos))
-    }
-    pub(super) fn inside_god_exclusion(&self, pos: Pos) -> bool {
-        self.inside_ghost_tower(pos) || self.phoenix_pyres.iter().any(|area| area.contains(pos))
     }
     pub(super) fn outside_setpieces(&self, pos: Pos) -> bool {
         // Most Realm cells are beyond the bounding box, so avoid millions of hypot calls.
@@ -949,13 +989,24 @@ impl World {
                     && self.content.grounds[&cell.ground] > 0.
                     && !matches!(cell.ground, 0x72 | 0x73))
     }
-    pub(super) fn place_named_setpiece(&mut self, kind: u16, terrains: &[u8]) -> Result<Pos> {
+    pub(super) fn place_named_setpiece(
+        &mut self,
+        rule: &crate::content::game::NamedSite,
+    ) -> Result<Pos> {
+        let (kind, terrains) = (rule.kind, &rule.terrains);
+        let tile = |mark| {
+            let (ground, scenery) = Piece::tile(kind, mark);
+            (
+                ground,
+                rule.interactive_tiles.get(&mark).copied().or(scenery),
+            )
+        };
         ensure!(
             self.players.is_empty() && self.now == 0,
             "setpieces require an unentered Realm"
         );
         let retain_authored_lava = self.retains_authored_lava();
-        let piece = Piece::build(kind, &mut self.rng);
+        let piece = Piece::build(kind, &mut self.rng)?;
         ensure!(
             kind != 0xdc2 || piece.temple_ground.len() == piece.cells.len(),
             "Temple ground plane is incomplete"
@@ -974,7 +1025,7 @@ impl World {
             .copied()
             .filter(|m| *m != 0 && !(matches!(kind, 0x67d | 0x925) && *m == 8))
         {
-            let (ground, object) = Piece::tile(kind, mark);
+            let (ground, object) = tile(mark);
             ensure!(
                 self.content.grounds.contains_key(&ground),
                 "setpiece {kind:#x} missing selected ground {ground:#x}"
@@ -1096,7 +1147,7 @@ impl World {
                     piece.width, piece.height, self.realm_layout
                 )
             })?;
-        if crate::quest::EVENT_BOSSES.contains(&kind) {
+        if self.xml_game().site_role(kind) == Some(crate::content::game::SiteRole::Event) {
             let indices = piece
                 .cells
                 .iter()
@@ -1125,7 +1176,7 @@ impl World {
                     self.spawn_landmark_chests(kind, pos)?;
                     continue;
                 }
-                let (ground, object) = Piece::tile(kind, mark);
+                let (ground, object) = tile(mark);
                 let index = pos.y as usize * self.map.width as usize + pos.x as usize;
                 if matches!((kind, mark), (0x67d, 5 | 6) | (0x91b | 0x925, 3)) {
                     // The community renderers retain native scenery beneath these ground-only writes.

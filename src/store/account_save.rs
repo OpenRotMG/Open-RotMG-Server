@@ -271,6 +271,7 @@ impl AccountSave {
     }
 }
 pub(crate) fn export(db: &Connection, account: i32, base: [i32; 8]) -> Result<AccountSave> {
+    world_events::portable_ready(db, account)?;
     ensure!(
         !db.query_row(
             "SELECT EXISTS(SELECT 1 FROM shore_bots WHERE account=?1)",
@@ -543,7 +544,7 @@ pub(crate) fn check_expected(
 pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResult> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=24),
+        matches!(version, 21..=25),
         "unsupported local preview schema {version}"
     );
     let existing: Option<i32> = if version == 21 {
@@ -556,6 +557,9 @@ pub(crate) fn preview(db: &Connection, save: &AccountSave) -> Result<ImportResul
         )
         .optional()?
     };
+    if let Some(account) = existing {
+        world_events::portable_ready(db, account)?;
+    }
     let next: i32 = db.query_row("SELECT coalesce(max(id),0)+1 FROM accounts", [], |r| {
         r.get(0)
     })?;
@@ -917,9 +921,12 @@ impl Store {
 pub(crate) fn verify_database(db: &Connection, content: &Content) -> Result<()> {
     let version: i32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     ensure!(
-        matches!(version, 21..=24),
+        matches!(version, 21..=25),
         "unsupported local snapshot schema {version}"
     );
+    if version >= 25 {
+        world_events::validate_state(db)?;
+    }
     if version >= 22 {
         migrate(db, version)?;
     } else {

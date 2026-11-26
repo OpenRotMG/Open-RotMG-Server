@@ -12,20 +12,30 @@ export async function prepare(api){
   const report=JSON.parse(await readFile(output('native/result.json'),'utf8'));
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers:{Authorization:'Bearer '+(await readFile(output('native/state/control.token'),'utf8')).trim()}});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  const candidates=map.entities.filter(e=>e.kind===0x652).filter(e=>{
-    for(let dx=-8;dx<=8;dx++)for(let dy=-5;dy<=5;dy++)if(blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))return false;
-    return true;
-  }).map(e=>({entity:e,clearance:Math.min(...map.entities.filter(o=>o.hp>0&&o.id!==e.id&&o.kind!==0x653).map(o=>Math.hypot(o.pos.x-e.pos.x,o.pos.y-e.pos.y)))})).sort((a,b)=>b.clearance-a.clearance);
-  assert(candidates.length,'No naturally placed Sprite God has a clear approach');root=candidates[0].entity;
+  // Mountains Sprite God wanders and keeps its natural children (realm/mountains.xml:73–77);
+  // choose a nearby unobstructed lane, not a vacant 17×11 rectangle around the root.
+  const clear=(x,y)=>!blocked.has([Math.floor(x),Math.floor(y)].join(','));
+  const candidates=map.entities.filter(e=>e.kind===0x652).flatMap(entity=>{
+    const {x,y}=entity.pos;
+    return [[-1,0],[1,0],[0,-1],[0,1]].flatMap(([dx,dy])=>{
+      for(let d=-2;d<=6;d++)for(let w=-2;w<=2;w++)if(!clear(x+d*dx+w*dy,y+d*dy+w*dx))return [];
+      const position={x:x+dx*5,y:y+dy*5};
+      const clearance=Math.min(...map.entities.filter(o=>o.hp>0&&o.id!==entity.id&&o.kind!==0x653).map(o=>Math.min(Math.hypot(o.pos.x-x,o.pos.y-y),Math.hypot(o.pos.x-position.x,o.pos.y-position.y))));
+      return [{entity,position,clearance}];
+    });
+  }).sort((a,b)=>b.clearance-a.clearance);
+  assert(candidates.length,'No naturally placed Sprite God has a clear approach');
+  const {entity,position}=candidates[0];root=entity;
   await writeFile(output('natural-placement.json'),JSON.stringify({world:info,root,candidates}));
-  return {...spec,position:{x:root.pos.x-5,y:root.pos.y}};
+  return {...spec,position};
 }
 export async function run(game){
   const config=JSON.parse(await readFile(output('native/native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),samples=[];
   let protectionUntil=0;
   const enemy=(s,id=root.id)=>s.diagnostic.entities.find(e=>e.id===id);
-  const children=s=>s.diagnostic.entities.filter(e=>e.kind===0x653&&e.camp===root.camp);
+  // XML Sprite God MakeMinions Sprite Children (actors.xml:1552) are owned by parent, not by the natural camp.
+  const children=s=>s.diagnostic.entities.filter(e=>e.kind===0x653&&(e.id===root.id||e.parent===root.id));
   async function protect(condition,duration_ms){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition,duration_ms}}})});
     const value=await response.json();assert(response.ok&&value.status==='succeeded',JSON.stringify(value));
@@ -48,9 +58,10 @@ export async function run(game){
   }
   try{
     const arrival=await game.inspect();root=enemy(arrival);assert(root);
-    game.check('natural mountain God and three owned children start at selected HP',root.hp===2000&&children(arrival).length===3&&children(arrival).every(e=>e.hp===50));
+    game.check('natural mountain God starts at selected HP without camp-placed children',root.hp===2000&&!arrival.diagnostic.entities.some(e=>e.kind===0x653&&e.camp===root.camp));
     await protect('invulnerable',60000);
-    await act({keys:[],duration_ms:5000});
+    const activated=await act({keys:[],duration_ms:5000});
+    game.check('activated God makes its five XML children at selected HP',children(activated).length===5&&children(activated).every(e=>e.parent===root.id&&e.hp===50));
     const quiet=await act({keys:[],duration_ms:1500},{name:'sprite-god-quiet',when:v=>(v.character.conditions&2)!==0});
     game.check('zero-damage boomerang applies Quiet and drains MP through HP protection',(quiet.view.character.conditions&2)!==0&&quiet.view.character.mp===0&&quiet.view.character.hp===arrival.view.character.hp);
     const shots=samples.flatMap(s=>s.view.projectiles).filter(p=>p.owner===root.id);
@@ -60,7 +71,7 @@ export async function run(game){
       const groups=new Map();for(const p of s.view.projectiles.filter(p=>p.owner===root.id&&p.speed===70)){const key=p.start.x+':'+p.start.y;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p.angle);}
       return [...groups.values()].some(a=>a.length===4&&a.sort((a,b)=>a-b).every((v,i)=>i===0||Math.abs(v-a[i-1]-Math.PI/18)<.001));
     }));
-    const initialChildren=children(arrival);
+    const initialChildren=children(activated);
     game.check('God and its children activate and move without child attacks',samples.some(s=>{const e=enemy(s);return e?.activated!==null&&e&&Math.hypot(e.pos.x-root.pos.x,e.pos.y-root.pos.y)>.2;})&&initialChildren.every(c=>samples.some(s=>{const e=enemy(s,c.id);return e&&Math.hypot(e.pos.x-c.pos.x,e.pos.y-c.pos.y)>.2;}))&&!samples.some(s=>s.view.projectiles.some(p=>initialChildren.some(c=>p.owner===c.id))));
     const child=children(quiet)[0],xp=quiet.view.character.experience;
     await kill(child.id);const childDead=await game.inspect();

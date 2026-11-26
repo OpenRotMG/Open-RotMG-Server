@@ -23,6 +23,7 @@ pub(super) struct Resident {
 type PortalDisplay = (String, Vec<(u8, i32)>, bool);
 #[derive(Clone)]
 pub(super) struct Snapshot {
+    pub instance: String,
     pub players: BTreeMap<i32, Resident>,
     pub admissions_empty: bool,
     pub realm_return: Option<i32>,
@@ -37,14 +38,14 @@ pub(super) struct Snapshot {
     pub admission_open: bool,
     pub bags_empty: bool,
     pub critical: bool,
-    pub portals_pending: bool,
-    pub chamber_at: Option<u64>,
+    pub portal_ids: std::collections::BTreeSet<i32>,
     pub portal_displays: BTreeMap<i32, PortalDisplay>,
     pub published: Instant,
 }
 impl Snapshot {
     fn capture(world: &World) -> Self {
         Self {
+            instance: world.xml.instance.clone(),
             players: world
                 .players
                 .iter()
@@ -75,17 +76,8 @@ impl Snapshot {
             admission_open: world.admission_open,
             bags_empty: world.bag_expiry.is_empty(),
             critical: !world.critical_deaths.is_empty(),
-            portals_pending: !world.portal_requests.is_empty(),
-            chamber_at: if world.name == "Oryx's Castle" && world.cleared {
-                world
-                    .actors()
-                    .filter(|e| e.kind == 0xd7a)
-                    .map(|e| e.next_aux)
-                    .min()
-            } else {
-                None
-            },
-            portal_displays: if world.name == "Nexus" {
+            portal_ids: world.portal_ids.clone(),
+            portal_displays: if world.template_id() == Some("nexus") {
                 world
                     .actors()
                     .filter(|e| e.kind == 0x712)
@@ -98,7 +90,7 @@ impl Snapshot {
         }
     }
     pub(super) fn needs_coordinator(&self) -> bool {
-        self.critical || self.portals_pending
+        self.critical
     }
 }
 #[derive(Default)]

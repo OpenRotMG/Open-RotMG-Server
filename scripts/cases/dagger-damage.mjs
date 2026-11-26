@@ -1,5 +1,6 @@
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {inRange} from './septavius-range.mjs';
 import assert from 'node:assert/strict';
 const root=process.argv[process.argv.indexOf('--run-dir')+1];
 export const fixture={class:0x300,level:20,seed:870,world:'undead-lair',worldSeed:12351,position:{x:14.5,y:120.5},equipment:[0xa14,-1,-1,-1],backpack:[0xa17,0xc0a,0xb21,0xc22,0xc29,-1,-1,-1],stats:[720,252,50,25,50,50,40,50]};
@@ -17,15 +18,12 @@ export async function run(game){
       await game.act({keys:[],duration_ms:350,drag:{from:{x:634+44*((i-1)%4),y:428+44*Math.floor((i-1)/4)},to:{x:634,y:385}}});
       game.check(item.toString(16)+' equips for combat',(await game.observe()).character.items[0]===item);
     }
-    let before=await game.inspect(),target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
-    for(let wait=0;(before.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<24))&&wait<12;wait++){
-      await game.act({keys:[],duration_ms:500});before=await game.inspect();target=before.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
-    }
-    assert(!(before.view.objects.find(e=>e.id===boss.id).condition_mask&(1<<24)),'Septavius did not become vulnerable');
+    const before=await inRange(game,boss,2),target={entity:boss.id,camera_angle:-Math.PI/4,fire:true};
     let after=before,damaged=[];
-    for(let attempt=0;attempt<4&&damaged.length===0&&after.diagnostic.character.kills===before.diagnostic.character.kills;attempt++){
-      await game.act({keys:[],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:true},duration_ms:500},attempt===0?{name:'damage-'+item.toString(16),when:view=>view.verification.shots>before.diagnostic.character.shots}:undefined);
-      after=await game.inspect();assert(after.diagnostic.entities.some(e=>e.id===boss.id));
+    for(let attempt=0;attempt<3&&damaged.length===0&&after.diagnostic.character.kills===before.diagnostic.character.kills;attempt++){
+      await inRange(game,boss,2);
+      await game.act({keys:[],target,duration_ms:1700},attempt===0?{name:'damage-'+item.toString(16),when:view=>view.verification.shots>before.diagnostic.character.shots}:undefined);
+      after=await game.inspect();
       damaged=before.diagnostic.entities.filter(e=>e.kind>=0xd90&&e.kind<=0xdb2&&after.diagnostic.entities.some(a=>a.id===e.id&&a.hp<e.hp));
     }
     observations.push({item,damaged:damaged.map(e=>({id:e.id,kind:e.kind,before:e.hp,after:after.diagnostic.entities.find(a=>a.id===e.id).hp})),before,after});

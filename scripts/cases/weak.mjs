@@ -4,7 +4,8 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const root=join(process.env.QA_RESULTS_DIR,'native'),weak=1<<2;
 process.env.RUST_LOG='info,openrotmg::world=debug';
-export const fixture={class:0x307,level:20,seed:936,world:'spider-den',worldSeed:12351,position:{x:75.5,y:16.5},equipment:[0xa1a,0xa61,-1,-1],backpack:[0xc21,-1,-1,-1,-1,-1,-1,-1],stats:[700,252,75,25,50,50,40,50]};
+// Spider Den layout is generated, so start six tiles south of the natural Arachna (actors.xml eat_flies: Shoot range15, StayBack7).
+export const fixture={class:0x307,level:20,seed:936,world:'spider-den',worldSeed:12351,position:w=>{const b=w.encounter_markers.find(e=>e.kind===0x936);assert(b);return{x:b.position.x,y:b.position.y+6};},equipment:[0xa1a,0xa61,-1,-1],backpack:[0xc21,-1,-1,-1,-1,-1,-1,-1],stats:[700,252,75,25,50,50,40,50]};
 export async function run(game){
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim(),samples=[];
@@ -18,6 +19,15 @@ export async function run(game){
   async function shots(){return (await readFile(join(root,'server.log'),'utf8')).split('\n').slice(0,-1).filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields).filter(f=>f.message==='player shot'&&f.player===player);}
   const initial=await save('prepared'),player=initial.view.session.player,boss=initial.diagnostic.entities.find(e=>e.kind===0x936);assert(boss);
   const target={entity:boss.id,camera_angle:-Math.PI/4,fire:true};
+  // XML Arachna StayBacks to seven tiles, so walk back into Shortbow reach before each volley.
+  async function close(range){
+    for(let n=0;n<30;n++){
+      const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===boss.id),dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y;if(Math.hypot(dx,dy)<=range)return s;
+      const x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+      await game.act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:150});
+    }
+    throw Error('Native approach to Arachna failed');
+  }
   const hp=state=>state.diagnostic.entities.find(e=>e.id===boss.id).hp;
   await cheat({kind:'protection',condition:'invulnerable',duration_ms:60000});
   const protectedUntil=initial.view.time_ms+60000;
@@ -25,23 +35,25 @@ export async function run(game){
   for(let n=0;n<40&&!((await game.observe()).character.conditions&weak);n++)await game.act({keys:[],duration_ms:250});
   const hit=await save('applied');
   game.check('natural Arachna blob applies Weak through Invulnerable',Boolean(hit.view.character.conditions&weak)&&hit.view.character.hp===700);
-  let offset=(await shots()).length;
+  await close(5);let offset=(await shots()).length;
   await game.act({keys:[],duration_ms:1000,target},{name:'weak-weapon',when:v=>Boolean(v.character.conditions&weak)});
   const weakened=await save('weak-weapon'),weakShots=(await shots()).slice(offset);
   game.check('Weak bow shots deal half base damage, not half boosted damage',weakShots.length>0&&weakShots.every(s=>s.damage>=5&&s.damage<=19));
   game.check('Weak shots actually reduce the boss HP',hp(weakened)<hp(hit));
-  const paladin=await game.join({class:0x31f,level:20,seed:937,world:hit.view.session.world,position:hit.view.position,equipment:[-1,0xa55,-1,-1],backpack:Array(8).fill(-1),stats:[770,252,50,25,50,50,40,50]});
+  const paladin=await game.join({class:0x31f,level:20,seed:937,world:hit.view.session.world,position:(await game.observe()).position,equipment:[-1,0xa55,-1,-1],backpack:Array(8).fill(-1),stats:[770,252,50,25,50,50,40,50]});
   await command({op:'cheat',actor:paladin.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}});
   await paladin.act({keys:[],duration_ms:2800});
+  // Arachna's targeted Shoot may pick the new Paladin, so wait for a fresh Weak on the Archer before sealing.
+  for(let n=0;n<40&&!((await game.observe()).character.conditions&weak);n++)await game.act({keys:[],duration_ms:250});
   await paladin.act({keys:[' '],duration_ms:200});
   game.check('ordinary allied seal adds Damaging while Weak',((await game.observe()).character.conditions&(weak|(1<<18)))===(weak|(1<<18)));
-  offset=(await shots()).length;
+  await close(5);offset=(await shots()).length;
   await game.act({keys:[],duration_ms:800,target},{name:'weak-damaging',when:v=>(v.character.conditions&(weak|(1<<18)))===(weak|(1<<18))});
   const damagingShots=(await shots()).slice(offset);
   game.check('Weak overrides native allied Damaging',damagingShots.length>0&&damagingShots.every(s=>s.damage>=5&&s.damage<=19));
-  await game.act({keys:['a','w'],duration_ms:550});
+  await close(5);
   const beforeAbility=await save('weak-damaging'),near=beforeAbility.diagnostic.entities.find(e=>e.id===boss.id).pos;
-  game.check('ordinary native movement closes quiver range',Math.hypot(near.x-beforeAbility.view.position.x,near.y-beforeAbility.view.position.y)<2.5);
+  game.check('ordinary native movement keeps Arachna inside quiver reach',Math.hypot(near.x-beforeAbility.view.position.x,near.y-beforeAbility.view.position.y)<=7);
   offset=(await shots()).length;
   const mana=beforeAbility.view.character.mp;
   let ability;

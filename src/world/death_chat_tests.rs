@@ -6,7 +6,7 @@ async fn fixture() -> (
     [i32; 2],
     Vec<mpsc::Receiver<Packet>>,
 ) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
     let mut world = World::new(content, map).unwrap();

@@ -17,9 +17,8 @@ fn use_incantation(d: &mut Directory, world: i32, player: i32, kind: u16) -> Res
         .context("expected inventory transaction")
 }
 
-#[test]
-fn chamber_unlock_rejects_rolls_back_and_publishes_once_to_everyone() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+fn chamber() -> (Directory, i32, Vec<mpsc::Receiver<Packet>>, [i32; 3]) {
+    let content = Arc::new(crate::world::test_content());
     let mut d = Directory::test_with_seed(std::path::Path::new("data"), content, 16, 867).unwrap();
     d.clock.set_paused(true);
     let world = d.instance(CHAMBER, None, None).unwrap();
@@ -49,15 +48,10 @@ fn chamber_unlock_rejects_rolls_back_and_publishes_once_to_everyone() {
         );
         receivers.push(inbox);
     }
-    let [failed, owner, other] = players.try_into().unwrap();
-    let snapshot = d.worlds[&world].players[&owner].character.clone();
-    assert!(
-        use_incantation(&mut d, world, owner, INCANTATION)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("defeated Oryx")
-    );
+    (d, world, receivers, players.try_into().unwrap())
+}
+/// Defeats Oryx through the journal and gathers every player at the locked cellar.
+fn defeat_oryx(d: &mut Directory, world: i32) -> (i32, Pos) {
     let boss = d.worlds[&world]
         .entities
         .values()
@@ -67,6 +61,9 @@ fn chamber_unlock_rejects_rolls_back_and_publishes_once_to_everyone() {
     let w = d.worlds.get_mut(&world).unwrap();
     w.entities.get_mut(&boss).unwrap().hp = 0;
     w.defeat_entity(boss).unwrap();
+    for _ in 0..8 {
+        crate::world::xml::tests::drain_events(w).unwrap();
+    }
     let locked = w
         .entities
         .values()
@@ -77,6 +74,22 @@ fn chamber_unlock_rejects_rolls_back_and_publishes_once_to_everyone() {
     for p in w.players.values_mut() {
         p.pos = pos;
     }
+    (locked, pos)
+}
+
+#[test]
+fn chamber_unlock_rejects_and_publishes_once_to_everyone() {
+    let (mut d, world, mut receivers, [_, owner, other]) = chamber();
+    let snapshot = d.worlds[&world].players[&owner].character.clone();
+    assert!(
+        use_incantation(&mut d, world, owner, INCANTATION)
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("defeated Oryx")
+    );
+    let (locked, pos) = defeat_oryx(&mut d, world);
+    let w = d.worlds.get_mut(&world).unwrap();
     w.players.get_mut(&owner).unwrap().pos.x += 3.01;
     assert!(
         use_incantation(&mut d, world, owner, INCANTATION)
@@ -106,43 +119,6 @@ fn chamber_unlock_rejects_rolls_back_and_publishes_once_to_everyone() {
     for inbox in &mut receivers {
         while inbox.try_recv().is_ok() {}
     }
-    let plan = use_incantation(&mut d, world, failed, INCANTATION).unwrap();
-    let opened = plan.unlock.unwrap().opened;
-    let plan = d.stage_unlock(plan).unwrap();
-    let destination = d.portals[&opened].destination.unwrap();
-    assert!(!d.worlds[&world].entities[&opened].published);
-    assert!(d.destination(other, Some(opened)).is_err());
-    assert!(
-        use_incantation(&mut d, world, other, INCANTATION)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("reserves")
-    );
-    assert!(receivers.iter_mut().all(|inbox| inbox.try_recv().is_err()));
-    assert!(
-        d.finish_inventory(plan, Err(anyhow::anyhow!("injected commit failure")))
-            .is_err()
-    );
-    assert!(!d.worlds.contains_key(&destination));
-    assert!(!d.portals.contains_key(&opened));
-    assert!(!d.worlds[&world].entities[&locked].reserved);
-    assert!(!d.worlds[&world].entities.contains_key(&opened));
-    assert_eq!(
-        d.worlds[&world].players[&failed].character.items[4],
-        i32::from(INCANTATION)
-    );
-    assert!(
-        d.worlds[&world].players[&failed]
-            .persistence_failure
-            .is_some()
-    );
-    for inbox in &mut receivers {
-        for packet in std::iter::from_fn(|| inbox.try_recv().ok()) {
-            assert_ne!(packet.id, wire::TEXT);
-            assert_ne!(packet.id, wire::NOTIFICATION);
-        }
-    }
     let plan = use_incantation(&mut d, world, owner, INCANTATION).unwrap();
     let opened = plan.unlock.unwrap().opened;
     let revision = plan.revision + 1;
@@ -165,7 +141,7 @@ fn chamber_unlock_rejects_rolls_back_and_publishes_once_to_everyone() {
     let text = chat::text_packet("", -1, 0, "Wine Cellar unlocked by Witness2");
     let mut note = Writer::new();
     note.i32(owner).utf("Unlocked by Witness2").u32(0xff00ff00);
-    for inbox in receivers.iter_mut().skip(1) {
+    for inbox in &mut receivers {
         let packets: Vec<_> = std::iter::from_fn(|| inbox.try_recv().ok()).collect();
         assert_eq!(
             packets

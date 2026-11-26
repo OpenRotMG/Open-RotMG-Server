@@ -142,8 +142,10 @@ fn only_real_carried_slots_not_equipped_cached_vault_or_observed_chest_are_candi
     v.objects.push(chest);
     assert!(select(&v, &c, &market, &policy).unwrap().is_none());
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     assert!(select(&v, &c, &market, &policy).unwrap().is_none());
     v.map.name = "Realm".into();
+    v.map.template = Some("realm".into());
     v.character.class = WARRIOR;
     v.character.items[..4].copy_from_slice(&[LONG_SWORD, -1, -1, -1]);
     assert!(select(&v, &c, &market, &policy).unwrap().is_none());

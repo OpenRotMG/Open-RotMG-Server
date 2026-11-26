@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {journaledReward} from './reward-journal.mjs';
 process.env.RUST_LOG='info,openrotmg::world::named_births=debug,openrotmg::world::native_hits=debug';
 const out=process.env.QA_RESULTS_DIR,bit=n=>1<<(n-1);
 const spec={class:0x31d,level:20,seed:825,world:1,equipment:[0xb40,-1,0xafc,0xacd],backpack:Array(8).fill(-1),stats:[770,252,75,25,50,50,75,0]};
@@ -17,6 +18,8 @@ export async function run(game){
   const config=JSON.parse(await readFile(join(out,'native/native.json'),'utf8')),token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
   const records=[],protectedUntil=new Map();let mystic;
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id),kinds=(s,k)=>s.diagnostic.entities.filter(e=>e.kind===k);
+  // Recovered top-level states: Crystal Idle/Instructions/Evaluation/Fail/StartBreak/BreakCrystal (actors.xml:4203), Prisoner Daisy_attack/Summon_the_clones/Whoa_nelly/Absolutely_Massive/Start_over_again (actors.xml:4365).
+  const top=(s,id)=>s.diagnostic.xml[id]?.states[1]?.name;
   function flags(s,id){const mask=s.view.objects.find(e=>e.id===id)?.condition_mask;assert(Number.isInteger(mask),'Published target conditions required');return mask;}
   async function save(label){const state=await game.inspect();records.push({label,state});await writeFile(join(out,'encounter.json'),JSON.stringify(records));return state;}
   async function cheat(actor,change){
@@ -48,36 +51,38 @@ export async function run(game){
   const crystal=kinds(state,0x935)[0];assert(crystal);
   game.check('one natural Mountains Crystal has selected million HP',kinds(state,0x935).length===1&&crystal.hp===1000000&&crystal.pos.x===placement.x+2.5&&crystal.pos.y===placement.y+2.5);
   await game.act({keys:[],duration_ms:600},{name:'natural-crystal',when:v=>v.nearby.some(e=>e.kind===0x935)});
-  for(let n=0;n<10&&entity(await game.inspect(),crystal.id).stage<3;n++)await fire(crystal.id);
-  // Heal runs on evaluation entry, not five seconds later: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/behaviors/Heal.cs
-  state=await save('evaluation');game.check('native damage admits evaluation and first heal restores Crystal',entity(state,crystal.id).stage===3&&entity(state,crystal.id).hp===1000000);
+  for(let n=0;n<10&&top(await game.inspect(),crystal.id)!=='Evaluation';n++)await fire(crystal.id,50);
+  // The executor runs a state's Heal on entry (next = offset), and the Crystal heals itself as a member of Crystals (behavior.cc:1306-1317).
+  // Admin Sword hits are exactly 4000, so without the entry heal Evaluation starts at or below 992000; one in-flight hit may land after it.
+  state=await save('evaluation');game.check('native damage admits evaluation and first heal restores Crystal',top(state,crystal.id)==='Evaluation'&&entity(state,crystal.id).hp>992000);
   await fire(crystal.id);state=await save('damaged');game.check('Crystal takes native damage during evaluation',entity(state,crystal.id).hp<1000000);
   await idle(5100);state=await save('healed');game.check('five-second evaluation heal restores Crystal',entity(state,crystal.id).hp===1000000);
-  const evaluation=entity(state,crystal.id).activated;
+  const evaluation=records.find(r=>r.label==='evaluation').state.view.time_ms;
   await idle(Math.max(0,evaluation+60200-state.view.time_ms));state=await save('failed');
-  game.check('insufficient damage reaches failure without releasing Prisoner',entity(state,crystal.id).stage===6&&!kinds(state,0x941).length);
+  game.check('insufficient damage reaches failure without releasing Prisoner',top(state,crystal.id)==='Fail'&&!kinds(state,0x941).length);
   game.check('failure emits selected Quiet projectiles',state.view.projectiles.some(p=>p.owner===crystal.id&&p.speed===10&&p.lifetime_ms===6000));
-  await idle(5100);state=await save('reset');game.check('failed Crystal resets healed and vulnerable',entity(state,crystal.id).stage===1&&entity(state,crystal.id).hp===1000000&&!(entity(state,crystal.id).condition&bit(25)));
+  await idle(5100);state=await save('reset');game.check('failed Crystal resets healed and vulnerable',top(state,crystal.id)==='Idle'&&entity(state,crystal.id).hp===1000000&&!(entity(state,crystal.id).condition&bit(25)));
   game.check('native failure-ring hit applies Quiet',!!(state.view.character.conditions&bit(2))&&state.view.character.mp===0);
-  for(let n=0;n<20&&entity(await game.inspect(),crystal.id)?.stage!==4;n++)await fire(crystal.id,500);
-  state=await save('cracked');game.check('native burst crosses five-percent threshold into shielded break',entity(state,crystal.id)?.stage===4&&!!(entity(state,crystal.id).condition&bit(25)));
+  // Prepared burst: the 50k (5%) threshold must land between 5s self-heals, so one continuous Admin Sword act (~17 x 4000) stands in
+  // for the XML's 'large group'; 3s keeps the act inside the 4s StartBreak (a 4.5s act ran into BreakCrystal, VPS 7e1a96c1).
+  for(let n=0;n<4&&top(await game.inspect(),crystal.id)!=='StartBreak';n++)await fire(crystal.id,3000);
+  state=await save('cracked');game.check('prepared continuous native burst crosses five-percent threshold into shielded break',top(state,crystal.id)==='StartBreak'&&!!(entity(state,crystal.id).condition&bit(25)));
   await idle(4300);state=await save('released');const prisoner=kinds(state,0x941)[0];assert(prisoner);
   game.check('release replaces Crystal with shielded Prisoner and clears damage credit',!entity(state,crystal.id)&&prisoner.hp===27000&&!!(prisoner.condition&bit(25))&&Object.keys(prisoner.damage).length===0);
-  await idle(1000);state=await save('steeds');const steeds=kinds(state,0x943);game.check('Prisoner produces three owned Steeds',steeds.filter(e=>e.quest===prisoner.quest).length===3);
+  await idle(1000);state=await save('steeds');const steeds=kinds(state,0x943);game.check('Prisoner produces three owned Steeds',steeds.filter(e=>e.parent===prisoner.id).length===3);
   await approach(game,prisoner.id,5);await game.act({keys:[],duration_ms:700},{name:'prisoner-released',when:v=>v.nearby.some(e=>e.kind===0x941)});
   const samples=[];
   await sample(Math.max(0,prisoner.activated+21500-(await game.observe()).game_ms),samples);
   await writeFile(join(out,'daisy.json'),JSON.stringify(samples));
-  game.check('Daisy moves and alternates shield/vulnerability',samples.some(s=>entity(s,prisoner.id)?.stage===1&&!(entity(s,prisoner.id).condition&bit(25)))&&samples.some(s=>entity(s,prisoner.id)?.stage===1&&(entity(s,prisoner.id).condition&bit(25)))&&samples.some(s=>Math.hypot(entity(s,prisoner.id).pos.x-prisoner.pos.x,entity(s,prisoner.id).pos.y-prisoner.pos.y)>.2));
+  game.check('Daisy moves and alternates shield/vulnerability',samples.some(s=>top(s,prisoner.id)==='Daisy_attack'&&!(entity(s,prisoner.id).condition&bit(25)))&&samples.some(s=>top(s,prisoner.id)==='Daisy_attack'&&(entity(s,prisoner.id).condition&bit(25)))&&samples.some(s=>Math.hypot(entity(s,prisoner.id).pos.x-prisoner.pos.x,entity(s,prisoner.id).pos.y-prisoner.pos.y)>.2));
   for(const [owner,speed] of [[prisoner.id,80],[prisoner.id,47]])game.check('Daisy projectile speed '+speed,samples.some(s=>s.view.projectiles.some(p=>p.owner===owner&&p.speed===speed)));
   game.check('Steeds move and fire selected bolts',samples.some(s=>s.view.projectiles.some(p=>kinds(s,0x943).some(e=>e.id===p.owner)&&p.speed===67))&&samples.some(s=>steeds.some(e=>{const p=entity(s,e.id)?.pos;return p&&Math.hypot(p.x-e.pos.x,p.y-e.pos.y)>.2;})));
   game.check('native hits publish Weak during Daisy',samples.some(s=>s.view.character.conditions&bit(3)));
-  for(let n=0;n<15&&entity(await game.inspect(),prisoner.id).stage!==3;n++)await idle(500);
-  await idle(1500);state=await save('clones');const clones=kinds(state,0x942).filter(e=>e.quest===prisoner.quest);
-  const tosses=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.includes('"message":"named tosses admitted within owned and shared budgets"')).map(l=>JSON.parse(l).fields);
-  const toss=tosses.findLast(e=>e.owner===prisoner.id&&e.kind===0x942);assert(toss,'Observed Clone toss admission required');
-  await writeFile(join(out,'clone-admission.json'),JSON.stringify({toss,clones}));
-  game.check('clone phase produces four births plus terrain-admitted owned tosses',toss.requested===4&&toss.admitted>=0&&toss.admitted<=4&&clones.length===4+toss.admitted&&clones.every(e=>e.hp===15000&&e.expires-e.activated===17000));
+  for(let n=0;n<15&&top(await game.inspect(),prisoner.id)!=='Summon_the_clones';n++)await idle(500);
+  await idle(1500);state=await save('clones');const clones=kinds(state,0x942).filter(e=>e.parent===prisoner.id);
+  await writeFile(join(out,'clone-admission.json'),JSON.stringify({clones}));
+  // Summon_the_clones makes four Clones and tosses up to four more onto placeable ground (actors.xml:4437-4441).
+  game.check('clone phase produces four births plus terrain-admitted owned tosses',clones.length>=4&&clones.length<=8&&clones.every(e=>e.hp===15000));
   mystic=await game.join({class:0x323,level:20,seed:826,world:1,position:state.view.position,equipment:[-1,0xb2d,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]});await protect(mystic);
   for(const kind of [0x942,0x943]){
     state=await game.inspect();const child=kinds(state,kind).find(e=>!(flags(state,e.id)&bit(23))) ;assert(child,'Susceptible living child required');
@@ -90,16 +95,17 @@ export async function run(game){
   state=await save('boss-immune');game.check('loaded Prisoner remains Stasis immune',!(flags(state,prisoner.id)&bit(22)));
   const caster=(await mystic.observe()).session.character;await mystic.act({keys:['Insert'],duration_ms:250});
   game.check('caster escapes normally after the Stasis checks',(await mystic.observe()).world==='Nexus'&&(await mystic.observe()).session.character===caster);
-  for(let n=0;n<40&&entity(await game.inspect(),prisoner.id).stage!==5;n++)await idle(500);
-  state=await save('whoa');game.check('timed cycle reaches Whoa phase',entity(state,prisoner.id).stage===5);
+  for(let n=0;n<40&&top(await game.inspect(),prisoner.id)!=='Whoa_nelly';n++)await idle(500);
+  state=await save('whoa');game.check('timed cycle reaches Whoa phase',top(state,prisoner.id)==='Whoa_nelly');
   await approach(game,prisoner.id,1);
-  const late=[];await sample(Math.max(0,entity(state,prisoner.id).activated+13000-(await game.observe()).game_ms),late);
+  // Whoa_nelly lasts 10s, then Absolutely_Massive grows to 260 (actors.xml:4458-4478).
+  const late=[];await sample(15000,late);
   await writeFile(join(out,'late-attacks.json'),JSON.stringify(late));
   game.check('late phases fire selected star-speed projectiles',late.some(s=>s.view.projectiles.some(p=>p.owner===prisoner.id&&p.speed===60&&p.lifetime_ms===1700)));
   for(const [condition,name] of [[4,'Slowed'],[11,'Confused']])game.check('native star hits apply '+name,late.some(s=>s.view.character.conditions&bit(condition)));
-  game.check('Massive phase grows selected boss',late.some(s=>entity(s,prisoner.id).stage===6&&entity(s,prisoner.id).size===260));
-  for(let n=0;n<40&&entity(await game.inspect(),prisoner.id).stage!==7;n++)await idle(500);
-  await idle(3200);state=await save('cycle');game.check('full cycle returns to Daisy and old Clones decay',entity(state,prisoner.id).stage===1&&!clones.some(c=>entity(state,c.id)));
+  game.check('Massive phase grows selected boss',late.some(s=>top(s,prisoner.id)==='Absolutely_Massive'&&entity(s,prisoner.id).size===260));
+  for(let n=0;n<40&&top(await game.inspect(),prisoner.id)!=='Start_over_again';n++)await idle(500);
+  await idle(3200);state=await save('cycle');game.check('full cycle returns to Daisy and old Clones decay',top(state,prisoner.id)==='Daisy_attack'&&!clones.some(c=>entity(state,c.id)));
   const xp=state.view.character.experience;
   let rateUntil=0;
   for(let n=0;n<100&&entity(await game.inspect(),prisoner.id);n++){
@@ -107,17 +113,22 @@ export async function run(game){
     await fire(prisoner.id,500);
   }
   state=await save('defeated');game.check('native combat defeats Prisoner and grants eligible XP',!entity(state,prisoner.id)&&state.view.character.experience>xp);
-  await idle(2000);state=await save('cleanup');game.check('defeat removes owned Steeds without respawning Crystal',!kinds(state,0x943).some(e=>e.quest===prisoner.quest)&&!kinds(state,0x935).length);
-  const rewards=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.includes('"message":"loot bag allocated"')||l.includes('"message":"enemy defeated"')).map(l=>JSON.parse(l).fields);
-  const death=rewards.findLastIndex(e=>e.message==='enemy defeated'&&e.entity===prisoner.id);assert(death>=0,'Prisoner defeat receipt required');
-  const previous=rewards.slice(0,death).findLastIndex(e=>e.message==='enemy defeated');
-  const drops=rewards.slice(previous+1,death).filter(e=>e.message==='loot bag allocated'&&e.owner===state.view.session.account);assert(drops.length===1,'One observed Prisoner private allocation required');const drop=drops[0];
-  const bag=entity(state,drop.entity);assert(bag?.items.some(i=>i!==-1),'Living Prisoner reward bag required');
-  game.check('Prisoner allocation owns only its selected reward pool',bag.extra_stats.some(([s,o])=>s===54&&o===state.view.session.account)&&bag.items.every(i=>[-1,0xb3f,0xa03,0xa1f,0xa20,0xa4c,0xa21,0xa34,0xa35].includes(i)));
-  await approach(game,bag.pos,.4);await game.act({keys:[],duration_ms:700},{name:'prisoner-reward',when:()=>true});
-  const before=await game.observe(),slot=bag.items.findIndex(i=>i!==-1),item=bag.items[slot];
-  await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot%4*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}}});state=await save('picked');
-  game.check('native pickup commits private reward once',state.view.character.items[4]===item&&state.view.character.inventory_revision===before.character.inventory_revision+1&&(!entity(state,bag.id)||entity(state,bag.id).items[slot]===-1));
+  // Recovered Steeds have no death rule (actors.xml Crystal Prisoner Steed), so they outlive the Prisoner; base removed them.
+  const orphans=new Set(kinds(state,0x943).map(e=>e.id));
+  await idle(2000);state=await save('cleanup');game.check('defeat stops Steed births without respawning Crystal',kinds(state,0x943).every(e=>orphans.has(e.id))&&!kinds(state,0x935).length);
+  const reward=await journaledReward(config,prisoner.id,state.view.session.character);
+  game.check('journaled Prisoner allocation follows its XML private rows for the eligible contributor',reward.valid&&reward.share>=.03);
+  const bags=state.diagnostic.entities.filter(e=>e.items?.some(i=>i!==-1)&&e.extra_stats.some(([s,o])=>s===54&&o===state.view.session.account)&&Math.hypot(e.pos.x-reward.position.x,e.pos.y-reward.position.y)<1);
+  await writeFile(join(out,'reward.json'),JSON.stringify({reward,bags}));
+  let item=-1;
+  if(!reward.items.length)game.check('empty journaled roll publishes no private Prisoner bag',!bags.length);
+  else{
+    const bag=bags.find(b=>JSON.stringify(b.items.filter(i=>i!==-1).sort())===JSON.stringify([...reward.items].sort()));assert(bag,'Journaled Prisoner allocation must publish its private bag');
+    await approach(game,bag.pos,.4);await game.act({keys:[],duration_ms:700},{name:'prisoner-reward',when:()=>true});
+    const before=await game.observe(),slot=bag.items.findIndex(i=>i!==-1);item=bag.items[slot];
+    await game.act({keys:[],duration_ms:350,drag:{from:{x:634+slot%4*44,y:528+Math.floor(slot/4)*44},to:{x:634,y:428}}});state=await save('picked');
+    game.check('native pickup commits private reward once',state.view.character.items[4]===item&&state.view.character.inventory_revision===before.character.inventory_revision+1&&(!entity(state,bag.id)||entity(state,bag.id).items[slot]===-1));
+  }
   const safe=await mystic.observe();game.check('escaped caster stays alive without acquiring a reward',safe.world==='Nexus'&&safe.lifecycle.alive&&safe.session.character===caster&&safe.character.items.slice(4).every(i=>i===-1));
   const earned=state.view.character.experience;await idle(1000);game.check('Prisoner defeat XP is once only',(await game.observe()).character.experience===earned);
   await game.act({keys:['Insert'],duration_ms:250});const retained=await game.observe();game.check('Nexus reconnect retains living character and reward',retained.world==='Nexus'&&retained.session.character===state.view.session.character&&retained.character.items[4]===item&&retained.lifecycle.alive);

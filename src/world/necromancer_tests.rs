@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn necromancer_requires_both_level_twenty_records() {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     let class = content.get(0x321).unwrap();
     assert_eq!(class.slots[..4], [17, 19, 14, 9]);
     assert_eq!(
@@ -52,8 +52,9 @@ async fn necromancer_requires_both_level_twenty_records() {
 
 #[test]
 fn necromancer_skulls_drain_actual_damage_and_heal_around_caster() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Arc::new(Map {
+        elevation: None,
         width: 32,
         height: 32,
         cells: vec![
@@ -79,12 +80,15 @@ fn necromancer_skulls_drain_actual_damage_and_heal_around_caster() {
         (0xc16, 80, 140, 4.25),
         (0xc0e, 200, 135, 2.),
     ] {
-        let mut w = World::new(content.clone(), map.clone()).unwrap();
+        let mut w = World::in_domain(content.clone(), map.clone(), WorldDomain::NonRealm).unwrap();
         w.clock.set_paused(true);
         let players: [i32; 4] = std::array::from_fn(|i| {
             let mut ch = Character::fresh(content.get(0x321).unwrap()).unwrap();
+            ch.name = format!("Necromancer{i}");
             ch.account = i as i32 + 1;
-            ch.id = 1;
+            ch.id = i as i32 + 1;
+            ch.level = 10;
+            ch.exp = crate::store::level_start(ch.level).unwrap();
             ch.base[0] = 670;
             ch.base[1] = 385;
             ch.hp = 100;
@@ -122,6 +126,7 @@ fn necromancer_skulls_drain_actual_damage_and_heal_around_caster() {
             kind,
         };
         w.activate_ability(caster, slot, item, target).unwrap();
+        crate::world::xml::tests::drain_events(&mut w).unwrap();
         assert_eq!(w.entities[&enemy].hp, 1000 - dealt, "{kind:#x}");
         assert!(!w.entities.contains_key(&weak));
         for id in immune {

@@ -4,6 +4,8 @@ import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const kind=Number(process.env.CUBE_KIND);
 assert([0x60e,0x60f,0x610].includes(kind),'Set CUBE_KIND to 1550, 1551 or 1552');
+// Keep the prepared startup independent of ambient map and spawn rolls.
+export const realmSeed=105;
 const spec={class:0x30e,level:3,seed:842,world:1,equipment:[0xa97,-1,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,20,0,30,20,0,0]};
 let cube;
 export async function prepare(api){

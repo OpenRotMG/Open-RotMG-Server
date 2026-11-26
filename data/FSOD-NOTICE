@@ -4,10 +4,15 @@ https://github.com/ossimc82/fabiano-swagger-of-doom/tree/6fd20aad4a7905b13f25389
 
 Install scripts/requirements-realm-maps.txt, then reproduce with
 python3 scripts/import-realm-maps.py. Source Git blobs are pinned in that
-script. Conversion drops unused elevation and locally rounds sharp road
-bends, restoring vacated cells from the nearest source biome and clearing
-scenery only in the new road footprint. Water, region markers and road
-connectivity are retained. Runtime replaces arrival markers and clears four
+script. Geometry conversion locally rounds sharp road bends, restoring
+vacated cells from the nearest source biome and clearing scenery only in
+the new road footprint. realm-elevations.json schema1 binds each unchanged
+WMAP to its pinned source and .elevation.zlib layer: original V2 payload
+byte2 per three-byte cell, y-major/x-minor, u8 0..255 (zero is real height).
+These numeric layers retain source coordinates through road/arrival edits;
+no height is inferred from the modified grounds. They are candidate-map
+source elevation, not authenticated official 123.5.1 terrain. Water, region
+markers and road connectivity are retained. Runtime replaces arrival markers and clears four
 connected coastal 3x3 pads, then applies bounded population and setpieces.
 
 davy-templates.json (templates without a note): cells from

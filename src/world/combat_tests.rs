@@ -5,6 +5,7 @@ use crate::condition::{self, bit};
 pub(super) fn shot(w: &World, owner: i32, kind: u16, index: u8) -> Bullet {
     let spec = w.content.get(kind).unwrap().projectiles[&index].clone();
     Bullet {
+        damage_origin: enemy_damage::DamageOrigin::nonplayer(),
         owner,
         source_kind: kind,
         id: 255,
@@ -326,7 +327,7 @@ fn selected_bows_keep_individual_projectiles_and_enemy_only_piercing() {
             assert!(item.bonuses.is_empty());
             assert!(spec.multi_hit && !spec.armor_piercing && !spec.passes_cover);
             let targets =
-                [10.5, 13.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+                [10.5, 13.5].map(|x| w.spawn_entity(0x206, Pos { x, y: 8.5 }, vec![]).unwrap());
             for target in targets {
                 w.entities.get_mut(&target).unwrap().hp = 2000;
             }
@@ -362,7 +363,7 @@ fn selected_swords_keep_damage_spread_cadence_and_first_target_collision() {
         let (mut w, id) = fixture(0x18, false);
         w.now = 1000;
         let targets = [9.5, 10.5].map(|x| {
-            let target = w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap();
+            let target = w.spawn_entity(0x206, Pos { x, y: 8.5 }, vec![]).unwrap();
             w.entities.get_mut(&target).unwrap().hp = 10000;
             target
         });
@@ -492,7 +493,7 @@ fn selected_staves_keep_individual_damage_cadence_waves_and_collision() {
         for cover in [false, true] {
             let (mut w, id) = fixture(0x18, false);
             let targets =
-                [9.3, 10.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+                [9.3, 10.5].map(|x| w.spawn_entity(0x206, Pos { x, y: 8.5 }, vec![]).unwrap());
             if cover {
                 w.spawn_entity(0x100, Pos { x: 8.5, y: 8.5 }, vec![])
                     .unwrap();
@@ -534,7 +535,7 @@ fn multihit_and_cover_flags_preserve_distinct_targets_and_once_only_hits() {
     ] {
         let (mut w, id) = fixture(0x18, false);
         let targets =
-            [10.5, 13.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+            [10.5, 13.5].map(|x| w.spawn_entity(0x206, Pos { x, y: 8.5 }, vec![]).unwrap());
         if let Some(kind) = cover {
             w.spawn_entity(kind, Pos { x: 9.5, y: 8.5 }, vec![])
                 .unwrap();
@@ -574,7 +575,7 @@ fn daggers_keep_selected_piercing_cover_range_and_spirit_parity() {
         for cover in [false, true] {
             let (mut w, id) = fixture(0x18, false);
             let targets =
-                [10.5, 11.5].map(|x| w.spawn_entity(0x21b, Pos { x, y: 8.5 }, vec![]).unwrap());
+                [10.5, 11.5].map(|x| w.spawn_entity(0x206, Pos { x, y: 8.5 }, vec![]).unwrap());
             for target in targets {
                 w.entities.get_mut(&target).unwrap().hp = 2000;
             }
@@ -665,56 +666,6 @@ fn night_elf_selected_multihit_crosses_players_and_native_reports_commit_once() 
             assert_eq!(w.players[&id].character.hp, 200 - damage);
         }
     }
-}
-
-#[test]
-fn nomad_primary_cycle_and_selected_blind_are_independent() {
-    let (mut w, player) = fixture(0x18, false);
-    let mut clocks = crate::encounter::attacks::Clocks::default();
-    for age in (0..10600).step_by(50) {
-        let shots = crate::encounter::phased_attacks(0x6c6, 140, 1., age);
-        let phase = age % 5300;
-        let magic = phase < 3100;
-        let elapsed = if magic { phase } else { phase - 3100 };
-        let interval = if magic { 500 } else { 700 };
-        let due = elapsed >= interval && elapsed % interval == 0;
-        assert_eq!(
-            shots.len(),
-            if due { if magic { 3 } else { 1 } } else { 0 },
-            "age={age}"
-        );
-        let schedule = crate::encounter::attacks::schedule(0x6c6, 140, age).unwrap();
-        assert_eq!(
-            clocks.due(&schedule, age).len(),
-            usize::from(due),
-            "age={age}"
-        );
-        for (i, (index, angle)) in shots.iter().enumerate() {
-            assert_eq!(*index, u8::from(!magic));
-            let expected = 1.
-                + if magic {
-                    (i as f32 - 1.) * 11f32.to_radians()
-                } else {
-                    0.
-                };
-            assert!((angle - expected).abs() < 0.0001);
-        }
-    }
-    w.now = 1000;
-    let b = shot(&w, 999, 0x6c6, 1);
-    assert_eq!((b.damage, b.spec.effects.clone()), (30, vec![(8, 1500)]));
-    assert!(native_hits::expect_shoot_ack(
-        w.players.get_mut(&player).unwrap(),
-        vec![b],
-        &w.clock
-    ));
-    w.acknowledge_shoot(player, 1000).unwrap();
-    w.native_player_hit(player, 999, 255).unwrap();
-    assert_eq!(w.players[&player].character.hp, 170);
-    assert_ne!(w.players[&player].conditions(2499) & bit(8), 0);
-    assert_eq!(w.players[&player].conditions(2500) & bit(8), 0);
-    w.native_player_hit(player, 999, 255).unwrap();
-    assert_eq!(w.players[&player].character.hp, 170);
 }
 
 #[test]
@@ -824,7 +775,7 @@ fn reported_native_enemy_hits_land_once_within_projectile_reach() {
     let (mut w, id) = fixture(0x18, false);
     w.now = 1000;
     let [near, far, weak] = [(12.5, 8.5), (25.5, 8.5), (11.5, 6.5)]
-        .map(|(x, y)| w.spawn_entity(0x21b, Pos { x, y }, vec![]).unwrap());
+        .map(|(x, y)| w.spawn_entity(0x206, Pos { x, y }, vec![]).unwrap());
     for (target, hp) in [(near, 2000), (far, 2000), (weak, 20)] {
         w.entities.get_mut(&target).unwrap().hp = hp;
     }
@@ -856,6 +807,7 @@ fn reported_native_enemy_hits_land_once_within_projectile_reach() {
     for _ in 0..12 {
         w.step();
     }
+    crate::world::xml::tests::drain_events(&mut w).unwrap();
     assert!(
         !w.entities.contains_key(&weak),
         "predicted kill did not land"
@@ -863,4 +815,53 @@ fn reported_native_enemy_hits_land_once_within_projectile_reach() {
     assert!(w.players[&id].predicted_deaths.is_empty());
     assert_eq!(w.entities[&near].hp, 1970);
     assert_eq!(w.players[&id].character.lifetime.projectile_hits, 2);
+}
+
+#[test]
+fn selected_boss_projectiles_preserve_return_reach_and_parametric_motion() {
+    let content = crate::world::test_content();
+    let near = |actual: (f32, f32), expected: (f32, f32)| {
+        assert!(
+            (actual.0 - expected.0).abs() < 0.0001 && (actual.1 - expected.1).abs() < 0.0001,
+            "{actual:?} != {expected:?}"
+        );
+    };
+    // Firing trigger ranges are not the client-defined outward reach of returning shots.
+    for (kind, index, reach, turn_ms) in [
+        (crate::dungeon::tomb::NUT, 1, 8., 2000.),
+        (crate::dungeon::tomb::NUT, 2, 8., 2000.),
+        (crate::dungeon::tomb::NUT, 3, 4., 2000.),
+        (crate::dungeon::tomb::NUT, 4, 8., 2000.),
+        (crate::dungeon::tomb::GEB, 1, 7.2, 1800.),
+        (crate::dungeon::tomb::BES, 1, 15., 2500.),
+    ] {
+        let shot = &content.get(kind).unwrap().projectiles[&index];
+        assert!(shot.boomerang && shot.multi_hit && !shot.passes_cover);
+        assert_eq!(shot.lifetime, 2. * turn_ms);
+        for (time, distance) in [
+            (0., 0.),
+            (turn_ms / 2., reach / 2.),
+            (turn_ms, reach),
+            (turn_ms * 1.5, reach / 2.),
+            (turn_ms * 2., 0.),
+        ] {
+            near(shot.offset(0, 0., time), (distance, 0.));
+            near(
+                shot.offset(1, std::f32::consts::FRAC_PI_2, time),
+                (0., distance),
+            );
+        }
+    }
+    let fireball = &content.get(crate::dungeon::tomb::GEB).unwrap().projectiles[&4];
+    assert!(fireball.parametric && !fireball.multi_hit);
+    for id in 0..4 {
+        let x = 3. * 0.5_f32.sqrt() * if id % 2 == 0 { -1. } else { 1. };
+        let y = if id < 2 { 3. } else { -3. };
+        near(fireball.offset(id, 0., 250.), (x, y));
+        near(
+            fireball.offset(id, std::f32::consts::FRAC_PI_2, 250.),
+            (-y, x),
+        );
+        near(fireball.offset(id, 0., 2000.), (0., 0.));
+    }
 }

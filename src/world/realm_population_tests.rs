@@ -2,7 +2,7 @@ use super::*;
 
 fn directory(limit: usize) -> Directory {
     let data = std::path::Path::new("data");
-    Directory::test_with_seed(data, Arc::new(Content::load(data).unwrap()), limit, 1344).unwrap()
+    Directory::test_with_seed(data, Arc::new(crate::world::test_content()), limit, 1344).unwrap()
 }
 
 #[test]
@@ -12,7 +12,7 @@ fn pending_allocation_serializes_repeated_demand_and_reports_worker_failure() {
     d.issue(2, 2, 1).unwrap();
     let id = d.next_world;
     d.next_world += 1;
-    let world = d.make("realm-shore", "Realm", false, None).unwrap();
+    let world = d.make("realm", "Realm", false, None).unwrap();
     let (sender, receiver) = oneshot::channel();
     d.realm_population.preparing = Some((id, receiver));
     for _ in 0..10 {
@@ -206,9 +206,8 @@ fn entrance_lease_requires_every_closed_hidden_condition_and_valid_metadata() {
 
 #[test]
 fn closed_hidden_predecessors_release_space_without_deleting_owned_entities() {
-    let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
-    let mut d = Directory::prepared(data, content, 16, 1344, 8).unwrap();
+    let content = Arc::new(crate::world::test_content());
+    let mut d = Directory::fixture(content, 16, 1344, Some(1344), 8).unwrap();
     let origins: Vec<_> = d.endgame.realms.keys().copied().collect();
     let mut holds = Vec::new();
     let mut bindings = Vec::new();
@@ -603,7 +602,7 @@ fn forty_scattered_admissions_do_not_multiply_realms() {
 fn eight_current_slots_keep_free_hard_admission_without_an_empty_spare() {
     let mut d = directory(72);
     for id in 2..=7 {
-        let world = d.make("realm-shore", "Realm", false, None).unwrap();
+        let world = d.make("realm", "Realm", false, None).unwrap();
         let mut record = endgame::RealmRecord::new(
             crate::endgame::RealmCycle::new(world.hero_identities()).unwrap(),
             d.tick * 50,
@@ -716,7 +715,7 @@ fn token_closed_realms_keep_closure_identity_and_allocate_an_admissible_spare() 
 #[test]
 fn marked_accounts_only_enter_the_least_populated_realm() {
     let data = std::path::Path::new("data");
-    let mut content = Content::load(data).unwrap();
+    let mut content = test_content();
     content.reviewed_accounts =
         crate::content::reviews::Reviews::new(vec![crate::content::reviews::Review {
             account: 7,

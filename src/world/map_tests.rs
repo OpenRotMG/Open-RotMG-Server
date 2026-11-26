@@ -2,9 +2,9 @@ use super::*;
 
 #[test]
 fn lair_generated_rooms_keep_coherent_families_and_reachable_enemies() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     for seed in [0, 1, 2, 3, 858, 12351, 54321, u64::MAX] {
-        let map = crate::dungeon::undead::generate(&content, seed).unwrap();
+        let map = crate::dungeon::generate_selected(&content, "undead-lair", seed).unwrap();
         let mut families = BTreeMap::<u8, BTreeSet<u8>>::new();
         for cell in &map.cells {
             let family = match cell.object {
@@ -55,8 +55,9 @@ fn lair_generated_rooms_keep_coherent_families_and_reachable_enemies() {
 
 #[test]
 fn serialized_development_map_preserves_schema_and_private_visibility() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 8,
         height: 8,
         cells: vec![

@@ -13,11 +13,21 @@ from realm_contract import check_realms
 from update import LIMIT, unpack
 
 
+RUNTIME_XML = frozenset('data/game/123.5.1/' + name for name in (
+    'game.xml', 'actors.xml', 'geometry.xml', 'strings.xml'))
+
+
 def source_archive(revision, destination):
-    # Preservation references and witness ledgers stay in Git, not the size-bounded runtime release.
-    subprocess.run(['git', 'archive', revision, '-o', str(destination), '--', '.',
-                    ':(exclude)data/reference',
-                    ':(exclude,glob)data/realms/*/reconstruction-decisions.json'], check=True)
+    paths = subprocess.check_output(['git', 'ls-tree', '-rz', '--name-only', revision]).decode().split('\0')
+    missing = RUNTIME_XML - set(paths)
+    if missing:
+        raise RuntimeError('Missing selected runtime XML: ' + ', '.join(sorted(missing)))
+    # Preservation and normalization inputs stay in Git; only selected rules enter the release.
+    paths = [path for path in paths if path
+             and not path.startswith(('data/reference/', 'tests/fixtures/xml_runtime/'))
+             and not (path.startswith('data/game/') and path not in RUNTIME_XML)
+             and not (Path(path).match('data/realms/*/reconstruction-decisions.json'))]
+    subprocess.run(['git', 'archive', revision, '-o', str(destination), '--', *paths], check=True)
 
 
 def main():

@@ -1,15 +1,26 @@
-use crate::content::{Content, Map};
-use anyhow::{Context, Result, ensure};
+use super::prepare::CompiledGeometryRecipe;
+use crate::content::{
+    Content, Map,
+    game::geometry::{EncodedMap, Geometry},
+};
+use anyhow::{Context, Result, bail, ensure};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
-use std::{collections::VecDeque, path::Path, sync::Arc};
+#[cfg(test)]
+use std::path::Path;
+use std::{collections::VecDeque, sync::Arc};
 
+#[cfg(test)]
 use super::prepare::{
-    ScopedLava, WORLD02_ID, WORLD03_ID, WORLD04_ID, WORLD05_ID, WORLD06_ID, WORLD07_ID, WORLD08_ID,
-    WORLD09_ID, WORLD10_ID, WORLD11_ID, WORLD12_ID, WORLD13_ID, bounded_read, read_recipe,
-    safe_path, valid_hash, valid_id,
+    ScopedLava, WORLD02_ID, WORLD03_ID, bounded_read, read_recipe, safe_path, valid_hash, valid_id,
+};
+use super::prepare::{
+    WORLD04_ID, WORLD05_ID, WORLD06_ID, WORLD07_ID, WORLD08_ID, WORLD09_ID, WORLD10_ID, WORLD11_ID,
+    WORLD12_ID, WORLD13_ID,
 };
 use serde::Deserialize;
 
+#[cfg(test)]
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Entry {
@@ -24,6 +35,7 @@ enum Entry {
     },
 }
 
+#[cfg(test)]
 pub(crate) struct Asset {
     pub(crate) id: String,
     pub(crate) bytes: Vec<u8>,
@@ -33,7 +45,9 @@ pub(crate) struct Asset {
     expected_dimensions: [usize; 2],
     expected_content: Option<[String; 2]>,
     lava: Option<Box<ScopedLava>>,
+    elevation: Option<Arc<super::elevation::SourceElevation>>,
 }
+#[cfg(test)]
 impl Asset {
     fn validate_lava(&self, map: &Map, content: &Content, phase: &str) -> Result<()> {
         if let Some(lava) = &self.lava {
@@ -81,43 +95,63 @@ struct Sites {
     sites: Vec<Site>,
 }
 
+pub(crate) enum LinkedLayout {
+    Baseline {
+        name: String,
+        asset: Arc<EncodedMap>,
+    },
+    Reconstruction(Arc<CompiledGeometryRecipe>),
+}
 pub(crate) enum Source {
+    Linked(LinkedLayout, u32),
+    #[cfg(test)]
     Encoded(Asset),
     #[cfg(test)]
     Fixture(Arc<Map>),
 }
 impl Source {
-    pub(crate) fn sites(&self) -> Result<Vec<Site>> {
-        let asset = match self {
-            Self::Encoded(asset) if asset.profile == "fsod" => return Ok(Vec::new()),
-            Self::Encoded(asset) => asset,
+    pub(crate) fn weight(&self) -> usize {
+        match self {
+            Self::Linked(_, weight) => *weight as usize,
             #[cfg(test)]
-            Self::Fixture(_) => return Ok(Vec::new()),
+            _ => 1,
+        }
+    }
+    pub(crate) fn sites(&self) -> Result<Vec<Site>> {
+        let (id, sha256) = match self {
+            Self::Linked(LinkedLayout::Reconstruction(recipe), _) => {
+                (recipe.id(), &recipe.output_sha256)
+            }
+            Self::Linked(LinkedLayout::Baseline { .. }, _) => return Ok(Vec::new()),
+            #[cfg(test)]
+            Self::Encoded(asset) if asset.profile != "fsod" => (asset.id.as_str(), &asset.sha256),
+            #[cfg(test)]
+            _ => return Ok(Vec::new()),
         };
         let records: Vec<Sites> = serde_json::from_str(include_str!("../../data/realm-sites.json"))
             .context("parse authored quest-site registry")?;
-        let mut matches = records.into_iter().filter(|r| r.layout == asset.id);
+        let mut matches = records.into_iter().filter(|r| r.layout == id);
         let record = matches
             .next()
-            .with_context(|| format!("{} has no authored quest-site registry", asset.id))?;
+            .with_context(|| format!("{} has no authored quest-site registry", id))?;
         ensure!(
             matches.next().is_none(),
             "duplicate quest-site registry for {}",
-            asset.id
+            id
         );
         ensure!(
-            record.sha256 == asset.sha256,
+            &record.sha256 == sha256,
             "{} quest-site registry hash mismatch: expected {}, loaded {}",
-            asset.id,
+            id,
             record.sha256,
-            asset.sha256
+            sha256
         );
         let groves = record
             .sites
             .iter()
             .filter(|site| site.kind == 0x91f)
             .count();
-        let census = match asset.id.as_str() {
+        let census = match id {
             WORLD04_ID => Some((21, 6, 16, 1, 44)),
             WORLD05_ID => Some((19, 5, 22, 2, 48)),
             WORLD06_ID => Some((25, 5, 14, 0, 44)),
@@ -139,19 +173,22 @@ impl Source {
                     && record.sites.iter().filter(|s| s.kind == 0xdc2).count() == coils
                     && record.sites.iter().filter(|s| s.kind == 0x678).count() == oases,
                 "{} has invalid authored encounter census",
-                asset.id
+                id
             );
         } else {
             ensure!(
                 (17..25).contains(&groves),
                 "{} has invalid authored Grove count {groves}",
-                asset.id
+                id
             );
         }
         Ok(record.sites)
     }
     pub(crate) fn name(&self) -> &str {
         match self {
+            Self::Linked(LinkedLayout::Baseline { name, .. }, _) => name,
+            Self::Linked(LinkedLayout::Reconstruction(recipe), _) => recipe.id(),
+            #[cfg(test)]
             Self::Encoded(asset) => &asset.id,
             #[cfg(test)]
             Self::Fixture(_) => "procedural-test-fixture",
@@ -159,6 +196,29 @@ impl Source {
     }
     pub(crate) fn open(&self, content: &Content) -> Result<Arc<Map>> {
         match self {
+            Self::Linked(layout, _) => {
+                let name = self.name();
+                let started = std::time::Instant::now();
+                let mut map = match layout {
+                    LinkedLayout::Baseline { asset, .. } => asset.decode(content)?,
+                    LinkedLayout::Reconstruction(recipe) => recipe.decode(content)?,
+                };
+                prepare_arrivals(&mut map, content)
+                    .with_context(|| format!("prepare Realm layout {name}"))?;
+                if let LinkedLayout::Reconstruction(recipe) = layout {
+                    recipe.validate_loaded(&map, content)?;
+                }
+                tracing::info!(
+                    layout = name,
+                    width = map.width,
+                    height = map.height,
+                    scenery = map.cells.iter().filter(|c| c.object.is_some()).count(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "linked Realm layout opened"
+                );
+                Ok(Arc::new(map))
+            }
+            #[cfg(test)]
             Self::Encoded(asset) => {
                 let name = &asset.id;
                 let bytes = &asset.bytes;
@@ -191,6 +251,9 @@ impl Source {
                     [map.width, map.height],
                     map.cells.len()
                 );
+                if let Some(elevation) = &asset.elevation {
+                    map.elevation = Some(elevation.decode()?);
+                }
                 asset.validate_lava(&map, content, "before arrivals")?;
                 prepare_arrivals(&mut map, content)
                     .with_context(|| format!("prepare Realm layout {name}"))?;
@@ -212,6 +275,41 @@ impl Source {
         }
     }
 }
+pub(crate) fn linked_sources(content: &Content) -> Result<Vec<Source>> {
+    let game = content.game.as_ref().context("Realm GameData absent")?;
+    let world = game
+        .world_template("realm")
+        .context("World realm missing")?;
+    let binding = &game.maps[world.map as usize];
+    let Geometry::Pool(pool) = &binding.geometry else {
+        bail!(
+            "World realm map={}: requires a Realm layout pool",
+            binding.name
+        );
+    };
+    pool.entries
+        .iter()
+        .zip(&pool.weights)
+        .map(|(&entry, &weight)| {
+            let map = &game.maps[entry as usize];
+            let source = match &map.geometry {
+                Geometry::Encoded(asset) if asset.realm => LinkedLayout::Baseline {
+                    name: map.name.clone(),
+                    asset: asset.clone(),
+                },
+                Geometry::Reconstruction(recipe) => LinkedLayout::Reconstruction(recipe.clone()),
+                _ => bail!(
+                    "World realm map={} entry={}: requires Realm geometry",
+                    binding.name,
+                    map.name
+                ),
+            };
+            Ok(Source::Linked(source, weight))
+        })
+        .collect()
+}
+
+#[cfg(test)]
 pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
     let catalog = safe_path(path, "realm-catalog.json")?;
     let entries: Vec<Entry> = serde_json::from_slice(&bounded_read(&catalog, 64 * 1024)?)
@@ -236,6 +334,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                     expected_dimensions,
                     expected_content,
                     lava,
+                    elevation,
                 ) = match entry {
                     Entry::Baseline {
                         id,
@@ -259,6 +358,12 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                             "{id} requires its reviewed source recipe"
                         );
                         let contract = format!("{id} fsod baseline");
+                        let elevation = super::elevation::SourceElevation::load(
+                            path,
+                            &relative,
+                            &sha256,
+                            [2048, 2048],
+                        )?;
                         (
                             id,
                             safe_path(path, &relative)?,
@@ -268,6 +373,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                             [2048, 2048],
                             None,
                             None,
+                            Some(Arc::new(elevation)),
                         )
                     }
                     Entry::Reconstruction { recipe, sha256 } => {
@@ -276,6 +382,12 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                             format!("Realm recipe {recipe} expected output SHA-256 {sha256}")
                         })?;
                         let file = safe_path(&root, metadata.output())?;
+                        let elevation = super::elevation::SourceElevation::load(
+                            path,
+                            &format!("realms/{}", metadata.output()),
+                            &sha256,
+                            metadata.dimensions(),
+                        )?;
                         (
                             metadata.id().to_owned(),
                             file,
@@ -285,6 +397,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                             metadata.dimensions(),
                             metadata.content_identity(),
                             metadata.lava_scope(&root)?.map(Box::new),
+                            Some(Arc::new(elevation)),
                         )
                     }
                 };
@@ -314,6 +427,7 @@ pub(crate) fn sources(path: &Path) -> Result<Vec<Source>> {
                     expected_dimensions,
                     expected_content,
                     lava,
+                    elevation,
                 }))
             };
             load().with_context(|| format!("Realm catalog {} entry {index}", catalog.display()))

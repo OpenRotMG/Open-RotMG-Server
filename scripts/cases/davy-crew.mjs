@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {route} from './native-route.mjs';
 import {randomUUID} from 'node:crypto';
 
 export const fixture={class:0x30e,level:20,seed:863,world:'davy-jones-locker',worldSeed:863,position:w=>{const m=w.encounter_markers,roger=m.find(r=>r.kind===0xe45&&m.some(g=>g.kind===0xe31&&distance(g.position,r.position)<6));assert(roger,'No Ghost of Roger beside a Lil Ghost Pirate');return roger.position;},equipment:[0xb08,-1,0xb05,0xac5],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
@@ -33,16 +34,46 @@ export async function run(game){
   game.check('destroyed barrel releases collision tile',crossed.view.position.y<barrel.pos.y-.3);
   await game.act({keys:['a','s'],duration_ms:750});
   const room=await save('room-population'),ghost=room.diagnostic.entities.filter(e=>e.kind===0xe31).sort((a,b)=>distance(a.pos,room.view.position)-distance(b.pos,room.view.position))[0];assert(ghost&&distance(ghost.pos,room.view.position)<8);
-  for(let n=0;n<25;n++){if(!(await game.inspect()).diagnostic.entities.some(e=>e.id===ghost.id))break;await game.act({keys:[],duration_ms:250,target:{entity:ghost.id,camera_angle:-Math.PI/4,fire:true}});}
+  // Recovered Lil' Ghost Pirate (actors.xml:11098) stays invincible in Ini until a nearby player's help call wakes it.
+  let last=ghost.pos;
+  for(let n=0;n<40;n++){const g=(await game.inspect()).diagnostic.entities.find(e=>e.id===ghost.id);if(!g)break;last=g.pos;await game.act({keys:[],duration_ms:500,target:{entity:ghost.id,camera_angle:-Math.PI/4,fire:true}});}
   const dead=await save('ghost-killed');game.check('ordinary staff defeats a renewable room ghost',!dead.diagnostic.entities.some(e=>e.id===ghost.id));
-  await game.act({keys:[],duration_ms:6500},{name:'ship-ghost-regrowth',when:()=>true});const regrown=await save('ghost-regrown');
-  game.check('nearby revisit regenerates a new ghost rather than resurrecting old identity',regrown.diagnostic.entities.some(e=>e.kind===0xe31&&e.id!==ghost.id&&distance(e.home,ghost.home)<.01));
+  await game.act({keys:[],duration_ms:1500},{name:'ship-ghost-regrowth',when:()=>true});const regrown=await save('ghost-regrown');
+  // Its MetamorphoseAtDeath (posJitter 2, actors.xml:11143) replaces it with a new identity beside the corpse.
+  game.check('defeat regenerates a new ghost beside it rather than resurrecting old identity',regrown.diagnostic.entities.some(e=>e.kind===0xe31&&e.id!==ghost.id&&distance(e.home,last)<=2.9));
   const roger=regrown.diagnostic.entities.find(e=>e.kind===0xe45&&distance(e.pos,regrown.view.position)<13);assert(roger);
-  let souls=[];
-  for(let n=0;n<16;n++){const s=await save('roger-offspring');souls=s.diagnostic.entities.filter(e=>e.kind===0xe48&&e.parent===roger.id);game.check('Roger offspring remain bounded at sample '+n,souls.length<=4);if(souls.some(e=>e.stage===1))break;await game.act({keys:[],duration_ms:500});}
-  game.check('natural Roger produces actual owned charging Lost Soul offspring',souls.some(e=>e.stage===1));
-  await game.act({keys:[],duration_ms:3000},{name:'ship-room-crew',when:()=>true});const final=await save('room-revisit');
-  game.check('observed charging Souls expire without attacking them',souls.filter(e=>e.stage===1).every(e=>!final.diagnostic.entities.some(other=>other.id===e.id)));
+  // Recovered Roger (actors.xml:12071) keeps up to four owned Lost Souls with a short Charge and contact Explode.
+  const first=new Map(),tracked=new Set(),shots=regrown.diagnostic.character.shots;
+  let charging=false,exploded;
+  async function contactVolley(s){
+    const log=await readFile(join(out,'native/server.log'),'utf8');
+    return log.split('\n').filter(l=>l.startsWith('{')&&l.includes('volley_attempt')).flatMap(l=>JSON.parse(JSON.parse(l).fields.record).data.facts??[]).find(({event,values:v})=>
+      event==='volley_attempt'&&v.source_kind===0xe48&&tracked.has(v.owner)&&v.shots.length===6&&v.recipients.some(([,actor,player])=>actor===s.view.session.character&&player===s.view.session.player)&&!s.diagnostic.entities.some(e=>e.id===v.owner));
+  }
+  for(let n=0;n<36&&!(charging&&exploded);n++){
+    const s=await save('soul-approach'),v=s.view.position;
+    const remaining=s.diagnostic.entities.filter(e=>e.kind===0xe48&&e.parent===roger.id);
+    game.check('Roger offspring remain bounded at sample '+n,remaining.length<=4);
+    for(const e of remaining){
+      tracked.add(e.id);
+      if(!first.has(e.id))first.set(e.id,e.pos);
+      if(distance(v,e.pos)<4.55&&distance(first.get(e.id),e.pos)>.3)charging=true;
+    }
+    // The short contact volley can disappear before the next client snapshot. Match its actual recipient and retired owner in the native journal.
+    exploded??=await contactVolley(s);
+    if(charging&&exploded)break;
+    const soul=remaining.sort((a,b)=>distance(v,a.pos)-distance(v,b.pos))[0];
+    const goal=soul?.pos??s.diagnostic.entities.find(e=>e.id===roger.id)?.pos;assert(goal,'No Roger or owned Soul during contact approach');
+    const reach=charging?1.3:3.5;
+    if(distance(v,goal)<=reach){await game.act({keys:[],duration_ms:150});continue;}
+    const response=await fetch(config.origin+'/dev/map?player='+s.diagnostic.player,{headers:{Authorization:'Bearer '+token}});assert(response.ok);
+    const {points}=route(await response.json(),v,goal,{reach});
+    const next=points.find(p=>distance(p,v)>.5)??goal,dx=next.x-v.x,dy=next.y-v.y;
+    await game.act({keys:Math.abs(dx)>Math.abs(dy)?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']),duration_ms:150});
+  }
+  game.check('natural Roger produces actual owned charging Lost Soul offspring',charging);
+  await game.act({keys:[],duration_ms:500},{name:'ship-room-crew',when:()=>true});const final=await save('room-revisit');
+  game.check('charging Souls that reach the player explode without being attacked',!!exploded&&final.diagnostic.character.shots===shots&&final.diagnostic.entities.filter(e=>e.kind===0xe48&&e.parent===roger.id).length<=4);
   game.check('barrel remains destroyed during room revisit',!final.diagnostic.entities.some(e=>e.id===barrel.id));
   game.check('prepared room has no invented Maggot or Sack spawns',!final.diagnostic.entities.some(e=>e.kind===0xe46||e.kind===0xe47));
 }

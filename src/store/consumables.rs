@@ -39,8 +39,9 @@ impl Store {
                 && (0..i32::MAX).contains(&write.revision),
             "invalid inventory potion reservation"
         );
+        let operation = self.world_operation.clone();
         self.call(move |db| {
-            let tx = db.transaction()?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let (raw, items): (String,String) = tx.query_row("SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",params![write.id,write.account,write.revision],|r|Ok((r.get(0)?,r.get(1)?))).context("inventory potion conflict: dead, foreign or stale character")?;
             let _: Character = serde_json::from_str(&raw)?;
             let mut previous: Vec<i32> = serde_json::from_str(&items)?;
@@ -48,6 +49,7 @@ impl Store {
             previous[slot] = next;
             ensure!(previous == write.items, "potion may only consume its reserved slot");
             ensure!(tx.execute("UPDATE characters SET stats=json_set(stats,'$.lifetime.inventory_potion_used',json('true')),items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",params![write.id,write.account,write.revision,serde_json::to_string(&write.items)?])? == 1,"inventory potion commit lost reservation");
+            world_events::finish_operation(&tx, operation.as_ref(), &serde_json::json!({"revision":write.revision+1}))?;
             tx.commit()?;
             Ok(write.revision+1)
         }).await
@@ -70,8 +72,9 @@ impl Store {
                     .all(|v| slot.is_none() && v.account == write.account),
             "invalid XP booster reservation"
         );
+        let operation = self.world_operation.clone();
         self.call(move |db| {
-            let tx = db.transaction()?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let (raw, items): (String, String) = tx.query_row(
                 "SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![write.id, write.account, write.revision], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -91,6 +94,7 @@ impl Store {
                 params![write.id, write.account, write.revision, serde_json::to_string(&write.items)?, serde_json::to_string(&boost)?])?;
             ensure!(n == 1, "XP booster commit lost its reservation");
             for vault in vaults { vaults::save(&tx, &vault)?; }
+            world_events::finish_operation(&tx, operation.as_ref(), &serde_json::json!({"revision":write.revision+1}))?;
             tx.commit()?;
             Ok(write.revision + 1)
         }).await
@@ -140,8 +144,9 @@ impl Store {
             "invalid dye revision"
         );
         let dyes = self.dyes.clone();
+        let operation = self.world_operation.clone();
         self.call(move |db| {
-            let tx = db.transaction()?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let (raw, items): (String, String) = tx.query_row(
                 "SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![write.id,write.account,write.revision], |r| Ok((r.get(0)?,r.get(1)?)))
@@ -166,6 +171,7 @@ impl Store {
             let n = tx.execute("UPDATE characters SET stats=json_set(stats,'$.tex1',?5,'$.tex2',?6),items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![write.id,write.account,write.revision,serde_json::to_string(&write.items)?,saved.tex1,saved.tex2])?;
             ensure!(n == 1, "dye commit lost its reservation");
+            world_events::finish_operation(&tx, operation.as_ref(), &serde_json::json!({"revision":write.revision+1}))?;
             tx.commit()?;
             Ok(write.revision + 1)
         }).await
@@ -203,8 +209,9 @@ impl Store {
         );
         let pet = content.companion_kind(&metadata.object)?;
         let consumable = item.consumable;
+        let operation = self.world_operation.clone();
         self.call(move |db| {
-            let tx = db.transaction()?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let (raw,items): (String,String) = tx.query_row(
                 "SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![write.id,write.account,write.revision],|r| Ok((r.get(0)?,r.get(1)?)))
@@ -219,6 +226,7 @@ impl Store {
             let n = tx.execute("UPDATE characters SET stats=json_set(stats,'$.pet_kind',?5),items=?4,revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![write.id,write.account,write.revision,serde_json::to_string(&write.items)?,selected])?;
             ensure!(n == 1,"companion selection lost its reservation");
+            world_events::finish_operation(&tx, operation.as_ref(), &serde_json::json!({"revision":write.revision+1}))?;
             tx.commit()?;
             Ok(write.revision+1)
         }).await

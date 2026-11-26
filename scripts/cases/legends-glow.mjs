@@ -47,6 +47,8 @@ export async function run(game){
     assert(response.ok);const xml=await response.text();
     game.check(span+' board ranks the prepared archived life on the living account',xml.includes(`<FameListElem accountId="${before.view.session.account}"`));
   }
+  // The first native ACK can arrive behind the client’s black Nexus title card (c4283c02).
+  await game.act({keys:[],duration_ms:3500});
   await game.act({keys:[],duration_ms:1600},{name:'legend-glow',when:()=>true});
   const after=await game.inspect();
   game.check('read-only glow fixture retains living character and inventory',after.view.lifecycle.alive&&after.view.session.character===before.view.session.character&&JSON.stringify(after.view.character.items)===JSON.stringify(before.view.character.items));

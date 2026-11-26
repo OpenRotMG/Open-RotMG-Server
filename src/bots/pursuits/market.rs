@@ -262,7 +262,7 @@ impl Market {
             self.outgoing = None;
         }
         // A Vault trip prepares the same visit; only an outing ends the market session.
-        if !matches!(v.map.name.as_str(), "Nexus" | "Vault") {
+        if !matches!(v.map.template.as_deref(), Some("nexus") | Some("vault")) {
             self.vault_refreshed = false;
             self.end_session(v, "left_nexus");
             self.session_used = false;
@@ -365,7 +365,7 @@ impl Market {
     }
     // Live: veterans kept their potions in chests 1-4 while bots read only chest 0.
     fn live_vault(v: &PlayerView) -> Option<Vec<i32>> {
-        (v.map.name == "Vault").then(|| {
+        (v.map.template.as_deref() == Some("vault")).then(|| {
             v.objects
                 .iter()
                 .filter(|o| o.kind == 0x504)
@@ -734,7 +734,7 @@ impl Market {
             return Ok(current);
         }
         if let Some(q) = parse_quote(&message.text, c) {
-            Ok(v.map.name == "Nexus"
+            Ok(v.map.template.as_deref() == Some("nexus")
                 && self.incoming.is_none()
                 && self.trade.is_none()
                 && super::settled(v)
@@ -751,7 +751,7 @@ impl Market {
                     .is_some_and(|s| v.elapsed_ms < s.until)
                 && self.quote(v, c, future)?.as_ref() == Some(&q))
         } else {
-            Ok(v.map.name == "Nexus"
+            Ok(v.map.template.as_deref() == Some("nexus")
                 && super::settled(v)
                 && self
                     .quote(v, c, future)?
@@ -845,7 +845,7 @@ impl Market {
         let Some(ad) = ad else {
             return Ok(false);
         };
-        if v.map.name != "Nexus"
+        if v.map.template.as_deref() != Some("nexus")
             || self.locked()
             || peer
                 .account
@@ -1174,7 +1174,9 @@ impl Market {
                 journey: None,
                 chat: None,
             };
-            if v.map.name != "Nexus" && v.map.name != "Vault" {
+            if v.map.template.as_deref() != Some("nexus")
+                && v.map.template.as_deref() != Some("vault")
+            {
                 d.journey = Some(Journey::Nexus);
                 return Ok(Some(d));
             }
@@ -1192,7 +1194,7 @@ impl Market {
                 .count();
             let free = v.character.items.iter().skip(4).filter(|k| **k < 0).count();
             let bank = carried < own || free + own < needed;
-            if v.map.name == "Vault" {
+            if v.map.template.as_deref() == Some("vault") {
                 let take = (carried < own).then_some(b.terms.goods[side].kind);
                 let Some(chest) = Self::chest(v, take) else {
                     return Ok(Some(d));
@@ -1310,7 +1312,7 @@ impl Market {
             if self.quote.is_none() {
                 self.preparing = false;
             }
-            if !matches!(v.map.name.as_str(), "Nexus" | "Vault") {
+            if !matches!(v.map.template.as_deref(), Some("nexus") | Some("vault")) {
                 if matches!(
                     self.resources(v, c, future)?.map(|p| p.state),
                     Some(AcquisitionState::Funded { .. })
@@ -1328,7 +1330,7 @@ impl Market {
                 return Ok(None);
             }
             // A memory can justify inspection, never a funded quote. At most one refresh per outing.
-            if v.map.name == "Nexus"
+            if v.map.template.as_deref() == Some("nexus")
                 && self.quote.is_none()
                 && !self.vault_refreshed
                 && self
@@ -1352,7 +1354,7 @@ impl Market {
                 }));
             }
         }
-        if v.map.name == "Vault"
+        if v.map.template.as_deref() == Some("vault")
             && let Some(q) = self.quote.clone()
         {
             let mut d = Decision {
@@ -1457,7 +1459,7 @@ impl Market {
             }
             return Ok(Some(d));
         }
-        if v.map.name != "Nexus" {
+        if v.map.template.as_deref() != Some("nexus") {
             return Ok(None);
         }
         let mut d = Decision {

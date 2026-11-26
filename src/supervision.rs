@@ -33,6 +33,7 @@ pub fn world(world: i32, tick: u64) -> Scope {
         npc: None,
     }))
 }
+#[cfg(test)]
 pub fn npc(id: i32, kind: u16) -> Scope {
     let old = CONTEXT.get();
     CONTEXT.set(ContextIds {

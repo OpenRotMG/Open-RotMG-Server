@@ -1,6 +1,7 @@
 mod account_save;
 mod audit;
 mod backup;
+mod behavior;
 mod bots;
 mod clock;
 mod condition;
@@ -112,7 +113,14 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         "missing reference client {}; run ./run.sh to download the pinned client",
         client.join("client.swf").display()
     );
-    let content = content::Content::load(&config.data)?;
+    let mut content = content::Content::load(&config.data)?;
+    let game_data = content::game::GameData::load(&config.data, &content)?;
+    for definition in game_data.definitions.values() {
+        behavior::validate(definition)?;
+    }
+    tracing::info!(fingerprint=%game_data.fingerprint, definitions=game_data.definitions.len(), reachable=game_data.reachable.len(), worlds=game_data.worlds.len(), "XML game data compiled and linked before store startup");
+    content.game = Some(Arc::new(game_data));
+    world::World::xml_validate_content(&content)?;
     if let Some(path) = std::env::var_os("OPENROTMG_REVIEWED_ACCOUNTS") {
         content::reviews::watch(path.into(), content.reviewed_accounts.clone())?;
     }
@@ -146,14 +154,12 @@ async fn serve(args: Vec<String>, thinking: tokio::runtime::Handle) -> Result<()
         supervision::Supervisor::recovered(state.join("last-critical-incident.json"), &store)?;
     let directory = match &testing {
         Some(_) => world::Directory::prepared(
-            &config.data,
             content.clone(),
             config.max_players,
             config.realm_seed,
             config.realm_count,
         )?,
         None => world::Directory::with_seed(
-            &config.data,
             content.clone(),
             config.max_players,
             config.realm_seed,

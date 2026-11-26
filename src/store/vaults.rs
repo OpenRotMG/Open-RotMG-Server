@@ -99,7 +99,7 @@ pub(super) fn migrate(db: &Connection, version: i32) -> Result<()> {
         &["account", "items", "revision"]
     };
     ensure!(
-        (0..=24).contains(&version)
+        (0..=25).contains(&version)
             && mask == (version >= 13)
             && columns
                 .iter()
@@ -185,6 +185,7 @@ impl Store {
             (1..VAULT_CHESTS).contains(&chest) && (0..i32::MAX).contains(&write.revision),
             "invalid vault purchase reservation"
         );
+        let operation = self.world_operation.clone();
         self.call(move |db| {
             let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let owned = read(&tx, write.account)?;
@@ -194,13 +195,14 @@ impl Store {
             let (raw, items): (String, String) = tx.query_row("SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1", params![write.id,write.account,write.revision], |r| Ok((r.get(0)?,r.get(1)?))).context("stale, dead or foreign vault buyer")?;
             let ch: Character = serde_json::from_str(&raw)?;
             ensure!(ch.hp > 0 && serde_json::from_str::<Vec<i32>>(&items)? == write.items, "vault buyer reservation changed");
-            if balance < VAULT_PRICE { return Ok(None); }
+            if balance < VAULT_PRICE { world_events::reject_operation(&tx,operation.as_ref())?;tx.commit()?;return Ok(None); }
             let balance = balance - VAULT_PRICE;
             ensure!(tx.execute("UPDATE accounts SET credits=?2,vault_mask=vault_mask|?3 WHERE id=?1", params![write.account,balance,1 << chest])? == 1, "vault buyer disappeared");
             let vault = Vault { account: write.account, chest, items: vec![-1;8], revision: 0 };
             tx.execute("INSERT INTO vaults(account,chest,items,revision) VALUES(?1,?2,?3,0)", params![vault.account,chest,serde_json::to_string(&vault.items)?])?;
             ensure!(tx.execute("UPDATE characters SET revision=revision+1 WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1", params![write.id,write.account,write.revision])? == 1, "vault purchase lost character reservation");
             read(&tx, write.account)?;
+            world_events::finish_operation(&tx,operation.as_ref(),&serde_json::json!({"revision":write.revision+1,"native_result":[write.revision+1,balance,vault]}))?;
             tx.commit()?;
             tracing::info!(account=write.account,chest,price=VAULT_PRICE,balance,"vault ownership committed");
             Ok(Some((write.revision + 1,balance,vault)))

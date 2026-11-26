@@ -11,14 +11,19 @@ export async function run(game) {
   const out=process.argv[process.argv.indexOf('--run-dir')+1];
   const config=JSON.parse(await readFile(out+'/native.json','utf8'));
   const token=(await readFile(config.state+'/control.token','utf8')).trim();
-  const selection=JSON.parse(await readFile(config.state+'/client-selection.json','utf8'));
-  const client=(process.env.XDG_CACHE_HOME||process.env.HOME+'/.cache')+'/openrotmg/deployed-clients/Open-RotMG-Client-'+selection.client,served={};
+  const {client:binding}=JSON.parse(await readFile(out+'/result.json','utf8'));
+  assert(['local','deployed','manifest'].includes(binding.mode),'No recorded native client provenance');
+  // run.py records the verified client it actually starts; pinned clients now live in a shared cache.
+  const launcher=await readFile(out+'/server.log','utf8');
+  const client=launcher.match(/^Local source: .+; client=(.+)$/m)?.[1];
+  assert(client&&(binding.mode==='local'?client===binding.path:client.endsWith('/Open-RotMG-Client-'+binding.selection.client)),'Launcher client does not match the native client binding');
+  const served={};
   for(const path of ['/client.swf','/launcher.js','/index.html',...(await readdir(client+'/web/vendor')).filter(p=>/\.(js|wasm)$/.test(p)).map(p=>'/vendor/'+p)]) {
     const response=await fetch(config.origin+path);assert(response.ok,path);
     const bytes=Buffer.from(await response.arrayBuffer());
     served[path]={bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};
   }
-  await writeFile(out+'/client-binding.json',JSON.stringify({selection,served,lock:JSON.parse(await readFile(client+'/ruffle/lock.json','utf8')),originalSwfSha256:createHash('sha256').update(await readFile(client+'/web/client.swf')).digest('hex')},null,2)+'\n');
+  await writeFile(out+'/client-binding.json',JSON.stringify({binding,served,lock:JSON.parse(await readFile(client+'/ruffle/lock.json','utf8')),originalSwfSha256:createHash('sha256').update(await readFile(client+'/web/client.swf')).digest('hex')},null,2)+'\n');
   async function inspect(label) {
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:'oxygen-'+randomUUID(),command:{op:'inspect',actor:game.actor}})});
     const value=await response.json();assert(response.ok&&value.diagnostic,JSON.stringify(value));
@@ -40,13 +45,17 @@ export async function run(game) {
   game.check('dry position is outside every nearby vent',dry.entities.filter(e=>e.kind===0x731).every(e=>Math.hypot(e.pos.x-dry.pos.x,e.pos.y-dry.pos.y)>1.2));
   const travel=dry.pos.y-spawn.y;
   game.check('default 7pi/4 camera cardinal pair moves south',Math.abs(dry.pos.x-spawn.x)<0.5&&travel>1.2);
-  await game.act({keys:[],duration_ms:Math.round(dry.oxygen*75+300)},{name:'oxygen-low',when:()=>captureOxygen('low-capture-condition',oxygen=>oxygen>0&&oxygen<20)});
+  // Compiled UsesBreath drains 7.25/s, not the legacy 75ms per breath (dungeons.xml:1079; src/world/ground.rs).
+  await game.act({keys:[],duration_ms:7500});
+  const remaining=await inspect('still-outside');
+  assert(remaining.oxygen>=20&&remaining.oxygen<=50,'Dry drain did not follow the configured breath rate');
+  await game.act({keys:[],duration_ms:Math.ceil(remaining.oxygen*1000/7.25)+450},{name:'oxygen-low',when:()=>captureOxygen('low-capture-condition',oxygen=>oxygen>0&&oxygen<20)});
   const empty=await inspect('empty-after-nonlethal-drowning');
   game.check('oxygen naturally empties and living actor loses HP',empty.oxygen===0&&empty.character.hp<dry.character.hp&&empty.character.alive);
   await game.act({keys:['d','w'],duration_ms:700},{name:'oxygen-empty',when:()=>captureOxygen('empty-capture-condition',oxygen=>oxygen===0)});
   const pocket=await inspect('returned-to-spawn-pocket');
   game.check('ordinary walk reaches the measured spawn vent',Math.hypot(pocket.pos.x-spawn.x,pocket.pos.y-spawn.y)<0.8);
-  await game.act({keys:[],duration_ms:2200},{name:'oxygen-recovered',when:()=>captureOxygen('recovered-capture-condition',oxygen=>oxygen===100)});
+  await game.act({keys:[],duration_ms:2650},{name:'oxygen-recovered',when:()=>captureOxygen('recovered-capture-condition',oxygen=>oxygen===100)});
   const recovered=await inspect('recovered');
   game.check('vent refills oxygen to cap without continued suffocation',recovered.oxygen===100&&recovered.character.hp>=pocket.character.hp);
   const corridor=spawn.x===12.5?{x:18.5,y:12.5}:null;

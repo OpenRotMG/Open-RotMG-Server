@@ -30,14 +30,15 @@ export async function run(game){
     for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);
   }
   await game.act({keys:[],duration_ms:800},{name:'snake-combat',when:()=>true});
-  game.check('natural Snake activates and wanders',samples.some(s=>s.diagnostic.entities.some(e=>e.id===snake.id&&e.activated!==null&&Math.hypot(e.pos.x-snake.pos.x,e.pos.y-snake.pos.y)>.2)));
+  game.check('natural Snake runs its XML program and wanders',samples.some(s=>s.diagnostic.xml[snake.id]?.active_ms>0&&s.diagnostic.entities.some(e=>e.id===snake.id&&Math.hypot(e.pos.x-snake.pos.x,e.pos.y-snake.pos.y)>.2)));
   // Do not mistake this bounded movement check for acceptance of Kithio's local reproduction: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Shore.cs#L38-L47
   game.check('selected Green Magic appears during native combat',[...shots.values()].some(p=>p.owner===snake.id&&p.speed===40&&p.lifetime_ms===2000));
   const ready=await game.inspect(),distance=e=>Math.hypot(e.pos.x-ready.view.position.x,e.pos.y-ready.view.position.y);
   const victim=ready.diagnostic.entities.filter(e=>e.kind===0x602&&ready.view.objects.some(o=>o.id===e.id)).sort((a,b)=>distance(a)-distance(b))[0];
-  assert(victim&&distance(victim)<=4,'No observed natural Snake within native firing distance');
+  // XML Wander (speed 0.8, shore.xml:62) can carry the Snake beyond firing range; the loop below walks back to it.
+  assert(victim,'No natural Snake visible to the native client');
   const xp=ready.view.character.experience;
-  for(let n=0;n<40;n++){
+  for(let n=0;n<80;n++){
     const s=await game.inspect(),e=s.diagnostic.entities.find(e=>e.id===victim.id);if(!e)break;
     const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
     if(Math.hypot(dx,dy)>4||!s.view.objects.some(o=>o.id===e.id))await game.act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:150});

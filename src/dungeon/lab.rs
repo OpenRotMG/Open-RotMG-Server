@@ -1,7 +1,5 @@
-use crate::{
-    content::{Cell, Content, Map},
-    encounter::{Motion, Profile, nr_speed},
-};
+use super::{Rect, opposite, rect_bounds};
+use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use std::{collections::BTreeMap, sync::LazyLock};
@@ -10,102 +8,23 @@ pub const NAME: &str = "Mad Lab";
 pub const BOSS: u16 = 0x976;
 pub const HEXXER: u16 = 0x1e15;
 pub const DEHEXXER: u16 = 0x1e16;
-/// Lab Bad Vat Rug (Hexxer vats) and Lab Good Vat Rug (DeHexxer vats).
+#[cfg(test)]
 pub const BAD_VAT: u8 = 0xa9;
+#[cfg(test)]
 pub const GOOD_VAT: u8 = 0xa7;
+#[cfg(test)]
 pub const CAGE: u16 = 0x892;
-pub const BUBBLE: u16 = 0x1e22;
+#[cfg(test)]
 pub const TESLA: u16 = 0x188a;
+#[cfg(test)]
 pub const EMERGENCY: u16 = 0x18c2;
+#[cfg(test)]
 pub const CREATION: u16 = 0x5e1c;
+pub const BUBBLE: u16 = 0x1e22;
 /// Lab Table: the destructible chemistry table (a flask on a bench, 100 HP, no XP). Players broke "desk objects" in
 /// the Lab: https://web.archive.org/web/20261025211742/https://wikiwiki.jp/rmd/Mad%20Lab (comment 2013-04-22).
+#[cfg(test)]
 pub const TABLE: u16 = 0x188b;
-pub const ROSTER: &[u16] = &[
-    BOSS, 0x978, 0x979, 0x980, 0x981, 0x982, 0x983, 0x990, 0x991, 0x993, 0x994, 0x995, 0x996,
-    0x12aa, 0x1e23, 0x1e24, 0x1e25, HEXXER, DEHEXXER, BUBBLE, TESLA, CREATION, TABLE,
-];
-
-pub fn initial_condition(kind: u16) -> i32 {
-    if matches!(
-        kind,
-        HEXXER | DEHEXXER | BUBBLE | CREATION | 0x990 | 0x991 | 0x993..=0x996
-    ) {
-        crate::condition::bit(crate::condition::INVINCIBLE)
-    } else {
-        0
-    }
-}
-
-pub fn profile(kind: u16) -> Profile {
-    let (motion, speed, interval, range) = match kind {
-        HEXXER | DEHEXXER | BUBBLE | TESLA | TABLE => (Motion::Stationary, 0., 0, 0.),
-        // H Creation Wave range 11.25: https://web.archive.org/web/20261025211809/https://wikiwiki.jp/rmd/Horrific%20Creation; wander, speed and cadence are reconstruction.
-        CREATION => (
-            Motion::WanderHome { radius: 3. },
-            nr_speed(0.5),
-            1000,
-            11.25,
-        ),
-        BOSS => (Motion::WanderHome { radius: 5. }, nr_speed(0.5), 0, 12.),
-        0x978 => (Motion::Stationary, 0., 50, 30.),
-        // Turrets fire "constantly" (常時): https://web.archive.org/web/20261025211742/https://wikiwiki.jp/rmd/Mad%20Lab. The
-        // acid-room screenshot on the wiki page last updated for 123.5.1 (image 9ol81, `tuning` link) holds 20 Green Stars
-        // in 12 turret rows; a 4 tiles/s star crosses its 10-tile view in 2.5 s from either wall, so each turret fires
-        // about every 3 s (estimate from one frame). Each keeps its own beat: `turret_beat`.
-        0x990 | 0x991 => (Motion::Stationary, 0., 3000, 32.),
-        0x993..=0x996 => (Motion::Stationary, 0., 1000, 30.),
-        0x12aa => (Motion::Stationary, 0., 1000, 10.),
-        0x980 | 0x1e24 => (
-            Motion::Chase {
-                sight: 10.,
-                stop: 1.,
-            },
-            nr_speed(0.6),
-            800,
-            10.,
-        ),
-        0x981 | 0x1e23 => (Motion::Wander, nr_speed(0.5), 800, 10.),
-        0x979 | 0x1e25 | 0x982 | 0x983 => (Motion::Wander, nr_speed(0.5), 1000, 10.),
-        _ => panic!("unregistered Mad Lab actor {kind:#x}"),
-    };
-    Profile {
-        motion,
-        speed,
-        interval,
-        range,
-    }
-}
-
-/// When in its `interval` a Defense Turret at row `y` fires. On the 123.5.1 wiki screenshot (`profile`) neighbouring
-/// turrets fire at different times and only a few at once, so the room shows a stream rather than walls of stars.
-/// Rows step 11 of 27 slots (any 27 rows of a wall take distinct slots), the east wall 13 slots later (estimate).
-pub fn turret_beat(kind: u16, y: i32, interval: u64) -> u64 {
-    let slot = (i64::from(y) * 11 + if kind == 0x991 { 13 } else { 0 }).rem_euclid(27);
-    slot as u64 * interval / 27
-}
-
-pub fn validate(content: &Content, kind: u16) -> Result<()> {
-    ensure!(
-        ROSTER.contains(&kind),
-        "unregistered Mad Lab actor {kind:#x}"
-    );
-    let indices: &[u8] = match kind {
-        HEXXER | DEHEXXER | BUBBLE | TESLA | TABLE => &[],
-        CREATION => &[1, 4, 5, 6],
-        0x980 | 0x1e24 => &[0, 1, 2],
-        0x982 => &[0, 1],
-        0x983 => &[0, 1, 2, 3],
-        _ => &[0],
-    };
-    for index in indices {
-        ensure!(
-            content.get(kind)?.projectiles.contains_key(index),
-            "Mad Lab actor {kind:#x} lacks selected projectile {index}"
-        );
-    }
-    Ok(())
-}
 
 /// Every layout tunable. "Wiki map" = the example layout (4 px per tile) on the Wild Shadow wiki page last updated
 /// for 123.5.1: https://web.archive.org/web/20130508122310/http://forums.wildshadow.com/wiki/realm-mad-god/mad-lab;
@@ -204,52 +123,6 @@ impl Shape {
     }
     fn size(&self) -> (i32, i32) {
         (self.rows[0].len() as i32, self.rows.len() as i32)
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Rect {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-}
-impl Rect {
-    /// The cell `along` this rect's `side` edge, `out` cells outside it.
-    fn at(self, side: char, along: i32, out: i32) -> (i32, i32) {
-        match side {
-            'N' => (self.x + along, self.y - out),
-            'S' => (self.x + along, self.y + self.h - 1 + out),
-            'W' => (self.x - out, self.y + along),
-            _ => (self.x + self.w - 1 + out, self.y + along),
-        }
-    }
-    fn span(a: (i32, i32), b: (i32, i32)) -> Rect {
-        Rect {
-            x: a.0.min(b.0),
-            y: a.1.min(b.1),
-            w: (a.0 - b.0).abs() + 1,
-            h: (a.1 - b.1).abs() + 1,
-        }
-    }
-    fn grow(self, g: i32) -> Rect {
-        Rect {
-            x: self.x - g,
-            y: self.y - g,
-            w: self.w + 2 * g,
-            h: self.h + 2 * g,
-        }
-    }
-    fn overlaps(self, o: Rect) -> bool {
-        self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
-    }
-}
-fn opposite(side: char) -> char {
-    match side {
-        'N' => 'S',
-        'S' => 'N',
-        'W' => 'E',
-        _ => 'W',
     }
 }
 
@@ -432,28 +305,55 @@ fn plan(rng: &mut StdRng) -> Option<(Vec<Node>, Vec<usize>)> {
             at = attach(&mut nodes, at, &ROOM_WEIGHTS, ANY, None, rng)?;
         }
     }
-    let (x0, y0, x1, y1) = bounds(&nodes);
+    let (x0, y0, x1, y1) = rect_bounds(nodes.iter().map(|n| n.rect));
     let rooms = nodes.iter().map(|n| n.rooms).sum::<usize>() + 1;
     (x1 - x0 <= MAX_EXTENT && y1 - y0 <= MAX_EXTENT && ROOMS.contains(&rooms))
         .then_some((nodes, path))
 }
-fn bounds(nodes: &[Node]) -> (i32, i32, i32, i32) {
-    let rects: Vec<_> = nodes.iter().map(|n| n.rect).collect();
-    (
-        rects.iter().map(|r| r.x).min().unwrap_or(0),
-        rects.iter().map(|r| r.y).min().unwrap_or(0),
-        rects.iter().map(|r| r.x + r.w).max().unwrap_or(0),
-        rects.iter().map(|r| r.y + r.h).max().unwrap_or(0),
-    )
+
+pub(crate) fn generate_for(
+    content: &Content,
+    world: &crate::content::game::World,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    Ok(build_for(content, world, generator, seed)?.0)
 }
 
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+#[cfg(test)]
+pub(crate) fn generate(content: &Content, seed: u64) -> Result<Map> {
     Ok(build(content, seed)?.0)
 }
 
-// Rooms are cut from the wiki map (shapes tile-exact, decor partly estimated; data/README.md). Both 2012 maps share
-// the start, the boss room and the kit but differ in arrangement, so the tree is drawn per run.
+#[cfg(test)]
 fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
+    let world = content
+        .game
+        .as_ref()
+        .unwrap()
+        .world_template("mad-lab")
+        .unwrap();
+    build_for(
+        content,
+        world,
+        crate::dungeon::test_generator(content, "mad-lab"),
+        seed,
+    )
+}
+
+// Both selected room sets share the start, boss and kit; the tree is drawn per run.
+fn build_for(
+    content: &Content,
+    world: &crate::content::game::World,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<(Map, Vec<Node>, Vec<usize>)> {
+    let [hex, cleanse, coil, emergency, open_wall, table] = generator.placements("mechanics")?;
+    let inhabitants = generator.placements::<5>("inhabitants")?;
+    let coils = world
+        .coils
+        .as_ref()
+        .context("missing linked CoilPlacement")?;
     use tuning::*;
     const EMPTY: u8 = 0xff;
     const WALL: u16 = 0x188c;
@@ -461,7 +361,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
     let (attempts, (mut nodes, path)) = (1..=1000)
         .find_map(|n| plan(&mut rng).map(|p| (n, p)))
         .context("Mad Lab template tree did not fit in 1000 attempts")?;
-    let (x0, y0, x1, y1) = bounds(&nodes);
+    let (x0, y0, x1, y1) = rect_bounds(nodes.iter().map(|n| n.rect));
     let (dx, dy) = ((WORLD - (x1 - x0)) / 2 - x0, (WORLD - (y1 - y0)) / 2 - y0);
     for n in &mut nodes {
         (n.rect.x, n.rect.y) = (n.rect.x + dx, n.rect.y + dy);
@@ -488,7 +388,13 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
         .map(|(&c, (g, o))| {
             let g = if g.is_empty() { EMPTY } else { ground(g)? };
             let marker = matches!(o.as_str(), "" | "table slot" | "vat field" | "spawn");
-            let kind = if marker { None } else { Some(object(o)?) };
+            let kind = match o.as_str() {
+                // These donor-kit legend tokens identify the slots, not the selected occupants.
+                "Tesla Coil" => Some(coil),
+                "Lab Emergency Wall" => Some(emergency),
+                _ if marker => None,
+                _ => Some(object(o)?),
+            };
             Ok((c, (g, kind, o.as_str())))
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
@@ -507,6 +413,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
         region: 0,
     };
     let mut map = Map {
+        elevation: None,
         width: WORLD,
         height: WORLD,
         cells: vec![blank.clone(); (WORLD * WORLD) as usize],
@@ -648,7 +555,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
         }
         let tables = rng.gen_range(TABLES).min(slots[i].len());
         for &q in &slots[i][..tables] {
-            map.cells[at(q)].object = Some(TABLE);
+            map.cells[at(q)].object = Some(table);
         }
         let spots: Vec<_> = floors[i]
             .iter()
@@ -658,11 +565,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
             .take(if n.name == "acid" { 0 } else { PACK * n.rooms })
             .collect();
         for q in spots {
-            map.cells[at(q)].object = Some(
-                *[0x979, 0x980, 0x981, 0x982, 0x983]
-                    .choose(&mut rng)
-                    .unwrap(),
-            );
+            map.cells[at(q)].object = Some(*inhabitants.choose(&mut rng).unwrap());
         }
     }
     // A pool actor acts on the 3x3 tiles round it (world::lab_step): cover every open vat tile, preferring actors
@@ -670,8 +573,8 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
     let around =
         |(x, y): (i32, i32)| (-1..=1).flat_map(move |a| (-1..=1).map(move |b| (x + a, y + b)));
     for (vat, actor) in [
-        (ground("Lab Bad Vat Rug")?, HEXXER),
-        (ground("Lab Good Vat Rug")?, DEHEXXER),
+        (ground("Lab Bad Vat Rug")?, hex),
+        (ground("Lab Good Vat Rug")?, cleanse),
     ] {
         let mut covered = vec![false; map.cells.len()];
         for i in 0..map.cells.len() {
@@ -705,6 +608,54 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
             }
         }
     }
+    let mut power_rooms: Vec<_> = path
+        .iter()
+        .map(|&i| {
+            let r = nodes[i].rect;
+            (r.y..r.y + r.h)
+                .flat_map(|y| (r.x..r.x + r.w).map(move |x| (x, y)))
+                .filter(|&q| map.cells[at(q)].object == Some(coil))
+                .collect()
+        })
+        .filter(|coils: &Vec<_>| !coils.is_empty())
+        .collect();
+    if coils.boss_first {
+        power_rooms.reverse();
+    }
+    ensure!(
+        power_rooms.len() >= coils.rooms
+            && power_rooms[..coils.rooms]
+                .iter()
+                .all(|dots| dots.len() >= coils.per_room),
+        "World mad-lab CoilPlacement ({}): route lacks {} rooms with {} Tesla Coil dots (seed={seed})",
+        coils.evidence.origin,
+        coils.rooms,
+        coils.per_room,
+    );
+    for c in map.cells.iter_mut().filter(|c| c.object == Some(coil)) {
+        c.object = None;
+    }
+    for room in &mut power_rooms[..coils.rooms] {
+        room.shuffle(&mut rng);
+        for &q in &room[..coils.per_room] {
+            map.cells[at(q)].object = Some(coil);
+        }
+    }
+    // No recovered layout places the opener; the sealed neck cell north of the second wall keeps all four in reach.
+    let walls: Vec<_> = (0..map.cells.len())
+        .filter(|&i| map.cells[i].object == Some(emergency))
+        .map(|i| (i as i32 % WORLD, i as i32 / WORLD))
+        .collect();
+    ensure!(
+        walls.len() == 4 && walls.windows(2).all(|w| w[1] == (w[0].0 + 1, w[0].1)),
+        "Mad Lab needs one row of four Emergency Walls, found {walls:?}"
+    );
+    let opener = (walls[1].0, walls[1].1 - 1);
+    ensure!(
+        map.cells[at(opener)].object.is_none() && map.cells[at(opener)].ground == floor,
+        "Mad Lab opener cell {opener:?} is not free Lab Floor"
+    );
+    map.cells[at(opener)].object = Some(open_wall);
     for c in &map.cells {
         ensure!(
             content.grounds.contains_key(&c.ground),
@@ -767,7 +718,7 @@ mod tests {
 
     #[test]
     fn lab_tree_follows_the_2012_maps() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let (map, nodes, path) = build(&content, seed).unwrap();
             let rooms = nodes.iter().map(|n| n.rooms).sum::<usize>() + 1;
@@ -865,8 +816,8 @@ mod tests {
                         .all(|&(x, y)| y == dr.1 - 11 && (dr.0 - 1..=dr.0 + 2).contains(&x)),
                 "seed {seed}: neck"
             );
-            // A Tesla Coil on every Lab Floor Power tile but the gas spawners' and nowhere else: as many per room as its
-            // template has dots, none in the start, L room and acid room.
+            // Two Tesla Coils on Lab Floor Power dots of each of the route's last power rooms (Dr Terrible's included) and
+            // nowhere else; the other dots stay bare.
             let power = content
                 .ground_names
                 .iter()
@@ -878,42 +829,44 @@ mod tests {
             assert!(
                 (0..map.cells.len())
                     .filter(|&i| map.cells[i].ground == power)
-                    .all(|i| matches!(map.cells[i].object, Some(TESLA | 0x993..=0x996))),
-                "seed {seed}: bare Lab Floor Power"
+                    .all(|i| matches!(map.cells[i].object, None | Some(TESLA | 0x993..=0x996))),
+                "seed {seed}: covered Lab Floor Power"
             );
-            for n in &nodes {
-                let dots: usize = LIBRARY.templates[n.name]
+            assert_eq!(coils.len(), 10);
+            let dots = |n: &Node| {
+                LIBRARY.templates[n.name]
                     .rows
                     .iter()
-                    .map(|r| r.matches(['o', 'T']).count())
-                    .sum();
+                    .any(|r| r.contains(['o', 'T']))
+            };
+            let guarded: Vec<_> = path
+                .iter()
+                .rev()
+                .filter(|&&i| dots(&nodes[i]))
+                .take(5)
+                .collect();
+            assert_eq!(nodes[*guarded[0]].name, "boss");
+            for (i, n) in nodes.iter().enumerate() {
                 let mine = coils.iter().filter(|&&q| inside(n.rect, q)).count();
-                assert_eq!(mine, dots, "seed {seed}: {}", n.name);
-                match n.name {
-                    "start" | "l_room" | "acid" => assert_eq!(mine, 0),
-                    "boss" => {
-                        // Four under the north wall, two each side of the neck (x dr-1..dr+2), mirrored about it and
-                        // evenly spaced; none south of the room, in the entrance pool section.
-                        let mut xs: Vec<_> = coils
-                            .iter()
-                            .filter(|&&q| inside(n.rect, q))
-                            .map(|&(x, y)| {
-                                assert_eq!(y, dr.1 - 10, "seed {seed}: boss coil row");
-                                x - dr.0
-                            })
-                            .collect();
-                        xs.sort();
-                        assert_eq!(xs, [-8, -4, 5, 9], "seed {seed}: boss coils");
-                    }
-                    _ => assert!(mine > 0, "seed {seed}: {}", n.name),
-                }
+                let expected = usize::from(guarded.contains(&&i)) * 2;
+                assert_eq!(mine, expected, "seed {seed}: {}", n.name);
+            }
+            // The boss room's pair stands under the north wall, among the four dots beside the neck (x dr-1..dr+2).
+            for &(x, y) in coils
+                .iter()
+                .filter(|&&q| inside(nodes[*guarded[0]].rect, q))
+            {
+                assert!(
+                    y == dr.1 - 10 && [-8, -4, 5, 9].contains(&(x - dr.0)),
+                    "seed {seed}: boss coil"
+                );
             }
         }
     }
 
     #[test]
     fn lab_acid_room_holds_only_its_turrets() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let (map, nodes, _) = build(&content, seed).unwrap();
             let acid = nodes.iter().find(|n| n.name == "acid").unwrap().rect;
@@ -949,7 +902,7 @@ mod tests {
 
     #[test]
     fn lab_boss_room_follows_the_contract() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let (map, ..) = build(&content, seed).unwrap();
             let boss = find(&map, BOSS);
@@ -1009,7 +962,7 @@ mod tests {
 
     #[test]
     fn lab_has_one_acid_room_with_full_turret_columns_and_covered_pools() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let (map, nodes, _) = build(&content, seed).unwrap();
             let acid: Vec<_> = nodes.iter().filter(|n| n.name == "acid").collect();
@@ -1059,7 +1012,7 @@ mod tests {
 
     #[test]
     fn lab_frames_every_open_pool_with_hazard_borders() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let (map, nodes, _) = build(&content, seed).unwrap();
             let cell = |x: i32, y: i32| &map.cells[(y * map.width + x) as usize];
@@ -1090,9 +1043,11 @@ mod tests {
                         .object
                         .and_then(|k| content.objects[&k].name.strip_prefix("MadLab Warning "));
                     let Some(piece) = piece else {
-                        // A free floor tile beside a pool on one side or two adjacent sides is always framed.
+                        // A free floor tile beside a pool on one side or two adjacent sides is always framed; a coil's
+                        // power dot is not floor to frame, with or without its coil.
                         assert!(
                             c.object.is_some()
+                                || content.ground_names[&c.ground] == "Lab Floor Power"
                                 || !matches!(
                                     touch.as_str(),
                                     "U" | "R" | "D" | "L" | "UR" | "UL" | "RD" | "DL"
@@ -1165,7 +1120,7 @@ mod tests {
 
     #[test]
     fn lab_cluster_and_pair_cells_hold_framed_vats_in_catwalk_floor() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let (map, nodes, _) = build(&content, seed).unwrap();
             let cell = |x: i32, y: i32| &map.cells[(y * map.width + x) as usize];
@@ -1229,7 +1184,7 @@ mod tests {
         // so a catwalk lies on a ground of normal speed with no damage that no pool acts on: the vat look-alikes Lab
         // Bad/Good Vat No Slow under catwalks over vats, Bright Grass under the acid-room lattice, grate or floor under
         // the walkway cross's plates.
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let (map, ..) = build(&content, seed).unwrap();
             let catwalks: Vec<_> = map
@@ -1257,7 +1212,7 @@ mod tests {
     fn lab_walkways_are_2012_catwalks_whose_slats_turn_with_the_room() {
         // The L room's walkway (https://www.youtube.com/watch?v=s9XOYh8DJQ8 2012-10-09 t=21.5-23.5): plates along its
         // edges and 3x3 blocks of slats, the slats running along the walkway; the walkway cross follows it.
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         let kind = |name: &str| {
             content
                 .objects
@@ -1308,7 +1263,7 @@ mod tests {
 
     #[test]
     fn lab_table_rooms_hold_a_rare_chemistry_table_and_no_plain_tables() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         let mut per_room = vec![];
         for seed in 0..32 {
             let (map, nodes, _) = build(&content, seed).unwrap();
@@ -1348,7 +1303,7 @@ mod tests {
 
     #[test]
     fn lab_start_holds_the_portal_of_cowardice() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let (map, nodes, _) = build(&content, seed).unwrap();
             let (sx, sy) = map.spawns[0];
@@ -1369,7 +1324,7 @@ mod tests {
 
     #[test]
     fn lab_layout_generates_quickly() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
             let started = std::time::Instant::now();
             generate(&content, seed).unwrap();
@@ -1383,7 +1338,7 @@ mod tests {
     #[test]
     #[ignore = "timing report: cargo test --release lab_generation_time -- --ignored --nocapture"]
     fn lab_generation_time_over_1000_seeds() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         let mut times: Vec<_> = (0..1000)
             .map(|seed| {
                 let started = std::time::Instant::now();

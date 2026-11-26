@@ -76,7 +76,12 @@ with sqlite3.connect(sys.argv[1]) as db:
   await game.act({keys:[],mouse:{x:748,y:158},duration_ms:500});await capture(game,'hall-remove-confirmation');
   await game.act({keys:[],mouse:{x:325,y:338},duration_ms:500});
   game.check('cancelled removal retains membership and both hall occupants',db('SELECT count(*) FROM guild_members')[0][0]===2&&(await peer.observe()).session.world===rebuilt.view.session.world);
-  await game.act({keys:[],mouse:{x:748,y:158},duration_ms:500});await game.act({keys:[],mouse:{x:475,y:338},duration_ms:700});
+  await game.act({keys:[],mouse:{x:748,y:158},duration_ms:500});
+  // The removed client needs an active input window to finish its ordinary Nexus reconnect.
+  await game.act([[
+    {actor:game.actor,input:{keys:[],mouse:{x:475,y:338},duration_ms:700}},
+    {actor:peer.actor,input:{keys:[],duration_ms:2600}},
+  ]]);
   for(let i=0;i<10&&(await peer.observe()).world!=='Nexus';i++)await peer.act({keys:[],duration_ms:500});
   const removed=await save('removed-member',peer);
   game.check('confirmed removal durably revokes occupied hall access',db('SELECT count(*) FROM guild_members')[0][0]===1&&removed.view.map.name==='Nexus'&&(await game.observe()).session.world===rebuilt.view.session.world);

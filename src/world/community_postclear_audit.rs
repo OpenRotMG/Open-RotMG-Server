@@ -11,7 +11,7 @@ impl Directory {
                 .worlds
                 .get(&view.session.world)
                 .context("audit own world missing")?;
-            if own.name != "Oryx's Chamber" || !own.cleared {
+            if own.template_id() != Some("oryx-chamber") || !own.cleared {
                 return Ok(None);
             }
         } else {
@@ -31,9 +31,8 @@ impl Directory {
         let mut cellar = false;
         let mut storage = false;
         for (world, w) in &self.worlds {
-            storage |= w.owner.is_some() || w.name == "Vault";
-            cellar |= w.name == "Wine Cellar";
-            opening |= w.portal_requests.iter().any(|(kind, _)| *kind == 0x700);
+            storage |= w.owner.is_some() || w.template_id() == Some("vault");
+            cellar |= w.template_id() == Some("wine-cellar");
             for (player, p) in &w.players {
                 actors.push(serde_json::json!({"account":p.character.account,"character":p.character.id,"world":world,"player":player}));
                 pending |= p.pending || p.death_pending || p.persistence_failure.is_some();

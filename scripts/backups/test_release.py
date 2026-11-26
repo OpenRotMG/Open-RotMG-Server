@@ -1,9 +1,10 @@
-from contextlib import closing
+from contextlib import closing, nullcontext
 from copy import deepcopy
 import gzip
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -17,7 +18,7 @@ def legacy_copy(bundle):
     old['schema'] = 15
     for row in old['game']['collections']:
         del row['source']
-    for table in backup.PORTABLE_TABLES:
+    for table in [*backup.PORTABLE_TABLES, *backup.WORLD_TABLES]:
         old['game'].pop(table, None)
     del old['game']['discord_gold_grants']
     del old['game']['legacy_claims'], old['game']['level_credits'], old['game']['bot_minds'], old['game']['trade_transactions']
@@ -42,6 +43,8 @@ def legacy_copy(bundle):
 
 class ReleaseContract(unittest.TestCase):
     def check_fame_migration(self, migrated, original):
+        for table in backup.WORLD_TABLES:
+            self.assertEqual(migrated.pop(table), [])
         self.assertRegex(migrated.pop('save_namespace')[0]['namespace'], '^[0-9a-f]{64}$')
         for table in backup.PORTABLE_TABLES.keys() - {'save_namespace'}:
             self.assertEqual(migrated.pop(table), [])
@@ -73,7 +76,7 @@ class ReleaseContract(unittest.TestCase):
 
     def test_actual_writer_backup_restore_and_reload(self):
         root = Path(__file__).resolve().parents[2]
-        with tempfile.TemporaryDirectory() as temporary:
+        with nullcontext(tempfile.mkdtemp(prefix='backup-release-', dir=os.environ['QA_RESULTS_DIR'])) as temporary:
             check(os.environ['OPENROTMG_BACKUP_BINARY'], root / 'data',
                   Path(temporary) / 'contract', 'a' * 40)
             with closing(sqlite3.connect(Path(temporary) / 'contract/written/game.db')) as db:
@@ -97,7 +100,7 @@ class ReleaseContract(unittest.TestCase):
                 self.assertIsNone(rewards[0][1])
                 self.assertIsNone(rewards[1][1])
                 self.assertGreater(rewards[2][1], 0)
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 24)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 25)
                 for table, column, default in [('characters', 'revision', '0'), ('characters', 'alive', '1'), ('deaths', 'died_at', 'unixepoch()')]:
                     with self.subTest(default=table + '.' + column):
                         self.assertEqual(db.execute('SELECT dflt_value FROM pragma_table_xinfo(?) WHERE name=?', (table, column)).fetchone(), (default,))
@@ -111,7 +114,84 @@ class ReleaseContract(unittest.TestCase):
                 for row in [(owner, 'discord_link', 123, None), (owner, 'invalid', 123, None), (owner, 'collection_top_half', 0, None), (owner, 'collection_top_half', 123, 0), (99999, 'discord_link', 123, None)]:
                     with self.subTest(row=row), self.assertRaises(sqlite3.IntegrityError):
                         db.execute('INSERT INTO gold_rewards VALUES(?,?,?,?)', row)
-            self.assertEqual(bundle['schema'], 24)
+            self.assertEqual(bundle['schema'], 25)
+            changed_data = Path(temporary) / 'changed-data'
+            shutil.copytree(root / 'data', changed_data)
+            with open(changed_data / 'game/123.5.1/strings.xml', 'a') as strings:
+                strings.write('\n')
+            loaded = subprocess.run([os.environ['OPENROTMG_BACKUP_BINARY'], '--backup-load', str(Path(temporary) / 'contract/restored/game.db'), str(changed_data)],
+                                    check=True, capture_output=True, text=True)
+            self.assertEqual(json.loads(loaded.stdout.splitlines()[-1])['prior_catalogue_events'], len(bundle['game']['world_events']))
+            shutil.rmtree(changed_data)
+            for field in ['payload_hash', 'ordinal', 'owner_character', 'pickup_operation']:
+                malformed = deepcopy(bundle)
+                if field == 'payload_hash':
+                    malformed['game']['world_events'][0][field] = '0' * 64
+                else:
+                    row = next(row for row in malformed['game']['world_entitlements'] if row['status'] == 0)
+                    row[field] = {'ordinal': 65536, 'owner_character': 999999, 'pickup_operation': 'f' * 32}[field]
+                with self.subTest(world_journal=field), self.assertRaises(ValueError):
+                    backup.validate(malformed)
+            malformed = deepcopy(bundle)
+            malformed['game']['world_entitlements'].pop()
+            with self.assertRaisesRegex(ValueError, 'entitlement count'):
+                backup.validate(malformed)
+            compacted = next(row for row in bundle['game']['world_events'] if row['event'] == '4' * 32)
+            tombstone = json.loads(compacted['payload'])['compacted']
+            self.assertEqual((tombstone['instance'], tombstone['seed'], len(tombstone['characters'])), (None, 52, 1))
+            with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as db:
+                self.assertEqual(db.execute('SELECT payload,payload_hash FROM world_events WHERE event=?', ('4' * 32,)).fetchone(),
+                                 (compacted['payload'], compacted['payload_hash']))
+            for case in ['status', 'field', 'deliverable']:
+                malformed = deepcopy(bundle)
+                row = next(row for row in malformed['game']['world_events'] if row['event'] == '4' * 32)
+                if case == 'status':
+                    row['status'] = 1
+                elif case == 'field':
+                    row['payload'] = json.dumps({'compacted': {**json.loads(row['payload'])['compacted'], 'progress': []}})
+                else:
+                    next(e for e in malformed['game']['world_entitlements'] if e['event'] == '4' * 32)['status'] = 0
+                with self.subTest(tombstone=case), self.assertRaisesRegex(ValueError, 'ompacted'):
+                    backup.validate(malformed)
+            expired = deepcopy(bundle)
+            entitlement = next(row for row in expired['game']['world_entitlements'] if row['status'] == 0)
+            entitlement['status'] = 2
+            event = next(row for row in expired['game']['world_events'] if row['event'] == entitlement['event'])
+            result = json.loads(event['result'])
+            proof = {'bag': 55, 'deadline': 10, 'now': 11, 'reason': 'published native bag lifetime ended'}
+            result.setdefault('expired', {})[str(entitlement['ordinal'])] = proof
+            event['result'] = json.dumps(result, separators=(',', ':'))
+            backup.validate(expired)
+            for field, proof_value in [('bag', 0), ('deadline', 12), ('reason', 'picked')]:
+                malformed = deepcopy(expired)
+                changed_event = next(row for row in malformed['game']['world_events'] if row['event'] == event['event'])
+                changed_result = json.loads(changed_event['result'])
+                changed_result['expired'][str(entitlement['ordinal'])][field] = proof_value
+                changed_event['result'] = json.dumps(changed_result, separators=(',', ':'))
+                with self.subTest(expiry_proof=field), self.assertRaisesRegex(ValueError, 'Expired entitlement'):
+                    backup.validate(malformed)
+            withheld = deepcopy(bundle)
+            entitlement = next(row for row in withheld['game']['world_entitlements'] if row['status'] == 0)
+            entitlement['status'] = 3
+            event = next(row for row in withheld['game']['world_events'] if row['event'] == entitlement['event'])
+            result = json.loads(event['result'])
+            result.setdefault('withheld', {})[str(entitlement['ordinal'])] = {'disposition': 'moderation_withheld', 'account': 3, 'bag_type': 4, 'keep_chance': 0.5}
+            event['result'] = json.dumps(result, separators=(',', ':'))
+            backup.validate(withheld)
+            reconciled = deepcopy(withheld)
+            lost = next(row for row in reconciled['game']['world_events'] if row['event'] == entitlement['event'])
+            source = json.loads(lost['payload'])['payload']['data'].get('actions', {}).get('instance')
+            lost['result'] = json.dumps({'reconciliation': {'disposition': 'origin_lost', 'previous_status': lost['status'], 'previous_result': result, 'source': source, 'at': 1, 'reason': 'exact original world instance no longer exists'}}, separators=(',', ':'))
+            lost['status'] = 3
+            with self.subTest(withheld='reconciled'):
+                backup.validate(reconciled)
+            ownerless = deepcopy(withheld)
+            next(row for row in ownerless['game']['world_entitlements'] if row['status'] == 3)['owner_character'] = None
+            with self.subTest(withheld='owner'), self.assertRaisesRegex(ValueError, 'Withheld entitlement|differs from original plan'):
+                backup.validate(ownerless)
+            event['result'] = json.dumps({key: value for key, value in result.items() if key != 'withheld'}, separators=(',', ':'))
+            with self.subTest(withheld='receipt'), self.assertRaisesRegex(ValueError, 'Withheld entitlement'):
+                backup.validate(withheld)
             canonical16 = legacy_copy(bundle)
             canonical16['schema'] = 16
             for table in ['bot_minds', 'trade_transactions']:
@@ -236,7 +316,7 @@ class ReleaseContract(unittest.TestCase):
                     backup.export(malformed_db, Path(temporary) / 'contract/levels.sqlite', Path(temporary) / 'malformed-death.gz', revision, revision, revision)
                 self.assertEqual(malformed_db.read_bytes(), original)
                 self.assertFalse((Path(temporary) / 'malformed-death.gz').exists())
-            for version in [0, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 25]:
+            for version in [0, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 26]:
                 with closing(sqlite3.connect(Path(temporary) / 'contract/restored/game.db')) as source, closing(sqlite3.connect(Path(temporary) / 'future.db')) as future:
                     source.backup(future)
                     future.execute(f'PRAGMA user_version={version}')
@@ -300,11 +380,12 @@ class ReleaseContract(unittest.TestCase):
                 self.assertEqual(row.pop('chest'), 0)
             self.assertEqual(migrated12, legacy['game'])
             legacy['schema'] = 10
+            buyer = legacy['game']['character_slot_purchases'][0]['account']
             del legacy['game']['character_slot_purchases']
             for row in legacy['game']['accounts']:
                 del row['character_slots']
             # Version10 cannot represent the new fixture's purchased second living slot.
-            extra = max(r['id'] for r in legacy['game']['characters'] if r['alive'])
+            extra = max(r['id'] for r in legacy['game']['characters'] if r['alive'] and r['account'] == buyer)
             legacy['game']['characters'] = [r for r in legacy['game']['characters'] if r['id'] != extra]
             with self.assertRaisesRegex(ValueError, 'gold reward'):
                 backup.validate(legacy)

@@ -33,13 +33,21 @@ export async function run(game){
   const ally=await game.join({...fixture,seed:898,position:{x:72.5,y:73.5}});
   const outside=await game.join({...fixture,seed:899,position:{x:79.5,y:73.5}});
   for(const client of [game,ally,outside])await vitals(client,100,100);
-  for(const [name,client] of [['near-before',game],['ally-before',ally],['outside-before',outside]])await save(name,client);
-  await game.act({keys:[],duration_ms:2200},{name:'nexus-fountain',when:v=>v.character.hp>=200});
+  const before=await save('near-before'),allyBefore=await save('ally-before',ally),farBefore=await save('outside-before',outside);
+  const passive=(a,b,stat,rate)=>{
+    const gain=b.character[stat]-a.character[stat],expected=(b.game_ms-a.game_ms)*rate/1000;
+    return gain>=Math.floor(expected)&&gain<=Math.ceil(expected);
+  };
+  // The nearest damaged player receives the next one-recipient zap (actors.xml:53–54).
+  for(let i=0;i<6&&(await game.observe()).character.hp<200;i++)await game.act({keys:[],duration_ms:250});
   const near=await save('near-after'),second=await save('ally-after',ally),far=await save('outside-after',outside);
-  // Comparator policy, not authenticated 123.5.1: https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/logic/behaviors/HealPlayer.cs
-  game.check('one fountain heals both injured native recipients',near.character.hp>=300&&second.character.hp>=300);
-  game.check('outside every fountain radius only natural HP regeneration applies',far.character.hp>=100&&far.character.hp<=104);
-  game.check('fountains do not restore MP beyond natural regeneration',[near,second,far].every(v=>v.character.mp>=100&&v.character.mp<=103));
+  game.check('only the closest injured recipient receives the first fountain zaps',near.character.hp>=200&&passive(allyBefore,second,'hp',1));
+  await vitals(game,670,100);
+  for(let i=0;i<6&&(await ally.observe()).character.hp<200;i++)await game.act({keys:[],duration_ms:250});
+  game.check('the other injured recipient is healed after the first is full',(await save('other-now-nearest',ally)).character.hp>=200);
+  game.check('outside every fountain radius only natural HP regeneration applies',passive(farBefore,far,'hp',1));
+  game.check('fountains do not restore MP beyond natural regeneration',[[before,near],[allyBefore,second],[farBefore,far]].every(([a,b])=>passive(a,b,'mp',0.6)));
+  await game.act({keys:[],duration_ms:600},{name:'nexus-fountain',when:v=>v.lifecycle.alive});
   await vitals(game,669,100);await game.act({keys:[],duration_ms:1500});
   game.check('fountain healing clips at effective maximum HP',(await save('clipped')).character.hp===670);
   const entities=(await game.inspect()).diagnostic.entities;

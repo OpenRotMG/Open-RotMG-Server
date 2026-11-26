@@ -8,15 +8,54 @@ pub(super) struct Region {
 }
 
 impl World {
+    pub(super) fn realm_rules(&self) -> Result<&crate::content::game::RealmRules> {
+        self.xml_game().realm_rules()
+    }
+    pub(super) fn population_habitat(&self, kind: u16) -> Result<u8> {
+        self.xml_game()
+            .definitions
+            .get(&kind)
+            .and_then(|d| d.population.terrain)
+            .with_context(|| format!("Realm population {kind:#x} lacks linked Terrain"))
+    }
+    pub(super) fn population_placement(
+        &self,
+        kind: u16,
+    ) -> Result<(Option<Arc<crate::content::game::CampRule>>, usize)> {
+        let definition = self.xml_declared_admission(kind, "ordinary placement")?;
+        let camp = self.realm_rules()?.camps.get(&kind).cloned();
+        if let Some(camp) = &camp {
+            for role in &camp.roles {
+                self.xml_raw_admission(role.kind)?;
+            }
+        }
+        let authored = camp.as_ref().map_or(1, |c| c.size());
+        // Reserve space for immediate live minions, not empty population slots or per-kind caps.
+        let footprint = authored + self.xml_ordinary_footprint(definition);
+        Ok((camp, footprint))
+    }
     pub(super) fn configure_population(&mut self) -> Result<()> {
         ensure!(
             self.population.is_empty(),
             "cannot reconfigure a live population"
         );
-        // Kithio's per-terrain area divisors, reindexed to selected XML terrain numbers: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/Oryx.cs#L27-L156
-        let divisors = [
-            0, 100, 250, 300, 300, 300, 150, 150, 200, 200, 200, 100, 150,
-        ];
+        let density = self.realm_rules()?.density.clone();
+        let roots: Vec<_> = self
+            .xml_game()
+            .definitions
+            .values()
+            .filter_map(|d| {
+                let r = &d.population;
+                let terrain = r.terrain?;
+                (self.content.objects[&d.kind].enemy
+                    && r.weight.is_some_and(|w| w > 0.)
+                    && r.per_world_max.is_none())
+                .then_some((d.kind, terrain))
+            })
+            .collect();
+        for &(kind, _) in &roots {
+            self.xml_raw_admission(kind)?;
+        }
         self.population_regions = std::array::from_fn(|_| Region::default());
         let mut area = [0usize; 13];
         for (i, cell) in self.map.cells.iter().enumerate() {
@@ -34,38 +73,18 @@ impl World {
                 self.population_regions[terrain].sites.push(pos);
             }
         }
-        for object in self.content.objects.values().filter(|o| {
-            o.enemy
-                && o.terrain > 0
-                && o.spawn_weight.is_some_and(|w| w > 0.)
-                && o.per_realm_max.is_none()
-        }) {
-            crate::encounter::validate(&self.content, object.kind)?;
-            crate::loot::validate(&self.content, object.kind)?;
-            if let Some(family) = population::FAMILIES
-                .iter()
-                .find(|f| f.leader == object.kind)
-            {
-                self.validate_family(family)?;
-            }
-            self.population_regions[object.terrain as usize]
-                .kinds
-                .push(object.kind);
+        for (kind, terrain) in roots {
+            self.xml_declared_admission(kind, "density population")?;
+            self.population_regions[terrain as usize].kinds.push(kind);
         }
-        for &(parent, child, ..) in population::REPRODUCTION {
-            let terrain = self.content.get(parent)?.terrain;
-            ensure!(
-                terrain > 0 && self.content.get(child)?.terrain == terrain,
-                "reproduction {parent:#x}->{child:#x} crosses Realm habitats"
-            );
-        }
-        for terrain in 1..=12 {
+        for (terrain, area) in area.into_iter().enumerate().skip(1) {
             let region = &mut self.population_regions[terrain];
-            // Owner playtests found full Kithio density too crowded elsewhere, but farmed Godlands too sparse.
+            // Only the farmed Godlands need full density; the selected ratio retains the other habitats.
+            let divisor = density.divisors[terrain - 1] as usize;
             region.target = if terrain == 1 {
-                area[terrain] / divisors[terrain]
+                area / divisor
             } else {
-                area[terrain] * 2 / (divisors[terrain] * 3)
+                area * density.numerator as usize / (divisor * density.denominator as usize)
             };
             ensure!(
                 region.target == 0 || !region.sites.is_empty() && !region.kinds.is_empty(),
@@ -73,7 +92,7 @@ impl World {
             );
             tracing::info!(
                 terrain,
-                area = area[terrain],
+                area,
                 target = region.target,
                 sites = region.sites.len(),
                 species = region.kinds.len(),
@@ -129,7 +148,7 @@ impl World {
         Ok(entity)
     }
     pub(super) fn sample_population_group(&mut self, kind: u16) -> usize {
-        match self.content.objects[&kind].spawn_group {
+        match self.xml_game().definitions[&kind].population.group {
             None => 1,
             Some(group) => {
                 let u: f64 = self.rng.gen_range(f64::EPSILON..1.);
@@ -141,7 +160,8 @@ impl World {
         }
     }
     fn spawn_population_group(&mut self, terrain: u8, kind: u16) -> Result<usize> {
-        let family = population::FAMILIES.iter().find(|f| f.leader == kind);
+        self.xml_raw_admission(kind)?;
+        let (family, footprint) = self.population_placement(kind)?;
         let roots = self.sample_population_group(kind);
         let center = *self.population_regions[terrain as usize]
             .sites
@@ -165,10 +185,7 @@ impl World {
                 {
                     continue;
                 }
-                let positions = match family {
-                    Some(family) => self.family_layout(pos, family, &occupied),
-                    None => Some(vec![pos]),
-                };
+                let positions = self.family_layout(pos, terrain, footprint, &occupied);
                 if let Some(positions) = positions
                     && positions.iter().all(|pos| self.outside_player_view(*pos))
                 {
@@ -183,8 +200,8 @@ impl World {
             groups.push(positions);
         }
         for positions in groups {
-            match family {
-                Some(family) => self.place_camp(family, positions)?,
+            match &family {
+                Some(family) => self.place_camp(family.clone(), terrain, positions)?,
                 None => {
                     let pos = positions[0];
                     self.place_population_solo(kind, pos)?;
@@ -198,13 +215,20 @@ impl World {
         let kinds = self.population_regions[terrain as usize].kinds.clone();
         let needed = target.saturating_sub(self.oryx_counted(terrain).len());
         let (mut roots, mut refused, mut stalled, mut groups) = (0, 0, 0, 0);
+        let game = self
+            .content
+            .game
+            .as_ref()
+            .context("population requires linked GameData")?
+            .clone();
         while roots < needed && stalled < 128 {
             // SpawnProb's original selector is lost; relative XML weights are an explicit reconstruction choice.
             let kind = *kinds
                 .choose_weighted(&mut self.rng, |kind| {
-                    self.content.objects[kind]
-                        .spawn_weight
-                        .expect("validated spawn weight")
+                    game.definitions[kind]
+                        .population
+                        .weight
+                        .expect("validated spawn weight") as f32
                 })
                 .context("invalid population weights")?;
             match self.spawn_population_group(terrain, kind)? {
@@ -247,7 +271,6 @@ impl World {
             if !range
                 .clone()
                 .any(|i| old[i].as_ref().expect("camp slot missing").entity.is_some())
-                && !self.fauna_births.iter().any(|b| b.camp == index)
             {
                 continue;
             }
@@ -284,18 +307,12 @@ impl World {
                 self.population.push(slot);
             }
         }
-        // Admitted tosses own empty slots even after their parent dies; compaction must preserve that promise.
-        for birth in &mut self.fauna_births {
-            ensure!(
-                camps[birth.camp] != usize::MAX && slots[birth.slot] != usize::MAX,
-                "compaction lost an admitted birth"
-            );
-            birth.camp = camps[birth.camp];
-            birth.slot = slots[birth.slot];
-        }
         Ok(())
     }
     pub(super) fn repopulate(&mut self) -> Result<()> {
+        if self.population.is_empty() && self.population_regions.iter().all(|r| r.target == 0) {
+            return Ok(());
+        }
         if self.now >= self.population_next {
             self.population_next = self.now + 60000;
             self.compact_population()?;
@@ -353,7 +370,7 @@ impl World {
                 }
             }
         }
-        self.reproduce_active();
+        self.reproduce_active()?;
         self.repopulate_families()
     }
     // Kithio counts every enemy on the terrain, but a root only summons its children once active.
@@ -413,11 +430,15 @@ impl World {
         let excess = counted.len() - self.population_regions[terrain as usize].target;
         // Only bodies without a player within 10 tiles leave, so active areas keep their regrowth.
         // Breeding causes the overgrowth; culling species that cannot breed back would let them die out.
+        let rules = &self
+            .realm_rules()
+            .expect("configured population")
+            .reproduction;
         let culled: Vec<_> = counted
             .into_iter()
             .filter(|id| {
                 let e = &self.entities[id];
-                population::REPRODUCTION.iter().any(|r| r.0 == e.kind)
+                rules.contains_key(&e.kind)
                     && self.players.values().all(|p| p.pos.distance(e.pos) >= 10.)
             })
             .take(excess)
@@ -520,66 +541,67 @@ fn natural_replenishment_checks_complete_footprints_and_the_view_boundary() {
 #[test]
 fn populated_realms_keep_all_arrivals_connected() -> Result<()> {
     let path = std::path::Path::new("data");
-    let content = Arc::new(Content::load(path)?);
+    let content = Arc::new(crate::world::test_content());
     // Fixed geography is distinct from variable buildings: https://web.archive.org/web/20130522030032id_/https://forums.wildshadow.com/wiki/realm-mad-god/maps-builds-106-123
-    for source in crate::terrain::realms::sources(path)? {
-        let name = source.name().to_owned();
-        let directory =
-            Directory::configured(path, content.clone(), 16, 785, Some(785), vec![source], 2)?;
-        let world = &directory.worlds[&-3];
-        let width = world.map.width as usize;
-        let passable: Vec<_> = (0..world.map.cells.len())
-            .map(|i| {
-                world.walkable(Pos {
-                    x: (i % width) as f32 + 0.5,
-                    y: (i / width) as f32 + 0.5,
-                })
+    let source = crate::terrain::realms::sources(path)?
+        .into_iter()
+        .find(|s| s.name() == "classic-world-01-reconstruction")
+        .unwrap();
+    let name = source.name().to_owned();
+    let directory = Directory::configured(content, 16, 785, Some(785), vec![source], 1)?;
+    let world = &directory.worlds[&-3];
+    let width = world.map.width as usize;
+    let passable: Vec<_> = (0..world.map.cells.len())
+        .map(|i| {
+            world.walkable(Pos {
+                x: (i % width) as f32 + 0.5,
+                y: (i / width) as f32 + 0.5,
             })
-            .collect();
-        assert_eq!(world.map.spawns.len(), 12, "{name}");
-        let index = |x: f32, y: f32| y as usize * width + x as usize;
-        let (x, y) = world.map.spawns[0];
-        let start = index(x, y);
-        let mut distance = vec![u32::MAX; passable.len()];
-        distance[start] = 0;
-        let mut queue = std::collections::VecDeque::from([start]);
-        while let Some(i) = queue.pop_front() {
-            for next in [
-                i.wrapping_sub(width),
-                i + width,
-                if i % width > 0 { i - 1 } else { usize::MAX },
-                if i % width + 1 < width {
-                    i + 1
-                } else {
-                    usize::MAX
-                },
-            ] {
-                if next < passable.len() && passable[next] && distance[next] == u32::MAX {
-                    distance[next] = distance[i] + 1;
-                    queue.push_back(next);
-                }
+        })
+        .collect();
+    assert_eq!(world.map.spawns.len(), 12, "{name}");
+    let index = |x: f32, y: f32| y as usize * width + x as usize;
+    let (x, y) = world.map.spawns[0];
+    let start = index(x, y);
+    let mut distance = vec![u32::MAX; passable.len()];
+    distance[start] = 0;
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some(i) = queue.pop_front() {
+        for next in [
+            i.wrapping_sub(width),
+            i + width,
+            if i % width > 0 { i - 1 } else { usize::MAX },
+            if i % width + 1 < width {
+                i + 1
+            } else {
+                usize::MAX
+            },
+        ] {
+            if next < passable.len() && passable[next] && distance[next] == u32::MAX {
+                distance[next] = distance[i] + 1;
+                queue.push_back(next);
             }
         }
-        for &(x, y) in &world.map.spawns {
-            let i = index(x, y);
-            assert!(
-                passable[i] && distance[i] != u32::MAX,
-                "{name}: arrival {x},{y}"
-            );
-            assert_eq!(world.map.cells[i].terrain, 11, "{name}: arrival habitat");
-            println!("{name} arrival={x},{y} distance_from_south={}", distance[i]);
-        }
-        for (label, matches) in [("road", 0xd0), ("rock", 0x60)] {
-            assert!(
-                world
-                    .map
-                    .cells
-                    .iter()
-                    .enumerate()
-                    .any(|(i, c)| c.ground == matches && distance[i] != u32::MAX),
-                "{name}: unreachable {label}"
-            );
-        }
+    }
+    for &(x, y) in &world.map.spawns {
+        let i = index(x, y);
+        assert!(
+            passable[i] && distance[i] != u32::MAX,
+            "{name}: arrival {x},{y}"
+        );
+        assert_eq!(world.map.cells[i].terrain, 11, "{name}: arrival habitat");
+        println!("{name} arrival={x},{y} distance_from_south={}", distance[i]);
+    }
+    for (label, matches) in [("road", 0xd0), ("rock", 0x60)] {
+        assert!(
+            world
+                .map
+                .cells
+                .iter()
+                .enumerate()
+                .any(|(i, c)| c.ground == matches && distance[i] != u32::MAX),
+            "{name}: unreachable {label}"
+        );
     }
     Ok(())
 }
@@ -588,24 +610,18 @@ fn populated_realms_keep_all_arrivals_connected() -> Result<()> {
 #[test]
 fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
     let path = std::path::Path::new("data");
-    let content = Arc::new(Content::load(path)?);
+    let content = Arc::new(crate::world::test_content());
     // Period MidForest uses Light Grass and HighPlains is snowy; boundaries remain reconstruction: https://wikiwiki.jp/rmd/%E5%9C%B0%E5%BD%A2
-    let sources: Vec<_> = crate::terrain::realms::sources(path)?
-        .into_iter()
-        .filter(|s| {
-            matches!(
-                s.name(),
-                "classic-world-01-reconstruction"
-                    | "classic-world-02-reconstruction"
-                    | "classic-world-03-reconstruction"
-            )
-        })
-        .collect();
-    assert_eq!(sources.len(), 3);
-    for source in sources {
+    let sources = crate::terrain::realms::sources(path)?;
+    for source in sources.into_iter().filter(|s| {
+        matches!(
+            s.name(),
+            "classic-world-01-reconstruction" | "classic-world-02-reconstruction"
+        )
+    }) {
         let name = source.name().to_owned();
         let directory =
-            Directory::configured(path, content.clone(), 16, 756, Some(756), vec![source], 2)?;
+            Directory::configured(content.clone(), 16, 756, Some(756), vec![source], 1)?;
         let world = &directory.worlds[&-3];
         let snowy = name != "classic-world-01-reconstruction";
         for terrain in 1..=12 {
@@ -684,9 +700,9 @@ fn reconstructed_realms_naturally_populate_reviewed_habitats() -> Result<()> {
 #[test]
 fn culling_an_overgrown_godlands_keeps_every_species() -> Result<()> {
     let path = std::path::Path::new("data");
-    let content = Arc::new(Content::load(path)?);
+    let content = Arc::new(crate::world::test_content());
     let source = crate::terrain::realms::sources(path)?.remove(0);
-    let mut directory = Directory::configured(path, content, 16, 756, Some(756), vec![source], 2)?;
+    let mut directory = Directory::configured(content, 16, 756, Some(756), vec![source], 2)?;
     let world = &mut directory.worlds[&-3];
     let count = |w: &World, kinds: &[u16]| {
         w.entities

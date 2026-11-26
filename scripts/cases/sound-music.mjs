@@ -4,7 +4,7 @@ import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {connect} from '../../scripts/record-demo.mjs';
 
-export const fixture={class:0x30e,level:20,seed:932,world:-2,position:'spawn',equipment:[0xa97,0xa2e,-1,-1],backpack:[0xa23,0xa23,-1,-1,-1,-1,-1,-1],stats:null};
+export const fixture={class:0x30e,level:20,seed:932,world:-2,position:'spawn',equipment:[0xa97,0xa2e,-1,-1],backpack:[0xa23,0xa23,0xa23,-1,-1,-1,-1,-1],stats:null};
 let c;
 const results=[];
 export async function beforeNavigate({browser,signal}) {
@@ -106,7 +106,12 @@ export async function run(game) {
     await game.act({keys:[],duration_ms:500},{name:'sound-options-reloaded',when:()=>true});
     game.check('disabled SFX persists across reload',await sample('sfx-after-reload',continueInput)<0.00001);
     game.check('disabled weapon sounds persist across reload',await sample('weapon-after-reload',fire)<0.00001);
-    await options();await click(60,182);
-    game.check('re-enabling SFX restores UI output above the silence floor',await sample('sfx-restored',continueInput)>0.00001);
+    // Use the same decoded potion SFX as before reload; Continue itself need not emit an SFX.
+    await options();await click(60,182);await game.act({keys:['o'],duration_ms:120});
+    await game.act({keys:[' '],duration_ms:500});
+    const restore=await game.observe();
+    game.check('re-enabling SFX restores potion output above the silence floor',await sample('sfx-restored',{keys:['3'],duration_ms:1000})>0.001);
+    const restored=await game.observe();
+    game.check('audible restored potion commits once',restored.character.items[6]===-1&&restored.character.inventory_revision===restore.character.inventory_revision+1);
   } finally {c.close();}
 }

@@ -16,7 +16,7 @@ export const fixture={class:0x310,level:20,seed:12351,world:'forbidden-jungle',w
     assert(index>=0);const r=rooms[index];center={x:20+r[0]*20+.5,y:20+r[1]*20+.5};
     if(part==='camp'){
       const parent=rooms[r[2]],dx=parent[0]-r[0],dy=parent[1]-r[1];entry={x:center.x+4*dx,y:center.y+4*dy};
-      return {x:center.x+12*dx,y:center.y+12*dy};
+      return {x:center.x+8*dx,y:center.y+8*dy};
     }
     return {x:center.x,y:center.y+4};
   },equipment:[0xa3d,0xb25,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,50,25,50,50,40,75]};
@@ -68,27 +68,35 @@ export async function run(game){
     game.check('ordinary native movement crosses the destroyed plant tile',Math.floor(crossed.view.position.x)===Math.floor(plant.pos.x)&&Math.floor(crossed.view.position.y)===Math.floor(plant.pos.y));
     await capture('opened-foliage-path');
   }else if(part==='camp'){
-    await walk(entry);const arrived=await save('camp-entered'),fire=near(arrived,0xdd3);assert(fire);
-    const tribe=arrived.diagnostic.entities.filter(e=>e.parent===fire.id);assert.equal(tribe.length,5);
-    game.check('generated camp binds all five tribes to its own Fire',tribe.filter(e=>e.kind===0xdd0).length===2);
-    const hunter=tribe.find(e=>e.kind===0xdd2);assert(hunter);
+    const fire=near(start,0xdd3);assert(fire);
+    // Recovered forbiddenJungle.xml:1020 leaves MakeMinions in NeverRun; the authored room places the masks.
+    const tribe=start.diagnostic.entities.filter(e=>[0xdd0,0xdd1,0xdd2].includes(e.kind)&&Math.hypot(e.home.x-center.x,e.home.y-center.y)<=3.1);
+    game.check('the generated Fire room places five independent tribes',tribe.length===5&&tribe.every(e=>e.parent===null)&&[0xdd0,0xdd1,0xdd2].every((k,i)=>tribe.filter(e=>e.kind===k).length===[2,2,1][i]));
+    await walk(entry);
+    let warrior;
+    for(let n=0;n<16&&!warrior;n++){
+      const s=await save('camp-entry-'+n),distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+      const shamans=tribe.filter(e=>e.kind===0xdd0).map(e=>entity(s,e.id)).filter(Boolean);
+      warrior=tribe.filter(e=>e.kind===0xdd1).map(e=>entity(s,e.id)).filter(e=>e&&shamans.some(h=>distance(e.pos,h.pos)<4.5))
+        .sort((a,b)=>distance(a.pos,s.view.position)-distance(b.pos,s.view.position))[0];
+      if(!warrior)await game.act({keys:[],duration_ms:250});
+    }
+    assert(warrior,'Wound a Warrior within recovered Shaman heal range');
     let previous;
     for(let n=0;n<12;n++){
-      await shoot(hunter.id,50);await game.act({keys:[],duration_ms:250});previous=await save('tribe-shot');
-      if(entity(previous,hunter.id)?.hp<300)break;
+      await shoot(warrior.id,50);await game.act({keys:[],duration_ms:250});previous=await save('tribe-shot');
+      if(entity(previous,warrior.id)?.hp<300)break;
     }
-    let healed=false,conditions=false,orbit=false;
-    game.check('ordinary wand shot wounds a living tribe member',entity(previous,hunter.id)?.hp>0&&entity(previous,hunter.id).hp<300);
+    let healed=false,orbit=false;
+    game.check('ordinary wand shot wounds a living tribe member',entity(previous,warrior.id)?.hp>0&&entity(previous,warrior.id).hp<300);
     for(let n=0;n<24;n++){
       await game.act({keys:[],duration_ms:250});const s=await save('camp-sample');
-      const a=entity(previous,hunter.id),b=entity(s,hunter.id);if(a&&b&&b.hp>a.hp)healed=true;
-      conditions||=(s.view.character.conditions&258)===258;
-      orbit||=tribe.some(e=>{const p=entity(s,e.id);return p&&p.parent===fire.id&&Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)>.2;});
+      const a=entity(previous,warrior.id),b=entity(s,warrior.id);if(a&&b&&b.hp>a.hp)healed=true;
+      orbit||=tribe.some(e=>{const p=entity(s,e.id);return p&&p.parent===null&&Math.hypot(p.pos.x-e.pos.x,p.pos.y-e.pos.y)>.2;});
       previous=s;await heal();
     }
     game.check('wounded tribe receives observed healing',healed);
-    game.check('Shaman stars apply selected Hallucinating and Quiet',conditions);
-    game.check('owned tribes move around their Fire',orbit);await capture('tribal-healing');
+    game.check('independent tribes move around their Fire',orbit);await capture('tribal-healing');
     let beforeKill;
     for(let n=0;n<45;n++){
       const s=await game.inspect();if(!entity(s,fire.id))break;beforeKill=s;
@@ -96,21 +104,34 @@ export async function run(game){
     }
     assert(beforeKill);trace.push({label:'before-final-fire-shot',...beforeKill});
     const survivors=tribe.filter(e=>entity(beforeKill,e.id)),detached=await save('fire-defeated');
-    game.check('Fire defeat detaches surviving tribes without deleting them',!entity(detached,fire.id)&&survivors.length>0&&survivors.every(e=>entity(detached,e.id)?.parent===null));
-    await game.act({keys:[],duration_ms:2500});const orphan=await save('tribes-orphaned');
-    game.check('detached tribes survive the timed ownership sweep',survivors.every(e=>entity(orphan,e.id)?.parent===null));
+    game.check('Fire defeat leaves surviving map-placed tribes independent',!entity(detached,fire.id)&&survivors.length>0&&survivors.every(e=>entity(detached,e.id)?.parent===null));
+    // The Orbit bucket suppresses star emission while dance movement wins. Watch at close range after Fire falls.
+    await walk(center);
+    let conditions=false;
+    for(let n=0;n<20;n++){await game.act({keys:[],duration_ms:250});const s=await game.observe();conditions||=(s.character.conditions&258)===258;if(conditions)break;await heal();}
+    game.check('Shaman stars apply selected Hallucinating and Quiet',conditions);
+    const orphan=await save('tribes-orphaned');
+    game.check('map-placed tribes remain independent after Fire death',survivors.every(e=>entity(orphan,e.id)?.parent===null));
     await capture('surviving-tribes');
   }else{
     const kind=part==='totem'?0xdcd:0xdcf,childKind=part==='totem'?0xdcc:0xdce;
     const parent=near(start,kind);assert(parent);await game.act({keys:[],duration_ms:2200});
-    const active=await save('family-active'),children=active.diagnostic.entities.filter(e=>e.parent===parent.id&&e.kind===childKind);
-    game.check('generated '+part+' has its bounded owned family',children.length===(part==='totem'?3:2));
-    game.check(part+' projectiles reach the native client',active.view.projectiles.some(p=>p.owner===parent.id));
+    const active=await save('family-active'),owned=s=>s.diagnostic.entities.filter(e=>e.parent===parent.id);
+    // Recovered forbiddenJungle.xml:693,838–840: Totem breeds; Basilisk's NeverRun does not.
+    const children=part==='totem'?owned(active):start.diagnostic.entities.filter(e=>e.kind===childKind&&Math.hypot(e.home.x-center.x,e.home.y-center.y)<=2.1);
+    game.check(part+' retains its exact linked room roster',children.every(e=>e.kind===childKind)&&
+      (part==='totem'?owned(start).length===0&&children.length===5:children.length===2&&owned(active).length===0&&children.every(e=>entity(active,e.id)?.parent===null)));
+    let shots=active.view.projectiles.some(p=>p.owner===parent.id);
+    for(let n=0;n<35&&!shots;n++){await game.act({keys:[],duration_ms:150});shots=(await game.inspect()).view.projectiles.some(p=>p.owner===parent.id);}
+    game.check(part+' projectiles reach the native client',shots);
     await capture(part+'-family');await defeat(parent.id);const detached=await save('parent-defeated');
-    game.check(part+' defeat detaches living children',children.every(e=>entity(detached,e.id)?.parent===null));
-    await game.act({keys:[],duration_ms:4500});const survivors=await save('family-survives');
-    game.check(part+' children survive without stale ownership',children.every(e=>entity(survivors,e.id)?.parent===null));
-    game.check(part+' parent does not respawn or keep summoning',!entity(survivors,parent.id)&&!survivors.diagnostic.entities.some(e=>e.parent===parent.id));
+    // Totem Spirit has no death/retirement order; parent is historical lineage, not a live spawner.
+    const survivors=part==='totem'?owned(detached):children.map(e=>entity(detached,e.id)).filter(Boolean);
+    const lineage=part==='totem'?parent.id:null;
+    game.check(part+' defeat leaves living dependents',!entity(detached,parent.id)&&survivors.length>0&&survivors.every(e=>e.kind===childKind&&e.parent===lineage));
+    await game.act({keys:[],duration_ms:4500});const end=await save('family-survives');
+    game.check(part+' surviving dependents retain their lineage',survivors.every(e=>entity(end,e.id)?.parent===lineage));
+    game.check(part+' parent does not respawn or keep summoning',!entity(end,parent.id)&&owned(end).every(e=>survivors.some(a=>a.id===e.id)));
     await capture(part+'-survivors');
   }
   const end=await save('final');

@@ -24,6 +24,8 @@ export async function run(game){
   await game.act({keys:['2'],duration_ms:700});
   const nested=await enter(first.session.world,'nested-dungeon');assert.equal(nested.world,'Snake Pit');
   // Origin inheritance is project policy, not recovered 2012 semantics: https://github.com/OpenRotMG/Open-RotMG-Server/pull/438
+  // An Enter click in the first frames after the nested arrival is not delivered as USEPORTAL; settle like a player first.
+  await game.act({keys:[],duration_ms:1500});
   const admitted=await enter(nested.session.world,'nested-return');
   game.check('nested key instance returns to the exact opening Realm',nested.session.world!==first.session.world&&admitted.session.world===home);
   const nexus=await escape('nexus');

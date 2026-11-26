@@ -27,7 +27,7 @@ export async function run(game){
     game.check('fresh natural family has no preexisting Sprite portal',begin.diagnostic.entities.some(e=>e.id===root.id)&&!begin.diagnostic.entities.some(e=>e.kind===0x70c));
     let portal;
     for(let attempt=0;attempt<12&&!portal;attempt++){
-      let s=await game.inspect();const child=s.diagnostic.entities.find(e=>e.kind===0x653&&e.camp===root.camp);
+      let s=await game.inspect();const child=s.diagnostic.entities.find(e=>e.kind===0x653&&(e.id===root.id||e.parent===root.id));
       if(child){
         for(let step=0;step<60;step++){
           s=await game.inspect();const e=s.diagnostic.entities.find(e=>e.id===child.id);if(!e)break;

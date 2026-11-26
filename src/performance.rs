@@ -293,92 +293,34 @@ pub fn memory() -> Value {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tick_miss_tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    fn pin_to_one_cpu() {
-        unsafe {
-            let mut set: libc::cpu_set_t = std::mem::zeroed();
-            let size = std::mem::size_of_val(&set);
-            assert_eq!(libc::sched_getaffinity(0, size, &mut set), 0);
-            let cpu = (0..libc::CPU_SETSIZE as usize)
-                .find(|&cpu| libc::CPU_ISSET(cpu, &set))
-                .expect("no allowed CPU");
-            libc::CPU_ZERO(&mut set);
-            libc::CPU_SET(cpu, &mut set);
-            assert_eq!(libc::sched_setaffinity(0, size, &set), 0);
-        }
-    }
-
-    fn spin(cpu: Duration) {
-        let start = thread_cpu().unwrap();
-        while thread_cpu().unwrap() - start < cpu {
-            std::hint::black_box(0u64);
-        }
-    }
-
-    fn tick(body: impl FnOnce()) -> (&'static str, Value) {
-        let waited = cpu_wait();
-        let measure = Measure::start();
-        body();
-        let step = measure.finish();
-        let wait = cpu_wait().unwrap() - waited.unwrap();
-        tick_miss(Duration::ZERO, step, Some(wait))
-    }
 
     #[test]
     fn deadline_misses_name_work_contention_blocking_and_late_start() {
-        let (work, contention, blocked) = std::thread::spawn(|| {
-            pin_to_one_cpu();
-            let work = tick(|| spin(Duration::from_millis(60)));
-            let blocked = tick(|| {
-                spin(Duration::from_millis(5));
-                std::thread::sleep(Duration::from_millis(60));
-            });
-            let stop = AtomicBool::new(false);
-            let contention = std::thread::scope(|s| {
-                for _ in 0..2 {
-                    s.spawn(|| {
-                        while !stop.load(Ordering::Relaxed) {
-                            std::hint::black_box(0u64);
-                        }
-                    });
-                }
-                std::thread::sleep(Duration::from_millis(20));
-                let result = tick(|| spin(Duration::from_millis(20)));
-                stop.store(true, Ordering::Relaxed);
-                result
-            });
-            (work, contention, blocked)
-        })
-        .join()
-        .unwrap();
-        println!(
-            "work {}\ncontention {}\nblocked {}",
-            work.1, contention.1, blocked.1
-        );
-        assert_eq!(work.0, "missed_work", "{}", work.1);
-        assert_eq!(contention.0, "missed_contention", "{}", contention.1);
-        assert_eq!(blocked.0, "missed_blocked", "{}", blocked.1);
-        let late = Measurement {
-            wall: Duration::from_millis(10),
-            cpu: Some(Duration::from_millis(9)),
-        };
-        let (counter, miss) = tick_miss(Duration::from_millis(80), late, Some(Duration::ZERO));
-        assert_eq!(counter, "missed_late_start", "{miss}");
-        assert_eq!(
-            tick_miss(
-                Duration::ZERO,
+        let ms = Duration::from_millis;
+        for (late, wall, cpu, wait, expected) in [
+            (0, 65, 60, 2, "work"),
+            (0, 65, 20, 40, "contention"),
+            (0, 65, 5, 2, "blocked"),
+            (80, 10, 9, 0, "late_start"),
+        ] {
+            let (counter, details) = tick_miss(
+                ms(late),
                 Measurement {
-                    wall: late.wall,
-                    cpu: None
+                    wall: ms(wall),
+                    cpu: Some(ms(cpu)),
                 },
-                None
-            )
-            .0,
-            "missed_unmeasured"
-        );
+                Some(ms(wait)),
+            );
+            assert_eq!(counter, format!("missed_{expected}"), "{details}");
+            assert_eq!(details["cause"], expected);
+        }
+        let step = Measurement {
+            wall: ms(65),
+            cpu: None,
+        };
+        assert_eq!(tick_miss(Duration::ZERO, step, None).0, "missed_unmeasured");
     }
 }

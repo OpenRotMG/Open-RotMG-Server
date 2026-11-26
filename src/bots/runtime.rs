@@ -380,7 +380,7 @@ async fn public_call(
                 }
                 if text.starts_with("hexed;") {
                     ensure!(
-                        current.map.name == "Mad Lab"
+                        current.map.template.as_deref() == Some("mad-lab")
                             && current.character.conditions
                                 & crate::condition::bit(crate::condition::HEXED)
                                 != 0,
@@ -388,7 +388,10 @@ async fn public_call(
                     );
                 }
                 if text == "blue water clears the green pool" {
-                    ensure!(current.map.name == "Mad Lab", "public call context changed");
+                    ensure!(
+                        current.map.template.as_deref() == Some("mad-lab"),
+                        "public call context changed"
+                    );
                 }
                 let portal = match text.as_str() {
                     "pc here" => Some(0x717),
@@ -397,7 +400,7 @@ async fn public_call(
                     _ => None,
                 };
                 ensure!(
-                    portal.is_none_or(|kind| current.map.name == "Realm"
+                    portal.is_none_or(|kind| current.map.template.as_deref() == Some("realm")
                         && current.objects.iter().any(|p| p.kind == kind)),
                     "public call portal left view"
                 );
@@ -490,7 +493,7 @@ async fn enter_admitted(
     let vault = if app
         .world
         .in_world(world)
-        .call(|w| Ok(w.name == "Vault"))
+        .call(|w| Ok(w.template_id() == Some("vault")))
         .await?
     {
         Some(app.store.vaults(character.account).await?)
@@ -1010,7 +1013,7 @@ pub(super) async fn launch(
                         }
                     }
                     if let Some(selected) = selected { ensure!(view.session.character == selected, "selected autonomous character changed"); }
-                    if view.map.name=="Nexus" && brain.agreement.as_ref().is_none_or(|a|a.waiting.is_none()) && brain.group_lost_since.is_some_and(|since|view.time_ms.saturating_sub(since)>=30000) {
+                    if view.map.template.as_deref() == Some("nexus") && brain.agreement.as_ref().is_none_or(|a|a.waiting.is_none()) && brain.group_lost_since.is_some_and(|since|view.time_ms.saturating_sub(since)>=30000) {
                         app.society.lock().expect("adventure registry poisoned").leave(account);
                         brain.group_lost_since=None;
                         tracing::info!(account,"autonomous rendezvous timed out; continuing independently");
@@ -1079,10 +1082,6 @@ pub(super) async fn launch(
                     }
                     if brain.crowd.bands.observe(&view, &app.content, &mut brain.mind.godlands, brain.profile.knows_minimap, brain.profile.identity) { brain.mind.revision = app.store.save_bot_mind(brain.mind.clone()).await?; }
                     while let Some((packet, received_view)) = deferred_market.take().or_else(||output.try_recv().ok().map(|p|(p,view.clone()))) {
-                        if packet.id == crate::wire::GOTO {
-                            app.world.for_player(id).call(move |w| w.acknowledge_autonomous_goto(id)).await?;
-                            continue;
-                        }
                         app.cctv.heard(name.as_str(), id, &packet)?;
                         let settled_view = if matches!(packet.id,12|23|67) { Some(app.world.player_view(id).await?) } else { None };
                         let social_view = settled_view.as_ref().unwrap_or(&received_view);
@@ -1171,7 +1170,7 @@ pub(super) async fn launch(
                         || ready_reply.as_ref().is_some_and(|(r,_,_)|matches!(r.plan,Some(adventures::Plan::Invite{..})));
                     let ending = until.is_some_and(|deadline| app.world.clock.now() >= deadline)
                         && pending.is_none() && ready_reply.is_none() && brain.draft.is_none() && director::may_finish(&app, &mut brain, &view);
-                    if ending && view.map.name == "Nexus" {
+                    if ending && view.map.template.as_deref() == Some("nexus") {
                         retired = true;
                         break;
                     }
@@ -1212,7 +1211,7 @@ pub(super) async fn launch(
                         tracing::info!(account,name=name.as_str(),"session finished; returning to Nexus before logout");
                         app.cctv.decided(&view, &decision, "session finished; returning to Nexus before logout".into(), &serde_json::json!({"goal":null,"plan":"End this session","step":"Return to Nexus before logout","mode":"necessary","reason":"session deadline reached","resume":null}), &brain, &app.content);
                     }
-                    if events::shared(&view.map.name) {
+                    if events::shared(view.map.template.as_deref()) {
                         tracing::info!(account,character=view.session.character,world=%view.map.name,tick=view.tick,time_ms=view.time_ms,
                             hp=view.character.hp,max_hp=view.character.stats[0],mp=view.character.mp,recovery=profile.recovery,
                             held_health=view.character.items.iter().skip(4).filter(|k|**k==0xa22).count(),
@@ -1315,7 +1314,7 @@ pub(super) async fn launch(
                                 let plan = std::mem::take(&mut brain.plan);
                                 let sought = brain.mind.market.sought;
                                 // A Vault errand belongs to the same Nexus market visit.
-                                let visit = (matches!((view.map.name.as_str(), portal_kind), ("Nexus", Some(0x720)) | ("Vault", None))).then(|| brain.mind.market.clone());
+                                let visit = (matches!((view.map.template.as_deref(), portal_kind), (Some("nexus"), Some(0x720)) | (Some("vault"), None))).then(|| brain.mind.market.clone());
                                 (id, output, sender, brain) = reenter(&app, profile, account, &mut owner, _entry, Reentry::Portal { destination, time, key, session: crate::world::view::Session { world: view.session.world, player: view.session.player, account: view.session.account, character: view.session.character }, selected }).await?;
                                 brain.plan = plan;
                                 brain.mind.market.sought = sought;

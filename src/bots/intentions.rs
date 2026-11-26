@@ -74,7 +74,7 @@ fn item_upgrade(v: &PlayerView, c: &Content, identity: &str) -> Result<Option<(i
             continue;
         };
         if v.character.items.contains(&kind)
-            || v.map.name == "Vault"
+            || v.map.template.as_deref() == Some("vault")
                 && v.objects
                     .iter()
                     .any(|o| o.kind == 0x504 && o.contents.contains(&kind))

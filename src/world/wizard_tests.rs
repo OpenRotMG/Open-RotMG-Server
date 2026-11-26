@@ -2,12 +2,13 @@ use super::*;
 
 #[test]
 fn selected_wizard_novas_preserve_layout_costs_and_rejection_state() {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let class = content.get(0x30e).unwrap();
     assert_eq!(class.slots[..4], [17, 11, 14, 9]);
     assert_eq!(content.classes[&0x30e].caps[7], 60);
     assert!(content.unlocked(0x30e, &BTreeMap::new()).unwrap());
     let map = Arc::new(Map {
+        elevation: None,
         width: 32,
         height: 32,
         cells: vec![

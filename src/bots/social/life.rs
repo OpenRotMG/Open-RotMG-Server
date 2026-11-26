@@ -504,7 +504,7 @@ impl Life {
         }
         // Owner, Nov 2026: bots asked each other for heals and potions in the Nexus, where players did not.
         if v.elapsed_ms >= self.next_request
-            && v.map.name != "Nexus"
+            && v.map.template.as_deref() != Some("nexus")
             && let Some(p) = v.objects.iter().find(|p| {
                 p.hp > 0
                     && p.account.is_some_and(|a| self.known(a))
@@ -529,7 +529,7 @@ impl Life {
                 .get_or_insert_with(|| format!("{}, good to see you again", p.name));
             self.remember(v, account, p.name.clone(), Interaction::Recognized, 0);
         }
-        if v.map.name == "Nexus"
+        if v.map.template.as_deref() == Some("nexus")
             && let Some(p) = v
                 .objects
                 .iter()
@@ -1009,8 +1009,9 @@ mod tests {
         v.character.hp = 1;
         let mut life = Life::default();
         life.remember(&v, 2, "Healer".into(), Interaction::HealedBy, 50);
-        for (map, asked) in [("Nexus", false), ("Realm", true)] {
+        for (map, template, asked) in [("Nexus", "nexus", false), ("Realm", "realm", true)] {
             v.map.name = map.into();
+            v.map.template = Some(template.into());
             (life.outgoing, life.next_request) = (None, 0);
             life.decide(&v);
             assert_eq!(

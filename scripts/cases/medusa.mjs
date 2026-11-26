@@ -3,6 +3,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 const spec={class:0x30e,level:20,seed:843,world:1,equipment:[0xb08,0xb24,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,75,0,50,75,0,0]};
+export const realmSeed=6;
 let medusa;
 export async function prepare(api){
   const info=await api({op:'world_info',world:1}),[x,y]=info.spawn_points[0];
@@ -59,7 +60,9 @@ export async function run(game){
     }
     await act({keys:[],duration_ms:500},{name:'medusa-defeated',when:()=>true});
     const dead=await save('defeated');
-    game.check('ordinary native staff defeats the same Medusa and earns XP',!enemy(dead)&&dead.view.character.experience>=xp+200);
+    // 79a4c92b:src/world.rs:6303-6310 caps ordinary XP at 10% of the level requirement.
+    const expectedXp=Math.min(200,Math.floor((50+(begin.view.character.level-1)*100)/10));
+    game.check('ordinary native staff defeats the same Medusa and earns capped XP',!enemy(dead)&&dead.view.character.experience===xp+expectedXp&&dead.diagnostic.character.kills===combat.diagnostic.character.kills+1);
     await act({keys:[],duration_ms:3000});
     const end=await save('end');
     game.check('defeated Medusa cannot award XP twice',!enemy(end)&&end.view.character.experience===dead.view.character.experience);

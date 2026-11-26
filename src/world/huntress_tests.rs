@@ -2,8 +2,9 @@ use super::*;
 use crate::condition::{PARALYZED, SLOWED, bit};
 
 fn fixture(kind: u16) -> (World, i32, Pos) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 32,
         height: 32,
         cells: vec![
@@ -18,9 +19,10 @@ fn fixture(kind: u16) -> (World, i32, Pos) {
         ],
         spawns: vec![(8.5, 8.5)],
     };
-    let mut world = World::new(content, Arc::new(map)).unwrap();
+    let mut world = World::in_domain(content, Arc::new(map), WorldDomain::NonRealm).unwrap();
     world.clock.set_paused(true);
     let mut ch = Character::fresh(world.content.get(0x322).unwrap()).unwrap();
+    ch.name = "Huntress".into();
     ch.account = 1;
     ch.id = 1;
     ch.base[1] = 252;
@@ -85,11 +87,11 @@ fn huntress_tiers_arm_then_blast_multiple_enemies_once() {
         );
         assert_eq!(w.players[&owner].character.mp, 252);
         w.now = 1499;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&inner].hp, 7500);
         assert_eq!(w.ability_state.thrown.len(), 1);
         w.now = 1500;
-        w.ability_step();
+        w.ability_step().unwrap();
         for target in [inner, outer] {
             assert_eq!(w.entities[&target].hp, 7500 - (damage - 19));
             assert_eq!(
@@ -102,7 +104,7 @@ fn huntress_tiers_arm_then_blast_multiple_enemies_once() {
         }
         assert_eq!(w.entities[&far].hp, 7500);
         assert!(w.ability_state.thrown.is_empty() && w.ability_state.objects.is_empty());
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&inner].hp, 7500 - (damage - 19));
     }
 }
@@ -114,12 +116,12 @@ fn huntress_outer_ring_does_not_trigger_but_ten_second_expiry_explodes() {
     cast(&mut w, owner, pos).unwrap();
     for now in [1500, 11499] {
         w.now = now;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&target].hp, 7500);
         assert_eq!(w.ability_state.objects.len(), 1);
     }
     w.now = 11500;
-    w.ability_step();
+    w.ability_step().unwrap();
     assert_eq!(w.entities[&target].hp, 7469);
     assert!(w.ability_state.objects.is_empty());
 }
@@ -164,14 +166,14 @@ fn huntress_rejections_and_owner_departure_leave_no_delayed_damage() {
         cast(&mut w, owner, pos).unwrap();
         if landed {
             w.now = 1500;
-            w.ability_step();
+            w.ability_step().unwrap();
         }
         let saved = w.leave(owner).unwrap();
         assert_eq!(saved.mp, 212);
         let next = w.enter(saved, None).unwrap();
         assert_ne!(next, owner);
         w.now = 12000;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&target].hp, 7500);
         assert!(w.ability_state.thrown.is_empty() && w.ability_state.objects.is_empty());
         assert!(!w.entities.values().any(|e| e.kind == 0x711));
@@ -180,7 +182,7 @@ fn huntress_rejections_and_owner_departure_leave_no_delayed_damage() {
 
 #[tokio::test]
 async fn huntress_requires_both_twenty_records_and_preserves_death() {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     for (rogue, archer) in [(19, 20), (20, 19), (20, 20)] {
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
         let guid = format!("huntress-{rogue}-{archer}");

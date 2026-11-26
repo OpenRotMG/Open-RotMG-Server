@@ -67,7 +67,10 @@ export async function run(game){
   const rejected=await api({op:'prepare_realm_closure',world:-3},false);
   game.check('prepared closure cannot be repeated after enrollment',JSON.stringify(rejected).includes('already prepared'));
   await hall(game);await walk(game,old.pos);await enter(game);
-  await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
+  // Renew protection as each window lapses: the countdown outlasts one window beside the recovered XML Cyclops camp.
+  let protectedUntil=0;
+  async function hold(ms){const now=(await game.observe()).game_ms;if(now>=protectedUntil){await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});protectedUntil=now+60000;}await game.act({keys:[],duration_ms:Math.min(ms,protectedUntil-now)});}
+  await hold(1);
   const kills=(await game.inspect()).diagnostic.character.kills;
   for(let n=0;n<30;n++){
     const s=await game.inspect();if(!s.diagnostic.entities.some(e=>e.id===prepared.hero))break;
@@ -77,10 +80,7 @@ export async function run(game){
   game.check('native shot defeats the prepared final hero',defeated.diagnostic.character.kills>kills&&!defeated.diagnostic.entities.some(e=>e.id===prepared.hero));
   const closed=await save('closed-entrance',watcher);
   game.check('only the selected closed Realm entrance disappears',!closed.view.objects.some(o=>o.id===old.id)&&closed.view.objects.some(o=>o.id===other.id));
-  for(let n=0;n<16&&(await game.observe()).world==='Realm';n++){
-    if(n===6||n===12)await api({op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invincible',duration_ms:60000}});
-    await game.act({keys:[],duration_ms:10000});
-  }
+  for(let n=0;n<24&&(await game.observe()).world==='Realm';n++)await hold(10000);
   const castle=await save('collective-castle-transfer');
   game.check('real countdown collectively transfers the same living character to Castle',castle.view.map.name==="Oryx's Castle"&&castle.view.session.character===initial.view.session.character&&castle.view.lifecycle.alive);
   await game.act({keys:[],duration_ms:2500});

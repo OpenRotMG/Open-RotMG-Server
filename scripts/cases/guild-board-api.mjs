@@ -4,12 +4,14 @@ import {promisify} from 'node:util';
 import {open,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createServer} from 'node:net';
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 
-const [native,client]=process.argv.slice(2),out=process.env.QA_RESULTS_DIR;
-assert(native&&client&&out,'Run through qa.py exec with a closed native run and its exact client directory');
+const [native,client,binary,data]=process.argv.slice(2),out=process.env.QA_RESULTS_DIR;
+assert(native&&client&&binary&&data&&out,'Run through qa.py exec with a closed native run and its exact client directory');
 const receipt=JSON.parse(await readFile(join(native,'result.json'),'utf8'));
+assert.equal(receipt.data.path,data,'Data must match the closed native run');
+assert.equal(createHash('sha256').update(await readFile(binary)).digest('hex'),receipt.inputs.serverBinary,'Binary must match the closed native run');
 assert(receipt.status==='passed'&&receipt.cleanupErrors.length===0,'Native lifecycle must have passed and closed');
 const config=JSON.parse(await readFile(join(native,'native.json'),'utf8')),state=config.state;
 const exec=promisify(execFile);
@@ -20,15 +22,20 @@ const founder={guid:accounts[0][0],password:''},member={guid:accounts[1][0],pass
 const saved=(await query('SELECT board FROM guilds'))[0][0];
 const listener=createServer();await new Promise(ok=>listener.listen(0,'127.0.0.1',ok));const port=listener.address().port;await new Promise(ok=>listener.close(ok));
 const origin='http://127.0.0.1:'+port,log=await open(join(out,'api-server.log'),'a',0o600);
-const child=spawn(join(state,'server-build/openrotmg'),['--state',state,'--dev-control','--no-shore-bots','--client',client,'--port',String(port)],{stdio:['ignore',log.fd,log.fd]});
+const child=spawn(binary,['--data',data,'--state',state,'--dev-control','--no-shore-bots','--client',client,'--port',String(port)],{stdio:['ignore',log.fd,log.fd]});
 const closed=new Promise((ok,bad)=>{child.once('error',bad);child.once('close',(code,signal)=>ok({code,signal}));});
 const checks=[],check=(name,value)=>{assert(value,name);checks.push(name);};
+let ready=false;
 try{
-  const deadline=Date.now()+30000;
-  while(true){
-    assert(child.exitCode===null,'API server exited during startup');
-    try{if((await fetch(origin+'/',{signal:AbortSignal.timeout(1000)})).ok)break;}catch(error){assert(Date.now()<deadline,'API server did not start: '+error);}
-    assert(Date.now()<deadline,'API server did not become ready');await delay(100);
+  // Realm construction precedes the frontdoor; the 30s probe stopped a healthy cold start.
+  const deadline=Date.now()+120000;
+  while(!ready){
+    assert(child.exitCode===null&&child.signalCode===null,'API server exited during startup; see api-server.log');
+    try{
+      const response=await fetch(origin+'/health',{signal:AbortSignal.timeout(1000)});
+      ready=response.ok;await response.body?.cancel();
+    }catch(error){assert(Date.now()<deadline,`API server did not start: ${error}; see api-server.log`);}
+    if(!ready){assert(Date.now()<deadline,'API server startup deadline; see api-server.log');await delay(100);}
   }
   const request=async(credentials,op,board)=>{
     await delay(4000);
@@ -57,5 +64,5 @@ try{
   await writeFile(join(out,'board-api.json'),JSON.stringify({status:'passed',native,revision:receipt.source.head,checks},null,2));
 }finally{
   child.kill('SIGINT');const timer=setTimeout(()=>child.kill('SIGKILL'),10000);
-  try{await closed;}finally{clearTimeout(timer);await log.close();}
+  try{const result=await closed;if(ready)assert.deepEqual(result,{code:0,signal:null},'Guild Board API server did not shut down cleanly');}finally{clearTimeout(timer);await log.close();}
 }

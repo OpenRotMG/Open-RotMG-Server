@@ -30,20 +30,6 @@ pub enum HistoricalDungeon {
     ManorOfTheImmortals,
 }
 impl HistoricalDungeon {
-    pub fn from_world(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| match kind {
-            Self::PirateCave => name == "Pirate Cave",
-            Self::SpiderDen => name == "Spider Den",
-            Self::ForbiddenJungle => name == "Forbidden Jungle",
-            Self::SnakePit => name == "Snake Pit",
-            Self::SpriteWorld => name == "Sprite World",
-            Self::UndeadLair => name == "Undead Lair",
-            Self::AbyssOfDemons => name == "Abyss of Demons",
-            Self::TombOfTheAncients => name == "Tomb of the Ancients",
-            Self::OceanTrench => name == "Ocean Trench",
-            Self::ManorOfTheImmortals => name == "Manor of the Immortals",
-        })
-    }
     pub const ALL: [Self; 10] = [
         Self::PirateCave,
         Self::SpiderDen,
@@ -72,7 +58,7 @@ pub const DUNGEONS: [(u16, &str, &str, u16); 13] = [
         0x739,
         "manor-of-the-immortals",
         "Manor of the Immortals",
-        manor::BOSS,
+        manor::SUMMONER,
     ),
     (0x742, "beachzone", "Beachzone", beach::BOSS),
     (0x741, davy::TEMPLATE, davy::NAME, davy::BOSS),
@@ -84,25 +70,106 @@ pub const DUNGEONS: [(u16, &str, &str, u16); 13] = [
     ),
 ];
 
-pub fn portal_drop(enemy: u16) -> Option<(u16, f64)> {
-    match enemy {
-        beach::BUM => Some((0x742, 0.5)),
-        trench::HERMIT => Some((0x730, 1.)),
-        0xdc2 => Some((0x733, 0.2)),
-        // Guaranteed drop: https://www.realmeye.com/wiki/kage-kami
-        0x6db => Some((0x739, 1.)),
-        tomb::SPHINX => Some((tomb::PORTAL, 1.)),
-        0x60e..=0x610 => Some((0x717, 0.01)),
-        0x654 => Some((0x71b, 0.1)),
-        0x62c | 0x637 => Some((0x719, 0.1)),
-        // Classic sources are these five leaders, not their followers: https://wikiwiki.jp/rmd/Snake%20Pit
-        0x640 | 0x645 | 0x646 | 0x649 | 0x650 => Some((0x718, 0.17)),
-        0x653 => Some((0x70c, 0.25)),
-        0x659 => Some((0x71a, 0.17)),
-        // 10% is project balance, not an authenticated 123.5.1 rate: https://github.com/OpenRotMG/Open-RotMG-Server/issues/1069
-        0x657 => Some((0x890, 0.1)),
-        _ => None,
+pub(crate) fn generate(
+    content: &crate::content::Content,
+    world: &crate::content::game::World,
+    generator: &crate::content::game::geometry::Generator,
+    seed: impl FnOnce() -> u64,
+) -> anyhow::Result<crate::content::Map> {
+    use crate::content::game::geometry::GeneratorKind::*;
+    match generator.kind {
+        Pirate => pirate::generate_for(content, generator, seed()),
+        Snake => snake::generate_for(content, generator, seed()),
+        Sprite => sprite::generate_for(content, generator, seed()),
+        Undead => undead::generate_for(content, generator, seed()),
+        Abyss => abyss::generate_for(content, generator, seed()),
+        Trench => trench::generate_for(content, generator, seed()),
+        Spider => spider::generate_for(content, generator, seed()),
+        Lab => lab::generate_for(content, world, generator, seed()),
+        Jungle => jungle::generate_for(content, generator, seed()),
+        Manor => manor::generate_for(content, generator, seed()),
+        Beach => beach::generate_for(content, generator),
+        Davy => davy::generate_for(content, generator, seed()),
+        Tomb => tomb::generate_for(content, generator, seed()),
     }
 }
 
-pub use snake::generate as snake_pit;
+#[cfg(test)]
+pub(crate) fn test_generator<'a>(
+    content: &'a crate::content::Content,
+    id: &str,
+) -> &'a crate::content::game::geometry::Generator {
+    let game = content.game.as_ref().unwrap();
+    let world = game.world_template(id).unwrap();
+    let crate::content::game::geometry::Geometry::Generator(g) =
+        &game.maps[world.map as usize].geometry
+    else {
+        panic!("test expected linked generator for {id}")
+    };
+    g
+}
+
+#[cfg(test)]
+pub(crate) fn generate_selected(
+    content: &crate::content::Content,
+    id: &str,
+    seed: u64,
+) -> anyhow::Result<crate::content::Map> {
+    let world = content.game.as_ref().unwrap().world_template(id).unwrap();
+    generate(content, world, test_generator(content, id), || seed)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Rect {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+}
+impl Rect {
+    /// The cell `along` this rect's `side` edge, `out` cells outside it.
+    fn at(self, side: char, along: i32, out: i32) -> (i32, i32) {
+        match side {
+            'N' => (self.x + along, self.y - out),
+            'S' => (self.x + along, self.y + self.h - 1 + out),
+            'W' => (self.x - out, self.y + along),
+            _ => (self.x + self.w - 1 + out, self.y + along),
+        }
+    }
+    fn span(a: (i32, i32), b: (i32, i32)) -> Rect {
+        Rect {
+            x: a.0.min(b.0),
+            y: a.1.min(b.1),
+            w: (a.0 - b.0).abs() + 1,
+            h: (a.1 - b.1).abs() + 1,
+        }
+    }
+    fn grow(self, g: i32) -> Rect {
+        Rect {
+            x: self.x - g,
+            y: self.y - g,
+            w: self.w + 2 * g,
+            h: self.h + 2 * g,
+        }
+    }
+    fn overlaps(self, o: Rect) -> bool {
+        self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
+    }
+}
+fn opposite(side: char) -> char {
+    match side {
+        'N' => 'S',
+        'S' => 'N',
+        'W' => 'E',
+        _ => 'W',
+    }
+}
+
+fn rect_bounds(rects: impl Iterator<Item = Rect> + Clone) -> (i32, i32, i32, i32) {
+    (
+        rects.clone().map(|r| r.x).min().unwrap_or(0),
+        rects.clone().map(|r| r.y).min().unwrap_or(0),
+        rects.clone().map(|r| r.x + r.w).max().unwrap_or(0),
+        rects.map(|r| r.y + r.h).max().unwrap_or(0),
+    )
+}

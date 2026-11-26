@@ -4,16 +4,17 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 const out=process.env.QA_RESULTS_DIR;
 const base={class:0x30e,level:20,seed:892,world:'pirate-cave',position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0xc34,0xc2b,0xc2c,-1,-1,-1,-1,-1],stats:[670,385,50,25,50,50,0,0]};
+export const realmSeed=1296;
 let target,grave,scoutPlayer;
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];
   const scout=await api({op:'spawn',spec:{...base,world:1,position:{x,y},guid:'seasonal-scout',controller:'direct',profile:null}});
   const state=await api({op:'inspect',actor:scout.result.actor}),root=join(out,'native');
+  scoutPlayer=state.diagnostic.player;
   const report=JSON.parse(await readFile(join(root,'result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
   const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
   const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  scoutPlayer=state.diagnostic.player;
   grave=map.entities.find(e=>e.kind===0x6db&&[0,1,2].every(dx=>[0,1,2].every(dy=>!blocked.has([Math.floor(e.pos.x)+dx,Math.floor(e.pos.y)+dy].join(',')))));
   assert(grave,'Expected an approachable natural Kage grave');target=grave;
   await writeFile(join(out,'natural-targets.json'),JSON.stringify({target,grave}));
@@ -65,8 +66,15 @@ export async function run(game){
   const rangeStart=await peer.observe();await game.act({keys:[],duration_ms:1500});
   const rangeEnd=await peer.observe();
   game.check('out-of-range player receives only passive regeneration',rangeEnd.character.hp-100<=Math.ceil((rangeEnd.game_ms-rangeStart.game_ms)/1000)+1);
-  const current=await castles();
-  game.check('Castles remain at their summon positions',fixed.every(e=>current.some(c=>c.id===e.id&&c.pos.x===e.pos.x&&c.pos.y===e.pos.y)));
+  const snapshot=await game.inspect(),current=snapshot.diagnostic.entities.filter(e=>e.kind===0x140a);
+  // The 79a4c92b companion service expires each Castle at its own deadline, not on a shared pail timer.
+  const published=(await readFile(join(out,'native/server.log'),'utf8')).split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l).fields)
+    .filter(f=>f.message==='companion published'&&f.kind===0x140a);
+  const live=fixed.filter(e=>{
+    const record=published.find(f=>f.companion===e.id);assert(Number.isInteger(record?.until));
+    return record.until>snapshot.diagnostic.time_ms;
+  });
+  game.check('Unexpired Castles remain at their summon positions; due Castles retire',live.length>0&&live.length===current.length&&live.every(e=>current.some(c=>c.id===e.id&&c.pos.x===e.pos.x&&c.pos.y===e.pos.y)));
   await change(game.actor,{kind:'vitals',hp:669,mp:100});
   const capStart=await game.observe();await game.act({keys:[],duration_ms:1200});
   const capEnd=await game.observe();
@@ -77,13 +85,17 @@ export async function run(game){
   const expiredEnd=await game.observe();
   game.check('expired Castles leave only passive regeneration',expiredEnd.character.hp-100<=Math.ceil((expiredEnd.game_ms-expiredStart.game_ms)/1000)+1);
   const fire=await game.join({...base,world:1,position:{x:target.pos.x+1,y:target.pos.y+1},backpack:[0xc2b,0xc2b,0xc2b,0xc2b,0xc2b,0xc2c,0xc2c,0xc34]});
-  await change(fire.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
+  async function protectFire(){
+    if(!((await fire.observe()).character.conditions&(1<<24)))await change(fire.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
+  }
+  await protectFire();
   for(const [kind,slots] of [[0x1407,[4,5,6,7,8]],[0x1408,[9,10]]]){
     let damage=0;
     for(const slot of slots){
       for(let n=0;n<30;n++){
-        const e=(await fire.inspect()).diagnostic.entities.find(e=>e.id===target.id);assert(e,'Natural damage target must survive');
-        if(e.stage!==1&&e.stage!==3)break;
+        await protectFire();
+        const {diagnostic}=await fire.inspect();assert(diagnostic.entities.some(e=>e.id===target.id),'Natural damage target must survive');
+        if(!diagnostic.xml[target.id]?.states.some(s=>['Start','Flying'].includes(s.name)))break;
         await fire.act({keys:[],duration_ms:200});
       }
       const start=(await fire.inspect()).diagnostic.entities.find(e=>e.id===target.id),before=await fire.observe();
@@ -97,10 +109,15 @@ export async function run(game){
   }
   await change(fire.actor,{kind:'item',slot:0,item:0xb08});await fire.act({keys:[],duration_ms:250});
   for(let n=0;n<25;n++){
+    if((await fire.inspect()).diagnostic.entities.find(e=>e.id===grave.id)?.hp<6930)break;
+    await protectFire();
     await fire.act({keys:[],duration_ms:200,target:{entity:grave.id,camera_angle:-Math.PI/4,fire:true}});
-    if((await fire.inspect()).diagnostic.entities.find(e=>e.id===grave.id)?.stage>0)break;
   }
-  for(let n=0;n<50&&!((await fire.observe()).character.conditions&16);n++)await fire.act({keys:[],duration_ms:200});
+  for(let n=0;n<50&&!((await fire.observe()).character.conditions&16);n++){
+    await protectFire();
+    await fire.act({keys:[],duration_ms:200});
+  }
+  await protectFire();
   game.check('ordinary Kage encounter inflicts Sick',Boolean((await fire.observe()).character.conditions&16));
   await change(fire.actor,{kind:'vitals',hp:100,mp:100});
   const sick=await fire.observe();await fire.act({keys:['8'],duration_ms:1500},{name:'sick-castle',when:v=>v.character.items[11]===0xc35});

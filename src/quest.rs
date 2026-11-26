@@ -1,8 +1,4 @@
-use crate::encounter::{Motion, Profile};
-use anyhow::{Result, ensure};
-
 pub const ROOTS: [u16; 5] = [0x91f, 0x91b, 0x928, 0x675, 0x678];
-pub const EVENTS: [u16; 3] = [0xd56, 0xd59, 0xd5f];
 pub const EVENT_BOSSES: [u16; 7] = [0xd56, 0xd59, 0xd5f, 0xd50, 0xd54, 0xd61, 0xe37];
 pub fn root(kind: u16) -> bool {
     ROOTS.contains(&kind) || EVENT_BOSSES.contains(&kind)
@@ -57,11 +53,6 @@ pub fn window(kind: u16) -> (u8, u8) {
         .find(|(k, _, _)| *k == kind)
         .map_or((1, 20), |(_, min, max)| (*min, *max))
 }
-pub const ROSTER: &[u16] = &[
-    0x91b, 0x91c, 0x91d, 0x91e, 0x91f, 0x920, 0x921, 0x922, 0x923, 0x924, 0x928, 0x929, 0x92a,
-    0x92b, 0x92c, 0x92d, 0x675, 0x676, 0x677, 0x6c1, 0x6c2, 0x65f, 0x660, 0x661, 0xd56, 0xd57,
-    0xd58, 0xd59, 0xd5a, 0xd5b, 0xd5c, 0xd5d, 0xd5e, 0xd5f, 0xd60, 0xd54, 0xd55,
-];
 pub fn final_root(kind: u16) -> bool {
     matches!(
         kind,
@@ -77,67 +68,4 @@ pub fn final_root(kind: u16) -> bool {
             | crate::dungeon::trench::HERMIT
             | 0xe37
     )
-}
-pub fn profile(kind: u16) -> Option<Profile> {
-    ROSTER.contains(&kind).then_some(Profile {
-        motion: Motion::Wander,
-        speed: 3.,
-        interval: 50,
-        range: match kind {
-            0xd56 | 0xd59 => 30.,
-            0xd57 | 0xd58 => 12.,
-            0xd5a..=0xd5c => 10.,
-            0xd5d => 9.,
-            _ => 15.,
-        },
-    })
-}
-pub fn validate(content: &crate::content::Content, kind: u16) -> Result<()> {
-    ensure!(
-        ROSTER.contains(&kind),
-        "unselected Realm quest object {kind:#x}"
-    );
-    let object = content.get(kind)?;
-    ensure!(object.enemy && object.hp > 0, "invalid Realm quest enemy");
-    if kind == 0xd54 {
-        ensure!(
-            object.per_realm_max == Some(1),
-            "Grand Sphinx requires selected PerRealmMax=1"
-        );
-    }
-    let indexes: &[u8] = match kind {
-        0x6c2 | 0xd5e..=0xd60 => &[],
-        0xd54 => &[0, 1, 2],
-        0xd55 => &[0, 1],
-        0x920 => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-        0x91b | 0x91c | 0x91d | 0x6c1 | 0xd59 | 0xd5a | 0xd5c => &[0, 1],
-        _ => &[0],
-    };
-    for index in indexes {
-        ensure!(
-            object.projectiles.contains_key(index),
-            "quest {kind:#x} lacks selected projectile {index}"
-        );
-    }
-    Ok(())
-}
-pub fn ring(index: u8, count: usize, angle: f32) -> Vec<(u8, f32)> {
-    (0..count)
-        .map(|n| {
-            (
-                index,
-                angle + n as f32 * std::f32::consts::TAU / count as f32,
-            )
-        })
-        .collect()
-}
-pub fn fan(index: u8, count: usize, degrees: f32, heading: f32) -> Vec<(u8, f32)> {
-    (0..count)
-        .map(|n| {
-            (
-                index,
-                heading + (n as f32 - (count - 1) as f32 / 2.) * degrees.to_radians(),
-            )
-        })
-        .collect()
 }

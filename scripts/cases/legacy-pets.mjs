@@ -3,7 +3,9 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 export const fixture={class:0x30e,level:20,seed:893,world:'pirate-cave',position:'spawn',equipment:[-1,-1,-1,-1],backpack:[0x1539,0x1513,-1,-1,-1,-1,-1,-1],stats:null};
-export async function run(game){
+export const petRosterRanges=Object.freeze([0,22,44,66]);
+
+async function context(game){
   const root=join(process.env.QA_RESULTS_DIR,'native'),records=[];
   const config=JSON.parse(await readFile(join(root,'native.json'),'utf8'));
   const token=(await readFile(join(config.state,'control.token'),'utf8')).trim();
@@ -23,6 +25,11 @@ export async function run(game){
     const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'item',slot:4,item}}})});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
+  return {roster,visible,save,wait,prepare};
+}
+
+export async function run(game){
+  const {roster,visible,save,wait}=await context(game);
   const initial=await save('initial');
   await game.act({keys:['1'],duration_ms:600});
   const baby=await save('baby');
@@ -40,9 +47,19 @@ export async function run(game){
   await wait();await game.act({keys:['1'],duration_ms:350});
   const hidden=await save('toggle-off');
   game.check('reusing permanent generator dismisses without consumption',visible(hidden).length===0&&hidden.view.character.items[4]===0x1539&&hidden.view.character.inventory_revision===nexus.view.character.inventory_revision+1);
+  const final=await save('final');
+  game.check('lifecycle leaves identity base stats and equipment unchanged',final.view.lifecycle.alive&&final.view.session.character===initial.view.session.character&&JSON.stringify(final.view.character.base_stats)===JSON.stringify(initial.view.character.base_stats)&&JSON.stringify(final.view.character.items.slice(0,4))===JSON.stringify(initial.view.character.items.slice(0,4)));
+}
+
+export async function runRoster(game,group){
+  assert(Number.isInteger(group)&&group>=0&&group<petRosterRanges.length-1);
+  const {roster,visible,save,wait,prepare}=await context(game);
+  const initial=await save('initial');
+  const selected=roster.slice(petRosterRanges[group],petRosterRanges[group+1]);
   // These are selected definitions, not proof every generator was historically sold: https://www.realmeye.com/wiki/pets-prior-to-release-12-0-0
-  for(const pet of roster){
-    await wait();await prepare(pet.item);
+  for(const [index,pet] of selected.entries()){
+    if(index)await wait();
+    await prepare(pet.item);
     await game.act({keys:[],duration_ms:350});
     const before=await save('prepared-'+pet.name);
     await game.act({keys:['1'],duration_ms:350});

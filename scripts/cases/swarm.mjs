@@ -36,26 +36,44 @@ export async function run(game){
   const shots=new Map(),trace=[];let pending=null,error=null;
   function record(s){
     const b=s.diagnostic.entities.find(e=>e.id===boss.id);
-    trace.push({time:s.view.time_ms,player:s.view.position,boss:b});
+    trace.push({time:s.view.time_ms,player:s.view.position,boss:b,states:(s.diagnostic.xml[boss.id]?.states??[]).map(x=>x.name)});
     for(const p of s.view.projectiles.filter(p=>p.owner===boss.id))if(!shots.has(p.id))shots.set(p.id,{...p,seen:s.view.time_ms});
   }
+  const chase=(pos,to,duration_ms)=>{
+    const dx=to.x-pos.x,dy=to.y-pos.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
+    const keys=[...(Math.abs(x)>Math.abs(y)*.4142?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.4142?[y>0?'s':'w']:[])];
+    return game.act({keys,duration_ms});
+  };
   const timer=setInterval(()=>{if(!pending)pending=game.inspect().then(record).catch(e=>{error=e;}).finally(()=>{pending=null;});},70);
-  try{for(let n=0;n<3;n++){
-    await game.act({keys:['s'],duration_ms:250});
-    await game.act({keys:['w'],duration_ms:250});
-    await game.act({keys:[],duration_ms:4100});
+  try{for(let n=0;n<24;n++){
+    const s=await game.inspect(),b=s.diagnostic.entities.find(e=>e.id===boss.id);
+    // Keep giving the authored Follow/Circle/StayBack a nearby moving player (actors.xml:4915–4929).
+    // Two fixed presses on a different natural layout left the Swarm beside the same terrain edge.
+    if(b&&Math.hypot(b.pos.x-s.view.position.x,b.pos.y-s.view.position.y)>4){await chase(s.view.position,b.pos,180);}
+    else if(n%4===0){await game.act({keys:[['a','s','d','w'][Math.floor(n/4)%4]],duration_ms:240});}
+    else {await game.act({keys:[],duration_ms:650});}
   }}
   finally{clearInterval(timer);if(pending)await pending;}
   if(error)throw error;
   const volleys=Map.groupBy([...shots.values()],p=>p.seen);
   await writeFile(join(process.env.QA_RESULTS_DIR,'cycle.json'),JSON.stringify({trace,shots:[...shots.values()],volleys:[...volleys]}));
-  game.check('both circle and dart-away phases run',trace.some(t=>t.boss?.stage%2===0)&&trace.some(t=>t.boss?.stage%2===1));
+  // Recovered Swarm (actors.xml 0x0955) alternates its circle and dart_away states.
+  game.check('both circle and dart-away phases run',['circle','dart_away'].every(name=>trace.some(t=>t.boss&&t.states.includes(name))));
   game.check('same Swarm moves during native play',trace.some(t=>t.boss&&Math.hypot(t.boss.pos.x-boss.pos.x,t.boss.pos.y-boss.pos.y)>1));
   game.check('native session receives directed and five-shot attacks',[...volleys.values()].some(v=>v.length===1)&&[...volleys.values()].some(v=>v.length===5));
   game.check('White Flames retain selected speed and lifetime',[...shots.values()].every(p=>p.speed===65&&p.lifetime_ms===1100));
   await game.act({keys:[],duration_ms:500},{name:'swarm-attacks',when:()=>true});
   const before=await game.observe();
-  for(let n=0;n<24&&(await game.inspect()).diagnostic.entities.some(e=>e.id===boss.id);n++)await game.act({keys:[],duration_ms:500,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+  for(let n=0;n<60;n++){
+    const s=await game.inspect(),b=s.diagnostic.entities.find(e=>e.id===boss.id);if(!b)break;
+    // A lethal shot can leave a zero-HP diagnostic actor until the durable terminal retires it.
+    if(b.hp<=0){await game.act({keys:[],duration_ms:250});continue;}
+    const local=s.view.objects.find(e=>e.id===boss.id&&e.hp>0);
+    if(!local||Math.hypot(local.position.x-s.view.position.x,local.position.y-s.view.position.y)>4){
+      await chase(s.view.position,b.pos,200);continue;
+    }
+    await game.act({keys:[],duration_ms:300,target:{entity:boss.id,camera_angle:-Math.PI/4,fire:true}});
+  }
   const defeated=await save('defeated');
   game.check('normal native shooting defeats Swarm and awards XP once',!defeated.diagnostic.entities.some(e=>e.id===boss.id)&&defeated.view.character.experience>before.character.experience);
   game.check('defeat has no dependent successor',!defeated.diagnostic.entities.some(e=>e.parent===boss.id));

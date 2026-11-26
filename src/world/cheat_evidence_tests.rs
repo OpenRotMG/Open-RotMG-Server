@@ -27,13 +27,12 @@ fn shots_and_warned_blasts_record_aim_and_escape_evidence() {
     let error = aim[0]["target"][4].as_f64().unwrap();
     assert!((error - 2f64.atan2(3.7)).abs() < 1e-4, "{error}");
 
-    w.throw_grenade(enemy, Pos { x: 8.5, y: 8.5 }, 2., 10)
-        .unwrap();
+    w.xml_queue_blast(0x21b, Pos { x: 8.5, y: 8.5 }, 2., 10, None, w.now + 1500);
     w.players.get_mut(&id).unwrap().pos = Pos { x: 12., y: 8.5 };
     for _ in 0..100 {
         w.step();
     }
-    assert!(w.grenades.is_empty());
+    assert!(w.xml.blasts.is_empty());
     let threat = facts("area_threat");
     assert_eq!(threat.len(), 1);
     assert_eq!(

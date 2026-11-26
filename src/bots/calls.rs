@@ -138,7 +138,7 @@ impl Brain {
         if self.committed(v) || self.mind.market.incoming.is_some() {
             return Ok(Some("ordinary_commitment"));
         }
-        if !matches!(v.map.name.as_str(), "Realm" | "Nexus")
+        if !matches!(v.map.template.as_deref(), Some("realm") | Some("nexus"))
             || matches!(self.goal, Goal::Portal(id) if v.objects.iter().any(|p| p.id == id && p.usable))
         {
             return Ok(Some("ordinary_dungeon_or_world"));
@@ -166,12 +166,14 @@ impl Brain {
             }
             // Fame trains draw ambitious players of any level, not only level 20s.
             Activity::Gods | Activity::Demon => {
-                v.map.name == "Realm"
+                v.map.template.as_deref() == Some("realm")
                     && (v.character.level == 20 && progression::ready(v, c, 0x718)
                         || self.ambitious())
             }
-            Activity::Sphinx => v.map.name == "Realm" && events::ready(v, c),
-            Activity::Snake => v.map.name == "Realm" && progression::ready(v, c, 0x718),
+            Activity::Sphinx => v.map.template.as_deref() == Some("realm") && events::ready(v, c),
+            Activity::Snake => {
+                v.map.template.as_deref() == Some("realm") && progression::ready(v, c, 0x718)
+            }
         };
         if !interested {
             return Ok(Some("activity_readiness"));

@@ -2,15 +2,20 @@ use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 
-const TREES: [u16; 5] = [0x175, 0x176, 0x177, 0x178, 0x179];
-const SPRITES: [u16; 5] = [0xd00, 0xd01, 0xd02, 0xd03, 0xd04];
 type Point = (i32, i32);
 const DIRECTIONS: [Point; 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 const PITCH: i32 = 16;
 const ROOM: i32 = 6;
 const ARENA: i32 = 15;
 
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    let [retreat, limon, god] = generator.placements("boss-god-and-exit")?;
+    let sprites = generator.placements::<5>("sprites")?;
+    let trees = generator.placements::<5>("sprite-trees")?;
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let (mut rooms, arena) = (0..64)
         .find_map(|_| spine(&mut rng))
@@ -49,6 +54,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     };
     let (width, height) = (extent(|p| p.0), extent(|p| p.1));
     let mut map = Map {
+        elevation: None,
         width,
         height,
         cells: vec![
@@ -88,11 +94,10 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     let (sx, sy) = centers[0];
     let spawn = &mut map.cells[(sy * width + sx) as usize];
     spawn.region = 1;
-    spawn.object = Some(0x70d);
+    spawn.object = Some(retreat);
     map.spawns = vec![(sx as f32 + 0.5, sy as f32 + 0.5)];
     let (bx, by) = centers[boss];
-    map.cells[(by * width + bx) as usize].object = Some(0xd06);
-    map.cells[(by * width + bx + 3) as usize].object = Some(0x70e);
+    map.cells[(by * width + bx) as usize].object = Some(limon);
     // The guide bounds the count, not its odds; 20% rolls tune rarity for #678, not recovered RNG:
     // https://web.archive.org/web/20120531054927id_/http://forums.wildshadow.com/wiki/realm-mad-god/sprite-world
     let gods = (0..5).filter(|_| rng.gen_ratio(1, 5)).count();
@@ -104,7 +109,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         .collect();
     hosts.shuffle(&mut rng);
     for (cx, cy) in hosts.into_iter().take(gods) {
-        place(&mut map, cx + 2, cy - 2, 0xd05);
+        place(&mut map, cx + 2, cy - 2, god);
     }
     let mut ordinary_room = 0;
     for (room, &(cx, cy)) in centers.iter().enumerate() {
@@ -113,7 +118,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         }
         // Reconstructed rotation reaches all five kinds without adding spawns or consuming RNG.
         for (n, &(dx, dy)) in [(-2, 0), (2, 1), (0, 2), (-1, -2)].iter().enumerate() {
-            let kind = SPRITES[(ordinary_room + n) % SPRITES.len()];
+            let kind = sprites[(ordinary_room + n) % sprites.len()];
             place(&mut map, cx + dx, cy + dy, kind);
         }
         ordinary_room += 1;
@@ -122,7 +127,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 &mut map,
                 cx + dx,
                 cy + dy,
-                TREES[rng.gen_range(0..TREES.len())],
+                trees[rng.gen_range(0..trees.len())],
             );
         }
     }
@@ -153,10 +158,14 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     }
     ensure!(map.spawns.len() == 1, "Sprite World lost its entrance");
     ensure!(
-        map.cells.iter().filter(|c| c.object == Some(0xd06)).count() == 1
-            && map.cells.iter().filter(|c| c.object == Some(0x70e)).count() == 1
-            && map.cells.iter().filter(|c| c.object == Some(0x70d)).count() == 1,
-        "Sprite World lost a required portal or boss"
+        map.cells.iter().filter(|c| c.object == Some(limon)).count() == 1
+            && map
+                .cells
+                .iter()
+                .filter(|c| c.object == Some(retreat))
+                .count()
+                == 1,
+        "Sprite World lost its retreat portal or boss"
     );
     for cell in &map.cells {
         ensure!(
@@ -224,11 +233,12 @@ mod tests {
 
     #[test]
     fn ordinary_sprite_roster_preserves_population_and_layout() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         let mut baseline = Sha256::new();
         let mut missing = Vec::new();
         for seed in (0..32).chain([12351, u64::MAX]) {
-            let mut map = generate(&content, seed).unwrap();
+            let mut map =
+                crate::dungeon::generate_selected(&content, "sprite-world", seed).unwrap();
             let (sx, sy) = map.spawns[0];
             let mut rooms = BTreeMap::<Point, Vec<Point>>::new();
             let mut roster = BTreeSet::new();
@@ -250,9 +260,21 @@ mod tests {
                 offsets.sort();
                 assert_eq!(*offsets, [(-2, 0), (-1, -2), (0, 2), (2, 1)], "seed {seed}");
             }
-            if roster != BTreeSet::from(SPRITES) {
+            if roster != BTreeSet::from([0xd00, 0xd01, 0xd02, 0xd03, 0xd04]) {
                 missing.push((seed, roster));
             }
+            assert!(
+                !map.cells.iter().any(|c| c.object == Some(0x70e)),
+                "seed {seed}: completion portal must be earned, not placed"
+            );
+            let boss = map
+                .cells
+                .iter()
+                .position(|c| c.object == Some(0xd06))
+                .unwrap();
+            assert!(map.cells[boss + 3].object.is_none());
+            // Restore the retired placeholder only in the historical digest comparison.
+            map.cells[boss + 3].object = Some(0x70e);
             baseline.update(serde_json::to_vec(&map).unwrap());
         }
         // Only ordinary Sprite identities may differ from the unmodified generator.
@@ -268,9 +290,9 @@ mod tests {
 
     #[test]
     fn sprite_platforms_remain_connected_through_clearable_trees() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
-            let map = generate(&content, seed).unwrap();
+            let map = crate::dungeon::generate_selected(&content, "sprite-world", seed).unwrap();
             let (sx, sy) = map.spawns[0];
             let mut reached = vec![false; map.cells.len()];
             let mut queue = VecDeque::from([(sx as i32, sy as i32)]);

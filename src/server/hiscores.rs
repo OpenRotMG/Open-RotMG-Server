@@ -29,7 +29,12 @@ pub(super) async fn hiscores(State(a): State<App>) -> Response {
             .directory(|d| Ok(d.competitive_characters()))
             .await?;
         let mut scores = a.store.hiscores(living).await?;
-        scores["collectible_items"] = serde_json::json!(crate::loot::collectibles(&a.content));
+        scores["collectible_items"] = serde_json::json!(crate::loot::catalogue::collectibles(
+            a.content
+                .game
+                .as_ref()
+                .context("hiscores require compiled GameData")?
+        ));
         scores["reviewed_accounts"] = serde_json::json!(a.content.reviewed_accounts.rows());
         Ok(scores)
     }

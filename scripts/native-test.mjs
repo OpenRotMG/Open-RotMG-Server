@@ -1,10 +1,10 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdir, open, readFile, writeFile, realpath, rename, lstat, access} from 'node:fs/promises';
+import {mkdir, open, readFile, writeFile, realpath, rename, lstat, access, stat} from 'node:fs/promises';
 import {resolve, dirname, join, isAbsolute} from 'node:path';
 import {pathToFileURL, fileURLToPath} from 'node:url';
 import {randomBytes, randomUUID, createHash} from 'node:crypto';
-import {writeSync,readFileSync} from 'node:fs';
+import {writeSync,readFileSync,constants} from 'node:fs';
 import {startChild,stopChild,identity,registry} from './native-test-process.mjs';
 import {createServer} from 'node:net';
 import {parseArgs} from 'node:util';
@@ -21,6 +21,15 @@ export function nativeClientArguments({client,clientManifest}) {
   if(clientManifest!==undefined){assert(isAbsolute(clientManifest),'--client-manifest must be an absolute manifest path');return ['--client-manifest',clientManifest];}
   return [];
 }
+export async function nativeServerArguments({serverBinary,data}) {
+  if(serverBinary===undefined&&data===undefined)return ['--release'];
+  assert(serverBinary!==undefined&&data!==undefined,'--server-binary and --data must be given together');
+  assert(isAbsolute(serverBinary)&&isAbsolute(data),'--server-binary and --data must be absolute paths');
+  assert((await stat(serverBinary)).isFile(),'--server-binary must be a file: '+serverBinary);
+  await access(serverBinary,constants.X_OK);
+  assert((await stat(data)).isDirectory(),'--data must be a directory: '+data);
+  return ['--server-binary',serverBinary,'--data',data];
+}
 export function nativeRealmArguments(seed) {
   if(seed===undefined)return [];
   assert(Number.isSafeInteger(seed)&&seed>=0,'Case realmSeed must be a nonnegative safe integer');
@@ -35,6 +44,10 @@ export function browserDiagnostic(line, closing=false) {
   return /\bERROR\b|panicked/.test(line)?'fatal':null;
 }
 export {startChild,stopChild} from './native-test-process.mjs';
+// Owned children are already stopped here; a case's leaked timer or socket must not hold the runner open.
+export function exitDespiteLingering(ms=5000) {
+  setTimeout(()=>{console.error('Native runner exiting despite lingering case handles: '+JSON.stringify(process.getActiveResourcesInfo()));process.exit();},ms).unref();
+}
 export function hasNativeEntry(module) {
   const present=Object.hasOwn(module,'enter');
   assert(!present||typeof module.enter==='function','Case enter export must be a function when present');
@@ -164,6 +177,7 @@ export async function closedArchive(options) {
 }
 export async function runCase(scenario, options) {
   let clientArgs=nativeClientArguments(options);
+  const serverArgs=await nativeServerArguments(options);
   const archive=Object.hasOwn(options,'archive')?await closedArchive(options.archive):null;
   assert(options.runDir && isAbsolute(options.runDir)&&resolve(options.runDir)===options.runDir,'A canonical absolute new --run-dir is required');
   assert(options.runDir!==root&&!options.runDir.startsWith(root+'/'),'Keep generated runs outside the source checkout');
@@ -235,19 +249,23 @@ export async function runCase(scenario, options) {
     report.guardian=guardian.child.pid;await guardian.started;
     const inputs=[['case',resolve(scenario)],['runner',fileURLToPath(import.meta.url)],['controller',join(root,'scripts/game.mjs')]];
     if(options.clientManifest!==undefined)inputs.push(['clientManifest',options.clientManifest]);
+    if(options.serverBinary!==undefined)inputs.push(['serverBinary',options.serverBinary]);
     report.inputs={};for(const [name,path] of inputs){
       const bytes=await readFile(path);report.inputs[name]=createHash('sha256').update(bytes).digest('hex');
       if(name==='case')await writeFile(join(out,'case.mjs'),bytes,{mode:0o600});
       if(name==='clientManifest'){const snapshot=join(out,'client-selection-input.json');await writeFile(snapshot,bytes,{mode:0o600});clientArgs=['--client-manifest',snapshot];}
     }
     const fixtureModule=await import(pathToFileURL(resolve(scenario)).href);if(archive)assert(typeof fixtureModule.readArchive==='function'&&!Object.hasOwn(fixtureModule,'prepare')&&!Object.hasOwn(fixtureModule,'enter')&&!Object.hasOwn(fixtureModule,'fixture')&&!Object.hasOwn(fixtureModule,'run'),'Archive requires readArchive only: no fixture/prepare/enter/run');else assert(typeof fixtureModule.run==='function'&&(fixtureModule.fixture||fixtureModule.prepare!==undefined),'Case must export fixture or prepare(api), and run(game)');hasNativeEntry(fixtureModule);
+    const receiptLimit=fixtureModule.nativeReceiptLimit??256;
+    assert(Number.isInteger(receiptLimit)&&receiptLimit>=256&&receiptLimit<=448,'Native receipt limit must be 256–448');
+    report.receiptLimit=receiptLimit;
     let spec=archive?null:fixtureModule.prepare===undefined?await prepareFixture(fixtureModule,api,controller.signal):null;
     port=await freePort(archive?archive.port:0);chromePort=await freePort();assert.notEqual(port,chromePort,'Ports collided; no launch attempted');
     owner='native-test:'+randomUUID();process.env.PI_BROWSER_OWNER=archive?owner:nativeBrowserOwner(owner,0);
     report.source={head:(await exec('git',['rev-parse','HEAD'],{cwd:root})).stdout.trim(),dirty:Boolean((await exec('git',['status','--porcelain'],{cwd:root})).stdout.trim())};report.origin=`http://127.0.0.1:${port}`;
     await bounded('prepareBuildStart',async()=>{
       const began=performance.now();let buildStart,buildEnd,ready;
-      const args=[String(port),archive?'--state':'--test-state',state,'--no-shore-bots','--release'];if(archive)args.push('--dev-control');args.push(...clientArgs,...nativeRealmArguments(fixtureModule.realmSeed));if(options.botLlm)args.push('--bot-llm');
+      const args=[String(port),archive?'--state':'--test-state',state,'--no-shore-bots',...serverArgs];if(archive)args.push('--dev-control');args.push(...clientArgs,...nativeRealmArguments(fixtureModule.realmSeed));if(options.botLlm)args.push('--bot-llm');
       const server=launch('server',join(root,'run.sh'),args,['ignore','pipe','pipe'],{...process.env,CARGO_TERM_COLOR:'never'});
       for(const [stream,name] of [[server.child.stdout,'server.log'],[server.child.stderr,'build.log']]){
         const fd=await log(name);let pending='';
@@ -256,14 +274,16 @@ export async function runCase(scenario, options) {
             writeSync(fd,bytes);pending+=bytes;
             if(pending.includes('Building and starting your local game.'))buildStart??=performance.now();
             if(pending.includes('Finished `release` profile'))buildEnd??=performance.now();
-            let newline;while((newline=pending.indexOf('\n'))>=0){const line=pending.slice(0,newline);pending=pending.slice(newline+1);if(line.startsWith('{')){const event=JSON.parse(line);if(event.level==='ERROR')fail(Error('Backend ERROR: '+line));if(event.fields?.message==='game frontdoor listening')ready=performance.now();}}
+            let newline;while((newline=pending.indexOf('\n'))>=0){const line=pending.slice(0,newline);pending=pending.slice(newline+1);if(line.startsWith('{')){const event=JSON.parse(line);if(event.level==='ERROR')fail(Error('Backend ERROR: '+line));if(event.fields?.message==='game frontdoor listening')ready=performance.now();if(event.fields?.message==='local environment selected')report.data={path:event.fields.data};if(event.fields?.message==='XML game data compiled and linked before store startup')report.data.fingerprint=event.fields.fingerprint;}}
           }catch(error){fail(error);}
         });
         stream.on('end',()=>{if(pending.includes('"level":"ERROR"'))fail(Error('Backend ERROR at EOF: '+pending));});
       }
       await server.started;await waitFor(()=>ready,'Server did not become ready',timeout-125000);
-      assert(buildStart&&buildEnd&&buildStart<=buildEnd&&buildEnd<=ready,'Missing or inconsistent launcher/Cargo timing boundaries');
-      report.phases.clientPreparation=Math.round(buildStart-began);report.phases.build=Math.round(buildEnd-buildStart);report.phases.serverStart=Math.round(ready-buildEnd);
+      if(options.serverBinary===undefined){
+        assert(buildStart&&buildEnd&&buildStart<=buildEnd&&buildEnd<=ready,'Missing or inconsistent launcher/Cargo timing boundaries');
+        report.phases.clientPreparation=Math.round(buildStart-began);report.phases.build=Math.round(buildEnd-buildStart);report.phases.serverStart=Math.round(ready-buildEnd);
+      }else{assert(buildStart===undefined&&buildEnd===undefined&&report.data.path===options.data&&/^[0-9a-f]{64}$/.test(report.data.fingerprint),'Selected server binary must start with its exact data and no build');report.phases.serverStart=Math.round(ready-began);}
       report.client=options.client?{mode:'local',path:options.client,lock:JSON.parse(await readFile(join(options.client,'ruffle/lock.json'),'utf8'))}:{mode:options.clientManifest===undefined?'deployed':'manifest',selection:JSON.parse(await readFile(join(state,'client-selection.json'),'utf8')),...(options.clientManifest===undefined?{}:{manifest:join(out,'client-selection-input.json')})};
     });
     delete report.phases.prepareBuildStart;
@@ -280,6 +300,18 @@ export async function runCase(scenario, options) {
       const env={...process.env,DISPLAY:display,XAUTHORITY:auth,PI_BROWSER_OWNER:archive?owner:nativeBrowserOwner(owner,index),PI_BROWSER_TAB_POLICY:'agent_only',CHROME_REAL_BINARY:options.chrome};delete env.WAYLAND_DISPLAY;
       const box=launch('openbox','openbox',['--sm-disable'],['ignore',await log('window-manager.log'),await log('window-manager.log')],env);await box.started;
       return env;
+    }
+    const writeNativeConfig=()=>writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state,receiptLimit,native_bootstrap:bootstrapIdentity,browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,owner:c.browser.owner,actor:c.actor}))}),{mode:0o600});
+    // Only a controller-verified rebind moves a dead participant's browser to its UI-created replacement.
+    async function rebind(client){
+      const result=await driver({op:'native_rebind',actor:client.actor});
+      assert(result.status==='rebound'&&result.actor===client.actor&&result.account===client.account,'Unexpected native rebind receipt: '+JSON.stringify(result));
+      const previous={...bootstrapIdentity,actors:bootstrapIdentity.actors.filter(row=>row.actor!==client.actor)};
+      client.actor=result.replacement;
+      const registered=participants.map(c=>({actor:c.actor,account:c.account}));
+      bootstrapIdentity=captureNativeBootstrap(await api({op:'native_state',actors:registered.map(c=>c.actor)}),registered,previous.actors.length?previous:undefined);
+      await writeNativeConfig();(report.rebinds??=[]).push(result);await save();
+      return result;
     }
     const joins=nativeJoins({signal:controller.signal,api,participants,freePort,privateDisplay,openClient});
     const addClient=spec=>joins.add(spec);
@@ -348,7 +380,7 @@ export async function runCase(scenario, options) {
       report.bootstrapStep='publish-participant';
       participants.push({actor,account,connection,browser,chromePort,call,evaluate,bounds,display:env.DISPLAY});
       bootstrapIdentity=readyIdentity;
-      await writeFile(join(out,'native.json'),JSON.stringify({origin:report.origin,state,native_bootstrap:bootstrapIdentity,browserTools:join(options.browserTools,'direct-cdp.mjs'),native:participants.map(c=>({port:c.chromePort,target:c.browser.target,owner:c.browser.owner,actor:c.actor}))}),{mode:0o600});
+      await writeNativeConfig();
       report.bootstrapStep='pause-native-client';
       await driver({op:'pause'});report.participants=participants.map(c=>({actor:c.actor,account:c.account,browser:c.browser,bounds:c.bounds,display:c.display}));
       report.bootstrapStep='ready';await save();check();
@@ -358,12 +390,14 @@ export async function runCase(scenario, options) {
     const first=await bounded('browserAndFixture',()=>archive?privateDisplay(0).then(env=>openClient(null,null,chromePort,env)):addClient(spec));
     ({actor,account,connection,browser,chromePort}=first);report.actor=actor;report.account=account;
     if(!archive)await bounded('scenario',async()=>{
-      const gameFor=client=>{const {actor,evaluate}=client;return {actor,join:async spec=>gameFor(await addClient(spec)),observe:()=>api({op:'observe',actor}),inspect:()=>api({op:'inspect',actor}),check(name,condition){assert(condition,name);report.assertions.push(name);},
+      const gameFor=client=>{const {evaluate}=client;return {get actor(){return client.actor;},join:async spec=>gameFor(await addClient(spec)),observe:()=>api({op:'observe',actor:client.actor}),inspect:()=>api({op:'inspect',actor:client.actor}),check(name,condition){assert(condition,name);report.assertions.push(name);},
+        die:input=>{check();return driver({op:'act',actor:client.actor,...(Array.isArray(input)?{sequence:input}:{input}),permit_death:true,pauseAfter:true});},
+        rebind:()=>{check();return rebind(client);},
         async act(input,captureSpec){
-          check();let complete=false;const action=driver({op:'act',actor,...(Array.isArray(input)?{sequence:input}:{input}),pauseAfter:true}).finally(()=>complete=true);
+          check();let complete=false;const action=driver({op:'act',actor:client.actor,...(Array.isArray(input)?{sequence:input}:{input}),pauseAfter:true}).finally(()=>complete=true);
           if(!captureSpec)return await action;
           const shot=(async()=>{
-            await waitFor(async()=>{assert(!complete,'Action ended before screenshot condition');const view=await api({op:'observe',actor});return !view.paused&&captureSpec.when(view)&&await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying');},'Screenshot condition not observed',(Array.isArray(input)?input.flat().reduce((sum,s)=>sum+s.input.duration_ms,0):input.duration_ms)+10000);
+            await waitFor(async()=>{assert(!complete,'Action ended before screenshot condition');const view=await api({op:'observe',actor:client.actor});return !view.paused&&captureSpec.when(view)&&await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying');},'Screenshot condition not observed',(Array.isArray(input)?input.flat().reduce((sum,s)=>sum+s.input.duration_ms,0):input.duration_ms)+10000);
             assert(await evaluate('document.querySelector("ruffle-player").ruffle().isPlaying'),'Client paused before capture');await capture(captureSpec.name,client.connection);
           })();
           const results=await Promise.allSettled([action,shot]);for(const r of results)if(r.status==='rejected')throw r.reason;return results[0].value;
@@ -410,11 +444,12 @@ export async function runCase(scenario, options) {
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   if(process.argv.length===3&&process.argv[2]==='--help'){
-    console.log('Usage: node scripts/native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY\nLinux: Node22.15+, Xvfb, xauth, Openbox and managed browser helpers.\nSet PI_BROWSER_TOOLS and PI_NATIVE_TEST_CHROME, or --browser-tools and --chrome.\nOptional --bot-llm (real provider, default OFF), --chrome-args JSON, --client ABSOLUTE_CHECKOUT or --client-manifest ABSOLUTE_MANIFEST, --timeout-ms (default900000; includes120000 cleanup reserve).\nFresh prepared fixtures only. Existing directories are refused; state/logs are preserved.');
+    console.log('Usage: node scripts/native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY\nLinux: Node22.15+, Xvfb, xauth, Openbox and managed browser helpers.\nSet PI_BROWSER_TOOLS and PI_NATIVE_TEST_CHROME, or --browser-tools and --chrome.\nOptional --bot-llm (real provider, default OFF), --chrome-args JSON, --client ABSOLUTE_CHECKOUT or --client-manifest ABSOLUTE_MANIFEST, --server-binary ABSOLUTE_EXECUTABLE with --data ABSOLUTE_DIRECTORY (no rebuild), --timeout-ms (default900000; includes120000 cleanup reserve).\nFresh prepared fixtures only. Existing directories are refused; state/logs are preserved.');
   }else try {
-    const {values,positionals}=parseArgs({allowPositionals:true,options:{'run-dir':{type:'string'},'browser-tools':{type:'string'},chrome:{type:'string'},'chrome-args':{type:'string'},client:{type:'string'},'client-manifest':{type:'string'},'bot-llm':{type:'boolean',default:false},'timeout-ms':{type:'string',default:'900000'}}});
+    const {values,positionals}=parseArgs({allowPositionals:true,options:{'run-dir':{type:'string'},'browser-tools':{type:'string'},chrome:{type:'string'},'chrome-args':{type:'string'},client:{type:'string'},'client-manifest':{type:'string'},'server-binary':{type:'string'},data:{type:'string'},'bot-llm':{type:'boolean',default:false},'timeout-ms':{type:'string',default:'900000'}}});
     assert.equal(positionals.length,1,'Usage: native-test.mjs CASE.mjs --run-dir NEW_ABSOLUTE_DIRECTORY');
-    const result=await runCase(positionals[0],{runDir:values['run-dir'],browserTools:values['browser-tools']??process.env.PI_BROWSER_TOOLS,chrome:values.chrome??process.env.PI_NATIVE_TEST_CHROME,chromeArgs:JSON.parse(values['chrome-args']??process.env.PI_NATIVE_TEST_CHROME_ARGS??'[]'),client:values.client,clientManifest:values['client-manifest'],botLlm:values['bot-llm'],timeoutMs:Number(values['timeout-ms'])});
+    const result=await runCase(positionals[0],{runDir:values['run-dir'],browserTools:values['browser-tools']??process.env.PI_BROWSER_TOOLS,chrome:values.chrome??process.env.PI_NATIVE_TEST_CHROME,chromeArgs:JSON.parse(values['chrome-args']??process.env.PI_NATIVE_TEST_CHROME_ARGS??'[]'),client:values.client,clientManifest:values['client-manifest'],serverBinary:values['server-binary'],data:values.data,botLlm:values['bot-llm'],timeoutMs:Number(values['timeout-ms'])});
     console.log(JSON.stringify({status:result.status,assertions:result.assertions,phases:result.phases,wallMs:result.wallMs,browserDiagnostics:result.browserDiagnostics,report:result.report}));
   }catch(error){console.error(String(error));process.exitCode=1;}
+  finally{exitDespiteLingering();}
 }

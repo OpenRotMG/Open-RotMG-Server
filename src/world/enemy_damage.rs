@@ -1,45 +1,69 @@
 use super::*;
-
-impl World {
-    pub(super) fn record_lifetime_kill(
-        &mut self,
-        owner: i32,
-        kind: u16,
-        final_blow: bool,
-    ) -> Result<()> {
-        let definition = &self.content.objects[&kind];
-        if definition.enemy
-            && let Some(p) = self
-                .players
-                .get_mut(&owner)
-                .filter(|p| p.character.alive && !p.death_started && !p.departing)
-        {
-            let mut lifetime = p.character.lifetime.clone();
-            lifetime.kills = lifetime
-                .kills
-                .checked_add(1)
-                .context("lifetime kill overflow")?;
-            if definition.god {
-                lifetime.god_kills = lifetime
-                    .god_kills
-                    .checked_add(1)
-                    .context("lifetime god kill overflow")?;
-            }
-            if definition.cube {
-                lifetime.cube_kills = lifetime
-                    .cube_kills
-                    .checked_add(1)
-                    .context("lifetime cube kill overflow")?;
-            }
-            if definition.oryx && final_blow {
-                lifetime.oryx_kills = lifetime
-                    .oryx_kills
-                    .checked_add(1)
-                    .context("lifetime Oryx kill overflow")?;
-            }
-            p.character.lifetime = lifetime;
+#[derive(Clone)]
+pub(super) struct DamageOrigin {
+    pub context: crate::behavior::TerminalContext,
+    pub character: Option<i32>,
+}
+impl DamageOrigin {
+    pub(super) fn nonplayer() -> Self {
+        Self {
+            context: crate::behavior::TerminalContext::NonPlayer,
+            character: None,
         }
-        Ok(())
+    }
+}
+
+pub(in crate::world) fn record_character_lifetime_kill(
+    character: &mut Character,
+    definition: &crate::content::Object,
+    final_blow: bool,
+) -> Result<()> {
+    if definition.enemy {
+        let mut lifetime = character.lifetime.clone();
+        lifetime.kills = lifetime
+            .kills
+            .checked_add(1)
+            .context("lifetime kill overflow")?;
+        if definition.god {
+            lifetime.god_kills = lifetime
+                .god_kills
+                .checked_add(1)
+                .context("lifetime god kill overflow")?;
+        }
+        if definition.cube {
+            lifetime.cube_kills = lifetime
+                .cube_kills
+                .checked_add(1)
+                .context("lifetime cube kill overflow")?;
+        }
+        if definition.oryx && final_blow {
+            lifetime.oryx_kills = lifetime
+                .oryx_kills
+                .checked_add(1)
+                .context("lifetime Oryx kill overflow")?;
+        }
+        character.lifetime = lifetime;
+    }
+    Ok(())
+}
+impl World {
+    pub(super) fn damage_origin(&self, owner: i32) -> Result<DamageOrigin> {
+        let p = self
+            .players
+            .get(&owner)
+            .context("damage event has no authoritative owning-world player")?;
+        ensure!(
+            owner > 0 && !p.character.name.is_empty(),
+            "damage event has invalid player/name attribution"
+        );
+        Ok(DamageOrigin {
+            context: crate::behavior::TerminalContext::PlayerKill {
+                world: self.xml_world_id(),
+                player: owner,
+                name: p.character.name.clone(),
+            },
+            character: Some(p.character.id),
+        })
     }
     pub(super) fn damage_enemy(
         &mut self,
@@ -50,141 +74,128 @@ impl World {
         effects: &[(u8, u64)],
         bullet: Option<u8>,
     ) -> Result<i32> {
-        let Some(e) = self.entities.get(&target) else {
-            tracing::debug!(owner, target, "damage target already removed");
-            return Ok(0);
+        let origin = self.damage_origin(owner)?;
+        self.damage_enemy_from(&origin, target, raw, piercing, effects, bullet)
+    }
+    pub(super) fn damage_enemy_nonplayer(
+        &mut self,
+        target: i32,
+        raw: i32,
+        piercing: bool,
+        effects: &[(u8, u64)],
+    ) -> Result<i32> {
+        self.damage_enemy_from(
+            &DamageOrigin::nonplayer(),
+            target,
+            raw,
+            piercing,
+            effects,
+            None,
+        )
+    }
+    pub(super) fn damage_enemy_from(
+        &mut self,
+        origin: &DamageOrigin,
+        target: i32,
+        raw: i32,
+        piercing: bool,
+        effects: &[(u8, u64)],
+        bullet: Option<u8>,
+    ) -> Result<i32> {
+        let owner = match &origin.context {
+            crate::behavior::TerminalContext::PlayerKill {
+                world,
+                player,
+                name,
+            } => {
+                ensure!(
+                    *world == self.xml_world_id() && *player > 0 && !name.is_empty(),
+                    "damage event attribution invalid for owning world"
+                );
+                *player
+            }
+            crate::behavior::TerminalContext::NonPlayer => 0,
         };
-        // Selected Boss Totems have no HP; zero HP must not turn an immune hit into a defeat.
-        if e.kind == crate::dungeon::jungle::BOSS_TOTEM {
+        if self.xml_terminal_pending(target) {
+            if let Err(error) = self.xml_defeated(target, origin.context.clone()) {
+                self.xml_bound_terminal_retry(target, &error);
+            }
             return Ok(0);
         }
+        self.terminal_damage_admission(target, raw, piercing)?;
+        let Some(e) = self.entities.get(&target) else {
+            return Ok(0);
+        };
+        if e.hp <= 0 && self.content.objects[&e.kind].hp > 0 {
+            return Ok(0);
+        }
+        let kind = e.kind;
+        let position = e.pos;
         let flags = e.conditions(self.now);
-        // Invulnerability blocks HP loss, not projectile conditions: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L93-L117
         let affects = flags
             & (crate::condition::bit(crate::condition::INVINCIBLE)
                 | crate::condition::bit(crate::condition::STASIS))
             == 0;
         let damage =
-            crate::condition::damage(raw, self.content.objects[&e.kind].defense, flags, piercing);
-        // Evaluation shells select a fight; only the transformed boss can be defeated for rewards.
-        let damage = if e.quest.is_some() && matches!(e.kind, 0x91b | 0x91f | 0x928) {
-            damage.min((e.hp - 1).max(0))
-        } else {
-            damage
-        };
-        let tomb_immortal = crate::dungeon::tomb::immortal(e.kind);
-        let damage = if tomb_immortal { 0 } else { damage };
+            crate::condition::damage(raw, self.content.objects[&kind].defense, flags, piercing);
         let actual = damage.min(e.hp).max(0);
+        if actual > 0 && actual == e.hp {
+            self.reserve_terminal_damage(target, raw, piercing)?;
+        }
         if affects {
             for (index, duration) in effects {
                 self.apply_condition(target, *index, *duration)?;
             }
         }
-        let e = self.entities.get_mut(&target).unwrap();
-        if let Some(p) = self.players.get(&owner) {
-            *e.damage.entry(p.character.id).or_default() += damage.min(e.hp).max(0);
+        let e = self
+            .entities
+            .get_mut(&target)
+            .context("damage target disappeared")?;
+        if let Some(character) = origin.character {
+            let prior = e.damage.entry(character).or_default();
+            *prior = prior
+                .checked_add(actual)
+                .context("effective damage ledger overflow")?;
         }
-        e.hp -= damage;
-        // A damaged Malphas missile ends through its telegraphed explosion, not ordinary loot/death.
-        if e.kind == 0x909 {
-            e.hp = e.hp.max(1);
-        }
-        let tomb_dying = e.hp <= 0 && matches!(e.kind, 0xd2a | 0xd2b);
-        if tomb_dying {
-            e.hp = 1;
-            e.stage = Some(4);
-            e.activated = Some(self.now);
-            e.condition |= crate::condition::bit(crate::condition::INVULNERABLE);
-            e.tomb
-                .as_mut()
-                .context("lethal worshipper state missing")?
-                .initialized = true;
-        }
-        let lethal = e.hp <= 0 && !tomb_immortal;
-        let transform =
-            lethal && e.quest.is_some() && matches!(e.kind, 0x675 | 0x6c2 | 0x92a | 0x92b);
-        let lantern = lethal && e.kind == crate::dungeon::davy::UNLIT && self.locker.is_some();
-        let kill = lethal && !transform && !lantern;
-        let kind = e.kind;
-        let position = e.pos;
-
-        let quest = e.kind == 0x6b1 || self.content.objects[&e.kind].quest;
-        if e.kind == 0x90b {
-            self.abyss_flamer_damage(target, owner, actual, lethal)?;
-        }
-        if let Some(p) = self.players.get_mut(&owner) {
-            if damage > 0 && bullet.is_some() {
-                p.character.hits += 1;
-            }
-            if kill {
-                p.character.kills += 1;
-                if quest {
-                    p.character.quests += 1;
-                }
-            }
-        }
-        if kill {
-            self.record_lifetime_kill(owner, self.entities[&target].kind, true)?;
-        }
-        let mut o = Writer::new();
-        o.i32(target)
+        e.hp = (e.hp - actual).max(0);
+        let lethal = e.hp == 0 && self.content.objects[&kind].hp > 0;
+        let mut out = Writer::new();
+        out.i32(target)
             .u8(if affects { effects.len() as u8 } else { 0 });
         if affects {
             for (index, _) in effects {
-                o.u8(*index);
+                out.u8(*index);
             }
         }
-        o.i16(damage as i16)
-            .u8(u8::from(kill))
+        // The selected client reads this with readUnsignedShort only for its "-N" text (_011/Damage.as,
+        // GameObject.damage); HP arrives in stats, so a larger hit applies in full and its text saturates.
+        out.i16(actual.clamp(0, i32::from(u16::MAX)) as u16 as i16)
+            .u8(u8::from(lethal))
             .u8(bullet.unwrap_or(0))
             .i32(if bullet.is_some() { owner } else { 0 });
-        // Quest arrows retain distant bosses, but damage plays audio without a range check: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Rotmg123.5.1/src/com/company/assembleegameclient/objects/Character.as
-        // The shooter already predicts enemy projectile damage: https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/realm/entities/Enemy.cs#L121-L129
         for (id, p) in &self.players {
             if p.known.contains(&target)
                 && p.pos.distance(position) < 20.
                 && (*id != owner || bullet.is_none() || !self.content.objects[&kind].enemy)
             {
-                send(p, 47, o.0.clone());
+                send(p, 47, out.0.clone());
             }
         }
-        if tomb_dying {
-            self.flash_inland(target, 0xffff0000, 0.1, 20.);
+        if let Some(p) = self.players.get_mut(&owner)
+            && actual > 0
+            && bullet.is_some()
+        {
+            p.character.hits += 1;
         }
-        if matches!(
-            kind,
-            crate::dungeon::davy::UNLIT | crate::dungeon::davy::LIT
-        ) {
-            self.locker_lantern_hit();
-        }
-        if lantern {
-            self.light_locker_lantern(target)?;
-        } else if transform {
-            self.quest_lethal_transform(target)?;
-        } else if kill {
-            if self.name == "Realm"
-                && (crate::endgame::HEROES.contains(&kind)
-                    || crate::quest::root(kind)
-                    || crate::quest::final_root(kind))
-                && let Some(player) = self.players.get(&owner).filter(|p| {
-                    p.character.alive
-                        && !p.death_pending
-                        && !p.departing
-                        && !p.character.name.is_empty()
-                })
-            {
-                let root = self.entities[&target].quest.unwrap_or(target);
-                self.critical_killers
-                    .insert(root, (kind, player.character.name.clone()));
+        if lethal {
+            self.xml_declared_admission(kind, "damage terminal lifecycle")?;
+            if let Err(error) = self.xml_defeated(target, origin.context.clone()) {
+                if !self.xml_terminal_pending(target) {
+                    return Err(error);
+                }
+                self.xml_bound_terminal_retry(target, &error);
             }
-            // Terminal authority seals NEW credit sources; damage and shared XP still resolve normally.
-            let killer = self
-                .players
-                .get(&owner)
-                .filter(|p| p.character.alive && !p.death_pending && !p.departing)
-                .map(|p| p.character.id);
-            self.defeat_entity_with_killer(target, killer)?;
-            tracing::info!(entity = target, kind, owner = owner, "enemy defeated");
+            tracing::info!(entity = target, kind, owner, "enemy defeated");
         }
         Ok(actual)
     }

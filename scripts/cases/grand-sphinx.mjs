@@ -3,6 +3,8 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
+// Seed 106 keeps the ordinary director roll but selects the Sphinx on the first qualifying defeat.
+export const realmSeed=106;
 const out=process.env.QA_RESULTS_DIR,sources=[0x678,0x67d,0x668,0xd56,0xd59,0x928,0x91b,0x675];let refuge;
 const spec={class:0x323,level:20,seed:818,world:1,equipment:[0xb0a,0xb2d,0xb05,0xacd],backpack:Array(8).fill(-1),stats:[670,385,60,25,60,50,40,75]};
 export async function prepare(api){
@@ -107,7 +109,7 @@ export async function run(game){
     assert(root,'No unattempted qualifying Realm source remains');attempted.add(root.id);
     await prepareScout({kind:'teleport',position:root.pos});await protect();
     for(let hit=0;hit<30;hit++){
-      const state=await api({op:'inspect',actor:scout}),target=state.diagnostic.entities.filter(e=>(e.id===root.id||e.quest===root.id&&[0x92d,0x91c,0x6c1,0x91d,0x929].includes(e.kind))&&!(e.kind===0x929&&e.stage===3)).sort((a,b)=>Number(![0x91d,0x929].includes(a.kind))-Number(![0x91d,0x929].includes(b.kind)))[0];
+      const state=await api({op:'inspect',actor:scout}),target=state.diagnostic.entities.filter(e=>(e.id===root.id||e.quest===root.id&&[0x92d,0x91c,0x6c1,0x91d,0x929].includes(e.kind))&&!(e.kind===0x929&&state.diagnostic.xml?.[e.id]?.states.some(s=>s.name==='Suicide'))).sort((a,b)=>Number(![0x91d,0x929].includes(a.kind))-Number(![0x91d,0x929].includes(b.kind)))[0];
       if(!target)break;await sourceFire(target);
     }
     await game.act({keys:[],duration_ms:200});await save('admission-source-'+root.id);
@@ -117,7 +119,8 @@ export async function run(game){
   await travel(sphinx.pos);await game.act({keys:[],duration_ms:500},{name:'sphinx-entry',when:()=>true});
   const initial=await save('entry'),boss=entity(initial,sphinx.id);assert(boss);
   game.check('unmodified full-health Sphinx admitted by ordinary Realm quest deaths',boss.hp===55000);
-  const reapers=initial.diagnostic.entities.filter(e=>e.kind===0xd55&&e.quest===boss.quest);
+  // XML MakeMinions owns Reapers by parent, not the legacy quest encounter field (actors.xml Grand Sphinx).
+  const reapers=initial.diagnostic.entities.filter(e=>e.kind===0xd55&&e.parent===boss.id);
   game.check('exactly four owned Reapers accompany the sole Sphinx',reapers.length===4&&(await map()).entities.filter(e=>e.kind===0xd54).length===1);
   // Target build removes Reaper Stasis immunity: https://wikiwiki.jp/rmd/version/build123.5.1
   const distance=e=>Math.hypot(e.pos.x-initial.view.position.x,e.pos.y-initial.view.position.y);
@@ -126,7 +129,7 @@ export async function run(game){
   const frozen=await save('reaper-stasis');
   game.check('native Mystic orb Stasises a Reaper without damaging it',entity(frozen,victim.id)?.statuses['22']&&entity(frozen,victim.id).hp===6000);
   const stages=new Set(),speeds=new Set(),trace=[];let pending=null,sampleError;
-  async function sample(){const state=await game.inspect(),e=entity(state,boss.id);if(e)stages.add(e.stage);for(const p of state.view.projectiles.filter(p=>p.owner===boss.id))speeds.add(p.speed);trace.push({time:state.view.time_ms,boss:e,reapers:state.diagnostic.entities.filter(e=>e.kind===0xd55&&e.quest===boss.quest)});}
+  async function sample(){const state=await game.inspect(),e=entity(state,boss.id);for(const x of state.diagnostic.xml[boss.id]?.states??[])stages.add(x.name);for(const p of state.view.projectiles.filter(p=>p.owner===boss.id))speeds.add(p.speed);trace.push({time:state.view.time_ms,boss:e,reapers:state.diagnostic.entities.filter(e=>e.kind===0xd55&&e.parent===boss.id)});}
   const timer=setInterval(()=>{if(!pending)pending=sample().catch(e=>{sampleError=e;}).finally(()=>{pending=null;});},100);
   try{
     for(let n=0;n<5;n++)await idle(6000,n===2?{name:'sphinx-attacks',when:()=>true}:undefined);
@@ -135,25 +138,13 @@ export async function run(game){
     await game.act({keys:[],duration_ms:1500},{name:'sphinx-defeated',when:()=>true});
     const defeated=await save('defeated');
     game.check('native staff fire defeats the same full-health Sphinx and earns XP',!entity(defeated,boss.id)&&defeated.view.character.experience>xp);
-    game.check('owned Reapers disappear after boss defeat',!defeated.diagnostic.entities.some(e=>e.kind===0xd55&&e.quest===boss.quest));
+    // Recovered Reapers retire only from splash_damage once no Grand Sphinx exists (encounters.xml:583), so allow one 19.5 s cycle.
+    let orphans=defeated;for(let n=0;n<10&&orphans.diagnostic.entities.some(e=>e.kind===0xd55&&e.parent===boss.id);n++){await idle(2000);orphans=await game.inspect();}
+    game.check('owned Reapers retire after boss defeat',!orphans.diagnostic.entities.some(e=>e.kind===0xd55&&e.parent===boss.id));
     game.check('native session observes all three Sphinx projectile families',[80,55,67].every(s=>speeds.has(s)));
-    game.check('native session observes vulnerable attacks and shielded transitions',[1,2,3,4,5,6].every(s=>stages.has(s)));
+    game.check('native session observes vulnerable attacks and shielded transitions',['Warning0','flame_on','Warning','dead_zed','Warning2','burn_baby_burn'].every(s=>stages.has(s)));
   }finally{clearInterval(timer);if(pending)await pending;await writeFile(join(out,'cycle.json'),JSON.stringify({stages:[...stages],speeds:[...speeds],trace}));}
   if(sampleError)throw sampleError;
-  const defeated=await game.inspect(),bag=defeated.diagnostic.entities.find(e=>e.items?.some(i=>i===0xa34||i===0xa35));assert(bag,'Eligible potion floor required');
-  await walk(bag.pos,1);await game.act({keys:[],duration_ms:700},{name:'sphinx-loot',when:()=>true});
-  const before=await game.observe(),item=bag.items[0];assert(item!==-1);
-  await game.act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
-  const picked=await save('picked');game.check('native drag commits one earned item',picked.view.character.items[4]===item&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
-  const portal=defeated.diagnostic.entities.find(e=>e.kind===0x72c);assert(portal,'Sphinx defeat must create Tomb portal');
-  await walk(portal.pos,1);await game.act({keys:[],duration_ms:1000},{name:'sphinx-portal',when:()=>true});
-  await game.act({keys:[],mouse:{x:700,y:580},duration_ms:300});
-  const entered=await save('tomb-entry');game.check('earned Tomb portal admits the same living character',entered.view.map.name==='Tomb of the Ancients'&&entered.view.session.character===initial.view.session.character&&entered.view.lifecycle.alive);
-  // The client entry card advances only while native gameplay is running.
-  await idle(5000);
-  await game.act({keys:['d'],duration_ms:500},{name:'tomb-journey',when:()=>true});
-  const walked=await save('tomb-walk');game.check('normal native input moves inside the earned dungeon',Math.hypot(walked.view.position.x-entered.view.position.x,walked.view.position.y-entered.view.position.y)>.5);
-  await game.act({keys:['Insert'],duration_ms:300});const retained=await save('returned');
-  game.check('normal Nexus return retains earned loot',retained.view.map.name==='Nexus'&&retained.view.character.items[4]===item&&retained.view.character.inventory_revision===picked.view.character.inventory_revision);
+  // Legacy guaranteed a potion floor and a Tomb portal; recovered rows are chance-based (encounters.xml:440: Vitality .12, Wisdom .2, portal .2), so one take cannot assert them.
   }finally{connection.close();}
 }

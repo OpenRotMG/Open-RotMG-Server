@@ -5,17 +5,24 @@ import {execFileSync} from 'node:child_process';
 const spec={class:0x30e,level:5,seed:12351,world:1,equipment:[0xa97,0xa2e,-1,-1],backpack:Array(8).fill(-1),stats:[670,385,10,0,30,10,0,0]};
 let leader;
 export async function prepare(api){
-  const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];
-  const scout=await api({op:'spawn',spec:{...spec,guid:'werewolf-scout',position:{x,y},controller:'direct',profile:null}});
-  const state=await api({op:'inspect',actor:scout.result.actor}),root=join(process.env.QA_RESULTS_DIR,'native');
+  const root=join(process.env.QA_RESULTS_DIR,'native');
   const report=JSON.parse(await readFile(join(root,'result.json'),'utf8'));
   const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
-  const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
-  const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
-  leader=map.entities.find(e=>e.kind===0x623&&[-1,0,1].every(dx=>[-1,0,1].every(dy=>!blocked.has([Math.floor(e.pos.x)-3+dx,Math.floor(e.pos.y)+dy].join(',')))));
-  assert(leader,'No natural Desert Werewolf with a clear approach');
-  await writeFile(join(process.env.QA_RESULTS_DIR,'natural-family.json'),JSON.stringify(map.entities.filter(e=>e.camp===leader.camp)));
-  return {...spec,position:{x:leader.pos.x-3,y:leader.pos.y}};
+  for(const world of [1,-3]){
+    const info=await api({op:'world_info',world}),[x,y]=info.spawn_points[0];
+    const scout=await api({op:'spawn',spec:{...spec,world,guid:'werewolf-scout-'+world,position:{x,y},controller:'direct',profile:null}});
+    const state=await api({op:'inspect',actor:scout.result.actor});
+    const response=await fetch(report.origin+'/dev/map?player='+state.diagnostic.player,{headers});assert(response.ok);
+    const map=await response.json(),blocked=new Set(map.blocked.map(p=>p.join(',')));
+    const clear=(x,y)=>!blocked.has([Math.floor(x),Math.floor(y)].join(','));
+    for(const e of map.entities.filter(e=>e.kind===0x623))for(const [dx,dy] of [[-1,0],[0,-1],[1,0],[0,1]]){
+      const position={x:e.pos.x+3*dx,y:e.pos.y+3*dy};
+      if(![0,1,2,3].every(n=>clear(e.pos.x+n*dx,e.pos.y+n*dy))||![-1,0,1].every(i=>[-1,0,1].every(j=>clear(position.x+i,position.y+j))))continue;
+      leader=e;await writeFile(join(process.env.QA_RESULTS_DIR,'natural-family.json'),JSON.stringify({world,layout:info.realm_layout,leader,position}));
+      return {...spec,world,position};
+    }
+  }
+  assert.fail('Neither initial Realm has a natural Desert Werewolf with a clear approach');
 }
 export async function run(game){
   let serial=0,protectedUntil=0;
@@ -31,26 +38,38 @@ export async function run(game){
   }
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
   const entity=(s,id)=>s.diagnostic.entities.find(e=>e.id===id);
-  const family=s=>s.diagnostic.entities.filter(e=>e.camp===leader.camp&&[0x620,0x622].includes(e.kind));
+  // XML Werewolf MakeMinions draws eight Wargs from its group (actors.xml:762); they are owned by parent, not by the natural camp.
+  const family=s=>s.diagnostic.entities.filter(e=>(e.id===leader.id||e.parent===leader.id)&&[0x620,0x622].includes(e.kind));
   const begin=await save('arrival');
   game.check('natural MidSand leader has selected HP and size',entity(begin,leader.id).hp===320&&entity(begin,leader.id).size===135);
-  for(const kind of [0x620,0x622])game.check(kind+': one to three natural initial Wargs',family(begin).filter(e=>e.kind===kind).length>=1&&family(begin).filter(e=>e.kind===kind).length<=3);
-  await game.act({keys:[],duration_ms:2000,target:{entity:leader.id,camera_angle:-Math.PI/4,fire:false}});
+  // Recovered realm/mid.xml:90: offspring belong to the XML spawner, not an ordinary population slot.
+  game.check('ordinary root is placed before it owns any offspring',begin.diagnostic.entities.some(e=>e.id===leader.id&&e.camp===null&&e.parent===null)&&!begin.diagnostic.entities.some(e=>e.parent===leader.id));
+  // The eight XML Wargs arrive at once (actors.xml:762), so stop the unprotected exposure at the first hit.
+  for(let n=0;n<20&&(await game.observe()).character.hp>=begin.view.character.hp;n++)await game.act({keys:[],duration_ms:100,target:{entity:leader.id,camera_angle:-Math.PI/4,fire:false}});
   const exposed=await save('exposed');
   game.check('unprotected native Wizard takes encounter damage',exposed.view.character.hp<begin.view.character.hp);
   game.check('level-five native player receives a visible Werewolf quest',entity(exposed,exposed.view.quest)?.kind===0x623);
+  game.check('activated Werewolf makes its eight XML Wargs',family(exposed).length===8&&family(exposed).every(e=>e.parent===leader.id));
   const samples=[];
   for(let n=0;n<40;n++){await act({keys:[],duration_ms:500},n===39?{name:'werewolf-unharmed',when:()=>true}:undefined);samples.push(await game.inspect());}
+  // The group draw can leave a single Warg of one kind (actors.xml:762); keep observing until each drawn kind has fired.
+  const fired=kind=>samples.some(s=>s.view.projectiles.some(p=>p.speed===60&&p.lifetime_ms===(kind===0x620?600:2000)&&family(s).some(e=>e.id===p.owner&&e.kind===kind)));
+  for(let n=0;n<20&&![0x620,0x622].every(fired);n++){await act({keys:[],duration_ms:500});samples.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'attacks.json'),JSON.stringify(samples));
   game.check('Werewolf activates and wanders',samples.some(s=>{const e=entity(s,leader.id);return e.activated!==null&&Math.hypot(e.pos.x-leader.pos.x,e.pos.y-leader.pos.y)>.2;}));
-  for(const kind of [0x620,0x622])game.check(kind+': living population reaches its reconstructed cap of three',family(samples.at(-1)).filter(e=>e.kind===kind).length===3&&samples.every(s=>family(s).filter(e=>e.kind===kind).length<=3));
+  game.check('living Werewolf keeps its XML eight-Warg cap',family(samples.at(-1)).length===8&&samples.every(s=>family(s).length<=8));
   const shots=samples.flatMap(s=>s.view.projectiles),ids=kind=>new Set(samples.flatMap(family).filter(e=>e.kind===kind).map(e=>e.id));
   game.check('unharmed Werewolf fires selected speed/lifetime',shots.some(p=>p.owner===leader.id&&p.speed===60&&p.lifetime_ms===2000));
-  for(const [kind,lifetime] of [[0x620,600],[0x622,2000]])game.check(kind+': Wargs move and fire selected speed/lifetime',samples.some(s=>family(s).some(e=>e.kind===kind&&family(begin).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.1)))&&shots.some(p=>ids(kind).has(p.owner)&&p.speed===60&&p.lifetime_ms===lifetime));
-  const origin=(await game.observe()).position;
-  await act({keys:['d'],duration_ms:100});const right=(await game.observe()).position;
-  await act({keys:['s'],duration_ms:100});const down=(await game.observe()).position;
-  const ux=right.x-origin.x,uy=right.y-origin.y,vx=down.x-right.x,vy=down.y-right.y,det=ux*vy-uy*vx;
+  for(const [kind,lifetime] of [[0x620,600],[0x622,2000]])game.check(kind+': Wargs move and fire selected speed/lifetime',samples.some(s=>family(s).some(e=>e.kind===kind&&family(exposed).some(p=>p.id===e.id&&Math.hypot(e.pos.x-p.pos.x,e.pos.y-p.pos.y)>.1)))&&shots.some(p=>ids(kind).has(p.owner)&&p.speed===60&&p.lifetime_ms===lifetime));
+  // A key direction can be pinned at the arrival tile (observed with the XML Warg pack), so fall back to the opposite pair.
+  let origin,right,down,ux,uy,vx,vy,det=0;
+  for(const [h,v,sign] of [['d','s',1],['a','w',-1]]){
+    origin=(await game.observe()).position;
+    await act({keys:[h],duration_ms:100});right=(await game.observe()).position;
+    await act({keys:[v],duration_ms:100});down=(await game.observe()).position;
+    [ux,uy,vx,vy]=[right.x-origin.x,right.y-origin.y,down.x-right.x,down.y-right.y].map(n=>n*sign);det=ux*vy-uy*vx;
+    if(Math.abs(det)>.05)break;
+  }
   game.check('native movement supplies a non-collinear observed input basis',Math.abs(det)>.05);
   const camera=det>0?Math.atan2(uy,ux):Math.atan2(ux,-uy);
   await writeFile(join(process.env.QA_RESULTS_DIR,'movement-basis.json'),JSON.stringify({origin,right,down,det,camera}));
@@ -60,22 +79,21 @@ export async function run(game){
       const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,a=camera,x=(dx*vy-dy*vx)/det,y=(ux*dy-uy*dx)/det;
       const approach=Math.hypot(dx,dy)>5;
       const keys=approach?[...(Math.abs(x)>Math.abs(y)*.5?[x>0?'d':'a']:[]),...(Math.abs(y)>Math.abs(x)*.5?[y>0?'s':'w']:[])]:[];
-      await act({keys,duration_ms:250,target:{entity:id,camera_angle:a,fire:!approach}});
+      await act(approach?{keys,duration_ms:250}:{keys:[],duration_ms:250,target:{entity:id,camera_angle:a,fire:true}});
     }
     assert.fail('Native shots failed to reach target outcome: '+id);
   }
-  const victim=family(samples.at(-1)).find(e=>e.kind===0x620),beforeWarg=(await game.observe()).character.experience;
+  const victim=family(samples.at(-1))[0],beforeWarg=(await game.observe()).character.experience;
   await shoot(victim.id);await act({keys:[],duration_ms:500});
   game.check('native shooting defeats Warg and earns XP',!entity(await game.inspect(),victim.id)&&(await game.observe()).character.experience>beforeWarg);
   for(let n=0;n<22;n++)await act({keys:[],duration_ms:500});
   const replaced=await save('replenished');
-  game.check('living Werewolf replenishes a defeated Tawny Warg within its cap',family(replaced).filter(e=>e.kind===0x620).length===3&&family(replaced).some(e=>e.kind===0x620&&!ids(0x620).has(e.id)));
-  // Current reconstruction is not target-era acceptance: Kithio instead uses <75% HP and projectile 0 in both phases.
-  // https://github.com/Zolmex/kithio-as3-source/blob/d15f321edcce0ef890001890c6991c25a1b0f718/Server%20Source/wServer/logic/db/BehaviorDb.Midland.cs#L815-L846
-  await shoot(leader.id,e=>e.hp<200);
+  game.check('living Werewolf replenishes a defeated Warg within its cap',family(replaced).length===8&&family(replaced).some(e=>!ids(0x620).has(e.id)&&!ids(0x622).has(e.id)));
+  // XML enrages below 75% HP: ChangeSize rate 20 up to 170 and projectile 1 (actors.xml:767-775).
+  await shoot(leader.id,e=>e.hp<240);
   await act({keys:[],duration_ms:600},{name:'werewolf-enraged',when:()=>true});
   const rage=await save('enraged');
-  game.check('native damage triggers reconstructed rage and size 150',entity(rage,leader.id)?.hp<200&&entity(rage,leader.id).stage===1&&entity(rage,leader.id).size===150);
+  game.check('native damage enters the XML enraged state and grows',entity(rage,leader.id)?.hp<240&&rage.diagnostic.xml[leader.id]?.states.some(x=>x.name==='enraged')&&entity(rage,leader.id).size>135);
   const enraged=[];
   for(let n=0;n<8;n++){await act({keys:[],duration_ms:250});enraged.push(await game.inspect());}
   await writeFile(join(process.env.QA_RESULTS_DIR,'rage-attacks.json'),JSON.stringify(enraged));

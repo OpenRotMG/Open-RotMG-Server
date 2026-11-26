@@ -1,154 +1,155 @@
-import {writeFile} from 'node:fs/promises';
-import {join,resolve} from 'node:path';
-import {execFileSync} from 'node:child_process';
-export const fixture = {
-  class:0x307,level:20,seed:12351,world:'mad-lab',position:{x:12.5,y:48.5},
-  equipment:[0xc02,0xade,0xaf9,0xacd],backpack:Array(8).fill(-1),
-  stats:[700,252,75,25,50,50,40,50],
-};
-export async function run(game) {
-  let serial=0,camera=0;
-  const protections=new Map([[game.actor,{until:0,armorUntil:0}]]);
-  async function prepare(actor,change) {
-    const request=join(process.env.QA_RESULTS_DIR,'preparation-'+serial+'.json');
-    await writeFile(request,JSON.stringify({id:'explicit-native-preparation-'+serial++,command:{op:'cheat',actor,change}}));
-    execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(process.env.QA_RESULTS_DIR,'native/native.json'),request]);
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {route,walk as nativeWalk} from './native-route.mjs';
+
+// Protected mechanics case: fixed generated Lab, geared level-20 archer, renewable player-only protection, attack and vitals.
+// No opponent, wall, reward or progress is prepared; kills and pickup come from native shots and drag.
+export const fixture={class:0x307,level:20,seed:12351,world:'mad-lab',worldSeed:12351,position:'spawn',equipment:[0xc02,0xb28,0xaf9,0xacd],backpack:Array(8).fill(-1),stats:[700,252,75,25,50,50,40,50]};
+const COIL=0x188a,BOSS=0x976,WALL=0x18c2,CREATION=0x5e1c,DEFENSE=0xa20,SHIELDED=(1<<23)|(1<<24),HEXED=1<<27;
+export async function run(game){
+  const output=name=>join(process.env.QA_RESULTS_DIR,name),samples=[],trace=[],prepared=[];
+  const report=JSON.parse(await readFile(output('native/result.json'),'utf8'));
+  const token=(await readFile(output('native/state/control.token'),'utf8')).trim();
+  let protectedUntil=0,modifierUntil=0;
+  const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+  async function save(name){const state=await game.inspect();samples.push({name,state});await writeFile(output('creation-journey.json'),JSON.stringify(samples));return state;}
+  async function api(command){
+    const response=await fetch(report.origin+'/dev/testing',{method:'POST',signal:AbortSignal.timeout(10000),headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({id:randomUUID(),command})});
+    const result=await response.json();assert(response.ok&&result.status!=='failed',JSON.stringify(result));return result;
   }
-  async function act(input,capture) {
-    const now=(await game.observe()).game_ms;
-    for(const [actor,window] of protections) {
-      if(now>=window.until) {
-        await prepare(actor,{kind:'protection',condition:'invincible',duration_ms:60000});
-        window.until=now+60000;
+  async function prepare(change){
+    const {game_ms}=await game.observe();
+    await api({op:'cheat',actor:game.actor,change});
+    prepared.push({provenance:'prepared/protected',game_ms,actor:game.actor,change});
+    await writeFile(output('creation-prepared.json'),JSON.stringify({count:prepared.length,operations:prepared}));
+  }
+  async function protect(){
+    const v=await game.observe(),now=v.game_ms;
+    if(!(v.character.conditions&(1<<23))){await prepare({kind:'protection',condition:'invincible',duration_ms:60000});protectedUntil=now+60000;}
+    return protectedUntil-now;
+  }
+  // Keep armor through the real expiry, when accumulated fire can hit before the next paused observation.
+  const act=async(input,capture)=>{
+    const ms=[input].flat().reduce((t,i)=>t+(i.input??i).duration_ms,0);
+    for(let left;(left=await protect())<2*ms+5000;){
+      const {game_ms:now,character:c}=await game.observe();
+      if(left<=6000){
+        if(now>=modifierUntil){await prepare({kind:'stat_modifier',index:3,amount:100,duration_ms:12000});modifierUntil=now+12000;}
+        if(c.hp<c.stats.max_hp)await prepare({kind:'vitals',hp:c.stats.max_hp,mp:c.stats.max_mp});
       }
-      // Protection cannot be renewed early; stagger DEF across its expiry.
-      if(window.until-now<=15000&&now>=window.armorUntil) {
-        await prepare(actor,{kind:'stat_modifier',index:3,amount:100,duration_ms:60000});
-        window.armorUntil=now+60000;
-      }
+      const step=left>6000?Math.min(10000,left-5000):left>1200?left-1000:left;
+      await game.act({keys:[],duration_ms:Math.max(50,step)});
     }
     return game.act(input,capture);
+  };
+  async function scene(){const v=await game.observe(),r=await fetch(report.origin+'/dev/map?player='+v.session.player,{headers:{Authorization:'Bearer '+token}});assert(r.ok);return r.json();}
+  // A Hexxer's range-2 aura Stuns and Hexes (actors.xml Hexxer, madLab.xml:2045): route beside, never through, its pool.
+  const hexed=m=>new Set(m.entities.filter(e=>e.kind===0x1e15).flatMap(e=>Array.from({length:49},(_,i)=>({x:Math.floor(e.pos.x)+i%7-3,y:Math.floor(e.pos.y)+Math.floor(i/7)-3}))
+    .filter(t=>Math.hypot(t.x+.5-e.pos.x,t.y+.5-e.pos.y)<=2.75).map(t=>t.y*m.width+t.x)));
+  const walk=(to,reach)=>nativeWalk({client:{actor:game.actor,observe:()=>game.observe(),act},map:scene,to,ready:async()=>((await protect())-5000)/2,
+    options:m=>({reach,soft:new Map(m.entities.filter(e=>e.kind===0x188b||e.kind===COIL).map(e=>[Math.floor(e.pos.y)*m.width+Math.floor(e.pos.x),e])),hazard:hexed(m)})});
+  async function dehex(){
+    const v=await game.observe();if(!(v.character.conditions&HEXED))return false;
+    const blue=(await scene()).entities.filter(p=>p.kind===0x1e16).sort((a,b)=>distance(a.pos,v.position)-distance(b.pos,v.position))[0];
+    // DeHexxer clears Hexed within 2 tiles (madLab.xml:2058).
+    assert(blue,'No DeHexxer pool for the hexed fighter');await walk(blue.pos,1.5);return true;
   }
-  const save=async name=>writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(await game.inspect(),null,2));
-  const entities=async()=> (await game.inspect()).diagnostic.entities;
-  const wait=async()=>act({keys:[],duration_ms:protections.get(game.actor).until-(await game.observe()).game_ms>5000?2000:100});
-  const alignEast=async()=>act({keys:(await game.observe()).character.conditions&(1<<10)?['a','w']:['d','s'],duration_ms:400});
-  async function go(x,y) {
-    for(let n=0;n<80;n++) {
-      const view=await game.observe(),p=view.position,dx=x-p.x,dy=y-p.y;
-      if(Math.hypot(dx,dy)<0.4)return;
-      const sx=dx*Math.cos(camera)+dy*Math.sin(camera),sy=-dx*Math.sin(camera)+dy*Math.cos(camera),keys=[];
-      if(Math.abs(sx)>0.15&&Math.abs(sx)>=Math.abs(sy)*0.41421356)keys.push(sx>0?'d':'a');
-      if(Math.abs(sy)>0.15&&Math.abs(sy)>=Math.abs(sx)*0.41421356)keys.push(sy>0?'s':'w');
-      const distance=keys.length===2?Math.min(Math.abs(sx),Math.abs(sy))*Math.SQRT2:Math.max(Math.abs(sx),Math.abs(sy));
-      const flags=view.character.conditions,speed=flags&(1<<3)?4:(4+5.6*view.character.stats.speed/75)*(flags&(1<<14)?1.5:1);
-      const inputKeys=flags&(1<<10)?keys.map(k=>({d:'w',a:'s',s:'a',w:'d'})[k]):keys;
-      await act({keys:inputKeys,duration_ms:Math.max(50,Math.min(400,Math.round(distance/speed*1000)))});
+  async function restoreVitals(c){
+    if(c.hp<c.stats.max_hp*.8||c.mp<c.stats.max_mp*.8)await prepare({kind:'vitals',hp:c.stats.max_hp,mp:c.stats.max_mp});
+  }
+  async function combatVitals(v){
+    const duration_ms=protectedUntil-v.game_ms-18000;
+    if(v.game_ms>=modifierUntil&&duration_ms>=5000){await prepare({kind:'stat_modifier',index:2,amount:100,duration_ms});modifierUntil=v.game_ms+duration_ms;}
+    await restoreVitals(v.character);
+  }
+  // Re-aim moving targets in one receipt, but never schedule a second aim after a possible lethal volley.
+  const fire=(id,ms,volleys=1)=>[...Array.from({length:volleys},(_,i)=>({actor:game.actor,input:{keys:i?[]:[' '],duration_ms:ms,target:{entity:id,camera_angle:-Math.PI/4,fire:true}}})),{actor:game.actor,input:{keys:[],duration_ms:600}}];
+  async function defeat(id,kind){
+    const before=(await game.inspect()).diagnostic.character.kills;let hp=0,stalled=0;
+    for(let n=0;n<100;n++){
+      // Local inspection only lists nearby entities; the development map lists the whole world.
+      const state=await game.inspect(),e=(await scene()).entities.find(e=>e.id===id);
+      // Tesla Coils are XpMult 0 scenery (actors.xml:15037): no kill credit, and only players can damage them.
+      if(!e){assert(kind===COIL||state.diagnostic.character.kills>before,'Enemy left the world without observed kill credit: '+id);return;}
+      // A target can stand within range behind a wall: close in once three volleys land nothing.
+      stalled=e.hp<hp?0:stalled+1;hp=e.hp;
+      if(await dehex())continue;
+      const v=await game.observe(),blocked=kind===COIL&&stalled>3;
+      if(blocked||distance(e.pos,v.position)>6.5){stalled=0;await walk(e.pos,blocked?2:4.5);}
+      // Dr Terrible's Phase2 bubble is Invulnerable (actors.xml:5096).
+      else if(e.condition&SHIELDED)await act({keys:[],duration_ms:kind===BOSS?4500:2000});
+      else if(!state.view.objects.some(o=>o.id===id&&o.hp>0))await act({keys:[],duration_ms:300});
+      else{await combatVitals(v);await act(fire(id,kind===BOSS?4500:2000));}
     }
-    await save('failed-walk-'+x+'-'+y);
-    throw Error('Native walk did not reach '+x+','+y);
+    await save('failed-fight');throw Error('Native fight exceeded its bound: '+id);
   }
-  async function defeat(kind,name) {
-    const victim=(await entities()).find(e=>e.kind===kind);
-    if(!victim)throw Error('Missing native fight target: '+name);
-    for(let n=0;n<80;n++) {
-      const e=(await entities()).find(e=>e.id===victim.id);
-      if(!e){game.check(name+' defeated through native shots',true);return;}
-      const view=await game.observe();
-      if(Math.hypot(e.pos.x-view.position.x,e.pos.y-view.position.y)>7)await go(e.pos.x-2,e.pos.y+2);
-      const target={entity:e.id,camera_angle:camera,fire:true};
-      if(kind===0x976) {
-        if(e.condition&(1<<23)){await wait();continue;}
-        const current=await game.observe();
-        await prepare(game.actor,{kind:'vitals',hp:current.character.stats.max_hp,mp:current.character.stats.max_mp});
-        if(e.hp>30000&&protections.get(game.actor).until-current.game_ms>10000) {
-          await act(Array.from({length:3},()=>[
-            {actor:game.actor,input:{keys:[' '],duration_ms:500,target}},
-            {actor:game.actor,input:{keys:[],duration_ms:800,target}},
-          ]).flat());
-        } else await act({keys:[' '],duration_ms:1000,target});
-      } else await act({keys:[],duration_ms:500,target});
+  const entered=await save('entered'),initial=await scene();
+  const creation=initial.entities.find(e=>e.kind===CREATION);
+  assert(creation,'Generated Lab has no Horrific Creation');
+  game.check('Creation is invulnerable before the archer approaches',Boolean(creation.condition&(1<<24)));
+  game.check('generated Lab holds the authored ten Tesla Coils',initial.entities.filter(e=>e.kind===COIL).length===10);
+  const walls=initial.entities.filter(e=>e.kind===WALL).sort((a,b)=>a.pos.x-b.pos.x);assert.equal(walls.length,4);
+  // data/lab-templates.json boss: the Creation spawns 13 tiles north of the second Emergency Wall; its Hexxer vats lie west.
+  const home={x:walls[1].pos.x,y:walls[1].pos.y-13};
+  // The coils guard the last rooms on the generated route (src/dungeon/lab.rs): follow it to Dr Terrible, clearing them.
+  const nearest=async()=>{const at=(await game.observe()).position;return (await scene()).entities.filter(e=>e.kind===COIL).sort((a,b)=>distance(a.pos,at)-distance(b.pos,at))[0];};
+  const path=route(initial,entered.view.position,initial.entities.find(e=>e.kind===BOSS).pos,{reach:9}).points;
+  for(let i=1;i<path.length;i++){
+    if(distance(path[i],path[i-1])<6&&i<path.length-1)continue;
+    await walk(path[i],1);await dehex();
+    for(let coil;(coil=await nearest())&&distance(coil.pos,path[i])<10;)await defeat(coil.id,COIL);
+  }
+  for(let coil;(coil=await nearest());)await defeat(coil.id,COIL);
+  const coiled=await save('coils-destroyed');
+  game.check('native shots destroy every Tesla Coil while the Emergency Walls stay sealed',!coiled.diagnostic.entities.some(e=>e.kind===COIL)&&(await scene()).entities.filter(e=>e.kind===WALL).length===4);
+  await defeat((await scene()).entities.find(e=>e.kind===BOSS).id,BOSS);
+  for(let n=0;n<10&&(await scene()).entities.some(e=>e.kind===WALL);n++)await act({keys:[],duration_ms:500});
+  const cleared=await save('boss-defeated');
+  // Recovered Mad Lab Open Wall (madLab.xml:1145) deletes the walls once Dr Terrible and every coil are gone.
+  game.check('native coil and Dr Terrible kills open the Emergency Walls and commit one clear',!(await scene()).entities.some(e=>e.kind===WALL)&&cleared.diagnostic.character.mad_labs===entered.diagnostic.character.mad_labs+1);
+  // Draw the Charge through the southwest vat from the dry strip beyond it, not from the Hexxer aura itself.
+  const lure={x:home.x-7.5,y:home.y+7};
+  const rail=(c,r)=>{
+    if(distance(c,lure)<=r)return lure;
+    const dy=lure.y-c.y;
+    if(Math.abs(dy)>r-.5)return {x:c.x,y:c.y+Math.sign(dy)*(r-.5)};
+    return {x:c.x-Math.sqrt(r*r-dy*dy),y:lure.y};
+  };
+  await walk({x:home.x,y:home.y+4.5},.6);
+  for(let n=0;n<600;n++){
+    const s=await game.inspect(),v=s.view,c=s.diagnostic.entities.find(e=>e.id===creation.id);
+    if(!c){assert(!(await scene()).entities.some(e=>e.id===creation.id),'Creation left the local fight without dying');break;}
+    const phase=s.diagnostic.xml[c.id]?.states[1]?.name;
+    const previous=trace.at(-1);
+    trace.push({game_ms:s.diagnostic.time_ms,phase,hp:c.hp,condition:c.condition,pos:c.pos,player:v.position});
+    if(n%10===0)await writeFile(output('creation-trace.json'),JSON.stringify(trace));
+    if(!(c.condition&SHIELDED)){
+      assert(phase==='RandomTexture'||/^AltTex[2-7]$/.test(phase),'Creation lost its shield in '+phase);
+      if(await dehex())continue;
+      if(distance(c.pos,v.position)>6.5){await walk(c.pos,6);continue;}
+      if(!v.objects.some(o=>o.id===c.id&&o.hp>0)){await act({keys:[],duration_ms:300});continue;}
+      await combatVitals(await game.observe());await act(c.hp>20000?fire(c.id,950,4):fire(c.id,4200));continue;
     }
-    await save('failed-fight-'+kind);
-    throw Error(name+' survived bounded native fight');
+    // Recover a Charge wedged at the entrance before leading it back across the vat.
+    if(phase==='Charge'&&c.pos.y>home.y+6&&previous?.phase==='Charge'&&distance(c.pos,previous.pos)<.08){await walk({x:home.x,y:home.y+1.5},.6);continue;}
+    const blasting=phase==='ShootBlast',goal=rail(c.pos,blasting?6.25:9);
+    if(blasting&&distance(c.pos,v.position)<6.75){await act({keys:[],duration_ms:8000});continue;}
+    // Only replan when the observed range matters; brief polls spent a receipt without changing the lure.
+    if(distance(goal,v.position)>1.4)await walk(goal,.8);else await act({keys:[],duration_ms:phase==='Charge'?1300:2400});
   }
-  const start=(await game.observe()).position;
-  await act({keys:['w'],duration_ms:200},{name:'native-lab-before',when:()=>true});
-  const moved=(await game.observe()).position;
-  game.check('native movement supplies a nonzero camera calibration',Math.hypot(moved.x-start.x,moved.y-start.y)>0.5);
-  camera=Math.atan2(moved.x-start.x,start.y-moved.y);
-  game.check('selected client uses its default camera',Math.abs(camera+Math.PI/4)<0.0001);
-  await writeFile(join(process.env.QA_RESULTS_DIR,'camera.json'),JSON.stringify({start,moved,camera}));
-  for(const [x,y] of [[12.5,48.5],[32.5,48.5],[32.5,30.5],[56.5,30.5]]) {
-    await go(x,y);
-    if(x===56.5)await go(60.5,y);
-    await defeat(0x188a,'Tesla Coil');
-    await go(x,y);
-  }
-  await go(56.5,23.5);
-  await alignEast();
-  await go(57.5,20.5);
-  await go(60.5,20.5);
-  await go(64.0,12.5);
-  await save('all-coils-before-boss');
-  game.check('coils alone leave emergency walls sealed',(await entities()).some(e=>e.kind===0x18c2));
-  await defeat(0x976,'Dr Terrible');
-  await go(60.5,12.5);
-  await act({keys:[],duration_ms:500});
-  game.check('real coil and boss kills open emergency walls',!(await entities()).some(e=>e.kind===0x18c2));
-  for(let n=0;n<20&&(await entities()).find(e=>e.kind===0x5e1c).stage!==4;n++)await wait();
-  game.check('ordinary native distance triggers the center blast phase',(await entities()).find(e=>e.kind===0x5e1c).stage===4);
-  await go(64.5,10.5);
-  await act([
-    {actor:game.actor,input:{keys:['d','s'],duration_ms:600}},
-    {actor:game.actor,input:{keys:['a','s'],duration_ms:300}},
-    {actor:game.actor,input:{keys:['d','s'],duration_ms:1200}},
-  ]);
-  await go(75.5,12.5);
-  game.check('native movement crosses the opened emergency doorway',(await game.observe()).position.x>69);
-  await save('creation-open');
-  const creation=async()=> (await entities()).find(e=>e.kind===0x5e1c);
-  const original=await creation();
-  const beforeFinal=await game.inspect(),trace=[];
-  for(let n=0;n<70;n++) {
-    const c=await creation();if(!c)break;
-    const now=(await game.observe()).game_ms,remaining=protections.get(game.actor).until-now;
-    trace.push({game_ms:now,id:c.id,hp:c.hp,stage:c.stage});
-    await writeFile(join(process.env.QA_RESULTS_DIR,'creation-completion.json'),JSON.stringify(trace));
-    if(c.stage===2) {
-      if((await game.observe()).character.conditions&(1<<27))await go(75.5,12.5);
-      const view=await game.observe();
-      await prepare(game.actor,{kind:'vitals',hp:view.character.stats.max_hp,mp:view.character.stats.max_mp});
-      const input={keys:[' '],duration_ms:1000,target:{entity:c.id,camera_angle:camera,fire:true}};
-      if(c.hp>15000&&remaining>5000)await act(Array.from({length:3},()=>({actor:game.actor,input})));
-      else await act(input);
-    } else if((await game.observe()).position.x>72)await go(70.5,12.5);
-    else if(c.stage===4&&remaining>7000) {
-      await act(Array.from({length:3},()=>({actor:game.actor,input:{keys:[],duration_ms:2000}})));
-    } else await wait();
-  }
-  const final=await game.inspect();
-  game.check('native weapon fire defeats the original Creation and earns kill and XP credit',!final.diagnostic.entities.some(e=>e.id===original.id)&&final.diagnostic.character.kills>beforeFinal.diagnostic.character.kills&&final.view.character.experience>beforeFinal.view.character.experience);
-  game.check('optional defeat does not duplicate Mad Lab clear credit',final.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
-  const bags=final.diagnostic.entities.filter(e=>Math.hypot(e.pos.x-original.pos.x,e.pos.y-original.pos.y)<10&&e.items?.some(i=>i>=0));
-  game.check('Horrific Creation guarantees one private defense potion and no other equipment',bags.length===1&&bags[0].items.filter(i=>i>=0).length===1&&bags[0].items.includes(0xa20)&&bags[0].extra_stats.some(([stat,account])=>stat===54&&account===final.view.session.account));
-  await act({keys:[],duration_ms:1000},{name:'creation-defeated',when:()=>true});
-  await save('creation-defeated');
-  await go(bags[0].pos.x,bags[0].pos.y);
-  await act({keys:[],duration_ms:900},{name:'creation-loot',when:()=>true});
-  const revision=(await game.observe()).character.inventory_revision;
-  await act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:634,y:428}}});
-  const picked=await game.observe();
-  game.check('native drag commits the earned Defense potion once',picked.character.items[4]===0xa20&&picked.character.inventory_revision===revision+1);
-  await act({keys:[],duration_ms:350,drag:{from:{x:634,y:528},to:{x:678,y:428}}});
-  game.check('dragging the emptied Creation bag cannot duplicate Defense',(await game.observe()).character.inventory_revision===picked.character.inventory_revision);
-  await go(64.5,12.5);
-  const exit=(await entities()).find(e=>e.kind===0x71d);
-  if(!exit)throw Error('Previously committed Dr Terrible exit is missing');
-  await go(exit.pos.x,exit.pos.y);await act({keys:[],duration_ms:900});
-  await act({keys:[],mouse:{x:700,y:575},duration_ms:1700});
-  const returned=await game.inspect();
-  game.check('same living character can use the retained first-boss exit after Creation',returned.view.map.name==='Nexus'&&returned.view.session.character===beforeFinal.view.session.character&&returned.view.lifecycle.alive&&returned.view.character.items[4]===0xa20&&returned.diagnostic.character.mad_labs===beforeFinal.diagnostic.character.mad_labs);
-  await act({keys:[],duration_ms:1000},{name:'creation-returned',when:()=>true});
-  await save('creation-returned');
+  await writeFile(output('creation-trace.json'),JSON.stringify(trace));
+  const final=await save('creation-defeated'),account=final.view.session.account;
+  game.check('native shots in the Creation’s vat windows defeat it and grant kill and XP credit',!(await scene()).entities.some(e=>e.id===creation.id)&&final.diagnostic.character.kills>cleared.diagnostic.character.kills&&final.view.character.experience>cleared.view.character.experience);
+  game.check('optional Creation defeat does not add a second Mad Lab clear',final.diagnostic.character.mad_labs===cleared.diagnostic.character.mad_labs);
+  const bag=final.diagnostic.entities.find(e=>distance(e.pos,trace.at(-1).pos)<10&&e.items?.includes(DEFENSE));
+  game.check('Creation guarantees a private Potion of Defense (min 1, actors.xml:15302)',bag&&bag.extra_stats.some(([stat,owner])=>stat===54&&owner===account));
+  await walk(bag.pos,.6);await act({keys:[],duration_ms:900},{name:'creation-loot',when:()=>true});
+  const slot=bag.items.indexOf(DEFENSE),from={x:634+44*(slot%4),y:528+44*Math.floor(slot/4)},before=await game.observe();
+  await act({keys:[],duration_ms:350,drag:{from,to:{x:634,y:428}}});
+  const picked=await save('defense-picked');
+  game.check('native drag commits the dropped Defense potion once',picked.view.character.items[4]===DEFENSE&&picked.view.character.inventory_revision===before.character.inventory_revision+1);
+  await act({keys:[],duration_ms:350,drag:{from,to:{x:678,y:428}}});
+  game.check('dragging the emptied bag slot cannot duplicate Defense',(await game.observe()).character.inventory_revision===picked.view.character.inventory_revision);
 }

@@ -2,8 +2,9 @@ use super::*;
 use crate::condition::{DAMAGING, SPEEDY, STASIS, STASIS_IMMUNE, bit};
 
 fn fixture(kind: u16) -> (World, i32, Pos) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 32,
         height: 32,
         cells: vec![
@@ -21,6 +22,7 @@ fn fixture(kind: u16) -> (World, i32, Pos) {
     let mut w = World::new(content, Arc::new(map)).unwrap();
     w.clock.set_paused(true);
     let mut ch = Character::fresh(w.content.get(0x323).unwrap()).unwrap();
+    ch.name = "Mystic".into();
     ch.account = 1;
     ch.id = 1;
     ch.base[1] = 385;
@@ -177,7 +179,7 @@ fn mystic_conflict_buffs_expire_and_rejections_do_not_spend() {
 
 #[test]
 fn mystic_123_5_1_minions_are_not_stasis_immune() {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     for kind in [
         0xd55, 0x943, 0x942, 0x1749, 0xd1c, 0xd1d, 0xd1e, 0xd1f, 0xd20, 0xd21, 0xd22, 0xd23, 0xd24,
     ] {

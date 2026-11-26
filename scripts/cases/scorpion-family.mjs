@@ -19,11 +19,13 @@ export async function prepare(api){
 }
 export async function run(game){
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
-  const members=s=>s.diagnostic.entities.filter(e=>e.camp===queen.camp&&e.kind===0x603);
-  const begin=await save('arrival'),initial=members(begin),samples=[];
-  game.check('natural Queen has selected HP and five initial defenders',begin.diagnostic.entities.some(e=>e.id===queen.id&&e.hp===100)&&initial.length===5&&initial.every(e=>e.hp===10));
+  // XML Queen MakeMinions Poison Scorpions (actors.xml:334) are owned by parent, not by the natural camp.
+  const members=s=>s.diagnostic.entities.filter(e=>(e.id===queen.id||e.parent===queen.id)&&e.kind===0x603);
+  const begin=await save('arrival'),samples=[];
+  game.check('natural Queen has selected HP and no camp-placed defenders',begin.diagnostic.entities.some(e=>e.id===queen.id&&e.hp===100)&&!members(begin).length);
   await game.act({keys:[],duration_ms:4000},{name:'scorpion-arrival',when:()=>true});
-  const exposed=await save('exposed');
+  const exposed=await save('exposed'),initial=members(exposed);
+  game.check('activated Queen makes her ten XML defenders at selected HP',initial.length===10&&initial.every(e=>e.parent===queen.id&&e.hp===10));
   game.check('unarmored native Wizard takes enemy damage',exposed.view.character.hp<begin.view.character.hp);
   game.check('ordinary Green Magic causes no status effect',exposed.view.character.conditions===0);
   const path=join(process.env.QA_RESULTS_DIR,'protection.json');
@@ -66,7 +68,7 @@ export async function run(game){
   const defeatStart=(await game.observe()).game_ms;
   await game.act({keys:[],duration_ms:10000});await game.act({keys:[],duration_ms:1000},{name:'scorpion-defeated',when:v=>v.game_ms>=defeatStart+10500});
   const final=await save('final');
-  game.check('dead Queen cannot replenish her camp',members(final).every(e=>surviving.has(e.id))&&!final.diagnostic.entities.some(e=>e.camp===queen.camp&&e.kind===0x604));
+  game.check('dead Queen cannot replenish her camp',members(final).every(e=>surviving.has(e.id))&&!final.diagnostic.entities.some(e=>e.id===queen.id));
   game.check('Queen XP is not credited twice',final.view.character.experience===dead.view.character.experience);
   game.check('same prepared living Wizard completes encounter',final.view.lifecycle.alive&&final.view.session.character===begin.view.session.character);
 }

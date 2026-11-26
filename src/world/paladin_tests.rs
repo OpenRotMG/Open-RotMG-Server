@@ -2,8 +2,9 @@ use super::*;
 use crate::condition::{self, DAMAGING, HEALING, INVULNERABLE};
 
 fn fixture(seal: u16) -> (World, [i32; 3]) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 32,
         height: 32,
         cells: vec![
@@ -127,7 +128,7 @@ fn paladin_overlap_is_nonstacking_and_preserves_longer_deadline() {
 
 #[tokio::test]
 async fn paladin_unlock_requires_both_twenty_and_retains_deleted_progress() {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     for levels in [[19, 20], [20, 19], [20, 20]] {
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
         let guid = format!("paladin-{}-{}", levels[0], levels[1]);

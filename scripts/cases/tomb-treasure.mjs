@@ -20,16 +20,21 @@ export async function run(observer){
   await game.act({keys:[],duration_ms:2500});
   const initial=await save('initial');
   game.check('optional treasure begins at selected full 50000 HP',initial.map.entities.find(e=>e.id===treasure.id).hp===50000);
+  // Inactive Sarcophagus (actors.xml:7345-7395): first damage Yells (5s Invulnerable); Toss1-8 then throw jars 1,2,3,4,1,2,3,4 below each 12.5% HP step.
   await game.act({keys:[],duration_ms:500,target:{entity:treasure.id,camera_angle:-Math.PI/4,fire:true}});
-  const jarsAt=(await game.observe()).game_ms;
-  await game.act({keys:[],duration_ms:8500},{name:'tomb-canopic-jars',when:v=>v.game_ms>=jarsAt+8000});
-  const spawned=await save('jars');
-  const jars=spawned.map.entities.filter(e=>e.kind>=0xd2d&&e.kind<=0xd30);
-  game.check('ordinary damage produces eight jars of four selected kinds',jars.length===8&&new Set(jars.map(e=>e.kind)).size===4&&spawned.map.entities.some(e=>e.id===treasure.id&&e.hp<49500));
-  for(let n=0;n<15&&(await map()).entities.some(e=>e.id===treasure.id);n++)await game.act({keys:[],duration_ms:1500,target:{entity:treasure.id,camera_angle:-Math.PI/4,fire:true}});
+  const yelled=await save('yell'),hit=yelled.state.diagnostic.entities.find(e=>e.id===treasure.id);
+  game.check('first damage leaves Idle for the Yell taunt before any jar',hit.hp<50000&&/^(Yell|Toss1)$/.test(yelled.state.diagnostic.xml[treasure.id].states.at(-1).name)&&!yelled.map.entities.some(e=>e.kind>=0xd2d&&e.kind<=0xd30));
+  const seen=new Map();let firstJarHp;
+  for(let n=0;n<30&&(await map()).entities.some(e=>e.id===treasure.id);n++){
+    await game.act({keys:[],duration_ms:1500,target:{entity:treasure.id,camera_angle:-Math.PI/4,fire:true}},n===8?{name:'tomb-canopic-jars',when:()=>true}:undefined);
+    const m=await map(),source=m.entities.find(e=>e.id===treasure.id);
+    for(const jar of m.entities.filter(e=>e.kind>=0xd2d&&e.kind<=0xd30&&e.parent===treasure.id)){if(!seen.size)firstJarHp=source?.hp;seen.set(jar.id,jar.kind);}
+  }
+  const order=[...seen.entries()].sort((a,b)=>a[0]-b[0]).map(e=>e[1]);
+  game.check('jars follow the recovered HP ladder in Toss order',order.length>=1&&order.length<=8&&order.every((kind,i)=>kind===0xd2d+i%4)&&firstJarHp<47500);
   const defeated=await save('treasure-defeated');
   game.check('native staff defeats the optional treasure without inventing XP',!defeated.map.entities.some(e=>e.id===treasure.id)&&defeated.state.diagnostic.character.kills>initial.state.diagnostic.character.kills&&defeated.state.view.character.experience===initial.state.view.character.experience);
-  const remaining=defeated.map.entities.filter(e=>e.kind>=0xd2d&&e.kind<=0xd30);assert(remaining.length,'A surviving jar is required');
+  const remaining=defeated.map.entities.filter(e=>seen.has(e.id));assert(remaining.length,'A surviving jar is required');
   const target=remaining.reduce((a,b)=>Math.hypot(a.pos.x-initial.state.view.position.x,a.pos.y-initial.state.view.position.y)<Math.hypot(b.pos.x-initial.state.view.position.x,b.pos.y-initial.state.view.position.y)?a:b);
   await game.act({keys:[],duration_ms:700,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
   const broken=await save('jar-broken');

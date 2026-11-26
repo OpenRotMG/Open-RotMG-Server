@@ -1,14 +1,8 @@
-use crate::{
-    content::{Cell, Content, Map},
-    encounter::{Anchor, Motion, Profile},
-};
+use super::{Rect, opposite, rect_bounds};
+use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use std::{collections::BTreeMap, sync::LazyLock};
-
-const MAX_ROOMS: usize = 30;
-// Skipped bat rooms retain their broods; leave headroom for Ruthven's overlapping cohorts.
-pub const SUMMON_LIMIT: usize = (MAX_ROOMS + 2) * 4 * 20;
 
 pub const BOSS: u16 = 0x1720;
 pub const BAT: u16 = 0x1721;
@@ -17,6 +11,7 @@ pub const SWARM: u16 = 0x1723;
 pub const ESCORT: u16 = 0x1724;
 pub const DECOY: u16 = 0x1725;
 pub const CHASER: u16 = 0x1726;
+pub const SUMMONER: u16 = 0x1736;
 pub const COFFIN: u16 = 0x1737;
 pub const FERATU: u16 = 0x1738;
 pub const BOOKCASE: u16 = 0x181a;
@@ -28,149 +23,6 @@ pub const ROSTER: [u16; 18] = [
     BOSS, BAT, CREATURE, SWARM, ESCORT, DECOY, CHASER, 0x1727, 0x1728, 0x1729, ROCK, 0x172b,
     0x172c, COFFIN, FERATU, KAGE, MINE, GRAVE,
 ];
-
-// Ruthven's cycle in five 2012 fights (OvCgRMN_JAw 2012-05-23 … I0XgIrF-BTQ 2012-12-22; YJQPDEw20f4 2012-10-03 the cleanest):
-// ≈20.3 s (17.7-22.8, n = 9) of daggers ≈2.5 s (2.2-3.2), a ritual from the sprite change to the bats ≈5.7 s (rings, then the coffin
-// throws ≈3.4 s after ring 1), and bats ≈12 s (11.5-13). The 2012 guide establishes timed returns, not a coffin kill gate:
-// https://web.archive.org/web/20120516045129id_/http://forums.wildshadow.com/wiki/realm-mad-god/manor-immortals
-pub const DAGGERS_MS: u64 = 2500;
-pub const RITUAL_MS: u64 = 5700;
-pub const BATS_MS: u64 = 12000;
-pub const CYCLE_MS: u64 = DAGGERS_MS + RITUAL_MS + BATS_MS;
-/// Ring 1 comes 0.2 s after the sprite change; the four coffins are thrown ≈3.1-3.7 s after ring 1 and fly ≈1.0-1.4 s.
-pub const COFFIN_TOSS_MS: u64 = 3600;
-pub const COFFIN_FLIGHT_MS: u64 = 1200;
-pub fn phase(elapsed: u64) -> (u64, u64) {
-    let t = elapsed % CYCLE_MS;
-    let (part, start) = if t < DAGGERS_MS {
-        (0, 0)
-    } else if t < DAGGERS_MS + RITUAL_MS {
-        (1, DAGGERS_MS)
-    } else {
-        (2, DAGGERS_MS + RITUAL_MS)
-    };
-    (elapsed / CYCLE_MS * 3 + part, t - start)
-}
-/// Dagger volleys grow 3 → 5 → 18 over the fight, ≈11° → ≈15° → exactly 20° apart (18 make a full ring). The HP bands are estimated
-/// from one fight (YJQPDEw20f4: 5 from about a third of his HP lost, 18 from about two thirds).
-pub fn daggers(hp: i32) -> (usize, f32) {
-    if hp * 3 > 15000 * 2 {
-        (3, 11.)
-    } else if hp * 3 > 15000 {
-        (5, 15.)
-    } else {
-        (18, 20.)
-    }
-}
-pub fn initial_condition(kind: u16) -> i32 {
-    use crate::condition::{ARMORED, INVINCIBLE, bit};
-    match kind {
-        0x1729 => bit(ARMORED),
-        // Size-zero anchors must not absorb native shots or show protection icons.
-        SWARM | DECOY => bit(INVINCIBLE),
-        _ => 0,
-    }
-}
-pub fn profile(kind: u16) -> Profile {
-    use Motion::*;
-    let (motion, speed, range) = match kind {
-        BOSS => (WanderHome { radius: 1. }, 1., 30.),
-        // Bat speeds are straight flights in YJQPDEw20f4 (2012-10-03), which plays at 1.0× (its SPD-57 warrior tops out at
-        // 8.3 tiles/s), scaled by 2.25 like the Hellhounds below. Room Swarmers fly ≈6.5 tiles/s (24 flights t=88-106, IQR
-        // 6.3-6.7), coffin-wave bats ≈5.6 (11 flights t=160-171, IQR 4.8-6.0). Decoy bats were never told apart from his own
-        // on screen, so they take his own bats' speed (estimate).
-        BAT | CHASER | 0x1727 => (
-            Chase {
-                sight: 20.,
-                stop: if kind == BAT { 2. } else { 0. },
-            },
-            match kind {
-                0x1727 => 6.5 * 2.25,
-                BAT => 5.6 * 2.25,
-                _ => 6. * 2.25,
-            },
-            1.,
-        ),
-        // Ruthven's own bats fly ≈6.0 tiles/s (9 flights t=220-229, IQR 5.7-6.5; others hover in the cloud) and the cloud they
-        // follow travels ≈4.7 (nine half-second minimap windows t=218-226, 2.5-7.7), YJQPDEw20f4 2012-10-03.
-        ESCORT => (
-            Protect {
-                anchor: Anchor::Parent,
-                distance: 4.,
-            },
-            6. * 2.25,
-            1.,
-        ),
-        SWARM => (
-            Protect {
-                anchor: Anchor::Parent,
-                distance: 0.3,
-            },
-            4.7 * 2.25,
-            0.,
-        ),
-        // The minimap groups moved alike whether his own or a decoy, so a decoy's centre takes his swarm's speed (estimate).
-        DECOY => (
-            Chase {
-                sight: 20.,
-                stop: 2.,
-            },
-            4.7 * 2.25,
-            0.,
-        ),
-        CREATURE | COFFIN | ROCK => (Stationary, 0., 10.),
-        KAGE | MINE | GRAVE => (Stationary, 0., 20.),
-        0x1728 => (
-            Chase {
-                sight: 10.,
-                stop: 1.,
-            },
-            2.,
-            10.,
-        ),
-        0x1729 => (
-            Chase {
-                sight: 10.,
-                stop: 1.,
-            },
-            2.,
-            10.,
-        ),
-        // Hellhounds dash at ≈9.5 tiles/s and stop ≈1.5 tiles short (two hounds, wRCpJLqPxLw 2012-07-25 at 1.00×); `speed` here is
-        // divided by 1.5 below and again by the engine, so the measured speed is scaled by 2.25.
-        0x172b => (
-            Charge {
-                sight: 6.,
-                cooldown: 0,
-                delay: 0,
-                stop: 1.5,
-                idle: 0.,
-            },
-            9.5 * 2.25,
-            10.,
-        ),
-        0x172c => (
-            Charge {
-                sight: 6.,
-                cooldown: 0,
-                delay: 0,
-                stop: 1.,
-                idle: 0.,
-            },
-            6.,
-            9.,
-        ),
-        FERATU => (WanderHome { radius: 1. }, 1., 8.),
-        _ => unreachable!("unregistered Manor actor {kind:#x}"),
-    };
-    Profile {
-        motion,
-        // Phoenix integrates legacy speed/1.5; these are not NR-Core movement rates.
-        speed: speed / 1.5,
-        range,
-        interval: 100,
-    }
-}
 
 /// Every layout tunable. TKR = the live-instance capture behind data/manor-templates.json (data/README.md); "maps" =
 /// TKR plus six independent full-map minimap screenshots (2013-2023), checked against 154 period runs on video.
@@ -256,52 +108,6 @@ static LIBRARY: LazyLock<Library> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../../data/manor-templates.json"))
         .expect("data/manor-templates.json is a valid template library")
 });
-
-#[derive(Clone, Copy, Debug)]
-struct Rect {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-}
-impl Rect {
-    /// The cell `along` this rect's `side` edge, `out` cells outside it.
-    fn at(self, side: char, along: i32, out: i32) -> (i32, i32) {
-        match side {
-            'N' => (self.x + along, self.y - out),
-            'S' => (self.x + along, self.y + self.h - 1 + out),
-            'W' => (self.x - out, self.y + along),
-            _ => (self.x + self.w - 1 + out, self.y + along),
-        }
-    }
-    fn span(a: (i32, i32), b: (i32, i32)) -> Rect {
-        Rect {
-            x: a.0.min(b.0),
-            y: a.1.min(b.1),
-            w: (a.0 - b.0).abs() + 1,
-            h: (a.1 - b.1).abs() + 1,
-        }
-    }
-    fn grow(self, g: i32) -> Rect {
-        Rect {
-            x: self.x - g,
-            y: self.y - g,
-            w: self.w + 2 * g,
-            h: self.h + 2 * g,
-        }
-    }
-    fn overlaps(self, o: Rect) -> bool {
-        self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
-    }
-}
-fn opposite(side: char) -> char {
-    match side {
-        'N' => 'S',
-        'S' => 'N',
-        'W' => 'E',
-        _ => 'W',
-    }
-}
 
 struct Link {
     parent: usize,
@@ -519,27 +325,29 @@ fn plan(rng: &mut StdRng, name: &'static str) -> Option<(Vec<Node>, Vec<usize>)>
             attach(&mut nodes, host, &VAULT_WEIGHTS, 1, "NW", true, rng)
         })?;
     }
-    let (x0, y0, x1, y1) = bounds(&nodes);
+    let (x0, y0, x1, y1) = rect_bounds(nodes.iter().map(|n| n.rect));
     (x1 - x0 <= MAX_EXTENT && y1 - y0 <= MAX_EXTENT).then_some((nodes, path))
 }
-fn bounds(nodes: &[Node]) -> (i32, i32, i32, i32) {
-    let rects: Vec<_> = nodes.iter().map(|n| n.rect).collect();
-    (
-        rects.iter().map(|r| r.x).min().unwrap_or(0),
-        rects.iter().map(|r| r.y).min().unwrap_or(0),
-        rects.iter().map(|r| r.x + r.w).max().unwrap_or(0),
-        rects.iter().map(|r| r.y + r.h).max().unwrap_or(0),
-    )
-}
 
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
-    Ok(build(content, seed)?.0)
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    Ok(build(content, generator, seed)?.0)
 }
 
 // Templates, sockets and corridors follow one live 2012-kit instance (TKR capture, data/README.md); the JP wiki
 // gives the nine path rooms, the hidden rooms behind bookshelves and the hollow-shelf coffin/Nosferatu:
 // https://wikiwiki.jp/rmd/Manor%20of%20the%20Immortals
-fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
+fn build(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<(Map, Vec<Node>, Vec<usize>)> {
+    let [retreat, shelf] = generator.placements("vault-and-exit")?;
+    let [bat] = generator.placements("room-bats")?;
+    let pack = generator.placements::<4>("room-pack")?;
     use tuning::*;
     const EMPTY: u8 = 0xff;
     const THRESHOLD: u8 = 0x6c;
@@ -553,7 +361,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
     let (attempts, (mut nodes, path)) = (1..=1000)
         .find_map(|n| plan(&mut rng, start).map(|p| (n, p)))
         .context("Manor template tree did not fit in 1000 attempts")?;
-    let (x0, y0, x1, y1) = bounds(&nodes);
+    let (x0, y0, x1, y1) = rect_bounds(nodes.iter().map(|n| n.rect));
     let (dx, dy) = ((WORLD - (x1 - x0)) / 2 - x0, (WORLD - (y1 - y0)) / 2 - y0);
     for n in &mut nodes {
         (n.rect.x, n.rect.y) = (n.rect.x + dx, n.rect.y + dy);
@@ -581,8 +389,8 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
             let g = if g.is_empty() { EMPTY } else { ground(g)? };
             let kind = match o.as_str() {
                 "" => None,
-                "spawn" => Some(0x703),
-                "secret shelf" => Some(BOOKCASE),
+                "spawn" => Some(retreat),
+                "secret shelf" => Some(shelf),
                 o => Some(object(o)?),
             };
             Ok((c, (g, kind, o == "secret shelf")))
@@ -596,6 +404,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
         region: 0,
     };
     let mut map = Map {
+        elevation: None,
         width: WORLD,
         height: WORLD,
         cells: vec![blank.clone(); (WORLD * WORLD) as usize],
@@ -616,7 +425,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
                     region: if secret { SECRET } else { 0 },
                     ..blank.clone()
                 };
-                if object == Some(0x703) {
+                if object == Some(retreat) {
                     map.cells[at(p)].region = 1;
                     map.spawns.push((p.0 as f32 + 0.5, p.1 as f32 + 0.5));
                 } else if object.is_none() && ground != THRESHOLD && content.grounds[&ground] > 0. {
@@ -656,7 +465,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
                     0,
                 );
             } else if (0..4).contains(&k) {
-                put(door, Some(BOOKCASE), THRESHOLD, SECRET);
+                put(door, Some(shelf), THRESHOLD, SECRET);
             }
             if jamb || inner {
                 put(
@@ -682,7 +491,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
         }
     }
     for c in &mut map.cells {
-        if c.object == Some(BOOKCASE) && c.region != SECRET {
+        if c.object == Some(shelf) && c.region != SECRET {
             c.config = format!(
                 "eff:{}",
                 crate::condition::bit(crate::condition::INVINCIBLE)
@@ -698,16 +507,16 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Vec<Node>, Vec<usize>)> {
             continue;
         }
         let mut pack: Vec<u16> = if n.name.starts_with("vault") {
-            vec![0x172c; rng.gen_range(2..=3)]
+            vec![pack[3]; rng.gen_range(2..=3)]
         } else if i == path[1] {
-            vec![0x172b; 4]
+            vec![pack[2]; 4]
         } else {
             (0..rng.gen_range(3..=5))
-                .map(|_| *[0x1728, 0x1729, 0x172b, 0x172c].choose(&mut rng).unwrap())
+                .map(|_| *pack.choose(&mut rng).unwrap())
                 .collect()
         };
         if !n.name.starts_with("vault") && i != path[1] && rng.gen_bool(0.4) {
-            pack.extend(std::iter::repeat_n(0x1727, rng.gen_range(5..=10)));
+            pack.extend(std::iter::repeat_n(bat, rng.gen_range(5..=10)));
         }
         for (p, kind) in floors[i].choose_multiple(&mut rng, pack.len()).zip(pack) {
             map.cells[at(*p)].object = Some(kind);
@@ -773,9 +582,14 @@ mod tests {
 
     #[test]
     fn manor_tree_follows_the_capture_rules() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
-            let (map, nodes, path) = build(&content, seed).unwrap();
+            let (map, nodes, path) = build(
+                &content,
+                crate::dungeon::test_generator(&content, "manor-of-the-immortals"),
+                seed,
+            )
+            .unwrap();
             assert!(
                 tuning::VAULTS
                     .contains(&nodes.iter().filter(|n| n.name.starts_with("vault")).count()),

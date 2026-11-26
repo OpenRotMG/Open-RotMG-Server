@@ -16,6 +16,7 @@ mod email;
 mod vaults;
 pub use vaults::{VAULT_CHESTS, VAULT_PRICE};
 mod consumables;
+pub(crate) mod world_events;
 
 pub(crate) use character_slots::SlotReplay;
 pub(crate) mod death_awards;
@@ -510,14 +511,14 @@ pub struct Account {
     pub best_fame: BTreeMap<u16, i32>,
     pub characters: Vec<Character>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Vault {
     pub account: i32,
     pub chest: i32,
     pub items: Vec<i32>,
     pub revision: i32,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct CollectedItem {
     pub item: u16,
     pub source: String,
@@ -589,6 +590,7 @@ enum Creation {
 }
 #[derive(Clone)]
 pub struct Store {
+    world_operation: Option<world_events::Event>,
     #[cfg(test)]
     lifecycle_lost_reply: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[cfg(test)]
@@ -700,6 +702,42 @@ pub(super) fn check_required_state(db: &Connection, version: i32) -> Result<()> 
     }
     Ok(())
 }
+pub(super) fn write_progress_row(
+    db: &Connection,
+    ch: &Character,
+    assists: &[LevelAssist],
+) -> Result<()> {
+    let raw: String = db
+        .query_row(
+            "SELECT stats FROM characters WHERE id=?1 AND account=?2 AND alive=1 AND revision=?3",
+            params![ch.id, ch.account, ch.revision],
+            |r| r.get(0),
+        )
+        .with_context(|| {
+            format!(
+                "progress conflict: dead, missing or stale character {} at revision {}",
+                ch.id, ch.revision
+            )
+        })?;
+    let saved: Character = serde_json::from_str(&raw)?;
+    ensure!(
+        ch.alive
+            && ch.schema == saved.schema
+            && ch.class == saved.class
+            && ch.level >= saved.level
+            && ch.exp >= saved.exp
+            && ch.fame >= saved.fame
+            && ch.xp_boost.bonus_exp >= saved.xp_boost.bonus_exp,
+        "progress snapshot lost committed experience"
+    );
+    ch.lifetime.follows(&saved.lifetime)?;
+    db.execute(
+        "UPDATE characters SET stats=?3 WHERE id=?1 AND account=?2",
+        params![ch.id, ch.account, serde_json::to_string(ch)?],
+    )?;
+    death_awards::save_assists(db, ch, saved.level, assists)?;
+    Ok(())
+}
 impl Store {
     pub fn open(path: &Path, content: &Content) -> Result<Self> {
         let legacy_base = content
@@ -750,6 +788,7 @@ impl Store {
                     | 22
                     | 23
                     | 24
+                    | 25
             ),
             "unsupported game database schema {version}"
         );
@@ -929,7 +968,8 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         death_awards::validate_wallets(&migration)?;
         death_awards::validate_state(&migration, legacy_base)?;
         account_save::migrate(&migration, version)?;
-        migration.pragma_update(None, "user_version", 24)?;
+        world_events::migrate(&migration, version)?;
+        migration.pragma_update(None, "user_version", 25)?;
         migration.commit()?;
         if migrated > 0 {
             tracing::info!(
@@ -949,6 +989,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 }
             })?;
         Ok(Self {
+            world_operation: None,
             #[cfg(test)]
             lifecycle_lost_reply: Default::default(),
             #[cfg(test)]
@@ -962,7 +1003,14 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             classes: std::sync::Arc::new(content.classes.clone()),
             content: std::sync::Arc::new(content.clone()),
             hashes: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
+            #[cfg(not(test))]
             dummy_hash: accounts::hash("unknown-account")?,
+            #[cfg(test)]
+            dummy_hash: {
+                static HASH: std::sync::LazyLock<String> =
+                    std::sync::LazyLock::new(|| accounts::hash("unknown-account").unwrap());
+                HASH.clone()
+            },
             dyes: std::sync::Arc::new(
                 content
                     .objects
@@ -972,6 +1020,11 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                     .collect(),
             ),
         })
+    }
+    #[cfg(test)]
+    pub(crate) fn lifecycle_test_lose_reply(&self) {
+        self.lifecycle_lost_reply
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
     #[cfg(test)]
     pub(crate) fn lifecycle_test_pause_reply(&self) -> (oneshot::Receiver<()>, mpsc::Sender<()>) {
@@ -998,6 +1051,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         f: impl FnOnce(&mut Connection) -> Result<T> + Send + 'static,
     ) -> Result<T> {
         let (tx, rx) = oneshot::channel();
+        let operation = self.world_operation.clone();
         #[cfg(test)]
         let lost = self
             .lifecycle_lost_reply
@@ -1012,7 +1066,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
         jobs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.tx
             .send(Box::new(move |c| {
-                let result = f(c);
+                let result = world_events::run_operation(c, operation.as_ref(), f);
                 #[cfg(test)]
                 let current = current_reply.lock().unwrap().take();
                 #[cfg(test)]
@@ -1685,8 +1739,9 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 "invalid inventory revision"
             );
         }
+        let operation = self.world_operation.clone();
         self.call(move |c| {
-            let tx = c.transaction()?;
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let raw_writes = serde_json::to_string(&writes)?;
             if let Some((id,delivery)) = &receipt {
                 let prior:Option<(String,String,Option<String>)>=tx.query_row("SELECT writes,revisions,delivery FROM trade_transactions WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
@@ -1711,6 +1766,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 let market_key=delivery.as_ref().map(|d|format!("{:x}:{}",d.terms.version,d.ordinal));
                 tx.execute("INSERT INTO trade_transactions(id,owners,writes,revisions,delivery,market_key) VALUES(?1,?2,?3,?4,?5,?6)",params![id,owners,raw_writes,serde_json::to_string(&revisions)?,delivery.as_ref().map(serde_json::to_string).transpose()?,market_key])?;
             }
+            world_events::finish_operation(&tx, operation.as_ref(), &serde_json::json!({"revision":revisions[0]}))?;
             tx.commit()?;
             if rewarded {
                 tracing::info!(account=collector, amount=gold::AMOUNT, reward="collection_top_half", "gold reward committed");
@@ -1772,8 +1828,9 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                     .all(|v| slot.is_none() && v.account == ch.account),
             "potion vault owner mismatch"
         );
+        let operation = self.world_operation.clone();
         self.call(move |db| {
-            let tx = db.transaction()?;
+            let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let (raw, items): (String, String) = tx.query_row(
                 "SELECT stats,items FROM characters WHERE id=?1 AND account=?2 AND revision=?3 AND alive=1",
                 params![ch.id, ch.account, ch.revision], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -1795,7 +1852,7 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
                 params![ch.id, ch.account, ch.revision - 1, serde_json::to_string(&ch)?, serde_json::to_string(&ch.items)?])?;
             ensure!(n == 1, "permanent potion commit lost its reservation");
             for vault in vaults { vaults::save(&tx, &vault)?; }
-            tx.commit()?;
+            world_events::finish_operation(&tx, operation.as_ref(), &serde_json::json!({"revision":ch.revision}))?;tx.commit()?;
             Ok(ch.revision)
         }).await
     }
@@ -1820,19 +1877,15 @@ CREATE INDEX IF NOT EXISTS characters_by_account ON characters(account);")?;
             characters.iter().all(|(ch, _)| accounts.insert(ch.account)),
             "progress batch repeats an account"
         );
-        self.call(move|db| {
-            let tx=db.transaction()?;
-            for (ch,assists) in characters {
-                let raw:String=tx.query_row("SELECT stats FROM characters WHERE id=?1 AND account=?2 AND alive=1 AND revision=?3",params![ch.id,ch.account,ch.revision],|r|r.get(0)).with_context(||format!("progress conflict: dead, missing or stale character {} at revision {}",ch.id,ch.revision))?;
-                let saved:Character=serde_json::from_str(&raw)?;
-                ensure!(ch.alive && ch.schema==saved.schema && ch.class==saved.class && ch.level>=saved.level && ch.exp>=saved.exp && ch.fame>=saved.fame && ch.xp_boost.bonus_exp>=saved.xp_boost.bonus_exp,"progress snapshot lost committed experience");
-                ch.lifetime.follows(&saved.lifetime)?;
-                tx.execute("UPDATE characters SET stats=?3 WHERE id=?1 AND account=?2",params![ch.id,ch.account,serde_json::to_string(&ch)?])?;
-                death_awards::save_assists(&tx,&ch,saved.level,&assists)?;
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            for (ch, assists) in characters {
+                write_progress_row(&tx, &ch, &assists)?;
             }
             tx.commit()?;
             Ok(())
-        }).await
+        })
+        .await
     }
     pub(crate) async fn source_character_alive(
         &self,

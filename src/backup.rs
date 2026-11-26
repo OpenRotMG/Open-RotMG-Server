@@ -244,7 +244,23 @@ pub async fn run(args: &[String]) -> Result<bool> {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
             }
-            let content = content::Content::load(Path::new(data))?;
+            #[cfg(test)]
+            let content = {
+                ensure!(
+                    *data == "data",
+                    "unit backup fixture requires the shared data directory"
+                );
+                crate::world::test_content()
+            };
+            #[cfg(not(test))]
+            let content = {
+                let mut content = content::Content::load(Path::new(data))?;
+                content.game = Some(std::sync::Arc::new(content::game::GameData::load(
+                    Path::new(data),
+                    &content,
+                )?));
+                content
+            };
             let store = store::Store::open(&directory.join("game.db"), &content)?;
             for alive in [true, false] {
                 let guid = format!("BACKUP_FIXTURE_SECRET_{alive}");
@@ -443,15 +459,21 @@ pub async fn run(args: &[String]) -> Result<bool> {
             )?;
             tx.execute_batch("INSERT INTO portable_assists VALUES(1,7); INSERT INTO portable_consumed_levels VALUES(1,2); INSERT INTO portable_history VALUES(1,0,3,2);")?;
             tx.commit()?;
-            println!("{}", serde_json::json!({"fixture_characters": 4}));
+            journal_fixture(&store, &content).await?;
+            println!("{}", serde_json::json!({"fixture_characters": 5}));
         }
         ["--backup-load", database, data] => {
             ensure!(
                 Path::new(database).is_file(),
                 "Restored game database missing"
             );
-            let content = content::Content::load(Path::new(data))?;
+            let mut content = content::Content::load(Path::new(data))?;
+            content.game = Some(std::sync::Arc::new(content::game::GameData::load(
+                Path::new(data),
+                &content,
+            )?));
             let store = store::Store::open(Path::new(database), &content)?;
+            let prior_catalogue_events = store.validate_world_events().await?;
             let rows = {
                 let db = rusqlite::Connection::open_with_flags(
                     database,
@@ -479,7 +501,7 @@ pub async fn run(args: &[String]) -> Result<bool> {
             }
             println!(
                 "{}",
-                serde_json::json!({"loaded_living_characters": rows.len(), "loaded_pictures": picture_ids.len()})
+                serde_json::json!({"loaded_living_characters": rows.len(), "loaded_pictures": picture_ids.len(), "prior_catalogue_events": prior_catalogue_events})
             );
         }
         ["--backup-exercise-vault", database, data] => {
@@ -566,7 +588,9 @@ pub async fn run(args: &[String]) -> Result<bool> {
 async fn exercise_vault(database: &Path, data: &Path) -> Result<()> {
     use crate::world::{Pos, Slot, World};
     use std::sync::Arc;
-    let content = Arc::new(content::Content::load(data)?);
+    let mut content = content::Content::load(data)?;
+    content.game = Some(Arc::new(content::game::GameData::load(data, &content)?));
+    let content = Arc::new(content);
     let store = store::Store::open(database, &content)?;
     let (account,id): (i32,i32) = rusqlite::Connection::open(database)?.query_row(
         "SELECT a.id,c.id FROM accounts a JOIN characters c ON c.account=a.id WHERE a.vault_mask=3 AND c.alive=1 ORDER BY c.id LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
@@ -577,13 +601,7 @@ async fn exercise_vault(database: &Path, data: &Path) -> Result<()> {
         inventory.extend(&v.items);
     }
     inventory.sort();
-    let mut world = World::with_ids(
-        content.clone(),
-        Arc::new(content::Map::load(&data.join("vault.wmap"), &content)?),
-        Arc::new(std::sync::atomic::AtomicI32::new(1000)),
-    )?;
-    world.name = "Vault".into();
-    world.owner = Some(account);
+    let mut world = World::restored_vault(content.clone(), account)?;
     world.load_vaults(original)?;
     let first = world
         .entities
@@ -836,6 +854,113 @@ fn fixture_png() -> Vec<u8> {
         png.extend(crc.finalize().to_be_bytes());
     }
     png
+}
+
+async fn journal_fixture(store: &store::Store, content: &content::Content) -> Result<()> {
+    use crate::{
+        loot::evaluator::{self, Contribution, DefeatContext},
+        store::world_events::{Event, LIMITS, TerminalPayload},
+    };
+    let game = content
+        .game
+        .as_ref()
+        .context("backup fixture GameData absent")?;
+    let account = store.list("BACKUP_FIXTURE_SECRET_journal".into()).await?;
+    let ch = store
+        .create(account.id, content.get(content::WIZARD)?)
+        .await?;
+    let defeat = DefeatContext {
+        world: 7,
+        encounter: Some(19),
+        actor: 1000,
+        event: 1,
+        kind: 0x1706,
+    };
+    let ledger = vec![Contribution {
+        character: ch.id,
+        world: 7,
+        encounter: Some(19),
+        effective_damage: u64::try_from(game.properties[&0x1706].hp)?,
+        alive: true,
+        departing: false,
+    }];
+    let allocation = evaluator::evaluate(game, defeat, &ledger, 52, LIMITS)?;
+    ensure!(
+        allocation.allocations().len() >= 2,
+        "actual Thessal fixture must retain picked and unpicked allocations"
+    );
+    let item = allocation.allocations()[0].item();
+    let payload = TerminalPayload {
+        defeat,
+        ledger: ledger.clone(),
+        seed: 52,
+        allocation: Some(allocation),
+        actions: serde_json::json!({}),
+    };
+    let mut event = Event::terminal(&game.fingerprint, payload)?;
+    event.id = "1".repeat(32);
+    store.prepare_world_event(event.clone()).await?;
+    store.commit_terminal_event(event.clone()).await?;
+    store.publish_world_event(event.clone()).await?;
+    let slot = ch
+        .items
+        .iter()
+        .enumerate()
+        .skip(4)
+        .find(|(_, item)| **item == -1)
+        .context("backup journal fixture empty inventory slot absent")?
+        .0;
+    let mut write = store::InventoryWrite {
+        id: ch.id,
+        account: ch.account,
+        revision: ch.revision,
+        items: ch.items.clone(),
+    };
+    write.items[slot] = i32::from(item);
+    let operation = "3".repeat(32);
+    store
+        .pick_world_entitlement(event, 0, operation.clone(), write.clone(), slot)
+        .await?;
+    let pickup = store
+        .world_event(operation)
+        .await?
+        .context("fixture pickup journal absent")?;
+    store.publish_world_event(pickup.event).await?;
+    let defeat = DefeatContext {
+        actor: 1001,
+        ..defeat
+    };
+    let allocation = evaluator::evaluate(game, defeat, &ledger, 52, LIMITS)?;
+    let expired = (0..allocation.allocations().len())
+        .map(|ordinal| (ordinal, 55, 10, 11))
+        .collect();
+    let mut settled = Event::terminal(
+        &game.fingerprint,
+        TerminalPayload {
+            defeat,
+            ledger,
+            seed: 52,
+            allocation: Some(allocation),
+            actions: serde_json::json!({}),
+        },
+    )?;
+    settled.id = "4".repeat(32);
+    store.prepare_world_event(settled.clone()).await?;
+    store.commit_terminal_event(settled.clone()).await?;
+    store.publish_world_event(settled.clone()).await?;
+    store.expire_world_entitlements(settled, expired).await?;
+    ensure!(
+        store.compact_settled_world_events(vec![]).await? == 1,
+        "backup journal fixture must retain one compacted settled event"
+    );
+    let mut pending = Event::new(
+        "inventory",
+        &game.fingerprint,
+        serde_json::json!({"write":store::InventoryWrite{revision:write.revision+1,..write},"source":"prepared backup fixture, no mutation/publication"}),
+    )?;
+    pending.id = "2".repeat(32);
+    store.prepare_world_event(pending).await?;
+    store.validate_world_events().await.map(drop)
 }
 
 #[cfg(test)]

@@ -173,6 +173,7 @@ fn item_funds_ignore_cached_vault_and_prepare_only_live_owned_stock() {
         "saving_continue_hunt_loot"
     );
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     chest.id = 42;
     chest.kind = 0x504;
     chest.position = v.position;
@@ -195,6 +196,7 @@ fn item_funds_ignore_cached_vault_and_prepare_only_live_owned_stock() {
     let d = m.decide(&v, &c, None, &grid, &mut rng).unwrap().unwrap();
     assert!(matches!(d.journey, Some(Journey::Nexus)));
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.objects.clear();
     assert_eq!(m.quote(&v, &c, None).unwrap(), Some(buy.clone()));
     assert!(m.decide(&v, &c, None, &grid, &mut rng).unwrap().is_some());
@@ -324,6 +326,7 @@ fn goal_bank_prepares_carried_surplus_and_refuses_keeps_that_cannot_fit() {
     v.character.base_stats[index] = c.classes[&v.character.class].caps[index] - 1;
     v.character.items[4..].fill(-1);
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     let mut chest = v.objects.remove(0);
     v.objects.clear();
     chest.id = 42;
@@ -358,6 +361,7 @@ fn goal_bank_prepares_carried_surplus_and_refuses_keeps_that_cannot_fit() {
     assert!(matches!(d.journey, Some(Journey::Nexus)));
     let mut chest = v.objects.remove(0);
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     m.bind();
     m.set_target(Some(2744));
     assert_eq!(
@@ -367,6 +371,7 @@ fn goal_bank_prepares_carried_surplus_and_refuses_keeps_that_cannot_fit() {
     );
 
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     v.character.base_stats[index] = c.classes[&v.character.class].caps[index] - 8;
     v.character.items[4..].fill(dex);
     chest.contents[0] = dex;
@@ -393,6 +398,7 @@ const DEX: i32 = 2636;
 fn nexus_peer(stock: [i32; 8]) -> (Content, PlayerView) {
     let (c, mut v) = crate::bots::quest_tests::fixture();
     v.map.name = "Nexus".into();
+    v.map.template = Some("nexus".into());
     v.character.items[4..].copy_from_slice(&stock);
     let peer = &mut v.objects[0];
     (peer.id, peer.account, peer.name) = (9, Some(2), "Peer".into());
@@ -691,6 +697,7 @@ fn a_bot_uses_potions_saved_in_any_vault_chest() {
     let mut gear = crate::bots::quest_tests::fixture().1.objects.remove(0);
     v.objects.clear();
     v.map.name = "Vault".into();
+    v.map.template = Some("vault".into());
     v.character.items[4..].fill(-1);
     v.character.class = 775;
     v.character.items[0] = c

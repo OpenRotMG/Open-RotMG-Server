@@ -22,7 +22,10 @@ impl Directory {
             .worlds
             .get_mut(&target)
             .context("active Realm missing")?;
-        ensure!(realm.name == "Realm", "active world is not a Realm");
+        ensure!(
+            realm.template_id() == Some("realm"),
+            "active world is not a Realm"
+        );
         ensure!(
             limit >= 1 && limit < realm.max_players,
             "capacity must lower the active Realm limit"
@@ -31,7 +34,7 @@ impl Directory {
         self.sync_realm_portal();
         Ok(target)
     }
-    pub(super) fn next_realm_portal_position(&mut self) -> Result<Pos> {
+    fn next_realm_portal_position(&self, rng: &mut rand::rngs::StdRng) -> Result<Pos> {
         let nexus = self.worlds.get(&-2).context("Nexus missing")?;
         let mut reserved = Vec::new();
         for entity in nexus.entities.values().filter(|e| e.kind == 0x712) {
@@ -47,15 +50,40 @@ impl Directory {
                 nexus.walkable(*pos) && reserved.iter().all(|other| other.distance(*pos) >= 4.)
             })
             .collect();
-        available.choose(&mut self.portal_rng).copied().context(
+        for pos in &available {
+            nexus.xml_preflight_native_entity(
+                0x712,
+                NativeService::Portal,
+                *pos,
+                "directory Nexus Realm portal position",
+            )?;
+        }
+        available.choose(rng).copied().context(
             "Nexus Realm entrance packing exhausted: all positions occupied, reserved or blocked",
         )
     }
     pub(super) fn install_realm_portal(&mut self, _slot: usize) -> Result<i32> {
-        let pos = self.next_realm_portal_position()?;
+        self.worlds
+            .get(&-2)
+            .context("Nexus missing")?
+            .xml_game()
+            .admission(
+                0x712,
+                AdmissionRole::Native(NativeService::Portal),
+                "directory Nexus Realm portal",
+            )?;
+        let mut draw = self.portal_rng.clone();
+        let pos = self.next_realm_portal_position(&mut draw)?;
         let nexus = self.worlds.get_mut(&-2).context("Nexus missing")?;
-        let id = nexus.spawn_entity(0x712, pos, vec![])?;
+        let id = nexus.insert_native_entity(
+            0x712,
+            NativeService::Portal,
+            pos,
+            vec![],
+            "directory Nexus Realm portal",
+        )?;
         nexus.entities.get_mut(&id).unwrap().published = false;
+        self.portal_rng = draw;
         tracing::info!(
             portal = id,
             x = pos.x,
@@ -126,7 +154,7 @@ impl World {
 #[test]
 fn realm_portal_counts_reservations_and_retires_closed_entrances() {
     let path = std::path::Path::new("data");
-    let content = Arc::new(Content::load(path).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut d = Directory::test_with_seed(path, content, 1, 901).unwrap();
     let portal = d.endgame.realms[&-3].portal.unwrap();
     let other = d.endgame.realms[&1].portal.unwrap();
@@ -169,7 +197,7 @@ fn realm_portal_counts_reservations_and_retires_closed_entrances() {
 #[test]
 fn realm_portal_placement_seed_changes_initial_positions() {
     let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let positions = |seed| {
         let d = Directory::test_with_seed(data, content.clone(), 1, seed).unwrap();
         d.endgame
@@ -194,7 +222,7 @@ fn realm_portal_placement_seed_changes_initial_positions() {
 #[test]
 fn realm_portal_placement_reserves_unpublished_entrances_and_reuses_only_released_positions() {
     let data = std::path::Path::new("data");
-    let content = Arc::new(Content::load(data).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut d = Directory::test_with_seed(data, content, 1, 1343).unwrap();
     let mut portals: Vec<_> = d
         .endgame

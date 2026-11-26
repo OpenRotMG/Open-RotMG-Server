@@ -1,8 +1,9 @@
 use super::*;
 
 fn fixture(poison: u16) -> (World, i32, i32) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 32,
         height: 32,
         cells: vec![
@@ -20,6 +21,7 @@ fn fixture(poison: u16) -> (World, i32, i32) {
     let mut w = World::new(content, Arc::new(map)).unwrap();
     w.clock.set_paused(true);
     let mut ch = Character::fresh(w.content.get(0x320).unwrap()).unwrap();
+    ch.name = "Assassin".into();
     ch.account = 1;
     ch.id = 1;
     ch.base[1] = 252;
@@ -86,22 +88,22 @@ fn assassin_poison_tiers_delay_defense_duration_and_credit() {
         assert!(cast(&mut w, player, pos).is_err());
         assert_eq!(w.players[&player].character.mp, 252 - cost);
         w.now = 1499;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&enemy].hp, hp);
         w.now = 1500;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&enemy].hp, hp);
         w.now += duration / 2;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(hp - w.entities[&enemy].hp, (raw - 12) / 2);
         w.now = 1500 + duration;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(hp - w.entities[&enemy].hp, raw - 12);
         assert_eq!(w.entities[&enemy].damage[&1], raw - 12);
         assert_eq!(hp - w.entities[&edge].hp, raw - 12);
         assert_eq!(w.entities[&outside].hp, hp);
         w.now += 10000;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(hp - w.entities[&enemy].hp, raw - 12);
         let effective = w.players[&player].character.effective(&w.content).unwrap();
         assert_eq!(
@@ -128,14 +130,14 @@ fn assassin_poison_snapshots_landing_targets_and_stacks_per_cast_and_owner() {
     cast(&mut w, player, pos).unwrap();
     cast(&mut w, ally, pos).unwrap();
     w.now = 1499;
-    w.ability_step();
+    w.ability_step().unwrap();
     w.entities.get_mut(&enemy).unwrap().pos = pos;
     w.now = 1500;
-    w.ability_step();
+    w.ability_step().unwrap();
     w.entities.get_mut(&enemy).unwrap().pos = Pos { x: 25., y: 25. };
     w.entities.get_mut(&missed).unwrap().pos = pos;
     w.now = 6500;
-    w.ability_step();
+    w.ability_step().unwrap();
     assert_eq!(w.entities[&enemy].hp, 7000 - 3 * 138);
     assert_eq!(w.entities[&enemy].damage[&1], 276);
     assert_eq!(w.entities[&enemy].damage[&2], 138);
@@ -151,11 +153,11 @@ fn assassin_poison_departure_immunity_and_failure_paths() {
         cast(&mut w, player, pos).unwrap();
         if landed {
             w.now = 1500;
-            w.ability_step();
+            w.ability_step().unwrap();
         }
         w.leave(player).unwrap();
         w.now = 10000;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&enemy].hp, 7000);
     }
     let (mut w, player, enemy) = fixture(0xaa3);
@@ -164,9 +166,9 @@ fn assassin_poison_departure_immunity_and_failure_paths() {
         .unwrap();
     cast(&mut w, player, pos).unwrap();
     w.now = 1500;
-    w.ability_step();
+    w.ability_step().unwrap();
     w.now = 6500;
-    w.ability_step();
+    w.ability_step().unwrap();
     assert_eq!(w.entities[&enemy].hp, 7000);
     for failure in [
         "mana",
@@ -197,14 +199,14 @@ fn assassin_poison_departure_immunity_and_failure_paths() {
         assert!(cast(&mut w, player, pos).is_err(), "{failure}");
         assert_eq!(w.players[&player].character.mp, mp, "{failure}");
         w.now = 10000;
-        w.ability_step();
+        w.ability_step().unwrap();
         assert_eq!(w.entities[&enemy].hp, 7000, "{failure}");
     }
 }
 
 #[tokio::test]
 async fn assassin_requires_both_level_twenty_records_after_permanent_death() {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     for (rogue, wizard) in [(19, 20), (20, 19), (20, 20)] {
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
         let guid = format!("assassin-{rogue}-{wizard}");

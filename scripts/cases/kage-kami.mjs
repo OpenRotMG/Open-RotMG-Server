@@ -23,6 +23,9 @@ export async function run(game){
   const samples=[],shots=new Map();
   const save=async name=>{const s=await game.inspect();await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
   const entity=s=>s.diagnostic.entities.find(e=>e.id===kage.id);
+  // Recovered Kage Kami states (actors.xml:2492): Ini until HP<99%, invincible Start reveal, Normal human form, invincible Flying.
+  const states=(s,id=kage.id)=>(s.diagnostic.xml[id]?.states??[]).map(x=>x.name),at=(s,name,id)=>states(s,id).includes(name);
+  const hidden=s=>!states(s).length||at(s,'Ini');
   const record=s=>{samples.push(s);for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);};
   const step=async(input,capture)=>{
     let pending=null,error;
@@ -32,39 +35,60 @@ export async function run(game){
     const s=await game.inspect();record(s);return s;
   };
   const initial=await save('arrival');
-  game.check('natural full-health grave is unrevealed',entity(initial).hp===7000&&entity(initial).stage===0);
+  game.check('natural full-health grave is unrevealed',entity(initial).hp===7000&&hidden(initial));
   await step({keys:[],duration_ms:700},{name:'kage-grave',when:()=>true});
-  game.check('proximity alone does not reveal Kage',entity(await game.inspect()).stage===0);
+  game.check('proximity alone does not reveal Kage',hidden(await game.inspect()));
   // The March 2012 notes describe finding a graveyard, not spawning a visible boss: https://wikiwiki.jp/rmd/test/build122.2.1
-  for(let n=0;n<16&&entity(await game.inspect()).stage===0;n++)await step({keys:[],duration_ms:100,target:{entity:kage.id,camera_angle:-Math.PI/4,fire:true}});
+  for(let n=0;n<16&&hidden(await game.inspect());n++)await step({keys:[],duration_ms:100,target:{entity:kage.id,camera_angle:-Math.PI/4,fire:true}});
   const reveal=await save('reveal');
-  game.check('ordinary staff damage reveals the same grave below ninety percent HP',entity(reveal).stage===1&&entity(reveal).hp<6300);
+  game.check('ordinary staff damage reveals the same grave below ninety-nine percent HP',at(reveal,'Start')&&entity(reveal).hp<6930);
   const protectedHp=entity(reveal).hp;
   await step({keys:[],duration_ms:700,target:{entity:kage.id,camera_angle:-Math.PI/4,fire:true}},{name:'kage-reveal',when:()=>true});
   game.check('reveal animation rejects ordinary damage',entity(await game.inspect()).hp===protectedHp);
   for(let n=0;n<10&&(await game.inspect()).view.character.hp===initial.view.character.hp;n++)await step({keys:[],duration_ms:400});
   const exposed=await save('exposed');
   game.check('native enemy attacks damage the prepared Wizard',exposed.view.character.hp<initial.view.character.hp);
-  const path=join(process.env.QA_RESULTS_DIR,'protection.json');
-  await writeFile(path,JSON.stringify({id:'kage-protection',command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
-  execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(process.env.QA_RESULTS_DIR,'native/native.json'),path]);
+  // The recovered Flying form cycles randomly, so a long fight can outlast one 60-second protection.
+  let protections=0,protectedUntil=0;
+  async function protect(){
+    const now=(await game.observe()).game_ms;if(now<protectedUntil)return;
+    const path=join(process.env.QA_RESULTS_DIR,'protection-'+protections+'.json');
+    await writeFile(path,JSON.stringify({id:'kage-protection-'+protections++,command:{op:'cheat',actor:game.actor,change:{kind:'protection',condition:'invulnerable',duration_ms:60000}}}));
+    execFileSync(process.execPath,[resolve('scripts/game.mjs'),join(process.env.QA_RESULTS_DIR,'native/native.json'),path]);protectedUntil=now+60250;
+  }
+  await protect();
   await step({keys:[],duration_ms:6000},{name:'kage-fight',when:()=>true});
-  game.check('human and protected flying phases are both observed',[2,3].every(stage=>samples.some(s=>entity(s)?.stage===stage)));
-  for(let n=0;n<20&&entity(await game.inspect()).stage!==3;n++)await step({keys:[],duration_ms:250});
-  const flying=await game.inspect();assert.equal(entity(flying).stage,3);
+  // Normal leaves for Flying on a 5% trial per 0.2 s after 3.4 s (actors.xml:2492), so wait for it before checking.
+  for(let n=0;n<40&&!at(await game.inspect(),'Flying');n++)await step({keys:[],duration_ms:250});
+  const flying=await game.inspect();record(flying);assert(at(flying,'Flying'),'Flying Kage required');
+  game.check('human and protected flying phases are both observed',['Normal','Flying'].every(name=>samples.some(s=>entity(s)&&at(s,name))));
   await step({keys:[],duration_ms:600,target:{entity:kage.id,camera_angle:-Math.PI/4,fire:true}});
   game.check('flying form rejects ordinary staff damage',entity(await game.inspect()).hp===entity(flying).hp);
-  for(let n=0;n<100&&entity(await game.inspect());n++)await step({keys:[],duration_ms:400,target:{entity:kage.id,camera_angle:-Math.PI/4,fire:true}});
+  for(let n=0;n<200;n++){
+    await protect();
+    const s=await game.inspect(),boss=entity(s);
+    if(!boss)break;
+    // An in-flight shot may have ended the fight before protection renewal completed.
+    const target=boss.hp>0&&s.view.objects.some(e=>e.id===kage.id)?{entity:kage.id,camera_angle:-Math.PI/4,fire:true}:undefined;
+    await step({keys:[],duration_ms:400,target});
+  }
   const dead=await save('defeated');
+  // Kage can die during a fresh mine's .6s Ini; the independent mine Decay is 10s (actors.xml:2482–2491).
+  let settled=dead;
+  for(let n=0;n<11&&settled.diagnostic.entities.some(e=>e.kind===0x6da);n++){
+    await protect();settled=await step({keys:[],duration_ms:1000});
+  }
   await writeFile(join(process.env.QA_RESULTS_DIR,'combat.json'),JSON.stringify({samples,shots:[...shots.values()]}));
   game.check('native staff defeats Kage and awards XP',!entity(dead)&&dead.view.character.experience>initial.view.character.experience);
-  game.check('human form wanders and flying form pursues', [2,3].every(stage=>{const ps=samples.filter(s=>entity(s)?.stage===stage).map(s=>entity(s).pos);return ps.some(p=>Math.hypot(p.x-ps[0].x,p.y-ps[0].y)>.2);}));
+  game.check('human form wanders and flying form pursues', ['Normal','Flying'].every(name=>{const ps=samples.filter(s=>entity(s)&&at(s,name)).map(s=>entity(s).pos);return ps.some(p=>Math.hypot(p.x-ps[0].x,p.y-ps[0].y)>.2);}));
   game.check('client receives selected Specter Shots', [...shots.values()].some(p=>p.owner===kage.id&&p.speed===35&&p.lifetime_ms===2600));
   game.check('client receives selected flying Specter Spinners', [...shots.values()].some(p=>p.owner===kage.id&&p.speed===55&&p.lifetime_ms===2000));
   const mines=new Set(samples.flatMap(s=>s.diagnostic.entities.filter(e=>e.kind===0x6da).map(e=>e.id)));
   game.check('naturally fought Kage tosses Specter Mines',mines.size>0);
-  game.check('mine bursts emit four spikes before expiring',samples.some(s=>s.diagnostic.entities.some(e=>mines.has(e.id)&&e.stage===1&&e.bullet===4))&&[...mines].every(id=>!dead.diagnostic.entities.some(e=>e.id===id)));
-  const firstFlight=samples.find(s=>entity(s)?.stage===3).view.time_ms;
+  // An Armed mine Explodes (actors.xml:2482-2491) as a terminal, so it leaves well before its 10 s Decay once a player is in range.
+  const exploded=id=>{const seen=samples.filter(s=>s.diagnostic.entities.some(e=>e.id===id));const near=seen.find(s=>{const e=s.diagnostic.entities.find(e=>e.id===id);return Math.hypot(e.pos.x-s.view.position.x,e.pos.y-s.view.position.y)<3;});return near&&seen.at(-1).view.time_ms-seen[0].view.time_ms<9000&&samples.some(s=>s.view.time_ms>seen.at(-1).view.time_ms&&s.view.time_ms<seen[0].view.time_ms+9500&&!s.diagnostic.entities.some(e=>e.id===id));};
+  game.check('mine bursts explode before expiring',[...mines].some(exploded)&&[...mines].every(id=>!settled.diagnostic.entities.some(e=>e.id===id)));
+  const firstFlight=samples.find(s=>entity(s)&&at(s,'Flying')).view.time_ms;
   game.check('native mine spikes apply Sick before flying attacks begin',samples.some(s=>s.view.time_ms<firstFlight&&(s.view.character.conditions&16)!==0));
   game.check('native projectiles apply Paralyzed, Sick and Confused',[8192,16,1024].every(mask=>samples.some(s=>(s.view.character.conditions&mask)!==0)));
   await step({keys:[],duration_ms:1000},{name:'kage-defeated',when:()=>true});

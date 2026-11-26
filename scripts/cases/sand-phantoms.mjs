@@ -21,8 +21,14 @@ export async function prepare(api){
 }
 export async function run(game){
   const samples=[],shots=new Map();let serial=0,protectedUntil=0;
-  const family=s=>s.diagnostic.entities.filter(e=>e.home.x===phantom.home.x&&e.home.y===phantom.home.y&&[0x6c5,0x7f22].includes(e.kind));
-  const record=s=>{samples.push(s);for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);return s;};
+  // XML Metamorphose replaces the actor at its current position (actors.xml:2299,15382), so follow the lineage by place, not home.
+  const lineage=new Set([phantom.id]);let current=phantom.id,last=phantom.pos;
+  const family=s=>s.diagnostic.entities.filter(e=>lineage.has(e.id));
+  const record=s=>{
+    const e=s.diagnostic.entities.find(e=>e.id===current),next=!e&&s.diagnostic.entities.find(e=>[0x6c5,0x7f22].includes(e.kind)&&!lineage.has(e.id)&&Math.hypot(e.pos.x-last.x,e.pos.y-last.y)<2.5);
+    if(e)last=e.pos;else if(next){current=next.id;lineage.add(next.id);last=next.pos;}
+    samples.push(s);for(const p of s.view.projectiles)shots.set(p.owner+':'+p.id,p);return s;
+  };
   const save=async name=>{const s=record(await game.inspect());await writeFile(join(process.env.QA_RESULTS_DIR,name+'.json'),JSON.stringify(s));return s;};
   async function act(input,capture){
     const now=(await game.observe()).game_ms;
@@ -41,20 +47,22 @@ export async function run(game){
     game.check('natural MidSand placement has one selected Phantom',family(begin).length===1&&family(begin)[0].hp===230);
     await act({keys:[],duration_ms:700},{name:'phantom-close',when:()=>true});
     const close=await save('close');
-    await act({keys:[],duration_ms:7000},{name:'phantom-cycle',when:()=>true});
+    await act({keys:[],duration_ms:9000},{name:'phantom-cycle',when:()=>true});
     const cycle=await save('cycle');
-    game.check('close native player triggers Wisp without a five-second wait',family(close).some(e=>e.kind===0x7f22));
-    const wisps=samples.flatMap(s=>family(s).filter(e=>e.kind===0x7f22).map(e=>({time:s.view.time_ms,...e})));
+    // A birth can be sampled before its first tick sets activated.
+    const wisps=samples.flatMap(s=>family(s).filter(e=>e.kind===0x7f22&&e.activated!==null).map(e=>({time:s.view.time_ms,...e})));
+    game.check('close native player triggers Wisp after the XML two-second Metamorphose',wisps.length>0&&wisps[0].activated-begin.view.time_ms>=2000&&wisps[0].activated-begin.view.time_ms<=2500);
     game.check('selected Wisp HP and movement observed',wisps.some(e=>e.hp===150)&&wisps.some(e=>Math.hypot(e.pos.x-wisps[0].pos.x,e.pos.y-wisps[0].pos.y)>.2));
     const first=wisps[0];assert(first);
     game.check('Wisp retreats from nearby stationary player',wisps.some(e=>e.id===first.id&&e.time-first.time<800&&Math.hypot(e.pos.x-begin.view.position.x,e.pos.y-begin.view.position.y)>Math.hypot(first.pos.x-begin.view.position.x,first.pos.y-begin.view.position.y)+.2));
-    const returned=samples.find(s=>s.view.time_ms>first.time&&family(s).some(e=>e.kind===0x6c5&&e.id!==phantom.id));
-    game.check('Wisp returns after the bounded 6.5-second reconstruction',returned&&returned.view.time_ms-first.activated>=6500&&returned.view.time_ms-first.activated<=6700);
+    const returned=samples.map(s=>family(s).find(e=>e.kind===0x6c5&&e.id!==phantom.id&&e.activated!==null)).find(Boolean);
+    // move_away_from_player lasts 6.5s, then wisp_finished Metamorphoses after 0.2s (actors.xml:15379-15382).
+    game.check('Wisp returns as a Phantom after XML 6.5s plus 0.2s Metamorphose',returned&&returned.activated-first.activated>=6700&&returned.activated-first.activated<=6900);
     game.check('transformations keep a single population member and award no kill XP',samples.every(s=>family(s).length===1)&&cycle.view.character.experience===begin.view.character.experience);
     for(let n=0;n<48;n++){
       const ids=new Set(samples.flatMap(family).filter(e=>e.kind===0x6c5).map(e=>e.id));
       if([...shots.values()].some(p=>ids.has(p.owner)))break;
-      const s=await game.inspect(),e=family(s)[0];assert(e);
+      const s=record(await game.inspect()),e=family(s)[0];assert(e);
       const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,distance=Math.hypot(dx,dy),sign=distance<6?-1:1;
       const x=sign*(dx-dy)/Math.SQRT2,y=sign*(dx+dy)/Math.SQRT2;
       await act({keys:distance<6||distance>8?[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean):[],duration_ms:250});
@@ -65,7 +73,7 @@ export async function run(game){
     }
     const xp=cycle.view.character.experience;
     for(let n=0;n<40;n++){
-      const s=await game.inspect(),e=family(s)[0];if(!e)break;
+      const s=record(await game.inspect()),e=family(s)[0];if(!e)break;
       const dx=e.pos.x-s.view.position.x,dy=e.pos.y-s.view.position.y,x=(dx-dy)/Math.SQRT2,y=(dx+dy)/Math.SQRT2;
       if(Math.hypot(dx,dy)>6)await act({keys:[Math.abs(x)>.15?(x>0?'d':'a'):null,Math.abs(y)>.15?(y>0?'s':'w'):null].filter(Boolean),duration_ms:150});
       else if(s.view.objects.some(o=>o.id===e.id&&o.hp>0))await act({keys:[],duration_ms:350,target:{entity:e.id,camera_angle:-Math.PI/4,fire:true}});

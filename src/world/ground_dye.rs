@@ -1,10 +1,19 @@
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub(super) struct Reservation {
+    #[serde(serialize_with = "journal_bag")]
     bag: Entity,
     expiry: u64,
     textures: [u32; 2],
+}
+
+fn journal_bag<S: serde::Serializer>(
+    bag: &Entity,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serde_json::json!({"entity":bag,"drop_slots":bag.drop_slots,"drop_source":bag.drop_source})
+        .serialize(serializer)
 }
 
 impl Reservation {

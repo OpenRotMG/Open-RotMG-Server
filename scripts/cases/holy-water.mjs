@@ -70,13 +70,20 @@ export async function run(game){
   game.check('Hexed and associated Speedy clear while Berserk survives',!(sample.after.character.conditions&(hexed|speedy))&&Boolean(sample.after.character.conditions&berserk));
   await game.act({keys:[],duration_ms:700},{name:'holy-water-restored',when:v=>!(v.character.conditions&hexed)});
   const sick=await game.join({...base,class:0x30e,world:1,position:{x:grave.pos.x-2.5,y:grave.pos.y},equipment:[0xb08,-1,-1,-1],backpack:[0xc21,0xc21,-1,-1,-1,-1,-1,-1]});
-  await prepare(sick.actor,{kind:'protection',condition:'invulnerable',duration_ms:60000});
+  const vulnerableAt=(await sick.observe()).game_ms+12000;
+  await prepare(sick.actor,{kind:'protection',condition:'invulnerable',duration_ms:12000});
   for(let n=0;n<25;n++){
     await sick.act({keys:[],duration_ms:200,target:{entity:grave.id,camera_angle:-Math.PI/4,fire:true}});
-    if((await sick.inspect()).diagnostic.entities.find(e=>e.id===grave.id)?.stage>0)break;
+    if((await sick.inspect()).diagnostic.xml?.[grave.id]?.states.some(s=>s.name==='Normal'))break;
   }
-  for(let n=0;n<40&&!((await sick.observe()).character.conditions&bit(5));n++)await sick.act({keys:[],duration_ms:200});
-  game.check('natural Kage mine applies Sick',(await sick.observe()).character.conditions&bit(5));
+  // Before the cure, transition from HP-only protection to blocking fresh conditions without clearing Sick.
+  for(let n=0;n<25;n++){
+    const v=await sick.observe();if(v.game_ms>=vulnerableAt&&(v.character.conditions&bit(5)))break;
+    await sick.act({keys:[],duration_ms:Math.max(200,Math.min(1000,vulnerableAt-v.game_ms))});
+  }
+  const exposed=await sick.observe();
+  game.check('natural Kage mine applies Sick',exposed.game_ms>=vulnerableAt&&Boolean(exposed.character.conditions&bit(5)));
+  await prepare(sick.actor,{kind:'protection',condition:'invincible',duration_ms:60000});
   await prepare(sick.actor,{kind:'vitals',hp:100,mp:252});
   sample=await use(sick,'1',4,'holy-water-sick-first',true);
   game.check('first Holy Water consumes and cures Sick without its 100 HP heal',Boolean(sample.before.character.conditions&bit(5))&&!(sample.after.character.conditions&bit(5))&&sample.after.character.hp>=100&&sample.after.character.hp<=100+hpRegen(sample));

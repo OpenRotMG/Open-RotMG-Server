@@ -5,16 +5,19 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {createHash} from 'node:crypto';
 import {crc32,deflateSync,inflateSync} from 'node:zlib';
 import {connect} from '../../scripts/record-demo.mjs';
-export {fixture} from './client-entry.mjs';
+import {fixture} from './client-entry.mjs';
+export {fixture};
 const checks=[];
-export async function enter({browser,signal}){
+let returningCharacter;
+export async function enter({account,browser,signal}){
   const out=process.env.QA_RESULTS_DIR,{origin}=JSON.parse(await readFile(join(out,'native/result.json'),'utf8'));
-  const traffic=[],pending=new Map(),accountRequests=new Set();let cdp,accountLoads=0,readyLoads=0;
+  const traffic=[],pending=new Map(),accountRequests=new Set(),accountLoads=[];let cdp,readyLoads=0,gameSocket=false;
   const check=(name,ok)=>{assert(ok,name);checks.push(name);};
   const wait=async(fn,label)=>{for(let i=0;i<300;i++){signal.throwIfAborted();const value=await fn();if(value)return value;await delay(100,undefined,{signal});}throw Error(label);};
   cdp=await connect({...browser,url:origin+'/',helper:join(process.env.PI_BROWSER_TOOLS,'direct-cdp.mjs'),onEvent:e=>{
+    if(e.method==='Network.webSocketCreated'&&e.params.url.startsWith(origin.replace('http:','ws:')+'/'))gameSocket=true;
     if(e.method==='Network.requestWillBeSent'&&e.params.request.url===origin+'/legacy-api/char/list')accountRequests.add(e.params.requestId);
-    if(e.method==='Network.loadingFinished'&&accountRequests.has(e.params.requestId))accountLoads++;
+    if(e.method==='Network.loadingFinished'&&accountRequests.has(e.params.requestId))accountLoads.push(e.params.requestId);
     if(e.method==='Network.requestWillBeSent'&&e.params.request.url.startsWith(origin+'/legacy-api/picture/')){
       const r={id:e.params.requestId,url:e.params.request.url};traffic.push(r);pending.set(r.id,r);
       cdp.call('Network.getRequestPostData',{requestId:r.id}).then(v=>r.form=Buffer.from(v.postData,v.base64Encoded?'base64':'utf8').toString('utf8')).catch(e=>r.error=String(e));
@@ -27,13 +30,19 @@ export async function enter({browser,signal}){
   const response=async(op,from=0)=>wait(()=>{const r=traffic.slice(from).find(r=>r.url.endsWith('/'+op));if(r?.error)throw Error(r.error);return r?.body&&r.form!==undefined?r:null;},'Missing native '+op+' response');
   let rect;
   const frames=()=>cdp.eval('new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok)))');
-  const click=async(x,y)=>{const p={x:rect.x+x,y:rect.y+y,button:'left',clickCount:1};await cdp.call('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y});try{await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}finally{await cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}await frames();};
-  const key=async(key)=>{const p={key,code:'Key'+key.toUpperCase(),windowsVirtualKeyCode:key.toUpperCase().charCodeAt(0)};await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',...p});await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',...p});await frames();};
+  // Software GL can show the Ruffle warning after initial account readiness and intercept editor clicks.
+  const dismissWarning=async()=>{
+    const dismissed=await cdp.eval(`(()=>{const p=document.querySelector('ruffle-player'),m=p.shadowRoot.querySelector('#hardware-acceleration-modal');if(!m||m.classList.contains('hidden'))return false;m.querySelector('.close-modal').click();p.focus();return true;})()`);
+    if(dismissed)await frames();
+  };
+  const hover=async(x,y)=>{await cdp.call('Input.dispatchMouseEvent',{type:'mouseMoved',x:rect.x+x,y:rect.y+y});await frames();};
+  const click=async(x,y,move=true,shot)=>{await dismissWarning();const p={x:rect.x+x,y:rect.y+y,button:'left',clickCount:1};if(move)await hover(x,y);try{await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});await frames();if(shot)await capture(shot);}finally{await cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}await frames();};
+  const key=async(key)=>{await dismissWarning();const p={key,code:'Key'+key.toUpperCase(),windowsVirtualKeyCode:key.toUpperCase().charCodeAt(0)};try{await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',...p});await frames();}finally{await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',...p});}await frames();};
   const capture=async(name)=>writeFile(join(out,name+'.png'),Buffer.from((await cdp.call('Page.captureScreenshot',{format:'png'})).data,'base64'));
   const ready=async()=>{
-    await wait(()=>accountLoads>readyLoads,'Native account refresh did not finish');readyLoads=accountLoads;
+    await wait(()=>accountLoads.length>readyLoads,'Native account refresh did not finish');readyLoads=accountLoads.length;
     await wait(()=>cdp.eval('document.querySelector("ruffle-player")?.ruffle().isPlaying===true'),'Ruffle not playing');await frames();
-    await cdp.eval('(()=>{const p=document.querySelector("ruffle-player"),m=p.shadowRoot.querySelector("#hardware-acceleration-modal");if(m&&!m.classList.contains("hidden"))m.querySelector(".close-modal").click();p.focus();})()');
+    await dismissWarning();await cdp.eval('document.querySelector("ruffle-player").focus()');
     rect=await cdp.eval('(()=>{const r=document.querySelector("ruffle-player").getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};})()');assert(rect.width===800&&rect.height===600);
   };
   const post=async(op,form)=>{const r=await fetch(origin+'/legacy-api/'+op,{method:'POST',body:form,signal});const text=await r.text();assert.equal(r.status,200,text);return text;};
@@ -52,15 +61,31 @@ export async function enter({browser,signal}){
     await click(350,310);await cdp.call('Input.insertText',{text:'gallery,original'});
     let from=traffic.length;await click(520,455);const saved=await response('save',from);
     check('native drawing saves successfully',saved.status===200&&/^<Success><Id>\d+<\/Id><\/Success>$/.test(saved.body.body));
-    const firstId=Number(saved.body.body.match(/<Id>(\d+)/)[1]);
-    const png=Buffer.from(await (await fetch(origin+'/legacy-api/picture/get',{method:'POST',body:new URLSearchParams({id:String(firstId)}),signal})).arrayBuffer());
+    const drawnId=Number(saved.body.body.match(/<Id>(\d+)/)[1]);
+    const png=Buffer.from(await (await fetch(origin+'/legacy-api/picture/get',{method:'POST',body:new URLSearchParams({id:String(drawnId)}),signal})).arrayBuffer());
     assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
-    // Respect the ordinary twenty-write/minute and 120-read/minute admission windows.
-    await delay(61000,undefined,{signal});
     const save=async(name,type,tags,owner=guid,data=png)=>{
       const form=new FormData();for(const [k,v] of Object.entries({guid:owner,password:'',name,dataType:String(type),tags,overwrite:'on'}))form.set(k,v);
       form.set('data',new Blob([data],{type:'image/png'}),'Foo.png');const text=await post('picture/save',form);assert.match(text,/^<Success><Id>\d+<\/Id><\/Success>$/);return Number(text.match(/<Id>(\d+)/)[1]);
     };
+    const foreign='gallery-other-933';await post('char/list',new URLSearchParams({guid:foreign,password:''}));
+    const foreignWitness=await save('Foreign Art Witness',2,'gallery,foreign',foreign);
+    const originals=new URLSearchParams({myGUID:guid,guid,tags:'original'});
+    const gallery=await list(async()=>{await key('l');await click(640,85);},1);await thumbnails(gallery);
+    assert.deepEqual(ids(gallery.body.body),[drawnId]);
+    // Moving into the thumbnail's child bubbles MouseOut: hover the tile and click its X without a move.
+    const deleteDialog=async name=>{await hover(155,145);await capture(name+'-hover');await click(184,125,false,name+'-down');await capture(name);};
+    await deleteDialog('gallery-delete-dialog');from=traffic.length;await click(325,339);
+    check('Cancel retains the artwork without submitting a delete',!traffic.slice(from).some(t=>t.url.endsWith('/delete'))&&ids(await post('picture/list',originals))[0]===drawnId);
+    await deleteDialog('gallery-delete-confirm');from=traffic.length;await click(475,339);
+    const deleted=await response('delete',from);check('confirmed native owner deletion commits',deleted.status===200&&deleted.body.body==='<Success/>'&&new URLSearchParams(deleted.form).get('id')===String(drawnId));
+    assert.deepEqual(ids((await response('list',from)).body.body),[]);await capture('gallery-after-delete');
+    check('confirmed deletion removes artwork from owner search',ids(await post('picture/list',originals)).length===0);
+    const retained=await post('picture/list',new URLSearchParams({myGUID:foreign,guid:foreign}));check('owner deletion preserves foreign artwork',ids(retained).includes(foreignWitness));
+    await click(699,50);
+    // Respect the ordinary twenty-write/minute and 120-read/minute admission windows.
+    await delay(61000,undefined,{signal});
+    const firstId=await save('Gallery Original',2,'gallery,original');
     const owned=[firstId];for(let i=1;i<=18;i++)owned.push(await save('Gallery '+i,2,'gallery,common'));
     await delay(61000,undefined,{signal});
     for(let i=19;i<=23;i++)owned.push(await save('Gallery '+i,2,'gallery,common'));
@@ -68,7 +93,7 @@ export async function enter({browser,signal}){
     const rows=Buffer.alloc(8*33);for(let y=0;y<8;y++)for(let x=0;x<8;x++)if(x===y||x+y===7)Buffer.from([255,0,255,255]).copy(rows,y*33+1+x*4);
     const rarePng=Buffer.concat([png.subarray(0,33),chunk('IDAT',deflateSync(rows)),chunk('IEND',Buffer.alloc(0))]);
     const rare=await save('Gallery Rare',3,'gallery,rare',guid,rarePng);owned.push(rare);
-    const foreign='gallery-other-933';await post('char/list',new URLSearchParams({guid:foreign,password:''}));const foreignId=await save('Foreign Art',2,'gallery,foreign',foreign);
+    const foreignId=await save('Foreign Art',2,'gallery,foreign',foreign);
     let page=await list(async()=>{await key('l');await click(640,85);},24);await thumbnails(page);check('Mine renders 24 of 25 owned artworks',ids(page.body.body).every(id=>owned.includes(id))&&!page.body.body.includes('<Admin'));
     await capture('gallery-page-one');
     const next=await list(()=>click(670,530),1);check('Next uses offset24 and retrieves final owned artwork',new URLSearchParams(next.form).get('offset')==='24'&&ids(next.body.body)[0]===firstId);await thumbnails(next);await capture('gallery-page-two');
@@ -83,13 +108,35 @@ export async function enter({browser,signal}){
     check('native load and save preserve the distinct prepared bitmap pixels',inflateSync(loaded.subarray(41,loaded.length-16)).equals(rows));
     await delay(61000,undefined,{signal});
     await cdp.call('Page.reload');await ready();page=await list(()=>key('l'),24);await thumbnails(page);check('page reload preserves Mine identity and saved artworks',new URLSearchParams(page.form).get('myGUID')===guid&&ids(page.body.body)[0]===rare);
-    await click(185,115);await capture('gallery-delete-dialog');await click(320,339);
-    const still=await post('picture/list',new URLSearchParams({myGUID:guid,guid,tags:'rare'}));check('Cancel retains the artwork',ids(still)[0]===rare);
-    await click(185,115);from=traffic.length;await click(480,339);const deleted=await response('delete',from);check('confirmed native owner deletion commits',deleted.body.body==='<Success/>');await response('list',from);await capture('gallery-after-delete');
-    check('confirmed deletion removes artwork from owner search',ids(await post('picture/list',new URLSearchParams({myGUID:guid,guid,tags:'rare'}))).length===0);
-    const retained=await post('picture/list',new URLSearchParams({myGUID:foreign,guid:foreign}));check('owner deletion preserves foreign artwork',ids(retained).includes(foreignId));
-    await writeFile(join(out,'gallery-receipt.json'),JSON.stringify({checks,owned,rare,foreignId,pngSha256:createHash('sha256').update(png).digest('hex'),traffic},null,2));
-    await cdp.call('Page.navigate',{url:origin+'/'});await ready();await delay(1000,undefined,{signal});await click(400,550);await click(400,550);
+    await writeFile(join(out,'gallery-receipt.json'),JSON.stringify({checks,drawnId,owned,rare,foreignId,pngSha256:createHash('sha256').update(png).digest('hex'),traffic},null,2));
+    await cdp.call('Page.navigate',{url:origin+'/'});await ready();
+    const chars=await cdp.call('Network.getResponseBody',{requestId:accountLoads.at(-1)});
+    const xml=chars.base64Encoded?Buffer.from(chars.body,'base64').toString('utf8'):chars.body;
+    const listedAccount=Number(xml.match(/<AccountId>(\d+)<\/AccountId>/)?.[1]);
+    const wizard=[...xml.matchAll(/<Char id="(\d+)"><ObjectType>(\d+)<\/ObjectType>/g)];
+    check(`returning to the game lists the same guest account and its prepared Wizard (account ${listedAccount}, ${wizard.length} characters)`,listedAccount===account&&wizard.length===1&&Number(wizard[0][2])===fixture.class);
+    returningCharacter=Number(wizard[0][1]);
+    const menuPress=async(x,y)=>{
+      const p={x:rect.x+x,y:rect.y+y,button:'left',clickCount:1};
+      try{await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',buttons:1,...p});}
+      finally{await cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',buttons:0,...p});}
+      await frames();
+    };
+    // Wait for the rendered gray character row before selecting it. Ruffle's canvas has no DOM menu nodes.
+    const rowVisible=async()=>{
+      const {data}=await cdp.call('Page.captureScreenshot',{format:'png',clip:{x:rect.x+245,y:rect.y+132,width:20,height:6,scale:1}});
+      return cdp.eval(`(async()=>{const image=await createImageBitmap(new Blob([Uint8Array.from(atob('${data}'),c=>c.charCodeAt(0))],{type:'image/png'}));const ctx=new OffscreenCanvas(20,6).getContext('2d');ctx.drawImage(image,0,0);const pixels=ctx.getImageData(0,0,20,6).data;return pixels.every((c,i)=>c===(i%4===3?255:92));})()`);
+    };
+    for(let n=0;n<8&&!gameSocket;n++){
+      if(await rowVisible()){await capture('gallery-return-selection');await menuPress(120,130);break;}
+      await menuPress(400,550);await delay(500,undefined,{signal});
+    }
+    await wait(()=>gameSocket,'Returning guest did not open the native game socket');
   }finally{await writeFile(join(out,'gallery-traffic.json'),JSON.stringify({checks,traffic},null,2));cdp.close();}
 }
-export async function run(game){for(const name of checks)game.check(name,true);game.check('normal game entry remains usable after gallery journey',(await game.inspect()).view.lifecycle.alive);}
+export async function run(game){
+  for(const name of checks)game.check(name,true);
+  const {account}=JSON.parse(await readFile(join(process.env.QA_RESULTS_DIR,'native/fixture.json'),'utf8'));
+  const {view}=await game.inspect();
+  game.check('normal selection loads the same living Wizard in Tutorial after gallery edits',view.lifecycle.alive&&view.map.name==='Tutorial'&&view.session.account===account&&view.session.character===returningCharacter);
+}

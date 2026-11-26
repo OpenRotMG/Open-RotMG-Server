@@ -1,0 +1,1555 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Game schema="1">
+  <Include file="actors.xml" />
+  <Include file="strings.xml" />
+  <Geometry file="geometry.xml" />
+  <RealmRules>
+    <Density divisors="100,250,300,300,300,150,150,200,200,200,100,150" numerator="2" denominator="3" provenance="authored" origin="79a4c92b:src/world/population_density.rs:29-76" reason="Owner-selected two-thirds ordinary root density." />
+    <Camp root="Fire Golem" provenance="authored" origin="79a4c92b:src/world/population.rs:73-105" reason="Independent satellite placements not supplied by this actor; linked MakeMinions owns its own children.">
+      <Member object="Gray Satellite 2" initial="1" max="1" />
+      <Member object="Gray Satellite 3" initial="1" max="1" />
+    </Camp>
+    <Camp root="Darkness Golem" provenance="authored" origin="79a4c92b:src/world/population.rs:73-105" reason="Independent satellite placements not supplied by this actor; linked MakeMinions owns its own children.">
+      <Member object="Gray Satellite 1" initial="1" max="1" />
+      <Member object="Gray Satellite 3" initial="1" max="1" />
+    </Camp>
+    <Camp root="Metal Golem" provenance="authored" origin="79a4c92b:src/world/population.rs:73-105" reason="Independent satellite placements not supplied by this actor; linked MakeMinions owns its own children.">
+      <Member object="Metal Golem" initial="0" max="2" interval="10" />
+      <Member object="Gray Satellite 1" initial="1" max="1" />
+      <Member object="Gray Satellite 2" initial="1" max="1" />
+    </Camp>
+    <Camp root="Clockwork Golem" provenance="authored" origin="79a4c92b:src/world/population.rs:73-105" reason="Independent satellite placements not supplied by this actor; linked MakeMinions owns its own children.">
+      <Member object="Gray Satellite 1" initial="1" max="1" />
+      <Member object="Gray Satellite 3" initial="1" max="1" />
+    </Camp>
+    <Camp root="Earth Golem" provenance="authored" origin="79a4c92b:src/world/population.rs:73-105" reason="Independent satellite placements not supplied by this actor; linked MakeMinions owns its own children.">
+      <Member object="Gray Satellite 1" initial="1" max="1" />
+      <Member object="Gray Satellite 2" initial="1" max="1" />
+    </Camp>
+    <Camp root="Paper Golem" provenance="authored" origin="79a4c92b:src/world/population.rs:73-105" reason="Independent satellite placements not supplied by this actor; linked MakeMinions owns its own children.">
+      <Member object="Gray Satellite 2" initial="1" max="1" />
+      <Member object="Gray Satellite 3" initial="1" max="1" />
+    </Camp>
+    <Reproduce parent="Piratess" child="Pirate" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Piratess" child="Piratess" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Snake" child="Snake" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Scorpion Queen" child="Scorpion Queen" radius="40" max="2" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Red Gelatinous Cube" child="Red Gelatinous Cube" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Purple Gelatinous Cube" child="Purple Gelatinous Cube" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Green Gelatinous Cube" child="Green Gelatinous Cube" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Fire Sprite" child="Fire Sprite" radius="10" max="2" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Ice Sprite" child="Ice Sprite" radius="10" max="2" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Magic Sprite" child="Magic Sprite" radius="10" max="2" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Pink Blob" child="Pink Blob" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Gray Blob" child="Gray Blob" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Big Green Slime" child="Big Green Slime" radius="10" max="5" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Black Bat" child="Black Bat" radius="20" max="5" cooldown="20" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Red Spider" child="Red Spider" radius="15" max="3" cooldown="45" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Flayer God" child="Flayer God" radius="10" max="2" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="White Demon" child="White Demon" radius="10" max="3" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Sprite God" child="Sprite God" radius="10" max="2" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Medusa" child="Medusa" radius="10" max="3" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Ent God" child="Ent God" radius="10" max="3" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Beholder" child="Beholder" radius="10" max="3" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Flying Brain" child="Flying Brain" radius="10" max="3" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Slime God" child="Slime God" radius="10" max="2" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Ghost God" child="Ghost God" radius="10" max="3" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <Reproduce parent="Djinn" child="Djinn" radius="10" max="4" cooldown="60" provenance="authored" origin="79a4c92b:src/world/population.rs:165-191,275-328" reason="Offscreen ordinary population regrowth, not parented minions." />
+    <NamedSite defender="Grand Sphinx" terrains="Mountains,HighSand,HighPlains,HighForest,MidSand,MidPlains,MidForest" min="1" max="1" anchorsReplaceRoll="false" role="event" provenance="authored" origin="0639842e:src/world/realm_events.rs:250-266; data/reference/release-7.0/xml/encounters.xml:440-442" reason="Recovered PerRealmMax; authored inland event habitat and reserve." />
+    <NamedSite defender="Great Coil Snake" terrains="MidPlains,MidForest" min="2" max="2" anchorsReplaceRoll="true" role="quest" provenance="authored" origin="0639842e:src/world/coil.rs:5-19; data/reference/release-7.0/xml/setpieces.xml:105-108" reason="Keep established two ruins across the midlands when no immutable temple anchor exists." />
+    <NamedSite defender="Beach Bum" terrains="HighPlains,HighForest,MidSand,MidPlains,MidForest" min="1" max="1" anchorsReplaceRoll="false" role="finite" chance="1/200" provenance="authored" origin="0639842e:src/world.rs:1447-1454; 0639842e:src/world/beach.rs:5-13" reason="Rare inland placement; recovered XML specifies the portal reward, not Realm rarity." />
+    <NamedSite defender="Red Demon" terrains="Mountains" min="3" max="4" anchorsReplaceRoll="false" role="hero" provenance="authored" origin="0639842e:src/world/endgame.rs:944-965; data/reference/release-7.0/xml/setpieces.xml:87-89" reason="Recovered Mountains; legacy exclusive 3..5 count and closure role.">
+      <InteractiveTile mark="2" object="Partial Red Floor" />
+    </NamedSite>
+    <NamedSite defender="Cyclops God" terrains="HighPlains,HighForest" min="4" max="6" anchorsReplaceRoll="false" role="hero" provenance="authored" origin="0639842e:src/world/endgame.rs:944-965; data/reference/release-7.0/xml/setpieces.xml:30-32" reason="Keep legacy exclusive 4..7 count and highland reconstruction group.">
+      <InteractiveTile mark="5" object="Destructible Grey Wall" />
+    </NamedSite>
+    <NamedSite defender="Ent Ancient" role="closure" terrains="MidForest" min="17" max="24" anchorsReplaceRoll="true" provenance="authored" origin="79a4c92b:src/world/realm_quests.rs:175-199; data/reference/release-7.0/xml/setpieces.xml:Grove" reason="Authored count and fixed-anchor policy; recovered Defender and Terrain." />
+    <NamedSite defender="Lich" role="closure" terrains="MidPlains" min="4" max="6" anchorsReplaceRoll="false" provenance="authored" origin="79a4c92b:src/world/realm_quests.rs:175-199; data/reference/release-7.0/xml/setpieces.xml:Temple" reason="Authored count and fixed-anchor policy; recovered Defender and Terrain.">
+      <InteractiveTile mark="3" object="Destructible Blue Wall" />
+    </NamedSite>
+    <NamedSite defender="Ghost King" role="closure" terrains="HighForest" min="8" max="14" anchorsReplaceRoll="false" provenance="authored" origin="79a4c92b:src/world/realm_quests.rs:175-199; data/reference/release-7.0/xml/setpieces.xml:Tower" reason="Authored count and fixed-anchor policy; recovered Defender and Terrain." />
+    <NamedSite defender="Phoenix Lord" role="closure" terrains="MidSand,HighSand" min="0" max="4" anchorsReplaceRoll="false" provenance="authored" origin="79a4c92b:src/world/realm_quests.rs:175-199; data/reference/release-7.0/xml/setpieces.xml:Pyre" reason="Authored count and fixed-anchor policy; recovered Defender and Terrain." />
+    <NamedSite defender="Oasis Giant" role="closure" terrains="MidSand,HighSand" min="0" max="4" anchorsReplaceRoll="false" provenance="authored" origin="79a4c92b:src/world/realm_quests.rs:175-199; data/reference/release-7.0/xml/setpieces.xml:Oasis" reason="Authored count and fixed-anchor policy; recovered Defender and Terrain." />
+    <NamedSite defender="Deathmage" role="quest" terrains="MidPlains" min="5" max="9" anchorsReplaceRoll="false" provenance="authored" origin="79a4c92b:src/world/realm_quests.rs:175-199; data/reference/release-7.0/xml/setpieces.xml:Graveyard" reason="Authored count and fixed-anchor policy; recovered Defender and Terrain.">
+      <InteractiveTile mark="3" object="Destructible Grey Wall" />
+    </NamedSite>
+    <NamedSite defender="Skull Shrine" terrains="Mountains,HighSand,HighPlains,HighForest,MidSand,MidPlains,MidForest" min="2" max="2" anchorsReplaceRoll="false" role="event" roundRobin="true" provenance="authored" origin="0639842e:src/world/realm_events.rs:268-279" reason="Two independent lifetime reserves; cycle the roster in its original draw order." />
+    <NamedSite defender="Cube God" terrains="Mountains,HighSand,HighPlains,HighForest,MidSand,MidPlains,MidForest" min="2" max="2" anchorsReplaceRoll="false" role="event" roundRobin="true" provenance="authored" origin="0639842e:src/world/realm_events.rs:268-279" reason="Two independent lifetime reserves; cycle the roster in its original draw order." />
+    <NamedSite defender="Pentaract" terrains="Mountains,HighSand,HighPlains,HighForest,MidSand,MidPlains,MidForest" min="2" max="2" anchorsReplaceRoll="false" role="event" roundRobin="true" provenance="authored" origin="0639842e:src/world/realm_events.rs:268-279" reason="Two independent lifetime reserves; cycle the roster in its original draw order." />
+    <NamedSite defender="Hermit God" terrains="Mountains,HighSand,HighPlains,HighForest,MidSand,MidPlains,MidForest" min="1" max="1" anchorsReplaceRoll="false" role="event" provenance="authored" origin="0639842e:src/world/ocean_setpiece.rs:22-92" reason="Inland event with an authored island stamp.">
+      <Island>
+        <Place object="Hermit God Tentacle Spawner" x="13" y="8" ownership="defender" />
+        <Place object="Hermit God Tentacle Spawner" x="20" y="17" ownership="defender" />
+        <Place object="Hermit God Tentacle Spawner" x="16" y="8" ownership="defender" />
+        <Place object="Hermit God Tentacle Spawner" x="18" y="8" ownership="defender" />
+        <Place object="Hermit God Tentacle Spawner" x="10" y="13" ownership="defender" />
+        <Place object="Hermit God Tentacle Spawner" x="21" y="13" ownership="defender" />
+        <Place object="Hermit God Tentacle Spawner" x="11" y="17" ownership="defender" />
+        <Place object="Hermit God Tentacle Spawner" x="15" y="18" ownership="defender" />
+        <Place object="Grey Pillar" x="11" y="7" ownership="independent-scenery" />
+        <Place object="Grey Pillar" x="20" y="7" ownership="independent-scenery" />
+        <Place object="Grey Pillar" x="8" y="13" ownership="independent-scenery" />
+        <Place object="Grey Pillar" x="20" y="19" ownership="independent-scenery" />
+      </Island>
+    </NamedSite>
+    <NamedSite defender="Kage Kami" terrains="HighForest,HighPlains" min="2" max="2" anchorsReplaceRoll="false" role="finite" provenance="authored" origin="0639842e:src/world/manor_entry.rs:7-17; data/reference/release-7.0/xml/setpieces.xml:118-121" reason="Two reconstructed highland graves; linked Kage rules own the children and portal.">
+      <InteractiveTile mark="7" object="Tombstone" />
+    </NamedSite>
+    <NamedSite defender="Ghost Ship" terrains="Mountains,HighSand,HighPlains,HighForest,MidSand,MidPlains,MidForest" min="1" max="1" anchorsReplaceRoll="false" role="event" anchor="Ghost Ship Anchor" provenance="authored" origin="0639842e:src/world/ghost_ship.rs:3-29; data/reference/release-7.0/xml/dungeons/ghostShip.xml:624" reason="One finite lake with the linked anchor already owning its ship." />
+    <NamedSite defender="Lord of the Lost Lands" terrains="Mountains,HighSand,HighPlains,HighForest,MidSand,MidPlains,MidForest" min="1" max="1" anchorsReplaceRoll="false" role="event" provenance="authored" origin="0639842e:src/world/lost_lands.rs:3-11" reason="One inland lifetime reserve." />
+    <NamedSite defender="Mysterious Crystal" terrains="Mountains" min="1" max="1" anchorsReplaceRoll="false" role="finite" phase="after-population" provenance="authored" origin="0639842e:src/world.rs:1463-1466; data/reference/release-7.0/xml/realm/mountains.xml:626" reason="Finite site placed after the ordinary camp allocator." />
+  </RealmRules>
+  <Root object="Broken Blue Pillar" />
+  <Root object="Broken Red Pillar" />
+  <Root object="Cross" />
+  <Root object="Red Spider" />
+  <Root object="Black Bat" />
+  <Root object="Pink Blob" />
+  <Root object="Dragon Egg" />
+  <Root object="Gray Blob" />
+  <Root object="Big Green Slime" />
+  <Root object="Rogue" />
+  <Root object="Archer" />
+  <Root object="Wizard" />
+  <Root object="Priest" />
+  <Root object="Warrior" />
+  <Root object="Knight" />
+  <Root object="Paladin" />
+  <Root object="Assassin" />
+  <Root object="Necromancer" />
+  <Root object="Huntress" />
+  <Root object="Mystic" />
+  <Root object="Trickster" />
+  <Root object="Sorcerer" />
+  <Root object="Loot Bag" />
+  <Root object="Treasure Chest" />
+  <Root object="Soulbound Loot Bag" />
+  <Root object="Vault Chest" />
+  <Root object="Closed Vault Chest" />
+  <Root object="Loot Bag 3" />
+  <Root object="Loot Bag 4" />
+  <Root object="Loot Bag 5" />
+  <Root object="Piratess" />
+  <Root object="Snake" />
+  <Root object="Scorpion Queen" />
+  <Root object="Elf Wizard" />
+  <Root object="Sandsman King" />
+  <Root object="Red Gelatinous Cube" />
+  <Root object="Purple Gelatinous Cube" />
+  <Root object="Green Gelatinous Cube" />
+  <Root object="Goblin Mage" />
+  <Root object="Hobbit Mage" />
+  <Root object="Undead Hobbit Mage" />
+  <Root object="Dwarf King" />
+  <Root object="Desert Werewolf" />
+  <Root object="Fire Sprite" />
+  <Root object="Ice Sprite" />
+  <Root object="Magic Sprite" />
+  <Root object="Orc King" />
+  <Root object="Metal Golem" />
+  <Root object="Clockwork Golem" />
+  <Root object="Earth Golem" />
+  <Root object="Paper Golem" />
+  <Root object="Fire Golem" />
+  <Root object="Darkness Golem" />
+  <Root object="Werelion" />
+  <Root object="Undead Dwarf God" />
+  <Root object="Ogre King" />
+  <Root object="Minotaur" />
+  <Root object="Flayer God" />
+  <Root object="Lizard God" />
+  <Root object="White Demon" />
+  <Root object="Sprite God" />
+  <Root object="Medusa" />
+  <Root object="Ent God" />
+  <Root object="Beholder" />
+  <Root object="Flying Brain" />
+  <Root object="Slime God" />
+  <Root object="Ghost God" />
+  <Root object="Red Demon" />
+  <Root object="Phoenix Lord" />
+  <Root object="Oasis Giant" />
+  <Root object="Cyclops God" />
+  <Root object="Giant Crab" />
+  <Root object="Sand Phantom" />
+  <Root object="Nomadic Shaman" />
+  <Root object="Sand Devil" />
+  <Root object="Easily Enraged Bunny" />
+  <Root object="Forest Nymph" />
+  <Root object="Leviathan" />
+  <Root object="Kage Kami" />
+  <Root object="Dungeon Portal" />
+  <Root object="Undead Lair Key" />
+  <Root object="Pirate Cave Key" />
+  <Root object="Spider Den Key" />
+  <Root object="Healing Ichor" />
+  <Root object="Spider's Eye Ring" />
+  <Root object="Poison Fang Dagger" />
+  <Root object="Abyss of Demons Key" />
+  <Root object="Snake Pit Key" />
+  <Root object="Tomb of the Ancients Key" />
+  <Root object="Trap" />
+  <Root object="Nexus Portal" />
+  <Root object="Decoy" />
+  <Root object="Sprite World Key" />
+  <Root object="Locked Wine Cellar Portal" />
+  <Root object="Wine Cellar Incantation" />
+  <Root object="Gravestone 1" />
+  <Root object="Gravestone 2" />
+  <Root object="Gravestone 3" />
+  <Root object="Gravestone 4" />
+  <Root object="Gravestone 5" />
+  <Root object="Gravestone 6" />
+  <Root object="Gravestone 7" />
+  <Root object="Gravestone 8" />
+  <Root object="Gravestone 9" />
+  <Root object="Gravestone 10" />
+  <Root object="Gravestone 11" />
+  <Root object="Shield Orc Key" />
+  <Root object="Flamer King" />
+  <Root object="Rock Bot" />
+  <Root object="Djinn" />
+  <Root object="Lich" />
+  <Root object="Ent Ancient" />
+  <Root object="Deathmage" />
+  <Root object="Ghost King" />
+  <Root object="Mysterious Crystal" />
+  <Root object="Horned Drake" />
+  <Root object="Wasp Queen" />
+  <Root object="Shambling Sludge" />
+  <Root object="Great Lizard" />
+  <Root object="Bandit Leader" />
+  <Root object="Swarm" />
+  <Root object="Urgle" />
+  <Root object="Short Sword" />
+  <Root object="Long Sword" />
+  <Root object="Golden Sword" />
+  <Root object="Crystal Sword" />
+  <Root object="Fire Wand" />
+  <Root object="Missile Wand" />
+  <Root object="Hell's Fire Wand" />
+  <Root object="Wand of Death" />
+  <Root object="Wooden Shield" />
+  <Root object="Iron Shield" />
+  <Root object="Steel Shield" />
+  <Root object="Golden Shield" />
+  <Root object="Mithril Shield" />
+  <Root object="Leather Armor" />
+  <Root object="Studded Leather Armor" />
+  <Root object="Chainmail" />
+  <Root object="Golden Chainmail" />
+  <Root object="Plate Mail" />
+  <Root object="Mithril Armor" />
+  <Root object="Dragonscale Armor" />
+  <Root object="Steel Dagger" />
+  <Root object="Dirk" />
+  <Root object="Golden Dagger" />
+  <Root object="Obsidian Dagger" />
+  <Root object="Mithril Dagger" />
+  <Root object="Fire Dagger" />
+  <Root object="Shortbow" />
+  <Root object="Crossbow" />
+  <Root object="Fire Bow" />
+  <Root object="Double Bow" />
+  <Root object="Golden Bow" />
+  <Root object="Potion of Attack" />
+  <Root object="Potion of Defense" />
+  <Root object="Potion of Speed" />
+  <Root object="Health Potion" />
+  <Root object="Magic Potion" />
+  <Root object="Ring of Attack" />
+  <Root object="Ring of Defense" />
+  <Root object="Ring of Speed" />
+  <Root object="Ring of Health" />
+  <Root object="Ring of Magic" />
+  <Root object="Ring of Greater Attack" />
+  <Root object="Ring of Greater Defense" />
+  <Root object="Ring of Greater Speed" />
+  <Root object="Ring of Greater Health" />
+  <Root object="Ring of Greater Magic" />
+  <Root object="Fire Spray Spell" />
+  <Root object="Fire Nova Spell" />
+  <Root object="Magic Nova Spell" />
+  <Root object="Healing Tome" />
+  <Root object="Spirit Salve Tome" />
+  <Root object="Tome of Renewing" />
+  <Root object="Potion of Vitality" />
+  <Root object="Potion of Wisdom" />
+  <Root object="Ring of Vitality" />
+  <Root object="Ring of Wisdom" />
+  <Root object="Ring of Greater Vitality" />
+  <Root object="Ring of Greater Wisdom" />
+  <Root object="Heavy Crossbow" />
+  <Root object="Fire Sword" />
+  <Root object="Glass Sword" />
+  <Root object="Wand of Dark Magic" />
+  <Root object="Snake Skin Armor" />
+  <Root object="Snake Oil" />
+  <Root object="Snake Skin Shield" />
+  <Root object="Snake Eye Ring" />
+  <Root object="Suspension Orb" />
+  <Root object="Imprisonment Orb" />
+  <Root object="Neutralization Orb" />
+  <Root object="Timelock Orb" />
+  <Root object="Banishment Orb" />
+  <Root object="Skysplitter Sword" />
+  <Root object="Elixir of Health 2" />
+  <Root object="Elixir of Health 1" />
+  <Root object="Elixir of Magic 3" />
+  <Root object="Sprite Wand" />
+  <Root object="Potion of Dexterity" />
+  <Root object="Ring of Dexterity" />
+  <Root object="Ring of Greater Dexterity" />
+  <Root object="Ring of Minor Defense" />
+  <Root object="Pirate Rum" />
+  <Root object="Magic Mushroom" />
+  <Root object="Seal of the Initiate" />
+  <Root object="Seal of the Seeker" />
+  <Root object="Seal of the Divine" />
+  <Root object="Seal of the Holy Warrior" />
+  <Root object="Cloak of Shadows" />
+  <Root object="Cloak of Darkness" />
+  <Root object="Cloak of Speed" />
+  <Root object="Cloak of the Red Agent" />
+  <Root object="Cloak of the Planewalker" />
+  <Root object="Tome of Divine Favor" />
+  <Root object="Robe of the Neophyte" />
+  <Root object="Robe of the Acolyte" />
+  <Root object="Robe of the Adept" />
+  <Root object="Robe of the Invoker" />
+  <Root object="Robe of the Master" />
+  <Root object="Magic Quiver" />
+  <Root object="Reinforced Quiver" />
+  <Root object="Iron Quiver" />
+  <Root object="Magesteel Quiver" />
+  <Root object="Golden Quiver" />
+  <Root object="Combat Helm" />
+  <Root object="Bronze Helm" />
+  <Root object="Black Iron Helm" />
+  <Root object="Red Iron Helm" />
+  <Root object="Steel Helm" />
+  <Root object="Golden Helm" />
+  <Root object="Broad Sword" />
+  <Root object="Saber" />
+  <Root object="Falchion" />
+  <Root object="Force Wand" />
+  <Root object="Power Wand" />
+  <Root object="Eldritch Wand" />
+  <Root object="Blue Steel Dagger" />
+  <Root object="Dusky Rose Dagger" />
+  <Root object="Silver Dagger" />
+  <Root object="Reinforced Bow" />
+  <Root object="Greywood Bow" />
+  <Root object="Ironwood Bow" />
+  <Root object="Wolfskin Armor" />
+  <Root object="Basilisk Hide Armor" />
+  <Root object="Minotaur Hide Armor" />
+  <Root object="Iron Mail" />
+  <Root object="Blue Steel Mail" />
+  <Root object="Silver Chainmail" />
+  <Root object="Robe of the Apprentice" />
+  <Root object="Robe of the Student" />
+  <Root object="Robe of the Conjurer" />
+  <Root object="Elixir of Health 3" />
+  <Root object="Ravenheart Sword" />
+  <Root object="Dragonsoul Sword" />
+  <Root object="Archon Sword" />
+  <Root object="Wand of Deep Sorcery" />
+  <Root object="Wand of Shadow" />
+  <Root object="Wand of Ancient Warning" />
+  <Root object="Ragetalon Dagger" />
+  <Root object="Emeraldshard Dagger" />
+  <Root object="Agateclaw Dagger" />
+  <Root object="Verdant Bow" />
+  <Root object="Bow of Fey Magic" />
+  <Root object="Bow of Innocent Blood" />
+  <Root object="Roc Leather Armor" />
+  <Root object="Hippogriff Hide Armor" />
+  <Root object="Griffon Hide Armor" />
+  <Root object="Desolation Armor" />
+  <Root object="Vengeance Armor" />
+  <Root object="Abyssal Armor" />
+  <Root object="Robe of the Shadow Magus" />
+  <Root object="Robe of the Moon Wizard" />
+  <Root object="Robe of the Elder Warlock" />
+  <Root object="Energy Staff" />
+  <Root object="Firebrand Staff" />
+  <Root object="Comet Staff" />
+  <Root object="Serpentine Staff" />
+  <Root object="Meteor Staff" />
+  <Root object="Slayer Staff" />
+  <Root object="Avenger Staff" />
+  <Root object="Staff of Destruction" />
+  <Root object="Staff of Horror" />
+  <Root object="Staff of Necrotic Arcana" />
+  <Root object="Staff of Diabolic Secrets" />
+  <Root object="Staff of Astral Knowledge" />
+  <Root object="Centipede Poison" />
+  <Root object="Spider Venom" />
+  <Root object="Pit Viper Poison" />
+  <Root object="Stingray Poison" />
+  <Root object="Felwasp Toxin" />
+  <Root object="Nightwing Venom" />
+  <Root object="Purple Drake Egg" />
+  <Root object="Necrotic Skull" />
+  <Root object="Breathtaker Skull" />
+  <Root object="Heartstealer Skull" />
+  <Root object="Soul Siphon Skull" />
+  <Root object="Essence Tap Skull" />
+  <Root object="Lifedrinker Skull" />
+  <Root object="Minor Health Potion" />
+  <Root object="Hunting Trap" />
+  <Root object="Wilderlands Trap" />
+  <Root object="Deepforest Trap" />
+  <Root object="Savage Trap" />
+  <Root object="Demonhunter Trap" />
+  <Root object="Dragonstalker Trap" />
+  <Root object="Ring of Superior Attack" />
+  <Root object="Ring of Superior Defense" />
+  <Root object="Ring of Superior Speed" />
+  <Root object="Ring of Superior Vitality" />
+  <Root object="Ring of Superior Wisdom" />
+  <Root object="Ring of Superior Dexterity" />
+  <Root object="Ring of Superior Health" />
+  <Root object="Ring of Superior Magic" />
+  <Root object="Ring of Paramount Attack" />
+  <Root object="Ring of Paramount Defense" />
+  <Root object="Ring of Paramount Speed" />
+  <Root object="Ring of Paramount Vitality" />
+  <Root object="Ring of Paramount Wisdom" />
+  <Root object="Ring of Paramount Dexterity" />
+  <Root object="Ring of Paramount Health" />
+  <Root object="Ring of Paramount Magic" />
+  <Root object="Ring of Exalted Attack" />
+  <Root object="Ring of Exalted Defense" />
+  <Root object="Ring of Exalted Speed" />
+  <Root object="Ring of Exalted Vitality" />
+  <Root object="Ring of Exalted Wisdom" />
+  <Root object="Ring of Exalted Dexterity" />
+  <Root object="Ring of Exalted Health" />
+  <Root object="Ring of Exalted Magic" />
+  <Root object="Reinforced Shield" />
+  <Root object="Bearskin Armor" />
+  <Root object="Chimera Hide Armor" />
+  <Root object="Wyvern Skin Armor" />
+  <Root object="Drake Hide Armor" />
+  <Root object="Flame Burst Spell" />
+  <Root object="Scorching Blast Spell" />
+  <Root object="Destruction Sphere Spell" />
+  <Root object="Remedy Tome" />
+  <Root object="Tome of Rejuvenation" />
+  <Root object="Seal of the Pilgrim" />
+  <Root object="Seal of the Aspirant" />
+  <Root object="Cloak of the Night Thief" />
+  <Root object="Robe of the Illusionist" />
+  <Root object="Minor Magic Potion" />
+  <Root object="Elvencraft Quiver" />
+  <Root object="Mithril Chainmail" />
+  <Root object="Wand of Arcane Flame" />
+  <Root object="Cloak of Endless Twilight" />
+  <Root object="Strike Amulet" />
+  <Root object="Decoy Prism" />
+  <Root object="Stasis Orb" />
+  <Root object="Lightning Scepter" />
+  <Root object="Potion of Life" />
+  <Root object="Potion of Mana" />
+  <Root object="Greater Health Potion" />
+  <Root object="Greater Magic Potion" />
+  <Root object="Elixir of Magic 2" />
+  <Root object="Elixir of Magic 1" />
+  <Root object="White Drake Egg" />
+  <Root object="Blue Drake Egg" />
+  <Root object="Orange Drake Egg" />
+  <Root object="Green Drake Egg" />
+  <Root object="Yellow Drake Egg" />
+  <Root object="Sword of Splendor" />
+  <Root object="Sword of Majesty" />
+  <Root object="Wand of Recompense" />
+  <Root object="Wand of Evocation" />
+  <Root object="Wand of Retribution" />
+  <Root object="Hydra Skin Armor" />
+  <Root object="Wyrmhide Armor" />
+  <Root object="Leviathan Armor" />
+  <Root object="Acropolis Armor" />
+  <Root object="Dominion Armor" />
+  <Root object="Annihilation Armor" />
+  <Root object="Dagger of Foul Malevolence" />
+  <Root object="Dagger of Sinister Deeds" />
+  <Root object="Dagger of Dire Hatred" />
+  <Root object="Bow of Covert Havens" />
+  <Root object="Bow of Mystical Energy" />
+  <Root object="Bow of Deep Enchantment" />
+  <Root object="Robe of the Grand Sorcerer" />
+  <Root object="Robe of the Star Mother" />
+  <Root object="Robe of the Ancient Intellect" />
+  <Root object="Staff of the Cosmic Whole" />
+  <Root object="Staff of the Vital Unity" />
+  <Root object="Staff of the Fundamental Core" />
+  <Root object="Sword of Acclaim" />
+  <Root object="Tincture of Dexterity" />
+  <Root object="Tincture of Life" />
+  <Root object="Tincture of Mana" />
+  <Root object="Tincture of Defense" />
+  <Root object="Effusion of Dexterity" />
+  <Root object="Effusion of Life" />
+  <Root object="Effusion of Mana" />
+  <Root object="Effusion of Defense" />
+  <Root object="Elixir of Health 7" />
+  <Root object="Elixir of Health 6" />
+  <Root object="Elixir of Health 5" />
+  <Root object="Elixir of Health 4" />
+  <Root object="Elixir of Magic 7" />
+  <Root object="Elixir of Magic 6" />
+  <Root object="Elixir of Magic 5" />
+  <Root object="Elixir of Magic 4" />
+  <Root object="Deception Prism" />
+  <Root object="Illusion Prism" />
+  <Root object="Hallucination Prism" />
+  <Root object="Prism of Figments" />
+  <Root object="Prism of Phantoms" />
+  <Root object="Chicken Leg of Doom" />
+  <Root object="Colossus Shield" />
+  <Root object="Prism of Apparitions" />
+  <Root object="Elemental Detonation Spell" />
+  <Root object="Tome of Holy Guidance" />
+  <Root object="Seal of the Blessed Champion" />
+  <Root object="Cloak of Ghostly Concealment" />
+  <Root object="Quiver of Elvish Mastery" />
+  <Root object="Helm of the Great General" />
+  <Root object="Baneserpent Poison" />
+  <Root object="Bloodsucker Skull" />
+  <Root object="Giantcatcher Trap" />
+  <Root object="Planefetter Orb" />
+  <Root object="Discharge Scepter" />
+  <Root object="Thunderclap Scepter" />
+  <Root object="Arcblast Scepter" />
+  <Root object="Cloudflash Scepter" />
+  <Root object="Scepter of Skybolts" />
+  <Root object="Scepter of Storms" />
+  <Root object="Fire Water" />
+  <Root object="Cream Spirit" />
+  <Root object="Chardonnay" />
+  <Root object="Melon Liqueur" />
+  <Root object="Cabernet" />
+  <Root object="Vintage Port" />
+  <Root object="Sauvignon Blanc" />
+  <Root object="Muscat" />
+  <Root object="Rice Wine" />
+  <Root object="Shiraz" />
+  <Root object="Amulet of Resurrection" />
+  <Root object="Crystal Wand" />
+  <Root object="Admin Sword" />
+  <Root object="Ring of the Sphinx" />
+  <Root object="Ring of the Nile" />
+  <Root object="Ring of the Pyramid" />
+  <Root object="Demon Blade" />
+  <Root object="Doom Bow" />
+  <Root object="Staff of Extreme Prejudice" />
+  <Root object="Wand of the Bulwark" />
+  <Root object="Ancient Stone Sword" />
+  <Root object="Seal of Blasphemous Prayer" />
+  <Root object="Quiver of Thunder" />
+  <Root object="Helm of the Juggernaut" />
+  <Root object="Tome of Purification" />
+  <Root object="Dirk of Cronus" />
+  <Root object="Orb of Conflict" />
+  <Root object="Penetrating Blast Spell" />
+  <Root object="Prism of Dancing Swords" />
+  <Root object="Skull of Endless Torment" />
+  <Root object="Shield of Ogmur" />
+  <Root object="Coral Bow" />
+  <Root object="Ocean Trench Key" />
+  <Root object="Coral Juice" />
+  <Root object="Coral Ring" />
+  <Root object="Robe of the Tlatoani" />
+  <Root object="Staff of the Crystal Serpent" />
+  <Root object="Cracked Crystal Skull" />
+  <Root object="Crystal Bone Ring" />
+  <Root object="Coral Silk Armor" />
+  <Root object="Totem Key" />
+  <Root object="Pollen Powder" />
+  <Root object="Thousand Shot" />
+  <Root object="Coral Venom Trap" />
+  <Root object="St. Abraham's Wand" />
+  <Root object="Tome of Holy Protection" />
+  <Root object="Chasuble of Holy Light" />
+  <Root object="Ring of Divine Faith" />
+  <Root object="Holy Water" />
+  <Root object="Bone Dagger" />
+  <Root object="Manor Key" />
+  <Root object="Anatis Staff" />
+  <Root object="Ghost Pirate Rum" />
+  <Root object="Crown" />
+  <Root object="Captain's Ring" />
+  <Root object="Spectral Cloth Armor" />
+  <Root object="Spirit Dagger" />
+  <Root object="Ghostly Prism" />
+  <Root object="Small Firecracker" />
+  <Root object="Large Firecracker" />
+  <Root object="America Ring" />
+  <Root object="Davy's Key" />
+  <Root object="Lab Key" />
+  <Root object="Scepter of Fulmination" />
+  <Root object="Experimental Ring" />
+  <Root object="Robe of the Mad Scientist" />
+  <Root object="Conducting Wand" />
+  <Root object="Sand Pail 5" />
+  <Root object="Sand Pail 4" />
+  <Root object="Sand Pail 3" />
+  <Root object="Sand Pail 2" />
+  <Root object="Sand Pail 1" />
+  <Root object="Bahama Sunrise" />
+  <Root object="Blue Paradise" />
+  <Root object="Pink Passion Breeze" />
+  <Root object="Lime Jungle Bay" />
+  <Root object="Beachzone Key" />
+  <Root object="Gold Medal" />
+  <Root object="Silver Medal" />
+  <Root object="Bronze Medal" />
+  <Root object="Transformation Potion" />
+  <Root object="XP Booster" />
+  <Root object="XP Booster Test" />
+  <Root object="Lord of the Lost Lands" />
+  <Root object="Grand Sphinx" />
+  <Root object="Skull Shrine" />
+  <Root object="Cube God" />
+  <Root object="Pentaract" />
+  <Root object="Hermit God" />
+  <Root object="Great Coil Snake" />
+  <Root object="Jungle Spear" />
+  <Root object="Ghost Ship" />
+  <Root object="Beach Bum" />
+  <Root object="Alice Blue Clothing Dye" />
+  <Root object="Antique White Clothing Dye" />
+  <Root object="Aqua Clothing Dye" />
+  <Root object="Aquamarine Clothing Dye" />
+  <Root object="Azure Clothing Dye" />
+  <Root object="Beige Clothing Dye" />
+  <Root object="Bisque Clothing Dye" />
+  <Root object="Black Clothing Dye" />
+  <Root object="Blanched Almond Clothing Dye" />
+  <Root object="Blue Clothing Dye" />
+  <Root object="Blue Violet Clothing Dye" />
+  <Root object="Brown Clothing Dye" />
+  <Root object="Burly Wood Clothing Dye" />
+  <Root object="Cadet Blue Clothing Dye" />
+  <Root object="Chartreuse Clothing Dye" />
+  <Root object="Chocolate Clothing Dye" />
+  <Root object="Coral Clothing Dye" />
+  <Root object="Cornflower Blue Clothing Dye" />
+  <Root object="Cornsilk Clothing Dye" />
+  <Root object="Crimson Clothing Dye" />
+  <Root object="Cyan Clothing Dye" />
+  <Root object="Dark Blue Clothing Dye" />
+  <Root object="Dark Cyan Clothing Dye" />
+  <Root object="Dark Golden Rod Clothing Dye" />
+  <Root object="Dark Gray Clothing Dye" />
+  <Root object="Dark Green Clothing Dye" />
+  <Root object="Dark Khaki Clothing Dye" />
+  <Root object="Dark Magenta Clothing Dye" />
+  <Root object="Dark Olive Green Clothing Dye" />
+  <Root object="Dark Orange Clothing Dye" />
+  <Root object="Dark Orchid Clothing Dye" />
+  <Root object="Dark Red Clothing Dye" />
+  <Root object="Dark Salmon Clothing Dye" />
+  <Root object="Dark Sea Green Clothing Dye" />
+  <Root object="Dark Slate Blue Clothing Dye" />
+  <Root object="Dark Slate Gray Clothing Dye" />
+  <Root object="Dark Turquoise Clothing Dye" />
+  <Root object="Dark Violet Clothing Dye" />
+  <Root object="Deep Pink Clothing Dye" />
+  <Root object="Deep Sky Blue Clothing Dye" />
+  <Root object="Dim Gray Clothing Dye" />
+  <Root object="Dodger Blue Clothing Dye" />
+  <Root object="Fire Brick Clothing Dye" />
+  <Root object="Floral White Clothing Dye" />
+  <Root object="Forest Green Clothing Dye" />
+  <Root object="Fuchsia Clothing Dye" />
+  <Root object="Gainsboro Clothing Dye" />
+  <Root object="Ghost White Clothing Dye" />
+  <Root object="Gold Clothing Dye" />
+  <Root object="Golden Rod Clothing Dye" />
+  <Root object="Gray Clothing Dye" />
+  <Root object="Green Clothing Dye" />
+  <Root object="Green Yellow Clothing Dye" />
+  <Root object="Honey Dew Clothing Dye" />
+  <Root object="Hot Pink Clothing Dye" />
+  <Root object="Indian Red Clothing Dye" />
+  <Root object="Indigo Clothing Dye" />
+  <Root object="Ivory Clothing Dye" />
+  <Root object="Khaki Clothing Dye" />
+  <Root object="Lavender Clothing Dye" />
+  <Root object="Lavender Blush Clothing Dye" />
+  <Root object="Lawn Green Clothing Dye" />
+  <Root object="Lemon Chiffon Clothing Dye" />
+  <Root object="Light Blue Clothing Dye" />
+  <Root object="Light Coral Clothing Dye" />
+  <Root object="Light Cyan Clothing Dye" />
+  <Root object="Light Golden Rod Yellow Clothing Dye" />
+  <Root object="Light Grey Clothing Dye" />
+  <Root object="Light Green Clothing Dye" />
+  <Root object="Light Pink Clothing Dye" />
+  <Root object="Light Salmon Clothing Dye" />
+  <Root object="Light Sea Green Clothing Dye" />
+  <Root object="Light Sky Blue Clothing Dye" />
+  <Root object="Light Slate Gray Clothing Dye" />
+  <Root object="Light Steel Blue Clothing Dye" />
+  <Root object="Light Yellow Clothing Dye" />
+  <Root object="Lime Clothing Dye" />
+  <Root object="Lime Green Clothing Dye" />
+  <Root object="Linen Clothing Dye" />
+  <Root object="Magenta Clothing Dye" />
+  <Root object="Maroon Clothing Dye" />
+  <Root object="Medium Aqua Marine Clothing Dye" />
+  <Root object="Medium Blue Clothing Dye" />
+  <Root object="Medium Orchid Clothing Dye" />
+  <Root object="Medium Purple Clothing Dye" />
+  <Root object="Medium Sea Green Clothing Dye" />
+  <Root object="Medium Slate Blue Clothing Dye" />
+  <Root object="Medium Spring Green Clothing Dye" />
+  <Root object="Medium Turquoise Clothing Dye" />
+  <Root object="Medium Violet Red Clothing Dye" />
+  <Root object="Midnight Blue Clothing Dye" />
+  <Root object="Mint Cream Clothing Dye" />
+  <Root object="Misty Rose Clothing Dye" />
+  <Root object="Moccasin Clothing Dye" />
+  <Root object="Navajo White Clothing Dye" />
+  <Root object="Navy Clothing Dye" />
+  <Root object="Old Lace Clothing Dye" />
+  <Root object="Olive Clothing Dye" />
+  <Root object="Olive Drab Clothing Dye" />
+  <Root object="Orange Clothing Dye" />
+  <Root object="Orange Red Clothing Dye" />
+  <Root object="Orchid Clothing Dye" />
+  <Root object="Pale Golden Rod Clothing Dye" />
+  <Root object="Pale Green Clothing Dye" />
+  <Root object="Pale Turquoise Clothing Dye" />
+  <Root object="Pale Violet Red Clothing Dye" />
+  <Root object="Papaya Whip Clothing Dye" />
+  <Root object="Peach Puff Clothing Dye" />
+  <Root object="Peru Clothing Dye" />
+  <Root object="Pink Clothing Dye" />
+  <Root object="Plum Clothing Dye" />
+  <Root object="Powder Blue Clothing Dye" />
+  <Root object="Purple Clothing Dye" />
+  <Root object="Red Clothing Dye" />
+  <Root object="Rosy Brown Clothing Dye" />
+  <Root object="Royal Blue Clothing Dye" />
+  <Root object="Saddle Brown Clothing Dye" />
+  <Root object="Salmon Clothing Dye" />
+  <Root object="Sandy Brown Clothing Dye" />
+  <Root object="Sea Green Clothing Dye" />
+  <Root object="Sea Shell Clothing Dye" />
+  <Root object="Sienna Clothing Dye" />
+  <Root object="Silver Clothing Dye" />
+  <Root object="Sky Blue Clothing Dye" />
+  <Root object="Slate Blue Clothing Dye" />
+  <Root object="Slate Gray Clothing Dye" />
+  <Root object="Snow Clothing Dye" />
+  <Root object="Spring Green Clothing Dye" />
+  <Root object="Steel Blue Clothing Dye" />
+  <Root object="Tan Clothing Dye" />
+  <Root object="Teal Clothing Dye" />
+  <Root object="Thistle Clothing Dye" />
+  <Root object="Tomato Clothing Dye" />
+  <Root object="Turquoise Clothing Dye" />
+  <Root object="Violet Clothing Dye" />
+  <Root object="Wheat Clothing Dye" />
+  <Root object="White Clothing Dye" />
+  <Root object="White Smoke Clothing Dye" />
+  <Root object="Yellow Clothing Dye" />
+  <Root object="Yellow Green Clothing Dye" />
+  <Root object="St Patrick's Green Clothing Dye" />
+  <Root object="Alice Blue Accessory Dye" />
+  <Root object="Antique White Accessory Dye" />
+  <Root object="Aqua Accessory Dye" />
+  <Root object="Aquamarine Accessory Dye" />
+  <Root object="Azure Accessory Dye" />
+  <Root object="Beige Accessory Dye" />
+  <Root object="Bisque Accessory Dye" />
+  <Root object="Black Accessory Dye" />
+  <Root object="Blanched Almond Accessory Dye" />
+  <Root object="Blue Accessory Dye" />
+  <Root object="Blue Violet Accessory Dye" />
+  <Root object="Brown Accessory Dye" />
+  <Root object="Burly Wood Accessory Dye" />
+  <Root object="Cadet Blue Accessory Dye" />
+  <Root object="Chartreuse Accessory Dye" />
+  <Root object="Chocolate Accessory Dye" />
+  <Root object="Coral Accessory Dye" />
+  <Root object="Cornflower Blue Accessory Dye" />
+  <Root object="Cornsilk Accessory Dye" />
+  <Root object="Crimson Accessory Dye" />
+  <Root object="Cyan Accessory Dye" />
+  <Root object="Dark Blue Accessory Dye" />
+  <Root object="Dark Cyan Accessory Dye" />
+  <Root object="Dark Golden Rod Accessory Dye" />
+  <Root object="Dark Gray Accessory Dye" />
+  <Root object="Dark Green Accessory Dye" />
+  <Root object="Dark Khaki Accessory Dye" />
+  <Root object="Dark Magenta Accessory Dye" />
+  <Root object="Dark Olive Green Accessory Dye" />
+  <Root object="Dark Orange Accessory Dye" />
+  <Root object="Dark Orchid Accessory Dye" />
+  <Root object="Dark Red Accessory Dye" />
+  <Root object="Dark Salmon Accessory Dye" />
+  <Root object="Dark Sea Green Accessory Dye" />
+  <Root object="Dark Slate Blue Accessory Dye" />
+  <Root object="Dark Slate Gray Accessory Dye" />
+  <Root object="Dark Turquoise Accessory Dye" />
+  <Root object="Dark Violet Accessory Dye" />
+  <Root object="Deep Pink Accessory Dye" />
+  <Root object="Deep Sky Blue Accessory Dye" />
+  <Root object="Dim Gray Accessory Dye" />
+  <Root object="Dodger Blue Accessory Dye" />
+  <Root object="Fire Brick Accessory Dye" />
+  <Root object="Floral White Accessory Dye" />
+  <Root object="Forest Green Accessory Dye" />
+  <Root object="Fuchsia Accessory Dye" />
+  <Root object="Gainsboro Accessory Dye" />
+  <Root object="Ghost White Accessory Dye" />
+  <Root object="Gold Accessory Dye" />
+  <Root object="Golden Rod Accessory Dye" />
+  <Root object="Gray Accessory Dye" />
+  <Root object="Green Accessory Dye" />
+  <Root object="Green Yellow Accessory Dye" />
+  <Root object="Honey Dew Accessory Dye" />
+  <Root object="Hot Pink Accessory Dye" />
+  <Root object="Indian Red Accessory Dye" />
+  <Root object="Indigo Accessory Dye" />
+  <Root object="Ivory Accessory Dye" />
+  <Root object="Khaki Accessory Dye" />
+  <Root object="Lavender Accessory Dye" />
+  <Root object="Lavender Blush Accessory Dye" />
+  <Root object="Lawn Green Accessory Dye" />
+  <Root object="Lemon Chiffon Accessory Dye" />
+  <Root object="Light Blue Accessory Dye" />
+  <Root object="Light Coral Accessory Dye" />
+  <Root object="Light Cyan Accessory Dye" />
+  <Root object="Light Golden Rod Yellow Accessory Dye" />
+  <Root object="Light Grey Accessory Dye" />
+  <Root object="Light Green Accessory Dye" />
+  <Root object="Light Pink Accessory Dye" />
+  <Root object="Light Salmon Accessory Dye" />
+  <Root object="Light Sea Green Accessory Dye" />
+  <Root object="Light Sky Blue Accessory Dye" />
+  <Root object="Light Slate Gray Accessory Dye" />
+  <Root object="Light Steel Blue Accessory Dye" />
+  <Root object="Light Yellow Accessory Dye" />
+  <Root object="Lime Accessory Dye" />
+  <Root object="Lime Green Accessory Dye" />
+  <Root object="Linen Accessory Dye" />
+  <Root object="Magenta Accessory Dye" />
+  <Root object="Maroon Accessory Dye" />
+  <Root object="Medium Aqua Marine Accessory Dye" />
+  <Root object="Medium Blue Accessory Dye" />
+  <Root object="Medium Orchid Accessory Dye" />
+  <Root object="Medium Purple Accessory Dye" />
+  <Root object="Medium Sea Green Accessory Dye" />
+  <Root object="Medium Slate Blue Accessory Dye" />
+  <Root object="Medium Spring Green Accessory Dye" />
+  <Root object="Medium Turquoise Accessory Dye" />
+  <Root object="Medium Violet Red Accessory Dye" />
+  <Root object="Midnight Blue Accessory Dye" />
+  <Root object="Mint Cream Accessory Dye" />
+  <Root object="Misty Rose Accessory Dye" />
+  <Root object="Moccasin Accessory Dye" />
+  <Root object="Navajo White Accessory Dye" />
+  <Root object="Navy Accessory Dye" />
+  <Root object="Old Lace Accessory Dye" />
+  <Root object="Olive Accessory Dye" />
+  <Root object="Olive Drab Accessory Dye" />
+  <Root object="Orange Accessory Dye" />
+  <Root object="Orange Red Accessory Dye" />
+  <Root object="Orchid Accessory Dye" />
+  <Root object="Pale Golden Rod Accessory Dye" />
+  <Root object="Pale Green Accessory Dye" />
+  <Root object="Pale Turquoise Accessory Dye" />
+  <Root object="Pale Violet Red Accessory Dye" />
+  <Root object="Papaya Whip Accessory Dye" />
+  <Root object="Peach Puff Accessory Dye" />
+  <Root object="Peru Accessory Dye" />
+  <Root object="Pink Accessory Dye" />
+  <Root object="Plum Accessory Dye" />
+  <Root object="Powder Blue Accessory Dye" />
+  <Root object="Purple Accessory Dye" />
+  <Root object="Red Accessory Dye" />
+  <Root object="Rosy Brown Accessory Dye" />
+  <Root object="Royal Blue Accessory Dye" />
+  <Root object="Saddle Brown Accessory Dye" />
+  <Root object="Salmon Accessory Dye" />
+  <Root object="Sandy Brown Accessory Dye" />
+  <Root object="Sea Green Accessory Dye" />
+  <Root object="Sea Shell Accessory Dye" />
+  <Root object="Sienna Accessory Dye" />
+  <Root object="Silver Accessory Dye" />
+  <Root object="Sky Blue Accessory Dye" />
+  <Root object="Slate Blue Accessory Dye" />
+  <Root object="Slate Gray Accessory Dye" />
+  <Root object="Snow Accessory Dye" />
+  <Root object="Spring Green Accessory Dye" />
+  <Root object="Steel Blue Accessory Dye" />
+  <Root object="Tan Accessory Dye" />
+  <Root object="Teal Accessory Dye" />
+  <Root object="Thistle Accessory Dye" />
+  <Root object="Tomato Accessory Dye" />
+  <Root object="Turquoise Accessory Dye" />
+  <Root object="Violet Accessory Dye" />
+  <Root object="Wheat Accessory Dye" />
+  <Root object="White Accessory Dye" />
+  <Root object="White Smoke Accessory Dye" />
+  <Root object="Yellow Accessory Dye" />
+  <Root object="Yellow Green Accessory Dye" />
+  <Root object="St Patrick's Green Accessory Dye" />
+  <Root object="Large Purple Pinstripe Cloth" />
+  <Root object="Large Brown Lined Cloth" />
+  <Root object="Large Blue Striped Cloth" />
+  <Root object="Large Black Striped Cloth" />
+  <Root object="Large Rainbow Cloth" />
+  <Root object="Large Starry Cloth" />
+  <Root object="Large Brown Stitch Cloth" />
+  <Root object="Large Tan Diamond Cloth" />
+  <Root object="Large Green Weave Cloth" />
+  <Root object="Large Blue Wave Cloth" />
+  <Root object="Large Yellow Wire Cloth" />
+  <Root object="Large Futuristic Cloth" />
+  <Root object="Large Stony Cloth" />
+  <Root object="Large Heart Cloth" />
+  <Root object="Large Skull Cloth" />
+  <Root object="Large Red Diamond Cloth" />
+  <Root object="Large Jester Cloth" />
+  <Root object="Large Crossbox Cloth" />
+  <Root object="Large White Diamond Cloth" />
+  <Root object="Large Grey Scaly Cloth" />
+  <Root object="Large Red Spotted Cloth" />
+  <Root object="Large Smiley Cloth" />
+  <Root object="Large Bold Diamond Cloth" />
+  <Root object="Large Blue Lace Cloth" />
+  <Root object="Large Loud Spotted Cloth" />
+  <Root object="Large Red Weft Cloth" />
+  <Root object="Large Pink Sparkly Cloth" />
+  <Root object="Large Red Lace Cloth" />
+  <Root object="Large Pink Maze Cloth" />
+  <Root object="Large Yellow Dot Cloth" />
+  <Root object="Large Cloud Cloth" />
+  <Root object="Large Glowthread Cloth" />
+  <Root object="Large Sweater Cloth" />
+  <Root object="Large Bee Stripe Cloth" />
+  <Root object="Large Western Stripe Cloth" />
+  <Root object="Large Blue Point Cloth" />
+  <Root object="Large Robber Cloth" />
+  <Root object="Large Chainmail Cloth" />
+  <Root object="Large Dark Blue Stripe Cloth" />
+  <Root object="Large Vine Cloth" />
+  <Root object="Large Party Cloth" />
+  <Root object="Large Viva Cloth" />
+  <Root object="Large Nautical Cloth" />
+  <Root object="Large Cactus Zag Cloth" />
+  <Root object="Large Big-Stripe Blue Cloth" />
+  <Root object="Large Big-Stripe Red Cloth" />
+  <Root object="Large Starry Night Cloth" />
+  <Root object="Large Lemon-Lime Cloth" />
+  <Root object="Large Floral Cloth" />
+  <Root object="Large Pink Dot Cloth" />
+  <Root object="Large Dark Eyes Cloth" />
+  <Root object="Large Wind Cloth" />
+  <Root object="Large Shamrock Cloth" />
+  <Root object="Large Bright Stripes Cloth" />
+  <Root object="Large USA Flag Cloth" />
+  <Root object="Large Flannel Cloth" />
+  <Root object="Large Cow Print Cloth" />
+  <Root object="Large Lush Camo Cloth" />
+  <Root object="Large Dark Camo Cloth" />
+  <Root object="Large Teal Crystal Cloth" />
+  <Root object="Large Blue Fireworks Cloth" />
+  <Root object="Large Crisscross Cloth" />
+  <Root object="Large Diamond Cloth" />
+  <Root object="Large Egyptian Cloth" />
+  <Root object="Large Purple Bones Cloth" />
+  <Root object="Large Plaid Cloth" />
+  <Root object="Large Red USA Star Cloth" />
+  <Root object="Large Blue USA Star Cloth" />
+  <Root object="Large USA Star Cloth" />
+  <Root object="Large Purple Stripes Cloth" />
+  <Root object="Large Bright Floral Cloth" />
+  <Root object="Small Purple Pinstripe Cloth" />
+  <Root object="Small Brown Lined Cloth" />
+  <Root object="Small Blue Striped Cloth" />
+  <Root object="Small Black Striped Cloth" />
+  <Root object="Small Rainbow Cloth" />
+  <Root object="Small Starry Cloth" />
+  <Root object="Small Brown Stitch Cloth" />
+  <Root object="Small Tan Diamond Cloth" />
+  <Root object="Small Green Weave Cloth" />
+  <Root object="Small Blue Wave Cloth" />
+  <Root object="Small Yellow Wire Cloth" />
+  <Root object="Small Futuristic Cloth" />
+  <Root object="Small Stony Cloth" />
+  <Root object="Small Heart Cloth" />
+  <Root object="Small Skull Cloth" />
+  <Root object="Small Red Diamond Cloth" />
+  <Root object="Small Jester Cloth" />
+  <Root object="Small Crossbox Cloth" />
+  <Root object="Small White Diamond Cloth" />
+  <Root object="Small Grey Scaly Cloth" />
+  <Root object="Small Red Spotted Cloth" />
+  <Root object="Small Smiley Cloth" />
+  <Root object="Small Bold Diamond Cloth" />
+  <Root object="Small Blue Lace Cloth" />
+  <Root object="Small Loud Spotted Cloth" />
+  <Root object="Small Red Weft Cloth" />
+  <Root object="Small Pink Sparkly Cloth" />
+  <Root object="Small Red Lace Cloth" />
+  <Root object="Small Pink Maze Cloth" />
+  <Root object="Small Yellow Dot Cloth" />
+  <Root object="Small Cloud Cloth" />
+  <Root object="Small Glowthread Cloth" />
+  <Root object="Small Sweater Cloth" />
+  <Root object="Small Bee Stripe Cloth" />
+  <Root object="Small Western Stripe Cloth" />
+  <Root object="Small Blue Point Cloth" />
+  <Root object="Small Robber Cloth" />
+  <Root object="Small Chainmail Cloth" />
+  <Root object="Small Dark Blue Stripe Cloth" />
+  <Root object="Small Vine Cloth" />
+  <Root object="Small Party Cloth" />
+  <Root object="Small Viva Cloth" />
+  <Root object="Small Nautical Cloth" />
+  <Root object="Small Cactus Zag Cloth" />
+  <Root object="Small Big-Stripe Blue Cloth" />
+  <Root object="Small Big-Stripe Red Cloth" />
+  <Root object="Small Starry Night Cloth" />
+  <Root object="Small Lemon-Lime Cloth" />
+  <Root object="Small Floral Cloth" />
+  <Root object="Small Pink Dot Cloth" />
+  <Root object="Small Dark Eyes Cloth" />
+  <Root object="Small Wind Cloth" />
+  <Root object="Small Shamrock Cloth" />
+  <Root object="Small Bright Stripes Cloth" />
+  <Root object="Small USA Flag Cloth" />
+  <Root object="Small Flannel Cloth" />
+  <Root object="Small Cow Print Cloth" />
+  <Root object="Small Lush Camo Cloth" />
+  <Root object="Small Dark Camo Cloth" />
+  <Root object="Small Teal Crystal Cloth" />
+  <Root object="Small Blue Fireworks Cloth" />
+  <Root object="Small Crisscross Cloth" />
+  <Root object="Small Diamond Cloth" />
+  <Root object="Small Egyptian Cloth" />
+  <Root object="Small Purple Bones Cloth" />
+  <Root object="Small Plaid Cloth" />
+  <Root object="Small Red USA Star Cloth" />
+  <Root object="Small Blue USA Star Cloth" />
+  <Root object="Small USA Star Cloth" />
+  <Root object="Small Purple Stripes Cloth" />
+  <Root object="Small Bright Floral Cloth" />
+  <Root object="Spirit Prism Bomb" />
+  <Root object="Black Cat Generator" />
+  <Root object="Grey Cat Generator" />
+  <Root object="Orange Cat Generator" />
+  <Root object="Tan Cat Generator" />
+  <Root object="Yellow Cat Generator" />
+  <Root object="Brown Pup Generator" />
+  <Root object="Grey Pup Generator" />
+  <Root object="Golden Pup Generator" />
+  <Root object="White Cat Generator" />
+  <Root object="Blue Snail Generator" />
+  <Root object="Grey Wolf Generator" />
+  <Root object="Brown Fox Generator" />
+  <Root object="Green Frog Generator" />
+  <Root object="Lion Generator" />
+  <Root object="Penguin Generator" />
+  <Root object="Sheepdog Generator" />
+  <Root object="Panda Generator" />
+  <Root object="Purple Snail Generator" />
+  <Root object="Black Wolf Generator" />
+  <Root object="Grey Fox Generator" />
+  <Root object="Purple Frog Generator" />
+  <Root object="White Lion Generator" />
+  <Root object="Green Penguin Generator" />
+  <Root object="Golden Sheepdog Generator" />
+  <Root object="Bluebird Generator" />
+  <Root object="Chick Generator" />
+  <Root object="Pig Generator" />
+  <Root object="Sea Slurp Generator" />
+  <Root object="Squirrel Generator" />
+  <Root object="Bat Generator" />
+  <Root object="Lil' Ghost Generator" />
+  <Root object="Valentine Generator" />
+  <Root object="Leprechaun Generator" />
+  <Root object="Lil' Oryx Generator" />
+  <Root object="Toucan Generator" />
+  <Root object="Skunk Generator" />
+  <Root object="Mallard Generator" />
+  <Root object="Duck Generator" />
+  <Root object="Eagle Generator" />
+  <Root object="Turtle Generator" />
+  <Root object="Jelly Generator" />
+  <Root object="Bee Generator" />
+  <Root object="Raven Generator" />
+  <Root object="Purple Penguin Generator" />
+  <Root object="Grass Penguin Generator" />
+  <Root object="Elf Generator" />
+  <Root object="Crab Generator" />
+  <Root object="Hamster Generator" />
+  <Root object="Dino Generator" />
+  <Root object="Elephant Generator" />
+  <Root object="Demon Frog Generator" />
+  <Root object="Gargoyle Generator" />
+  <Root object="Gummy Bear Generator" />
+  <Root object="Dragonfly Generator" />
+  <Root object="Lil' Cyclops Generator" />
+  <Root object="Snowy Owl Generator" />
+  <Root object="Turkey Generator" />
+  <Root object="Baby Generator" />
+  <Root object="Baby Dragon Generator" />
+  <Root object="Karate Penguin Red Generator" />
+  <Root object="Karate Penguin Blue Generator" />
+  <Root object="Karate Penguin Yellow Generator" />
+  <Root object="Karate Penguin Purple Generator" />
+  <Root object="Beach Ball Generator" />
+  <Root object="Robobuddy Generator" />
+  <Root object="Snowman Generator" />
+  <Root object="OceanRock" />
+  <Root object="Death Grass" />
+  <Root object="Death Flower" />
+  <Root object="MadLab Warning R" />
+  <Root object="MadLab Warning L" />
+  <Root object="MadLab Warning U" />
+  <Root object="MadLab Warning D" />
+  <Root object="MadLab Warning UR" />
+  <Root object="MadLab Warning UL" />
+  <Root object="MadLab Warning DR" />
+  <Root object="MadLab Warning DL" />
+  <Root object="MadLab Warning Inner UR" />
+  <Root object="MadLab Warning Inner UL" />
+  <Root object="MadLab Warning Inner DR" />
+  <Root object="MadLab Warning Inner DL" />
+  <Root object="Sumo Master" />
+  <Root object="Sand Phantom Wisp" />
+  <PortalRoute object="Portal of Cowardice" except="snake-pit,abyss-of-demons" destination="nexus" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="General retreat to Nexus." />
+  <PortalRoute object="Portal of Cowardice" from="snake-pit" destination="origin-realm" earnedExit="true" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Snake Pit retreat returns to its originating Realm." />
+  <PortalRoute object="Portal of Cowardice" from="abyss-of-demons" destination="origin-realm" earnedExit="true" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Abyss retreat returns to its originating Realm." />
+  <PortalRoute object="Realm Portal" destination="origin-realm" earnedExit="true" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Return via the owning instance route." />
+  <PortalRoute object="Glowing Portal of Cowardice" destination="nexus" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Sprite retreat goes to Nexus." />
+  <PortalRoute object="Glowing Realm Portal" destination="origin-realm" earnedExit="true" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Return via the owning instance route." />
+  <PortalRoute object="Nexus Portal" except="nexus" destination="nexus" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Return to Nexus outside the named Nexus entrances." />
+  <PortalRoute object="Nexus Portal" from="nexus" destination="named-realm" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Use the corresponding live Realm entrance binding." />
+  <PortalRoute object="Random Realm Portal" destination="random-realm" earnedExit="true" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Choose an open Realm; credit uses the source world exit key." />
+  <PortalRoute object="Portal to Nexus" destination="nexus" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Return directly to Nexus." />
+  <PortalRoute object="Kitchen Portal" destination="fresh-kitchen" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Create a fresh Kitchen on each use." />
+  <PortalRoute object="Vault Portal" destination="owned-vault" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Admit only to the requesting account's vault." />
+  <PortalRoute object="Locked Wine Cellar Portal" destination="locked" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Requires owned Incantation activation, not portal travel." />
+  <PortalRoute object="Guild Hall Portal" destination="guild-hall" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Admit only to the requesting character's guild hall." />
+  <PortalRoute object="Tomb Portal of Cowardice" destination="nexus" earnedExit="false" provenance="authored" origin="2edfa131:src/world.rs:1841-1896,2020-2050" reason="Tomb retreat goes to Nexus." />
+  <World id="tutorial" map="tutorial" />
+  <World id="kitchen" map="kitchen" />
+  <World id="nexus" map="nexus">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+  </World>
+  <World id="nexus-limbo" map="nexus-limbo" />
+  <World id="vault" map="vault" />
+  <World id="oryx-castle" map="oryx-castle">
+    <RequiredActor object="Oryx Stone Guardian Right" />
+    <RequiredActor object="Oryx Stone Guardian Left" />
+    <RequiredActor object="Oryx Guardian TaskMaster" />
+    <Clear boss="Oryx Guardian TaskMaster" route="scripted" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/oryxCastle.xml:867; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Linked actor script alone owns portal births; no replacement when changed or removed." />
+  </World>
+  <World id="oryx-chamber" map="oryx-chamber">
+    <Unlock item="Wine Cellar Incantation" locked="Locked Wine Cellar Portal" opened="Dungeon Portal" provenance="authored" origin="cd755e49:src/world/endgame.rs:1137-1186; data/objects.xml:7300" reason="Bind the owned unlock activation to the Chamber clear, selected locked portal, and routed instance entrance." />
+    <Instance entrance="Oryx's Chamber Portal" name="Oryx's Chamber" provenance="authored" origin="0639842e:src/endgame.rs:35-38" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Oryx the Mad God 1" route="victory" portal="Locked Wine Cellar Portal" reveal="Portal to Nexus" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/oryxChamber.xml:3; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Explicit portal for the linked VictoryAtDeath hook and reveal the selected room exit." />
+  </World>
+  <World id="wine-cellar" map="wine-cellar">
+    <CornerPlacement object="Wine Barrel" provenance="authored" origin="cd755e49:src/world/endgame.rs:995-1029; https://web.archive.org/web/20130605124909/forums.wildshadow.com/node/41768" reason="Keep the reconstructed room-corner placement for the destructible barrel introduced in Build 122." />
+    <Instance entrance="Dungeon Portal" name="Wine Cellar" provenance="authored" origin="0639842e:src/endgame.rs:35-38" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Oryx the Mad God 2" route="victory" portal="Portal to Nexus" provenance="authored" origin="data/reference/release-7.0/xml/testingObjects.xml:13; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Explicit portal for the linked VictoryAtDeath hook." />
+  </World>
+  <World id="guild-hall-1" map="guild-hall-1" />
+  <World id="guild-hall-2" map="guild-hall-2" />
+  <World id="guild-hall-3" map="guild-hall-3" />
+  <World id="guild-hall-4" map="guild-hall-4" />
+  <World id="realm" map="realm">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Population object="Red Spider" min="0" max="1" />
+    <Population object="Black Bat" min="0" max="1" />
+    <Population object="Pink Blob" min="0" max="1" />
+    <Population object="Dragon Egg" min="0" max="1" />
+    <Population object="Gray Blob" min="0" max="1" />
+    <Population object="Big Green Slime" min="0" max="1" />
+    <Population object="Piratess" min="0" max="1" />
+    <Population object="Snake" min="0" max="1" />
+    <Population object="Scorpion Queen" min="0" max="1" />
+    <Population object="Elf Wizard" min="0" max="1" />
+    <Population object="Sandsman King" min="0" max="1" />
+    <Population object="Red Gelatinous Cube" min="0" max="1" />
+    <Population object="Purple Gelatinous Cube" min="0" max="1" />
+    <Population object="Green Gelatinous Cube" min="0" max="1" />
+    <Population object="Goblin Mage" min="0" max="1" />
+    <Population object="Hobbit Mage" min="0" max="1" />
+    <Population object="Undead Hobbit Mage" min="0" max="1" />
+    <Population object="Dwarf King" min="0" max="1" />
+    <Population object="Desert Werewolf" min="0" max="1" />
+    <Population object="Fire Sprite" min="0" max="1" />
+    <Population object="Ice Sprite" min="0" max="1" />
+    <Population object="Magic Sprite" min="0" max="1" />
+    <Population object="Orc King" min="0" max="1" />
+    <Population object="Metal Golem" min="0" max="1" />
+    <Population object="Clockwork Golem" min="0" max="1" />
+    <Population object="Earth Golem" min="0" max="1" />
+    <Population object="Paper Golem" min="0" max="1" />
+    <Population object="Fire Golem" min="0" max="1" />
+    <Population object="Darkness Golem" min="0" max="1" />
+    <Population object="Werelion" min="0" max="1" />
+    <Population object="Undead Dwarf God" min="0" max="1" />
+    <Population object="Ogre King" min="0" max="1" />
+    <Population object="Minotaur" min="0" max="1" />
+    <Population object="Flayer God" min="0" max="1" />
+    <Population object="Lizard God" min="0" max="1" />
+    <Population object="White Demon" min="0" max="1" />
+    <Population object="Sprite God" min="0" max="1" />
+    <Population object="Medusa" min="0" max="1" />
+    <Population object="Ent God" min="0" max="1" />
+    <Population object="Beholder" min="0" max="1" />
+    <Population object="Flying Brain" min="0" max="1" />
+    <Population object="Slime God" min="0" max="1" />
+    <Population object="Ghost God" min="0" max="1" />
+    <Population object="Red Demon" min="0" max="1" />
+    <Population object="Phoenix Lord" min="0" max="1" />
+    <Population object="Oasis Giant" min="0" max="1" />
+    <Population object="Cyclops God" min="0" max="1" />
+    <Population object="Giant Crab" min="0" max="1" />
+    <Population object="Sand Phantom" min="0" max="1" />
+    <Population object="Nomadic Shaman" min="0" max="1" />
+    <Population object="Sand Devil" min="0" max="1" />
+    <Population object="Easily Enraged Bunny" min="0" max="1" />
+    <Population object="Forest Nymph" min="0" max="1" />
+    <Population object="Leviathan" min="0" max="1" />
+    <Population object="Kage Kami" min="0" max="1" />
+    <Population object="Shield Orc Key" min="0" max="1" />
+    <Population object="Flamer King" min="0" max="1" />
+    <Population object="Rock Bot" min="0" max="1" />
+    <Population object="Djinn" min="0" max="1" />
+    <Population object="Lich" min="0" max="1" />
+    <Population object="Ent Ancient" min="0" max="1" />
+    <Population object="Deathmage" min="0" max="1" />
+    <Population object="Ghost King" min="0" max="1" />
+    <Population object="Mysterious Crystal" min="0" max="1" />
+    <Population object="Horned Drake" min="0" max="1" />
+    <Population object="Wasp Queen" min="0" max="1" />
+    <Population object="Shambling Sludge" min="0" max="1" />
+    <Population object="Great Lizard" min="0" max="1" />
+    <Population object="Bandit Leader" min="0" max="1" />
+    <Population object="Swarm" min="0" max="1" />
+    <Population object="Urgle" min="0" max="1" />
+    <Population object="Lord of the Lost Lands" min="0" max="1" />
+    <Population object="Grand Sphinx" min="0" max="1" />
+    <Population object="Skull Shrine" min="0" max="1" />
+    <Population object="Cube God" min="0" max="1" />
+    <Population object="Pentaract" min="0" max="1" />
+    <Population object="Hermit God" min="0" max="1" />
+    <Population object="Great Coil Snake" min="0" max="1" />
+    <Population object="Ghost Ship" min="0" max="1" />
+    <Population object="Beach Bum" min="0" max="1" />
+    <Population object="Sumo Master" min="0" max="1" />
+    <Population object="Sand Phantom Wisp" min="0" max="1" />
+  </World>
+  <World id="mad-lab" map="mad-lab" clearKey="mad_labs">
+    <CoilPlacement rooms="5" perRoom="2" order="boss-first" provenance="authored" origin="2edfa131:src/dungeon/lab.rs:63-66,631-656; data/reference/release-7.0/xml/dungeons/madLab.xml:1145" reason="Owner-selected ten coils on existing power dots along the approach to the Creation; lost room maps, recovered Open Wall condition unchanged." />
+    <Instance entrance="Mad Lab Portal" name="Mad Lab" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Dr Terrible" route="realm-exit" portal="Realm Portal" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/madLab.xml:35; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Authored Realm-return continuity; no implicit portal fallback." />
+    <Visibility provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Mad Lab" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">Path</Visibility>
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Mad Lab" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">5</Difficulty>
+  </World>
+  <World id="davy-jones-locker" map="davy-jones-locker" clearKey="davy_lockers">
+    <Instance entrance="Davy Jones's Locker Portal" name="Davy Jones's Locker" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Davy Jones" route="realm-exit" portal="Realm Portal" provenance="authored" origin="79a4c92b:src/world.rs:6444-6484; data/reference/release-7.0/xml/dungeons/ghostShip.xml:1435-1489" reason="The generated Locker admits Davy directly and has no Captain Summoner. Keep the prior single Realm exit as an explicit clear route." />
+    <Visibility provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Davy Jones's Locker" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">Path</Visibility>
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Davy Jones's Locker" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">4</Difficulty>
+    <HelloNotification provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Davy Jones's Locker" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">showKeyUI</HelloNotification>
+  </World>
+  <World id="manor-of-the-immortals" map="manor-of-the-immortals" clearKey="manors" exitKey="manor_of_the_immortals">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <SummonLimit provenance="authored" origin="cd755e49:src/dungeon/manor.rs:6-8" reason="Keep headroom for skipped bat rooms and Ruthven’s overlapping cohorts.">2560</SummonLimit>
+    <Instance entrance="Manor of the Immortals Portal" name="Manor of the Immortals" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Vampire Summoner" route="scripted" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/manorOfTheImmortals.xml:939-957; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Linked actor script alone owns portal births; no replacement when changed or removed." />
+    <Visibility provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Manor of the Immortals" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">LineOfSight</Visibility>
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Manor of the Immortals" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">4</Difficulty>
+  </World>
+  <World id="forbidden-jungle" map="forbidden-jungle" clearKey="jungles" exitKey="forbidden_jungle">
+    <Instance entrance="Forbidden Jungle Portal" name="Forbidden Jungle" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Mixcoatl the Masked God" route="realm-exit" portal="Realm Portal" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/forbiddenJungle.xml:157; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Authored Realm-return continuity; no implicit portal fallback." />
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Forbidden Jungle" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">2</Difficulty>
+  </World>
+  <World id="ocean-trench" map="ocean-trench" clearKey="trenches" exitKey="ocean_trench">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Instance entrance="Ocean Trench Portal" name="Ocean Trench" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Thessal the Mermaid Goddess" route="realm-exit" portal="Realm Portal" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/oceanTrench.xml:345; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Authored Realm-return continuity; no implicit portal fallback." />
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Ocean Trench" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">5</Difficulty>
+    <UsesBreath provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Ocean Trench" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">7.25</UsesBreath>
+  </World>
+  <World id="pirate-cave" map="pirate-cave" clearKey="pirate_caves" exitKey="pirate_cave">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Instance entrance="Pirate Cave Portal" name="Pirate Cave" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Dreadstump the Pirate King" route="scripted" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/pirateCave.xml:11; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Linked actor script alone owns portal births; no replacement when changed or removed." />
+    <Visibility provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Pirate Cave" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">Full</Visibility>
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Pirate Cave" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">0</Difficulty>
+  </World>
+  <World id="spider-den" map="spider-den" clearKey="spider_dens" exitKey="spider_den">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Instance entrance="Spider Den Portal" name="Spider Den" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Arachna the Spider Queen" route="realm-exit" portal="Realm Portal" provenance="authored" origin="data/reference/release-7.0/xml/testingObjects.xml:2080; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Authored Realm-return continuity; no implicit portal fallback." />
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Spider Den" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">1</Difficulty>
+  </World>
+  <World id="undead-lair" map="undead-lair" clearKey="dungeons[2]" exitKey="undead_lair">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Instance entrance="Undead Lair Portal" name="Undead Lair" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Septavius the Ghost God" route="realm-exit" portal="Realm Portal" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/undeadLair.xml:3; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Authored Realm-return continuity; no implicit portal fallback." />
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Undead Lair" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">3</Difficulty>
+  </World>
+  <World id="abyss-of-demons" map="abyss-of-demons" clearKey="abysses" exitKey="abyss_of_demons">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Instance entrance="Abyss of Demons Portal" name="Abyss of Demons" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Archdemon Malphas" route="realm-exit" portal="Realm Portal" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/abyssOfDemons.xml:96; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Authored Realm-return continuity; no implicit portal fallback." />
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Abyss of Demons" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">4</Difficulty>
+  </World>
+  <World id="snake-pit" map="snake-pit" clearKey="dungeons[0]" exitKey="snake_pit">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Instance entrance="Snake Pit Portal" name="Snake Pit" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Stheno the Snake Queen" route="realm-exit" portal="Realm Portal" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/snakePit.xml:173; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Authored Realm-return continuity; no implicit portal fallback." />
+    <Visibility provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Snake Pit" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">Path</Visibility>
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Snake Pit" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">1</Difficulty>
+  </World>
+  <World id="sprite-world" map="sprite-world" clearKey="dungeons[1]" exitKey="sprite_world">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Instance entrance="Glowing Portal" name="Sprite World" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Limon the Sprite God" route="scripted" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/spriteWorld.xml:177; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Linked actor script alone owns portal births; no replacement when changed or removed." />
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Sprite World" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">2</Difficulty>
+    <Background provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Sprite World" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">1</Background>
+  </World>
+  <World id="tomb-of-the-ancients" map="tomb-of-the-ancients" clearKey="tombs" exitKey="tomb_of_the_ancients">
+    <AllowTeleport provenance="authored" origin="cd755e49:src/world/cooperative.rs:106-126" reason="Preserve the existing ordinary player teleport permission.">true</AllowTeleport>
+    <Instance entrance="Tomb of the Ancients Portal" name="Tomb of the Ancients" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Tomb Boss Anchor" route="scripted" retire="Tomb Portal of Cowardice" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:1019; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Linked actor script alone owns portal births; no replacement when changed or removed." />
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Tomb of the Ancients" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">5</Difficulty>
+  </World>
+  <World id="beachzone" map="beachzone" clearKey="beaches">
+    <Instance entrance="Beachzone Portal" name="Beachzone" provenance="authored" origin="0639842e:src/dungeon.rs:61-90" reason="Preserve the existing selected portal binding and instance name." />
+    <Clear boss="Masked Party God" route="realm-exit" portal="Realm Portal" provenance="authored" origin="data/reference/release-7.0/xml/dungeons/ghostShip.xml:41; 0639842e:src/world/xml/terminal.rs:570-578,695-722" reason="Authored Realm-return continuity; no implicit portal fallback." />
+    <Difficulty provenance="recovered" origin="data/reference/release-7.0/xml/dungeons.xml:Beachzone" reason="Recovered world-service settings reserved for explicit world integration, not inert geometry parameters.">0</Difficulty>
+  </World>
+  <LandmarkChest landmark="Phoenix Lord" container="Treasure Chest" provenance="authored" origin="https://web.archive.org/web/20120217151558/http://forums.wildshadow.com:80/wiki/realm-mad-god/oasis-giant; src/loot.rs chest_table@79a4c92b" reason="Monster-page chest tier rates (only the Oasis Giant page URL was recorded); one independent public roll per row with uniform tier choice. Authored reconstruction, not recovered server XML.">
+    <Loot prob="0.75" tier="5">Weapon</Loot>
+    <Loot prob="0.375" tier="6">Weapon</Loot>
+    <Loot prob="0.167" tier="7">Weapon</Loot>
+    <Loot prob="0.75" tier="5">Armor</Loot>
+    <Loot prob="0.375" tier="6">Armor</Loot>
+    <Loot prob="0.167" tier="7">Armor</Loot>
+    <Loot prob="0.3" tier="2">Ability</Loot>
+    <Loot prob="0.075" tier="3">Ability</Loot>
+    <Loot prob="0.6" tier="1">Ring</Loot>
+    <Loot prob="0.15" tier="2">Ring</Loot>
+    <Loot prob="1.0" tier="1">Potion</Loot>
+    <Loot prob="1.0" tier="1">Potion</Loot>
+  </LandmarkChest>
+  <LandmarkChest landmark="Oasis Giant" container="Treasure Chest" provenance="authored" origin="https://web.archive.org/web/20120217151558/http://forums.wildshadow.com:80/wiki/realm-mad-god/oasis-giant; src/loot.rs chest_table@79a4c92b" reason="Monster-page chest tier rates (only the Oasis Giant page URL was recorded); one independent public roll per row with uniform tier choice. Authored reconstruction, not recovered server XML.">
+    <Loot prob="0.75" tier="5">Weapon</Loot>
+    <Loot prob="0.375" tier="6">Weapon</Loot>
+    <Loot prob="0.167" tier="7">Weapon</Loot>
+    <Loot prob="0.75" tier="4">Armor</Loot>
+    <Loot prob="0.375" tier="5">Armor</Loot>
+    <Loot prob="0.167" tier="6">Armor</Loot>
+    <Loot prob="0.3" tier="2">Ability</Loot>
+    <Loot prob="0.075" tier="3">Ability</Loot>
+    <Loot prob="0.6" tier="1">Ring</Loot>
+    <Loot prob="0.15" tier="2">Ring</Loot>
+    <Loot prob="1.0" tier="1">Potion</Loot>
+    <Loot prob="1.0" tier="1">Potion</Loot>
+  </LandmarkChest>
+  <LandmarkChest landmark="Cyclops God" container="Treasure Chest" provenance="authored" origin="https://web.archive.org/web/20120217151558/http://forums.wildshadow.com:80/wiki/realm-mad-god/oasis-giant; src/loot.rs chest_table@79a4c92b" reason="Monster-page chest tier rates (only the Oasis Giant page URL was recorded); one independent public roll per row with uniform tier choice. Authored reconstruction, not recovered server XML.">
+    <Loot prob="0.5" tier="6">Weapon</Loot>
+    <Loot prob="0.25" tier="7">Weapon</Loot>
+    <Loot prob="0.125" tier="8">Weapon</Loot>
+    <Loot prob="0.5" tier="6">Armor</Loot>
+    <Loot prob="0.25" tier="7">Armor</Loot>
+    <Loot prob="0.125" tier="8">Armor</Loot>
+    <Loot prob="0.4" tier="2">Ability</Loot>
+    <Loot prob="0.1" tier="3">Ability</Loot>
+    <Loot prob="0.025" tier="4">Ability</Loot>
+    <Loot prob="0.2" tier="2">Ring</Loot>
+    <Loot prob="0.05" tier="3">Ring</Loot>
+    <Loot prob="1.0" tier="1">Potion</Loot>
+    <Loot prob="1.0" tier="1">Potion</Loot>
+  </LandmarkChest>
+  <LandmarkChest landmark="Red Demon" container="Treasure Chest" platform="Partial Red Floor" provenance="authored" origin="https://web.archive.org/web/20120217151558/http://forums.wildshadow.com:80/wiki/realm-mad-god/oasis-giant; src/loot.rs chest_table@79a4c92b" reason="Monster-page chest tier rates (only the Oasis Giant page URL was recorded); one independent public roll per row with uniform tier choice. Authored reconstruction, not recovered server XML.">
+    <Loot prob="0.5" tier="7">Weapon</Loot>
+    <Loot prob="0.25" tier="8">Weapon</Loot>
+    <Loot prob="0.125" tier="9">Weapon</Loot>
+    <Loot prob="0.5" tier="7">Armor</Loot>
+    <Loot prob="0.25" tier="8">Armor</Loot>
+    <Loot prob="0.125" tier="9">Armor</Loot>
+    <Loot prob="0.8" tier="2">Ability</Loot>
+    <Loot prob="0.2" tier="3">Ability</Loot>
+    <Loot prob="0.05" tier="4">Ability</Loot>
+    <Loot prob="0.4" tier="2">Ring</Loot>
+    <Loot prob="0.1" tier="3">Ring</Loot>
+    <Loot prob="1.0" tier="1">Potion</Loot>
+    <Loot prob="1.0" tier="1">Potion</Loot>
+  </LandmarkChest>
+  <LandmarkChest landmark="Deathmage" container="Treasure Chest" ceilingMin="3" ceilingMax="7" provenance="authored" origin="https://web.archive.org/web/20120610073636id_/http://forums.wildshadow.com:80/wiki/realm-mad-god/deathmage (tiers); https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/Graveyard.cs (rates, GetLoots(3,8)); data/REALM-SRC-LICENSE; src/loot.rs chest_table@79a4c92b" reason="realm-src MobDrops expands each tier row to per-item p/n rows in selected-kind order (selected order, not authenticated source order); successes stop at a uniform 3..7 ceiling drawn first. Authored reconstruction, not recovered server XML.">
+    <Loot prob="0.06">Falchion</Loot>
+    <Loot prob="0.06">Eldritch Wand</Loot>
+    <Loot prob="0.06">Silver Dagger</Loot>
+    <Loot prob="0.06">Ironwood Bow</Loot>
+    <Loot prob="0.06">Meteor Staff</Loot>
+    <Loot prob="0.04">Hell's Fire Wand</Loot>
+    <Loot prob="0.04">Golden Dagger</Loot>
+    <Loot prob="0.04">Fire Bow</Loot>
+    <Loot prob="0.04">Fire Sword</Loot>
+    <Loot prob="0.04">Slayer Staff</Loot>
+    <Loot prob="0.02">Obsidian Dagger</Loot>
+    <Loot prob="0.02">Double Bow</Loot>
+    <Loot prob="0.02">Glass Sword</Loot>
+    <Loot prob="0.02">Wand of Dark Magic</Loot>
+    <Loot prob="0.02">Avenger Staff</Loot>
+    <Loot prob="0.09999999999999999">Robe of the Acolyte</Loot>
+    <Loot prob="0.09999999999999999">Basilisk Hide Armor</Loot>
+    <Loot prob="0.09999999999999999">Blue Steel Mail</Loot>
+    <Loot prob="0.06666666666666667">Minotaur Hide Armor</Loot>
+    <Loot prob="0.06666666666666667">Silver Chainmail</Loot>
+    <Loot prob="0.06666666666666667">Robe of the Student</Loot>
+    <Loot prob="0.03333333333333333">Golden Chainmail</Loot>
+    <Loot prob="0.03333333333333333">Robe of the Conjurer</Loot>
+    <Loot prob="0.03333333333333333">Bearskin Armor</Loot>
+    <Loot prob="0.023076923076923075">Iron Shield</Loot>
+    <Loot prob="0.023076923076923075">Suspension Orb</Loot>
+    <Loot prob="0.023076923076923075">Cloak of Darkness</Loot>
+    <Loot prob="0.023076923076923075">Reinforced Quiver</Loot>
+    <Loot prob="0.023076923076923075">Bronze Helm</Loot>
+    <Loot prob="0.023076923076923075">Spider Venom</Loot>
+    <Loot prob="0.023076923076923075">Breathtaker Skull</Loot>
+    <Loot prob="0.023076923076923075">Wilderlands Trap</Loot>
+    <Loot prob="0.023076923076923075">Flame Burst Spell</Loot>
+    <Loot prob="0.023076923076923075">Remedy Tome</Loot>
+    <Loot prob="0.023076923076923075">Seal of the Pilgrim</Loot>
+    <Loot prob="0.023076923076923075">Deception Prism</Loot>
+    <Loot prob="0.023076923076923075">Discharge Scepter</Loot>
+    <Loot prob="0.015384615384615385">Steel Shield</Loot>
+    <Loot prob="0.015384615384615385">Fire Nova Spell</Loot>
+    <Loot prob="0.015384615384615385">Spirit Salve Tome</Loot>
+    <Loot prob="0.015384615384615385">Imprisonment Orb</Loot>
+    <Loot prob="0.015384615384615385">Seal of the Seeker</Loot>
+    <Loot prob="0.015384615384615385">Cloak of Speed</Loot>
+    <Loot prob="0.015384615384615385">Iron Quiver</Loot>
+    <Loot prob="0.015384615384615385">Black Iron Helm</Loot>
+    <Loot prob="0.015384615384615385">Pit Viper Poison</Loot>
+    <Loot prob="0.015384615384615385">Heartstealer Skull</Loot>
+    <Loot prob="0.015384615384615385">Deepforest Trap</Loot>
+    <Loot prob="0.015384615384615385">Illusion Prism</Loot>
+    <Loot prob="0.015384615384615385">Thunderclap Scepter</Loot>
+    <Loot prob="0.015384615384615385">Neutralization Orb</Loot>
+    <Loot prob="0.015384615384615385">Red Iron Helm</Loot>
+    <Loot prob="0.015384615384615385">Stingray Poison</Loot>
+    <Loot prob="0.015384615384615385">Soul Siphon Skull</Loot>
+    <Loot prob="0.015384615384615385">Savage Trap</Loot>
+    <Loot prob="0.015384615384615385">Reinforced Shield</Loot>
+    <Loot prob="0.015384615384615385">Scorching Blast Spell</Loot>
+    <Loot prob="0.015384615384615385">Tome of Rejuvenation</Loot>
+    <Loot prob="0.015384615384615385">Seal of the Aspirant</Loot>
+    <Loot prob="0.015384615384615385">Cloak of the Night Thief</Loot>
+    <Loot prob="0.015384615384615385">Elvencraft Quiver</Loot>
+    <Loot prob="0.015384615384615385">Hallucination Prism</Loot>
+    <Loot prob="0.015384615384615385">Arcblast Scepter</Loot>
+    <Loot prob="0.03125">Ring of Attack</Loot>
+    <Loot prob="0.03125">Ring of Defense</Loot>
+    <Loot prob="0.03125">Ring of Speed</Loot>
+    <Loot prob="0.03125">Ring of Health</Loot>
+    <Loot prob="0.03125">Ring of Magic</Loot>
+    <Loot prob="0.03125">Ring of Vitality</Loot>
+    <Loot prob="0.03125">Ring of Wisdom</Loot>
+    <Loot prob="0.03125">Ring of Dexterity</Loot>
+    <Loot prob="0.01875">Ring of Greater Attack</Loot>
+    <Loot prob="0.01875">Ring of Greater Defense</Loot>
+    <Loot prob="0.01875">Ring of Greater Speed</Loot>
+    <Loot prob="0.01875">Ring of Greater Health</Loot>
+    <Loot prob="0.01875">Ring of Greater Magic</Loot>
+    <Loot prob="0.01875">Ring of Greater Vitality</Loot>
+    <Loot prob="0.01875">Ring of Greater Wisdom</Loot>
+    <Loot prob="0.01875">Ring of Greater Dexterity</Loot>
+    <Loot prob="0.25">Health Potion</Loot>
+    <Loot prob="0.25">Magic Potion</Loot>
+  </LandmarkChest>
+  <LandmarkChest landmark="Great Coil Snake" container="Treasure Chest" ceilingMin="3" ceilingMax="7" provenance="authored" origin="https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/TempleA.cs; https://github.com/moistosaurus/realm-src/blob/1855c017eab870d13f0b61b1cf0b9e66a01922ff/wServer/realm/setpieces/TempleB.cs (rates, GetLoots(3,8)); data/REALM-SRC-LICENSE; src/loot.rs chest_table@79a4c92b" reason="realm-src MobDrops expands each tier row to per-item p/n rows in selected-kind order (selected order, not authenticated source order); successes stop at a uniform 3..7 ceiling drawn first. Authored reconstruction, not recovered server XML.">
+    <Loot prob="0.06">Falchion</Loot>
+    <Loot prob="0.06">Eldritch Wand</Loot>
+    <Loot prob="0.06">Silver Dagger</Loot>
+    <Loot prob="0.06">Ironwood Bow</Loot>
+    <Loot prob="0.06">Meteor Staff</Loot>
+    <Loot prob="0.04">Hell's Fire Wand</Loot>
+    <Loot prob="0.04">Golden Dagger</Loot>
+    <Loot prob="0.04">Fire Bow</Loot>
+    <Loot prob="0.04">Fire Sword</Loot>
+    <Loot prob="0.04">Slayer Staff</Loot>
+    <Loot prob="0.09999999999999999">Minotaur Hide Armor</Loot>
+    <Loot prob="0.09999999999999999">Silver Chainmail</Loot>
+    <Loot prob="0.09999999999999999">Robe of the Student</Loot>
+    <Loot prob="0.06666666666666667">Golden Chainmail</Loot>
+    <Loot prob="0.06666666666666667">Robe of the Conjurer</Loot>
+    <Loot prob="0.06666666666666667">Bearskin Armor</Loot>
+    <Loot prob="0.019230769230769232">Iron Shield</Loot>
+    <Loot prob="0.019230769230769232">Suspension Orb</Loot>
+    <Loot prob="0.019230769230769232">Cloak of Darkness</Loot>
+    <Loot prob="0.019230769230769232">Reinforced Quiver</Loot>
+    <Loot prob="0.019230769230769232">Bronze Helm</Loot>
+    <Loot prob="0.019230769230769232">Spider Venom</Loot>
+    <Loot prob="0.019230769230769232">Breathtaker Skull</Loot>
+    <Loot prob="0.019230769230769232">Wilderlands Trap</Loot>
+    <Loot prob="0.019230769230769232">Flame Burst Spell</Loot>
+    <Loot prob="0.019230769230769232">Remedy Tome</Loot>
+    <Loot prob="0.019230769230769232">Seal of the Pilgrim</Loot>
+    <Loot prob="0.019230769230769232">Deception Prism</Loot>
+    <Loot prob="0.019230769230769232">Discharge Scepter</Loot>
+    <Loot prob="0.011538461538461537">Steel Shield</Loot>
+    <Loot prob="0.011538461538461537">Fire Nova Spell</Loot>
+    <Loot prob="0.011538461538461537">Spirit Salve Tome</Loot>
+    <Loot prob="0.011538461538461537">Imprisonment Orb</Loot>
+    <Loot prob="0.011538461538461537">Seal of the Seeker</Loot>
+    <Loot prob="0.011538461538461537">Cloak of Speed</Loot>
+    <Loot prob="0.011538461538461537">Iron Quiver</Loot>
+    <Loot prob="0.011538461538461537">Black Iron Helm</Loot>
+    <Loot prob="0.011538461538461537">Pit Viper Poison</Loot>
+    <Loot prob="0.011538461538461537">Heartstealer Skull</Loot>
+    <Loot prob="0.011538461538461537">Deepforest Trap</Loot>
+    <Loot prob="0.011538461538461537">Illusion Prism</Loot>
+    <Loot prob="0.011538461538461537">Thunderclap Scepter</Loot>
+    <Loot prob="0.0375">Ring of Greater Attack</Loot>
+    <Loot prob="0.0375">Ring of Greater Defense</Loot>
+    <Loot prob="0.0375">Ring of Greater Speed</Loot>
+    <Loot prob="0.0375">Ring of Greater Health</Loot>
+    <Loot prob="0.0375">Ring of Greater Magic</Loot>
+    <Loot prob="0.0375">Ring of Greater Vitality</Loot>
+    <Loot prob="0.0375">Ring of Greater Wisdom</Loot>
+    <Loot prob="0.0375">Ring of Greater Dexterity</Loot>
+    <Loot prob="0.025">Ring of Superior Attack</Loot>
+    <Loot prob="0.025">Ring of Superior Defense</Loot>
+    <Loot prob="0.025">Ring of Superior Speed</Loot>
+    <Loot prob="0.025">Ring of Superior Vitality</Loot>
+    <Loot prob="0.025">Ring of Superior Wisdom</Loot>
+    <Loot prob="0.025">Ring of Superior Dexterity</Loot>
+    <Loot prob="0.025">Ring of Superior Health</Loot>
+    <Loot prob="0.025">Ring of Superior Magic</Loot>
+    <Loot prob="0.25">Health Potion</Loot>
+    <Loot prob="0.25">Magic Potion</Loot>
+    <Loot prob="0.25">Health Potion</Loot>
+    <Loot prob="0.25">Magic Potion</Loot>
+    <Loot prob="0.25">Health Potion</Loot>
+    <Loot prob="0.25">Magic Potion</Loot>
+  </LandmarkChest>
+  <Evidence file="realm-catalog.json" />
+  <Evidence file="ALLOY-LICENSE" />
+  <Evidence file="FSOD-NOTICE" />
+  <Evidence file="REALM-SRC-LICENSE" />
+  <Evidence file="TERRAIN-GEOMETRY-LICENSES" />
+  <Evidence file="realms/NOTICE" />
+</Game>

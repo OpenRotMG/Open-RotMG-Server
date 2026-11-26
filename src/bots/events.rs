@@ -1,11 +1,18 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
-pub(super) fn shared(map: &str) -> bool {
-    matches!(
-        map,
-        "Oryx's Castle" | "Oryx's Chamber" | "Wine Cellar" | "Mad Lab"
-    )
+fn pickup_world(template: Option<&str>) -> Option<&'static str> {
+    // Keep the saved pickup evidence format compatible with earlier residents.
+    Some(match template {
+        Some("oryx-castle") => "Oryx's Castle",
+        Some("oryx-chamber") => "Oryx's Chamber",
+        Some("wine-cellar") => "Wine Cellar",
+        Some("mad-lab") => "Mad Lab",
+        _ => return None,
+    })
+}
+pub(super) fn shared(template: Option<&str>) -> bool {
+    pickup_world(template).is_some()
 }
 pub(super) fn objective(kind: u16) -> bool {
     crate::endgame::GUARDIANS.contains(&kind)
@@ -141,7 +148,10 @@ impl Events {
         ensure!(
             self.pickups.len() <= 16
                 && self.pickups.iter().all(|p| p.character > 0
-                    && shared(&p.world)
+                    && matches!(
+                        p.world.as_str(),
+                        "Oryx's Castle" | "Oryx's Chamber" | "Wine Cellar" | "Mad Lab"
+                    )
                     && (0..=65535).contains(&p.kind)
                     && p.revision > 0),
             "invalid own event pickup evidence"
@@ -149,7 +159,7 @@ impl Events {
         Ok(())
     }
     pub(super) fn receive(&mut self, packet: &Packet, v: &PlayerView, name: &str) -> Result<()> {
-        if packet.id != wire::TEXT || v.map.name != "Mad Lab" {
+        if packet.id != wire::TEXT || v.map.template.as_deref() != Some("mad-lab") {
             return Ok(());
         }
         let mut r = Reader::new(&packet.body);
@@ -181,7 +191,7 @@ impl Events {
         Ok(())
     }
     pub(super) fn observe(&mut self, v: &PlayerView) {
-        if !shared(&v.map.name) || !v.lifecycle.alive {
+        if !shared(v.map.template.as_deref()) || !v.lifecycle.alive {
             self.outing = None;
             return;
         }
@@ -237,10 +247,10 @@ impl Events {
             );
             o.objective = None;
         }
-        let boss = match v.map.name.as_str() {
-            "Oryx's Chamber" => Some(crate::endgame::ORYX),
-            "Wine Cellar" => Some(crate::endgame::ORYX2),
-            "Mad Lab" => Some(crate::dungeon::lab::BOSS),
+        let boss = match v.map.template.as_deref() {
+            Some("oryx-chamber") => Some(crate::endgame::ORYX),
+            Some("wine-cellar") => Some(crate::endgame::ORYX2),
+            Some("mad-lab") => Some(crate::dungeon::lab::BOSS),
             _ => None,
         };
         if let Some(boss) = v.objects.iter().find(|p| Some(p.kind) == boss && p.hp > 0) {
@@ -272,7 +282,7 @@ impl Events {
         v: &'a PlayerView,
     ) -> Option<&'a crate::world::view::VisibleObject> {
         (self.knows_blue
-            && v.map.name == "Mad Lab"
+            && v.map.template.as_deref() == Some("mad-lab")
             && v.character.conditions & crate::condition::bit(crate::condition::HEXED) != 0)
             .then(|| {
                 v.objects
@@ -305,7 +315,9 @@ impl Events {
             );
             let pickup = Pickup {
                 character: v.session.character,
-                world: v.map.name.clone(),
+                world: pickup_world(v.map.template.as_deref())
+                    .context("event pickup has no observed world template")?
+                    .into(),
                 kind,
                 revision: v.character.inventory_revision,
             };
@@ -347,7 +359,7 @@ impl Events {
         profile: Profile,
         allow_idle: bool,
     ) -> Result<Option<Decision>> {
-        if !shared(&v.map.name) {
+        if !shared(v.map.template.as_deref()) {
             return Ok(None);
         }
         let mut d = Decision {
@@ -404,7 +416,7 @@ impl Events {
             .as_mut()
             .context("shared event observation missing")?;
         let hexed = v.character.conditions & crate::condition::bit(crate::condition::HEXED) != 0;
-        if v.map.name == "Mad Lab"
+        if v.map.template.as_deref() == Some("mad-lab")
             && hexed
             && self.knows_blue
             && let Some(blue) = v
@@ -434,7 +446,7 @@ impl Events {
         if !idle_safe(v, c) {
             return Ok(None);
         }
-        if v.map.name == "Oryx's Chamber"
+        if v.map.template.as_deref() == Some("oryx-chamber")
             && !v.objects.iter().any(|p| p.kind == 0x700 && p.usable)
             && let Some(locked) = v
                 .objects
@@ -686,7 +698,7 @@ impl Speech {
         Ok(if let Some((_, target)) = self.goal {
             goal == self.goal
                 && !v.character.items.contains(&target)
-                && !(v.map.name == "Vault"
+                && !(v.map.template.as_deref() == Some("vault")
                     && v.objects
                         .iter()
                         .any(|p| p.kind == 0x504 && p.contents.contains(&target)))

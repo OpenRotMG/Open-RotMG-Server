@@ -14,10 +14,13 @@ export async function run(game){
   const {worldSeed,...knight}=fixture;
   game=await game.join({...knight,world:initial.view.session.world,position:{x:boss.pos.x-2,y:boss.pos.y}});
   const observations=[];
-  async function vitals(mp){
-    const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change:{kind:'vitals',hp:770,mp}}}),signal:AbortSignal.timeout(10000)});
+  async function prepare(change){
+    const response=await fetch(config.origin+'/dev/testing',{method:'POST',headers,body:JSON.stringify({id:randomUUID(),command:{op:'cheat',actor:game.actor,change}}),signal:AbortSignal.timeout(10000)});
     const receipt=await response.json();assert(response.ok&&receipt.status==='succeeded',JSON.stringify(receipt));
   }
+  // Test the shield outcomes at close range without Septavius killing the Knight during the expiration window.
+  await prepare({kind:'protection',condition:'invincible',duration_ms:60000});
+  const vitals=mp=>prepare({kind:'vitals',hp:770,mp});
   await game.act({keys:[],duration_ms:600});
   const start=await game.observe();
   for(const [slot,item,name,cost,shots,effect,duration,stats] of [
@@ -31,11 +34,18 @@ export async function run(game){
       game.check(name+' equips through native inventory',(await game.observe()).character.items[1]===item);
     }
     await vitals(250);
+    for(let n=0;n<12;n++){
+      const s=await game.inspect(),target=s.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
+      const dx=target.pos.x-s.view.position.x,dy=target.pos.y-s.view.position.y;
+      if(Math.hypot(dx,dy)<=2)break;
+      await game.act({keys:Math.abs(dx)>Math.abs(dy)?(dx>0?['d','s']:['a','w']):(dy>0?['a','s']:['d','w']),duration_ms:120});
+    }
     const before=await game.inspect(),old=before.diagnostic.entities.find(e=>e.id===boss.id);assert(old);
+    assert(Math.hypot(old.pos.x-before.view.position.x,old.pos.y-before.view.position.y)<=2,'Septavius must be within every selected shield projectile range');
     await game.act({keys:[' '],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:false},duration_ms:300},{name,when:view=>view.character.mp<before.view.character.mp-cost/2});
     const after=await game.inspect(),target=after.diagnostic.entities.find(e=>e.id===boss.id);assert(target);
     observations.push({name,before,after});
-    await writeFile(join(root,'shield-observations.json'),JSON.stringify({preparedVitals:true,observations},null,2));
+    await writeFile(join(root,'shield-observations.json'),JSON.stringify({preparedVitals:true,preparedProtection:true,observations},null,2));
     game.check(name+' spends one mana cost',after.view.character.mp>=before.view.character.mp-cost&&after.view.character.mp<before.view.character.mp-cost+10);
     game.check(name+' admits the selected projectile count',after.diagnostic.character.shots-before.diagnostic.character.shots===shots);
     game.check(name+' applies the selected condition',Object.hasOwn(target.statuses,String(effect)));
@@ -51,5 +61,5 @@ export async function run(game){
   await game.act({keys:[' '],target:{entity:boss.id,camera_angle:7*Math.PI/4,fire:false},duration_ms:250});const denied=await game.inspect();
   game.check('insufficient mana admits no shield projectiles',denied.diagnostic.character.shots===poor.diagnostic.character.shots);
   game.check('same living Knight retains Ogmur',denied.view.lifecycle.alive&&denied.view.session.character===start.session.character&&denied.view.character.items[1]===0xc0f);
-  await writeFile(join(root,'shield-observations.json'),JSON.stringify({preparedVitals:true,observations,expired,poor,denied},null,2));
+  await writeFile(join(root,'shield-observations.json'),JSON.stringify({preparedVitals:true,preparedProtection:true,observations,expired,poor,denied},null,2));
 }

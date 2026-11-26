@@ -27,6 +27,7 @@
   "Q": ["Gothic Rug", "spawn"],
   "R": ["Gothic Rug", "Lord Ruthven"],
   "S": ["Gothic Big Tile", "spawn"],
+  "V": ["Gothic Rug", "Vampire Summoner"],
   "_": ["Gothic Big Tile", ""],
   "a": ["Gothic Floor Slabs 3", "Gothic Pillar"],
   "b": ["Gothic Floor Slabs", "Gothic Candelabra"],
@@ -129,7 +130,7 @@
   },
   "boss": {
    "ports": [["S", 14]],
-   "note": "unused fill of S14 never captured: reconstructed; Lord Ruthven at the alloy Manor.jm editor position",
+   "note": "unused fill of S14 never captured: reconstructed; Lord Ruthven at the alloy Manor.jm editor position; authored recovered Vampire Summoner (manorOfTheImmortals.xml:939) one tile south of that arena marker, where the pre-XML exit appeared",
    "rows": [
     "       AAAwAAPKKKKPAAwAAA",
     "      AP..n..c....c..n..PA",
@@ -147,7 +148,7 @@
     "Pc........============........cP",
     "K.........============.........K",
     "K.........======R=====.........K",
-    "K.........============.........K",
+    "K.........======V=====.........K",
     "K.........============.........K",
     "Pc........============........cP",
     "A.........============.........A",

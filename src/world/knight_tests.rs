@@ -2,8 +2,9 @@ use super::*;
 use crate::condition;
 
 fn fixture(shield: u16) -> (World, i32) {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Map {
+        elevation: None,
         width: 16,
         height: 16,
         cells: vec![
@@ -18,9 +19,10 @@ fn fixture(shield: u16) -> (World, i32) {
         ],
         spawns: vec![(8.5, 8.5)],
     };
-    let mut w = World::new(content, Arc::new(map)).unwrap();
+    let mut w = World::in_domain(content, Arc::new(map), WorldDomain::NonRealm).unwrap();
     w.clock.set_paused(true);
     let mut ch = Character::fresh(w.content.get(0x31e).unwrap()).unwrap();
+    ch.name = "Knight".into();
     ch.account = 1;
     ch.id = 1;
     ch.base[1] = 252;
@@ -47,7 +49,7 @@ fn cast(w: &mut World, id: i32) -> Result<()> {
 
 #[tokio::test]
 async fn knight_unlock_requires_warrior_twenty_after_committed_death() {
-    let content = Content::load(std::path::Path::new("data")).unwrap();
+    let content = crate::world::test_content();
     for level in [19, 20] {
         let store = crate::store::Store::open(std::path::Path::new(":memory:"), &content).unwrap();
         let guid = format!("knight-unlock-{level}");

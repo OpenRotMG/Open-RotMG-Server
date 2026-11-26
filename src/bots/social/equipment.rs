@@ -79,7 +79,7 @@ pub(in crate::bots) fn select(
     }
     if !policy.available
         || policy.willingness < 6.
-        || v.map.name != "Realm"
+        || v.map.template.as_deref() != Some("realm")
         || !v.lifecycle.alive
         || v.lifecycle.busy
         || v.lifecycle.death_pending

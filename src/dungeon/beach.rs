@@ -1,41 +1,16 @@
-use crate::{
-    content::{Cell, Content, Map},
-    encounter::{Motion, Profile, nr_speed},
-};
+use crate::content::{Cell, Content, Map};
 use anyhow::{Result, ensure};
 
 pub const BOSS: u16 = 0xe56;
 pub const BUM: u16 = 0xe55;
-pub const DRINKS: [u16; 4] = [0xc39, 0xc3a, 0xc3b, 0xc3c];
-pub const TAUNTS: [&str; 11] = [
-    "Oh no, Mixcoatl is my brother, I prefer partying to fighting.",
-    "Lets have a fun-time in the sun-shine!",
-    "Nothing like relaxin' on the beach.",
-    "Chillin' is the name of the game!",
-    "I hope you're having a good time!",
-    "How do you like my shades?",
-    "EVERYBODY BOOGEY!",
-    "What a beautiful day!",
-    "Whoa there!",
-    "Oh SNAP!",
-    "Ho!",
-];
-pub fn profile(kind: u16) -> Profile {
-    Profile {
-        motion: if kind == BUM {
-            Motion::WanderHome { radius: 2.5 }
-        } else {
-            Motion::Stationary
-        },
-        speed: if kind == BUM { nr_speed(0.2) } else { 0. },
-        interval: 0,
-        range: 0.,
-    }
-}
 
 // The archived 123.5.0 guide establishes the island, towels, partial wooden stage and four braziers.
 // https://web.archive.org/web/20121201000000id_/http://forums.wildshadow.com/wiki/realm-mad-god/beachzone
-pub fn generate(content: &Content) -> Result<Map> {
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+) -> Result<Map> {
+    let [boss, retreat] = generator.placements("boss-and-exit")?;
     let (width, height) = (136, 127);
     let mut cells = Vec::new();
     for y in 0..height {
@@ -97,8 +72,8 @@ pub fn generate(content: &Content) -> Result<Map> {
     for (x, y) in [(68, 63), (74, 63), (68, 69), (74, 69)] {
         set(x, y, 0xf5, Some(0xdc6));
     }
-    set(71, 66, 0xb6, Some(BOSS));
-    set(44, 65, 0xf5, Some(0x703));
+    set(71, 66, 0xb6, Some(boss));
+    set(44, 65, 0xf5, Some(retreat));
     for cell in &cells {
         ensure!(
             content.grounds.contains_key(&cell.ground),
@@ -110,6 +85,7 @@ pub fn generate(content: &Content) -> Result<Map> {
         }
     }
     Ok(Map {
+        elevation: None,
         width,
         height,
         cells,

@@ -23,12 +23,15 @@ export async function run(game){
     game.check(name+' key commits once without changing stats MP or other slots',a.items[4]===-1&&a.inventory_revision===b.inventory_revision+1&&a.mp===b.mp&&JSON.stringify(a.stats)===JSON.stringify(b.stats)&&JSON.stringify(a.base_stats)===JSON.stringify(b.base_stats)&&a.items.every((item,slot)=>slot===4||item===b.items[slot]));
     game.check(name+' portal appears at native user position',Math.hypot(portal.pos.x-before.view.position.x,portal.pos.y-before.view.position.y)<.05);
     await game.act({keys:['1'],duration_ms:100});game.check(name+' empty slot cannot consume twice',(await game.observe()).character.inventory_revision===a.inventory_revision);
+    if(kind===0x70c){
+      game.check('Glowing Portal still exists shortly after publication',portal.expires===null||portal.expires>after.diagnostic.time_ms);
+    }
   }
-  const opened=await save('expiry-start'),portal=opened.diagnostic.entities.find(e=>e.kind===0x70c);assert(portal);
+  // Glowing Portal has Decay(time=30) from publication (objects.xml:385ff; actors.xml:2574-2575).
   for(let n=0;n<3;n++)await game.act({keys:[],duration_ms:10000});
-  game.check('key portal remains published beyond30 seconds',(await game.inspect()).diagnostic.entities.some(e=>e.id===portal.id&&e.published));
-  for(let n=0;n<3;n++)await game.act({keys:[],duration_ms:10000});
-  const expired=await save('expired');game.check('all13 key portals disappear after one minute',keys.every(([,kind])=>!expired.diagnostic.entities.some(e=>e.kind===kind)));
+  const expired=await save('expired');
+  game.check('Glowing Portal expires after 30 seconds, rather than the legacy minute',!expired.diagnostic.entities.some(e=>e.kind===0x70c));
+  game.check('every tested key portal has expired',keys.every(([,kind])=>!expired.diagnostic.entities.some(e=>e.kind===kind)));
   await game.act({keys:[],mouse:{x:700,y:575},duration_ms:700});game.check('expired portal cannot admit or refund',((await game.observe()).session.world===expired.view.session.world)&&(await game.observe()).character.items[4]===-1);
   await supply(0x71f);await game.act({keys:['1'],duration_ms:700});await game.act({keys:[],duration_ms:1000},{name:'sprite-key-opened',when:v=>v.character.items[4]===-1});const shared=await save('shared-open');
   const peer=await game.join({...fixture,world:shared.view.session.world,position:shared.view.position,backpack:Array(8).fill(-1)});

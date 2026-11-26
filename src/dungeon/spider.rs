@@ -1,34 +1,11 @@
-use crate::{
-    content::{Cell, Content, Map},
-    encounter::{Motion, Profile},
-};
+use crate::content::{Cell, Content, Map};
 use anyhow::{Context, Result, ensure};
 use rand::{Rng, SeedableRng, rngs::StdRng, seq::SliceRandom};
 use std::{collections::BTreeMap, sync::LazyLock};
 
 pub const BOSS: u16 = 0x936;
-pub const EGG: u16 = 0x21b;
-pub const HATCHLING: u16 = 0x21c;
-// 2012 web threads are dashed with a 1.40-tile period at 7 tiles/s: one volley per 200 ms (8Uv7XGMabZI 2012-05-27, oMP3hUIl3qI 2012-11-13);
-// the Japanese spoke page (last modified 2012-06-26) also says every 0.2 s.
-pub const WEB_INTERVAL: u64 = 200;
-/// Arachna wakes with a player within 10 tiles (one player stood 11.6 tiles away for 1.5 s without waking her).
-pub const WAKE: f32 = 10.;
-/// The spokes land 1500 ms after the toss; she stays invulnerable, still and silent until ≈3.0 s (2.55-3.25 s measured, 3 videos).
-pub const SPOKE_MS: u64 = 1500;
-pub const ATTACK_MS: u64 = 3000;
-/// The web disappears 200 s after it is placed (Japanese spoke page, last modified 2012-06-26; dated comments 2012-03-06 and 2012-11-12).
-pub const WEB_LIFETIME_MS: u64 = 200_000;
-/// Engine speed for a measured ground speed: an NPC moves `speed / 1.5` tiles per second.
-const fn tiles_per_s(measured: f32) -> f32 {
-    measured * 1.5
-}
 const WALL: u16 = 0x1e8;
 const WEB: u16 = 0x732;
-pub const ROSTER: [u16; 16] = [
-    EGG, HATCHLING, 0x21d, 0x21e, 0x21f, 0x220, BOSS, 0x937, 0x938, 0x939, 0x93a, 0x93b, 0x93c,
-    0x93d, 0x93e, 0x93f,
-];
 
 /// Every layout tunable. "Capture" = the live instance behind data/spider-templates.json (data/README.md); "maps" =
 /// the capture plus tile-exact RealmEye wiki minimaps of 2018-07-06 (rev 40) and 2020-05-01 (rev 52), and the 2010
@@ -84,14 +61,10 @@ pub mod tuning {
     /// Adult spiders per middle room (capture rooms in path order); 2012 rooms mix one to three species.
     pub const SPIDERS: [usize; 9] = [2, 4, 2, 0, 0, 9, 10, 12, 4];
     pub const SPECIES: std::ops::RangeInclusive<usize> = 1..=3;
-    pub const ADULTS: [u16; 4] = [0x21d, 0x21e, 0x21f, 0x220];
     /// The Portal of Cowardice carries the spawn point, 1-4 tiles from the start-room centre in 2012 footage (capture: 3.5).
     pub const SPAWN_OFFSET: std::ops::RangeInclusive<f32> = 1.0..=4.0;
     /// Each loose arena wall stood in 8 of 8 and 7 of 8 rebuilt 2012 arenas.
     pub const LOOSE_WALL: f64 = 0.9;
-    /// Arachna's web spokes as (count, radius) rings from angle 0, world-fixed: outer 11.0, inner 6.5 in all five 2012 fights measured
-    /// (Xl8e3X8bGEw 2012-03-03 … oMP3hUIl3qI 2012-11-13).
-    pub const SPOKES: [(usize, f32); 2] = [(6, 11.), (3, 6.5)];
 }
 
 #[derive(serde::Deserialize)]
@@ -244,13 +217,23 @@ fn bounds(rooms: &[Room]) -> (i32, i32, i32, i32) {
     )
 }
 
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
-    Ok(build(content, seed)?.0)
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    Ok(build(content, generator, seed)?.0)
 }
 
 // The 2012 Wild Shadow guide: "a linear series of underground caverns"; Build 122 added aesthetic eggs and the boss
 // chamber's pillars: https://web.archive.org/web/20120224174134id_/http://forums.wildshadow.com/wiki/realm-mad-god/spider-den
-fn build(content: &Content, seed: u64) -> Result<(Map, Plan)> {
+fn build(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<(Map, Plan)> {
+    let [sac, retreat] = generator.placements("sac-and-exit")?;
+    let adults = generator.placements::<4>("adult-spiders")?;
     use tuning::*;
     const EMPTY: u8 = 0xff;
     const DIRT: u8 = 0x2f;
@@ -303,6 +286,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Plan)> {
         region: 0,
     };
     let mut map = Map {
+        elevation: None,
         width: WORLD,
         height: WORLD,
         cells: vec![blank.clone(); (WORLD * WORLD) as usize],
@@ -390,7 +374,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Plan)> {
         if !rng.gen_bool(SAC_FREE_ROOMS) {
             for &j in &free {
                 if rng.gen_bool(SACS) {
-                    map.cells[j].object = Some(EGG);
+                    map.cells[j].object = Some(sac);
                 }
             }
         }
@@ -399,7 +383,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Plan)> {
             .filter(|&j| map.cells[j].object.is_none())
             .collect();
         let mixed = rng.gen_range(SPECIES);
-        let species: Vec<u16> = ADULTS.choose_multiple(&mut rng, mixed).copied().collect();
+        let species: Vec<u16> = adults.choose_multiple(&mut rng, mixed).copied().collect();
         let n = *SPIDERS.choose(&mut rng).unwrap();
         for &j in free.choose_multiple(&mut rng, n) {
             map.cells[j].object = Some(*species.choose(&mut rng).unwrap());
@@ -416,7 +400,7 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Plan)> {
     let &spawn = spots
         .choose(&mut rng)
         .context("Spider Den start has no spawn spot")?;
-    (map.cells[at(spawn)].object, map.cells[at(spawn)].region) = (Some(0x703), 1);
+    (map.cells[at(spawn)].object, map.cells[at(spawn)].region) = (Some(retreat), 1);
     map.spawns
         .push((spawn.0 as f32 + 0.5, spawn.1 as f32 + 0.5));
     for c in &map.cells {
@@ -440,139 +424,22 @@ fn build(content: &Content, seed: u64) -> Result<(Map, Plan)> {
     Ok((map, plan))
 }
 
-// The modified 7.0 realm-src 1855c017 SpiderDen table supplies behavior, not an authenticated 123.5.1 map.
-pub fn initial_condition(kind: u16) -> i32 {
-    if kind == BOSS || (0x937..=0x93f).contains(&kind) {
-        crate::condition::bit(crate::condition::INVULNERABLE)
-    } else {
-        0
-    }
-}
-
-/// 2012 movement (8Uv7XGMabZI 2012-05-27 solo, Build 123.0.0; oMP3hUIl3qI 2012-11-13, Build 123.5.1; 59.6 px per tile).
-/// The current table was the 2011 wiki block divided by 10 with Charge's speed and range swapped; the wiki's speeds are about twice tiles/s.
-pub fn profile(kind: u16) -> Profile {
-    let (motion, speed, interval, range) = match kind {
-        EGG => (Motion::Stationary, 0., 0, 0.),
-        // Drifts ≈1.4 tiles/s without closing in while a player is within 8 tiles; the wiki's "Chase Range 8" closes to 8 from farther.
-        HATCHLING => (
-            Motion::Follow {
-                sight: 20.,
-                stop: 8.,
-                idle: tiles_per_s(1.5),
-                duration: 0,
-                cooldown: 0,
-            },
-            tiles_per_s(4.),
-            1000,
-            9.,
-        ),
-        // Charges lock the player's position and run through it: Black 9-10 tiles/s, Black Spotted 16-20 (range 9, cooldown 2 s per the 2011 wiki).
-        0x21d | 0x21f => (
-            Motion::Charge {
-                sight: 9.,
-                cooldown: 2000,
-                delay: 0,
-                stop: 0.1,
-                idle: tiles_per_s(if kind == 0x21d { 4. } else { 3.5 }),
-            },
-            tiles_per_s(if kind == 0x21d { 10. } else { 18. }),
-            400,
-            if kind == 0x21d { 3. } else { 9. },
-        ),
-        // Mostly ≤2 tiles/s; one approach at ≈7 to ≈1.5 tiles (LOW).
-        0x21e => (
-            Motion::Follow {
-                sight: 9.,
-                stop: 1.5,
-                idle: tiles_per_s(2.),
-                duration: 0,
-                cooldown: 0,
-            },
-            tiles_per_s(7.),
-            400,
-            9.,
-        ),
-        // Approaches at ≈4 tiles/s and holds about 3 tiles out (wiki "Chase Range 3").
-        0x220 => (
-            Motion::Follow {
-                sight: 9.,
-                stop: 3.,
-                idle: tiles_per_s(4.),
-                duration: 0,
-                cooldown: 0,
-            },
-            tiles_per_s(4.),
-            400,
-            9.,
-        ),
-        // She wanders the web at ≈5.5 tiles/s with frequent turns, usually 5-6 tiles from the centre and sometimes beyond 10; she never chases
-        // (5 fights; "Arachna does run away from you if you get too close", Wild Shadow forum 2012-08-15).
-        BOSS => (
-            Motion::WanderHome { radius: 10. },
-            tiles_per_s(5.5),
-            750,
-            20.,
-        ),
-        0x937..=0x93f => (Motion::Stationary, 0., WEB_INTERVAL, 30.),
-        _ => panic!("unregistered Spider Den actor {kind:#x}"),
-    };
-    Profile {
-        motion,
-        speed,
-        interval,
-        range,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn spider_den_fires_the_2012_patterns() {
-        use crate::encounter::attacks::schedule;
-        let degrees = |shots: Vec<(u8, f32)>| -> Vec<i32> {
-            let mut out: Vec<i32> = shots
-                .iter()
-                .map(|s| s.1.to_degrees().rem_euclid(360.).round() as i32 % 360)
-                .collect();
-            out.sort();
-            out
-        };
-        // Arachna is silent until the attack phase, then rings 12 Green Magic at fixed 0°, 30° … 330°.
-        assert!(
-            schedule(BOSS, 2700, ATTACK_MS - 50)
-                .unwrap()
-                .snapshot(1.)
-                .is_empty()
-        );
-        let ring = degrees(
-            schedule(BOSS, 2700, ATTACK_MS)
-                .unwrap()
-                .snapshot(1.)
-                .into_iter()
-                .filter(|s| s.0 == 0)
-                .collect(),
-        );
-        assert!((0..12).all(|k| ring.contains(&(k * 30))));
-        // Brown fires 3 shots 9° apart; the others one shot every 0.4 s.
-        assert_eq!(
-            degrees(schedule(0x220, 100, 0).unwrap().snapshot(0.)),
-            vec![0, 9, 351]
-        );
-        assert_eq!(schedule(0x21e, 200, 400).unwrap().snapshot(0.).len(), 1);
-        // The web: outer spokes at 11.0, inner at 6.5, a volley every 200 ms.
-        assert_eq!(tuning::SPOKES, [(6, 11.), (3, 6.5)]);
-        assert_eq!(WEB_INTERVAL, 200);
-    }
     use std::collections::VecDeque;
 
     #[test]
     fn spider_chain_follows_the_capture_rules() {
-        let content = Content::load(std::path::Path::new("data")).unwrap();
+        let content = crate::world::test_content();
         for seed in 0..32 {
-            let (map, plan) = build(&content, seed).unwrap();
+            let (map, plan) = build(
+                &content,
+                crate::dungeon::test_generator(&content, "spider-den"),
+                seed,
+            )
+            .unwrap();
             let cell = |(x, y): (i32, i32)| &map.cells[(y * map.width + x) as usize];
             let floor = |p| cell(p).ground != 0xff && cell(p).object != Some(WALL);
             let rooms = &plan.rooms;

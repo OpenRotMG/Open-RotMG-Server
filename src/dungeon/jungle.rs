@@ -3,41 +3,23 @@ use anyhow::{Result, ensure};
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 
 pub const COIL: u16 = 0xdc2;
-pub const EGG: u16 = 0xdc1;
-pub const SNAKE: u16 = 0xdc0;
 pub const BOSS: u16 = 0xdc3;
-pub const BOSS_TOTEM: u16 = 0xdc4;
-pub const SPIRIT: u16 = 0xdcc;
-pub const TOTEM: u16 = 0xdcd;
-pub const BABY: u16 = 0xdce;
-pub const BASILISK: u16 = 0xdcf;
-pub const SHAMAN: u16 = 0xdd0;
-pub const WARRIOR: u16 = 0xdd1;
-pub const HUNTER: u16 = 0xdd2;
-pub const FIRE: u16 = 0xdd3;
-pub const ROSTER: [u16; 14] = [
-    BOSS, BOSS_TOTEM, SPIRIT, TOTEM, BABY, BASILISK, SHAMAN, WARRIOR, HUNTER, FIRE, 0xdd8, COIL,
-    EGG, SNAKE,
-];
-
-pub fn foliage(kind: u16) -> bool {
-    matches!(kind, 0xdc8..=0xdcb | 0xdd8..=0xdda)
-}
-
-pub fn initial_condition(kind: u16) -> i32 {
-    if kind == BOSS_TOTEM {
-        crate::condition::bit(crate::condition::INVINCIBLE)
-    } else {
-        0
-    }
-}
 
 // The period guide establishes branching circular clearings; no original server generator is preserved.
 // https://web.archive.org/web/20120420071116/http://forums.wildshadow.com/wiki/realm-mad-god/forbidden-jungle
-pub fn generate(content: &Content, seed: u64) -> Result<Map> {
+pub(super) fn generate_for(
+    content: &Content,
+    generator: &crate::content::game::geometry::Generator,
+    seed: u64,
+) -> Result<Map> {
+    let [boss_kind, boss_totem, retreat] = generator.placements("boss-and-exit")?;
+    let foliage = generator.placements::<6>("forest-edge")?;
+    let [fire, shaman, hunter, warrior, totem, basilisk, baby] =
+        generator.placements("room-actors")?;
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let size = 120;
     let mut map = Map {
+        elevation: None,
         width: size,
         height: size,
         cells: vec![
@@ -110,11 +92,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
                 })
             {
                 map.cells[i].ground = 0x56;
-                map.cells[i].object = Some(
-                    *[0xdc9, 0xdcb, 0xdda, 0xdda, 0xdd9, 0xdd8]
-                        .choose(&mut rng)
-                        .unwrap(),
-                );
+                map.cells[i].object = Some(*foliage.choose(&mut rng).unwrap());
             } else if floors[i] && rng.gen_ratio(1, 35) {
                 map.cells[i].object = Some(rng.gen_range(0xdd4..=0xdd7));
             }
@@ -128,15 +106,15 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         let (cx, cy) = center(r);
         let placements = match i % 3 {
             0 => vec![
-                (0, 0, FIRE),
-                (-3, 0, SHAMAN),
-                (3, 0, HUNTER),
-                (0, -3, WARRIOR),
-                (0, 3, WARRIOR),
-                (-2, 2, SHAMAN),
+                (0, 0, fire),
+                (-3, 0, shaman),
+                (3, 0, hunter),
+                (0, -3, warrior),
+                (0, 3, warrior),
+                (-2, 2, shaman),
             ],
-            1 => vec![(0, 0, TOTEM)],
-            _ => vec![(0, 0, BASILISK), (-2, 0, BABY), (2, 0, BABY)],
+            1 => vec![(0, 0, totem)],
+            _ => vec![(0, 0, basilisk), (-2, 0, baby), (2, 0, baby)],
         };
         for (dx, dy, k) in placements {
             map.cells[((cy + dy) * size + cx + dx) as usize].object = Some(k);
@@ -153,7 +131,7 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
         }
     }
     for (dx, dy) in [(-5, -5), (5, -5), (-5, 5), (5, 5)] {
-        map.cells[((cy + dy) * size + cx + dx) as usize].object = Some(BOSS_TOTEM);
+        map.cells[((cy + dy) * size + cx + dx) as usize].object = Some(boss_totem);
     }
     for (dx, dy) in [
         (-7, -3),
@@ -167,9 +145,9 @@ pub fn generate(content: &Content, seed: u64) -> Result<Map> {
     ] {
         map.cells[((cy + dy) * size + cx + dx) as usize].object = Some(0xdc5);
     }
-    map.cells[(cy * size + cx) as usize].object = Some(BOSS);
+    map.cells[(cy * size + cx) as usize].object = Some(boss_kind);
     let c = &mut map.cells[(100 * size + 60) as usize];
-    c.object = Some(0x703);
+    c.object = Some(retreat);
     c.region = 1;
     for c in &map.cells {
         ensure!(

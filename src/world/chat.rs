@@ -426,7 +426,7 @@ impl Directory {
         };
         let packet = text_to(&name, id, 5, "", text, stars);
         let world = self.resolve(Target::Player(id))?;
-        world.ocean_response(id, text)?;
+        world.xml_chat(id, text)?;
         let pos = world.players[&id].pos;
         let mut recipients = 0;
         for player in world.players.values().filter(|p| {

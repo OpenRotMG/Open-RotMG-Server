@@ -1,0 +1,621 @@
+[
+  {
+    "object": "0207",
+    "name": "White Dragon Whelp",
+    "origin": "data/reference/release-7.0/xml/realm/high.xml:1438",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0208",
+    "name": "Juvenile White Dragon",
+    "origin": "data/reference/release-7.0/xml/realm/high.xml:1468",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0209",
+    "name": "Adult White Dragon",
+    "origin": "data/reference/release-7.0/xml/realm/high.xml:1502",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "020d",
+    "name": "Gray Blob",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:981",
+    "changes": [
+      "authored explicit Explode projectile0: sole selected Gray Blob Red Fire, implicit source slot now visible"
+    ]
+  },
+  {
+    "object": "0601",
+    "name": "Piratess",
+    "origin": "data/reference/release-7.0/xml/realm/shore.xml:31",
+    "changes": [
+      "coodown -> cooldown (2.5)"
+    ]
+  },
+  {
+    "object": "0614",
+    "name": "Goblin Mage",
+    "origin": "data/reference/release-7.0/xml/realm/low.xml:899",
+    "changes": [
+      "authored Follow predictive0.5 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "061e",
+    "name": "Dwarf Veteran",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:1419",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0620",
+    "name": "Tawny Warg",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:4",
+    "changes": [
+      "authored Follow predictive0.5 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0623",
+    "name": "Desert Werewolf",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:60",
+    "changes": [
+      "authored Follow predictive0.7 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0637",
+    "name": "Werelion",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:1732",
+    "changes": [
+      "authored Follow predictive0.5 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0639",
+    "name": "Werepanther",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:1679",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim",
+      "authored Follow predictive0.5 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0643",
+    "name": "Ogre Warrior",
+    "origin": "data/reference/release-7.0/xml/realm/high.xml:1107",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0646",
+    "name": "Minotaur",
+    "origin": "data/reference/release-7.0/xml/realm/high.xml:5",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0668",
+    "name": "Red Demon",
+    "origin": "data/reference/release-7.0/xml/monsters.xml:354",
+    "changes": [
+      "authored explicit missing Taunt listId -> Red Demon; same identity or Phoenix death/rebirth lineage, original implicit lookup unavailable"
+    ]
+  },
+  {
+    "object": "0675",
+    "name": "Phoenix Lord",
+    "origin": "data/reference/release-7.0/xml/monsters.xml:908",
+    "changes": [
+      "authored explicit missing Taunt listId -> Phoenix Lord; same identity or Phoenix death/rebirth lineage, original implicit lookup unavailable"
+    ]
+  },
+  {
+    "object": "0678",
+    "name": "Oasis Giant",
+    "origin": "data/reference/release-7.0/xml/monsters.xml:479",
+    "changes": [
+      "authored explicit missing Taunt listId -> Oasis Giant; same identity or Phoenix death/rebirth lineage, original implicit lookup unavailable"
+    ]
+  },
+  {
+    "object": "067d",
+    "name": "Cyclops God",
+    "origin": "data/reference/release-7.0/xml/monsters.xml:589",
+    "changes": [
+      "authored explicit missing Taunt listId -> Cyclops God; same identity or Phoenix death/rebirth lineage, original implicit lookup unavailable"
+    ]
+  },
+  {
+    "object": "068a",
+    "name": "Cave Pirate Moll",
+    "origin": "data/reference/release-7.0/xml/dungeons/pirateCave.xml:266",
+    "changes": [
+      "avoidWater=1 normalized to explicit documented boolean"
+    ]
+  },
+  {
+    "object": "068b",
+    "name": "Cave Pirate Parrot",
+    "origin": "data/reference/release-7.0/xml/dungeons/pirateCave.xml:279",
+    "changes": [
+      "avoidWater=1 normalized to explicit documented boolean"
+    ]
+  },
+  {
+    "object": "068c",
+    "name": "Cave Pirate Macaw",
+    "origin": "data/reference/release-7.0/xml/dungeons/pirateCave.xml:292",
+    "changes": [
+      "avoidWater=1 normalized to explicit documented boolean"
+    ]
+  },
+  {
+    "object": "068d",
+    "name": "Cave Pirate Monkey",
+    "origin": "data/reference/release-7.0/xml/dungeons/pirateCave.xml:305",
+    "changes": [
+      "avoidWater=1 normalized to explicit documented boolean"
+    ]
+  },
+  {
+    "object": "068e",
+    "name": "Cave Pirate Hunchback",
+    "origin": "data/reference/release-7.0/xml/dungeons/pirateCave.xml:318",
+    "changes": [
+      "avoidWater=1 normalized to explicit documented boolean"
+    ]
+  },
+  {
+    "object": "068f",
+    "name": "Cave Pirate Cabin Boy",
+    "origin": "data/reference/release-7.0/xml/dungeons/pirateCave.xml:331",
+    "changes": [
+      "avoidWater=1 normalized to explicit documented boolean"
+    ]
+  },
+  {
+    "object": "06c1",
+    "name": "Phoenix Reborn",
+    "origin": "data/reference/release-7.0/xml/monsters.xml:988",
+    "changes": [
+      "authored explicit missing Taunt listId -> Phoenix Lord; same identity or Phoenix death/rebirth lineage, original implicit lookup unavailable"
+    ]
+  },
+  {
+    "object": "06c4",
+    "name": "Giant Crab",
+    "origin": "data/reference/release-7.0/xml/realm/low.xml:105",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "06c7",
+    "name": "Sand Devil",
+    "origin": "data/reference/release-7.0/xml/realm/low.xml:210",
+    "changes": [
+      "authored Follow predictive0.7 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "06c8",
+    "name": "Easily Enraged Bunny",
+    "origin": "data/reference/release-7.0/xml/realm/low.xml:965",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "06c9",
+    "name": "Enraged Bunny",
+    "origin": "data/reference/release-7.0/xml/realm/low.xml:984",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "06d1",
+    "name": "Forest Nymph",
+    "origin": "data/reference/release-7.0/xml/realm/low.xml:1026",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0806",
+    "name": "Tutorial Loot Bag",
+    "origin": "data/reference/release-7.0/xml/tutorial/tutorial_objects.xml:67",
+    "changes": [
+      "omit only Tutorial Loot Bag0806 empty client Container Loot marker; selected/original property bytes preserved, not a server item/drop row"
+    ]
+  },
+  {
+    "object": "0909",
+    "name": "Malphas Missile",
+    "origin": "data/reference/release-7.0/xml/dungeons/abyssOfDemons.xml:44",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0918",
+    "name": "Stheno Pet",
+    "origin": "data/reference/release-7.0/xml/dungeons/snakePit.xml:310",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "091c",
+    "name": "Actual Lich",
+    "origin": "data/reference/release-7.0/xml/testingObjects.xml:1113",
+    "changes": [
+      "broadcast=0 normalized to explicit boolean"
+    ]
+  },
+  {
+    "object": "0924",
+    "name": "Actual Greater Nature Sprite",
+    "origin": "data/reference/release-7.0/xml/testingObjects.xml:1888",
+    "changes": [
+      "authored legacy-derived drop: private Quiver of Thunder at .001 without a damage threshold restores 79a4c92b:src/loot.rs:41; recovered testingObjects.xml defines no loot for 0x924, which would leave the item unobtainable"
+    ]
+  },
+  {
+    "object": "0925",
+    "name": "Deathmage",
+    "origin": "data/reference/release-7.0/xml/testingObjects.xml:1944",
+    "changes": [
+      "authored explicit missing Taunt listId -> Deathmage; same identity or Phoenix death/rebirth lineage, original implicit lookup unavailable"
+    ]
+  },
+  {
+    "object": "0932",
+    "name": "Oryx the Mad God 2",
+    "origin": "data/reference/release-7.0/xml/testingObjects.xml:13",
+    "changes": [
+      "broadcast=1 normalized to explicit boolean",
+      "authored explicit missing Taunt listId -> Oryx the Mad God 2; same identity or Phoenix death/rebirth lineage, original implicit lookup unavailable"
+    ]
+  },
+  {
+    "object": "0935",
+    "name": "Mysterious Crystal",
+    "origin": "data/reference/release-7.0/xml/realm/mountains.xml:626",
+    "changes": [
+      "broadcast=1 normalized to explicit boolean"
+    ]
+  },
+  {
+    "object": "0941",
+    "name": "Crystal Prisoner",
+    "origin": "data/reference/release-7.0/xml/testingObjects.xml:2614",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0945",
+    "name": "Horned Drake",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:1801",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0949",
+    "name": "Warrior Wasp",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:1144",
+    "changes": [
+      "authored Follow predictive0.3 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0951",
+    "name": "Sludget",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:1244",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim",
+      "authored Follow predictive0.5 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0952",
+    "name": "Great Lizard",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:525",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0953",
+    "name": "Bandit Leader",
+    "origin": "data/reference/release-7.0/xml/realm/shore.xml:139",
+    "changes": [
+      "exact selected Bandit 0x954 alias, not approximate name lookup"
+    ]
+  },
+  {
+    "object": "0954",
+    "name": "Bandit",
+    "origin": "data/reference/release-7.0/xml/realm/shore.xml:217",
+    "changes": [
+      "recovered Bandit Enemy is selected Bandit at the same numeric identity"
+    ]
+  },
+  {
+    "object": "0955",
+    "name": "Swarm",
+    "origin": "data/reference/release-7.0/xml/realm/mid.xml:1295",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0982",
+    "name": "Enforcer Bot 3000",
+    "origin": "data/reference/release-7.0/xml/dungeons/madLab.xml:933",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0990",
+    "name": "West Automated Defense Turret",
+    "origin": "data/reference/release-7.0/xml/dungeons/madLab.xml:1101",
+    "changes": [
+      "authored malformed Shoot cooldownJitter2 -> true under DOCX9/DECA boolean contract; original numeric jitter intent unresolved"
+    ]
+  },
+  {
+    "object": "0991",
+    "name": "East Automated Defense Turret",
+    "origin": "data/reference/release-7.0/xml/dungeons/madLab.xml:1119",
+    "changes": [
+      "authored malformed Shoot cooldownJitter2 -> true under DOCX9/DECA boolean contract; original numeric jitter intent unresolved"
+    ]
+  },
+  {
+    "object": "0992",
+    "name": "Mad Lab Open Wall",
+    "origin": "data/reference/release-7.0/xml/dungeons/madLab.xml:1145",
+    "changes": [
+      "DeleteObject Blue Torch Wall -> Lab Emergency Wall: the selected Mad Lab seals the Horrific Creation with Lab Emergency Walls; the recovered opener otherwise unchanged"
+    ]
+  },
+  {
+    "object": "0d19",
+    "name": "Jackal Lord",
+    "origin": "data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:500",
+    "changes": [
+      "acquirerange -> acquireRange (11)",
+      "PromoteRank2 heals Jackal Assassin, the same-source Veteran promotion destination; Jackal Master absent"
+    ]
+  },
+  {
+    "object": "0d1a",
+    "name": "Bloated Mummy",
+    "origin": "data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:568",
+    "changes": [
+      "numshots -> numShots (10)"
+    ]
+  },
+  {
+    "object": "0d26",
+    "name": "Tomb Support",
+    "origin": "data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:1091",
+    "changes": [
+      "broadcast=1 normalized to explicit boolean"
+    ]
+  },
+  {
+    "object": "0d27",
+    "name": "Tomb Attacker",
+    "origin": "data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:1633",
+    "changes": [
+      "broadcast=1 normalized to explicit boolean",
+      "defaultangle -> defaultAngle (180)"
+    ]
+  },
+  {
+    "object": "0d28",
+    "name": "Tomb Defender",
+    "origin": "data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:2052",
+    "changes": [
+      "broadcast=1 normalized to explicit boolean",
+      "defaultangle -> defaultAngle (180)",
+      "authored unavailable projectile6 -> selected2; retain timing/geometry, no historical equivalence claim"
+    ]
+  },
+  {
+    "object": "0d2c",
+    "name": "Inactive Sarcophagus",
+    "origin": "data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:2902",
+    "changes": [
+      "authored explicit missing Taunt listId -> Inactive Sarcophagus; same identity or Phoenix death/rebirth lineage, original implicit lookup unavailable"
+    ]
+  },
+  {
+    "object": "0d3a",
+    "name": "Eagle Sentry",
+    "origin": "data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:3440",
+    "changes": [
+      "authored unavailable projectile3 -> selected2; retain timing/geometry, no historical equivalence claim"
+    ]
+  },
+  {
+    "object": "0d3b",
+    "name": "Jackal Priest",
+    "origin": "data/reference/release-7.0/xml/dungeons/tombOfTheAncients.xml:3542",
+    "changes": [
+      "authored unavailable projectile2 -> selected0; retain timing/geometry, no historical equivalence claim",
+      "authored unavailable projectile3 -> selected1; retain timing/geometry, no historical equivalence claim"
+    ]
+  },
+  {
+    "object": "0d50",
+    "name": "Lord of the Lost Lands",
+    "origin": "data/reference/release-7.0/xml/encounters.xml:3",
+    "changes": [
+      "Shoot predictive=true normalized to documented numeric endpoint"
+    ]
+  },
+  {
+    "object": "0d51",
+    "name": "Protection Crystal",
+    "origin": "data/reference/release-7.0/xml/encounters.xml:289",
+    "changes": [
+      "Shoot predictive=true normalized to documented numeric endpoint"
+    ]
+  },
+  {
+    "object": "0d53",
+    "name": "Guardian of the Lost Lands",
+    "origin": "data/reference/release-7.0/xml/encounters.xml:370",
+    "changes": [
+      "aquireRange -> acquireRange (8)"
+    ]
+  },
+  {
+    "object": "0d61",
+    "name": "Hermit God",
+    "origin": "data/reference/release-7.0/xml/encounters.xml:1026",
+    "changes": [
+      "authored explicit name WaitForTentacles for Hermit God/NoPools first unnamed child at encounters.xml1130; preserve first-child order, afterTime2->ForceTent and parent2.4->Base, original name unavailable"
+    ]
+  },
+  {
+    "object": "0d64",
+    "name": "Hermit God Tentacle",
+    "origin": "data/reference/release-7.0/xml/encounters.xml:1384",
+    "changes": [
+      "Authored #1465 parent leash: reacquire the living owned Hermit outside 10 tiles; bound charges and return toward the five-tile orbit"
+    ]
+  },
+  {
+    "object": "0d78",
+    "name": "Oryx Stone Guardian Right",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxCastle.xml:133",
+    "changes": [
+      "Shoot predictive=true normalized to documented numeric endpoint"
+    ]
+  },
+  {
+    "object": "0d79",
+    "name": "Oryx Stone Guardian Left",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxCastle.xml:500",
+    "changes": [
+      "Shoot predictive=true normalized to documented numeric endpoint"
+    ]
+  },
+  {
+    "object": "0d7e",
+    "name": "Oryx Suit of Armor",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxCastle.xml:1048",
+    "changes": [
+      "aquireRange -> acquireRange (6)"
+    ]
+  },
+  {
+    "object": "0d7f",
+    "name": "Oryx Insect Commander",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxCastle.xml:1168",
+    "changes": [
+      "authored unavailable projectile1 -> selected0; retain timing/geometry, no historical equivalence claim"
+    ]
+  },
+  {
+    "object": "0d80",
+    "name": "Oryx Insect Minion",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxCastle.xml:1236",
+    "changes": [
+      "aquireRange -> acquireRange (4)"
+    ]
+  },
+  {
+    "object": "0d81",
+    "name": "Oryx Eye Warrior",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxCastle.xml:1296",
+    "changes": [
+      "aquireRange -> acquireRange (4)",
+      "aquireRange -> acquireRange (8)",
+      "remove dangling AttackOne -> Attack1; enclosing buzz exits to sibling search at5s"
+    ]
+  },
+  {
+    "object": "0d82",
+    "name": "Oryx Brute",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxCastle.xml:1357",
+    "changes": [
+      "aquireRange -> acquireRange (7)"
+    ]
+  },
+  {
+    "object": "0d83",
+    "name": "Oryx Knight",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxCastle.xml:1499",
+    "changes": [
+      "aquireRange -> acquireRange (7)"
+    ]
+  },
+  {
+    "object": "0d90",
+    "name": "Septavius the Ghost God",
+    "origin": "data/reference/release-7.0/xml/dungeons/undeadLair.xml:3",
+    "changes": [
+      "authored Follow predictive1 -> documented boolean nonzero=true (DOCX38); fractional original intent unresolved, no numeric strength claim"
+    ]
+  },
+  {
+    "object": "0de0",
+    "name": "Abomination of Oryx",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxWineCellar.xml:3",
+    "changes": [
+      "noCooldownJitter=1 normalized to explicit documented boolean"
+    ]
+  },
+  {
+    "object": "1706",
+    "name": "Thessal the Mermaid Goddess",
+    "origin": "data/reference/release-7.0/xml/dungeons/oceanTrench.xml:345",
+    "changes": [
+      "authored Part2/Part3 BigWait siblings: Part1 SetTag ini, 4s/playerWithin15 OR12s then Base"
+    ]
+  },
+  {
+    "object": "170a",
+    "name": "Sea Mare",
+    "origin": "data/reference/release-7.0/xml/dungeons/oceanTrench.xml:816",
+    "changes": [
+      "aquireRange -> acquireRange (5)"
+    ]
+  },
+  {
+    "object": "170e",
+    "name": "Grey Sea Slurp",
+    "origin": "data/reference/release-7.0/xml/dungeons/oceanTrench.xml:1209",
+    "changes": [
+      "aquireRange -> acquireRange (2)"
+    ]
+  },
+  {
+    "object": "1740",
+    "name": "Oryx the Mad God 1",
+    "origin": "data/reference/release-7.0/xml/dungeons/oryxChamber.xml:3",
+    "changes": [
+      "broadcast=1 normalized to explicit boolean",
+      "authored decimal typo correction bulletDance/grenade4b defaultAngle22,5 ->22.5; same source mirrored22.5-degree pattern, original numeric malformed"
+    ]
+  }
+]

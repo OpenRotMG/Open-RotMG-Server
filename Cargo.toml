@@ -27,9 +27,16 @@ tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
-# Keep test hot paths fast and backtraces useful without full debugger metadata.
+# Release archive cap is 64 MiB: thin LTO + 1 CGU measured 57,998,891 package bytes (~8 min clean build);
+# panic incidents keep file:line from embedded locations, not symbols.
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
+
+# Production closure rebuilds Realm geometry; keep assertions and optimize its test execution.
 [profile.test]
-opt-level = 1
+opt-level = 3
 debug = "line-tables-only"
 
 [dev-dependencies]

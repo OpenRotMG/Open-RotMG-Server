@@ -400,7 +400,7 @@ impl World {
         self.trade_ready(peer)?;
         let q = &self.players[&peer];
         ensure!(
-            self.name == "Nexus"
+            self.template_id() == Some("nexus")
                 && p.known.contains(&peer)
                 && p.pos.distance(q.pos) < 2.
                 && q.character.account == binding.0
@@ -795,8 +795,8 @@ impl World {
         let players = trade.players;
         let inventories = exchanged_items(&trade.items, &trade.offers)?;
         let plans = [
-            self.plan(players[0], inventories[0].clone(), None),
-            self.plan(players[1], inventories[1].clone(), None),
+            self.plan(players[0], inventories[0].clone(), None)?,
+            self.plan(players[1], inventories[1].clone(), None)?,
         ];
         for player in players {
             self.players.get_mut(&player).unwrap().pending = true;
@@ -899,7 +899,7 @@ mod community_tests {
 
     impl World {}
     async fn fixture() -> (World, Store, [i32; 2], [mpsc::Receiver<Packet>; 2]) {
-        let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+        let content = Arc::new(crate::world::test_content());
         let store = Store::open(std::path::Path::new(":memory:"), &content).unwrap();
         let map =
             Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
@@ -1241,6 +1241,7 @@ mod community_tests {
         use crate::bots::pursuits::market::Goods;
         let (mut w, _, ids, _) = fixture().await;
         w.name = "Nexus".into();
+        w.xml.template = Some("nexus".into());
         let [id, peer] = ids;
         let mut speed = [false; 12];
         speed[4..8].fill(true);
@@ -1295,7 +1296,7 @@ mod community_tests {
             } else {
                 items[4..8].fill(0xa21);
             }
-            let plan = w.plan(id, items, None);
+            let plan = w.plan(id, items, None).unwrap();
             w.players.get_mut(&id).unwrap().pending = true;
             let revision = store
                 .exchange(
@@ -1312,6 +1313,7 @@ mod community_tests {
             w.finish_inventory(plan, Ok(revision)).unwrap();
         }
         w.name = "Nexus".into();
+        w.xml.template = Some("nexus".into());
         w.players.get_mut(&ids[1]).unwrap().controller = Controller::Autonomous;
         w.updates(ids[1], true).unwrap();
         let session = [-2, ids[1], w.players[&ids[1]].character.id];

@@ -207,7 +207,8 @@ async fn review_informational_event_calls_survive_planning_changes_and_reach_ent
     app.world
         .for_player(id)
         .call(move |w| {
-            w.name = "Mad Lab".into();
+            w.name = "Renamed Lab".into();
+            w.set_test_template("mad-lab");
             let p = w.players.get_mut(&id).unwrap();
             p.character.level = 20;
             p.character.exp = crate::store::level_start(20)?;
@@ -443,7 +444,8 @@ async fn aftermath_request_composition_publishes_only_current_missing_own_goal()
         app.world
             .for_player(id)
             .call(move |w| {
-                w.name = "Wine Cellar".into();
+                w.name = "Renamed Cellar".into();
+                w.set_test_template("wine-cellar");
                 let p = w.players.get_mut(&id).unwrap();
                 p.character.level = 20;
                 p.character.items[0] = 0xa9e;

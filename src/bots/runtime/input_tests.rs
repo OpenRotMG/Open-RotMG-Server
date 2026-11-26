@@ -38,6 +38,7 @@ fn snake_pit_breaks_reachable_cover_before_chasing_distant_cover() {
     let mut world = World::new(
         content.clone(),
         Arc::new(Map {
+            elevation: None,
             width: 128,
             height: 128,
             cells,
@@ -48,6 +49,7 @@ fn snake_pit_breaks_reachable_cover_before_chasing_distant_cover() {
     let mut character = Character::fresh(content.get(0x31d).unwrap()).unwrap();
     character.id = 1;
     character.account = 1;
+    character.name = "CoverTester".into();
     character.items[0] = 0xa01;
     let player = world.enter(character, None).unwrap();
     world.players.get_mut(&player).unwrap().controller = Controller::Autonomous;
@@ -55,6 +57,7 @@ fn snake_pit_breaks_reachable_cover_before_chasing_distant_cover() {
     view.character.class = 0x31d;
     view.character.items[..4].copy_from_slice(&world.players[&player].character.items[..4]);
     view.map.name = "Snake Pit".into();
+    view.map.template = Some("snake-pit".into());
     view.objects[0].id = -10;
     view.objects[0].kind = 0x917;
     view.objects[0].position = target;
@@ -112,6 +115,7 @@ fn snake_pit_breaks_reachable_cover_before_chasing_distant_cover() {
     for _ in 0..40 {
         world.step();
     }
+    crate::world::drain_events(&mut world).unwrap();
     assert!(
         world.entities.get(&first).is_none(),
         "held fire should destroy the chosen wall"
@@ -164,6 +168,7 @@ fn off_axis_known_corner_admits_actual_safe_keys_and_makes_progress() {
     let mut w = World::new(
         content.clone(),
         Arc::new(Map {
+            elevation: None,
             width: 128,
             height: 128,
             cells,
@@ -241,6 +246,7 @@ fn full_occupy_wall_route_reaches_goal_through_ordinary_held_inputs() {
             let mut world = World::new(
                 Arc::new(content.clone()),
                 Arc::new(Map {
+                    elevation: None,
                     width: 128,
                     height: 128,
                     cells: cells.clone(),
@@ -376,7 +382,7 @@ fn mouse_aimed_spell_uses_actual_cursor_and_tome_does_not_move_it() {
         content::Map,
         world::{Controller, World},
     };
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let map = Arc::new(Map::load(std::path::Path::new("data/tutorial.wmap"), &content).unwrap());
     let mut w = World::new(content.clone(), map).unwrap();
     for (n, class) in [crate::content::WIZARD, crate::content::PRIEST]
@@ -435,7 +441,7 @@ fn trap_cast_waits_for_walkable_cursor_without_releasing_movement() {
         content::{Cell, Map},
         world::{Controller, World},
     };
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut cells = vec![
         Cell {
             ground: 1,
@@ -450,6 +456,7 @@ fn trap_cast_waits_for_walkable_cursor_without_releasing_movement() {
     let mut w = World::new(
         content.clone(),
         Arc::new(Map {
+            elevation: None,
             width: 16,
             height: 16,
             cells,
@@ -747,6 +754,7 @@ fn travel_beside_a_tree_row_off_center_keeps_moving() {
     let mut world = World::new(
         Arc::new(content.clone()),
         Arc::new(Map {
+            elevation: None,
             width: 128,
             height: 128,
             cells,
@@ -825,6 +833,7 @@ fn travel_through_a_one_tile_tree_corridor_off_center_keeps_moving() {
     let mut world = World::new(
         Arc::new(content.clone()),
         Arc::new(Map {
+            elevation: None,
             width: 128,
             height: 128,
             cells,

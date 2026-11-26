@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn vault_purchase_rollback_capacity_and_death_preserve_account_storage() {
     use crate::store::{InventoryWrite, Store};
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let path = std::env::temp_dir().join(format!("vault-{}.db", rand::random::<u64>()));
     let store = Store::open(&path, &content).unwrap();
     let account = store
@@ -32,6 +32,7 @@ async fn vault_purchase_rollback_capacity_and_death_preserve_account_storage() {
     )
     .unwrap();
     world.name = "Vault".into();
+    world.xml.template = Some("vault".into());
     world.owner = Some(account);
     world
         .load_vaults(store.vaults(account).await.unwrap())
@@ -166,8 +167,9 @@ async fn vault_purchase_rollback_capacity_and_death_preserve_account_storage() {
 }
 
 fn fixture(item: u16, minutes: i32, count: i32) -> World {
-    let content = Arc::new(Content::load(std::path::Path::new("data")).unwrap());
+    let content = Arc::new(crate::world::test_content());
     let mut map = Map {
+        elevation: None,
         width: 4,
         height: 4,
         cells: vec![

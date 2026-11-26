@@ -4,8 +4,14 @@ import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {connect} from '../../scripts/record-demo.mjs';
 const out=process.env.QA_RESULTS_DIR;
+// Realm events admit through a 25% lottery per qualifying defeat, then pick a reserved kind (realm_events.rs:140-151); the
+// Realm's prepared event_rng draws for seed 71 admit Pentaract on the first defeat, so the take is deterministic, not lucky.
+export const realmSeed=71;
 const spec={class:0x30e,level:20,seed:821,world:1,equipment:[0xc03,0xa2e,0xb05,0xac0],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
 let admissionActor,safePosition,rootEntity,admitted,startedWithoutPentaract,api,cheat,map,clients=0;
+// XML ownership is the parent chain (host -> towers/corpses -> Eyes), not the legacy quest encounter field.
+// A Realm snapshot holds ~280k entities, so parents resolve through a per-snapshot index (a nested scan never finishes).
+const indexes=new WeakMap(),owned=(m,e)=>{if(!indexes.has(m))indexes.set(m,new Map(m.entities.map(t=>[t.id,t])));return e.parent===rootEntity.id||indexes.get(m).get(e.parent)?.parent===rootEntity.id;};
 const save=(name,value)=>writeFile(join(out,name+'.json'),JSON.stringify(value,null,2));
 export async function prepare(api){
   const world=await api({op:'world_info',world:1}),[x,y]=world.spawn_points[0];safePosition={x,y};
@@ -70,22 +76,24 @@ async function admit(){
   const stats=(await api({op:'observe',actor:admissionActor})).character.stats;
   assert(stats.dexterity===50&&Math.ceil(90*(.5+1.5*stats.attack/75))<200,'Short Sword preparation must leave a safe positive-health margin');
   const assistance=[];
-  for(const tower of m.entities.filter(e=>e.quest===rootEntity.id&&e.kind===0xd5e).slice(1)){
+  // A 5000-HP tower survives the race's one-second volley (VPS take 19aa0c6b left it at 3267 HP), so all five are weakened,
+  // to at most 700 HP (Short Sword hits stay under 200) so the native share still clears the corpses' .10 loot threshold (actors.xml Pentaract Tower Corpse).
+  for(const tower of m.entities.filter(e=>e.kind===0xd5e&&owned(m,e))){
     const now=(await api({op:'observe',actor:admissionActor})).game_ms;
     if(now+40000>=until){await cheat(admissionActor,{kind:'teleport',position:safePosition});await expire();await cheat(admissionActor,{kind:'protection',condition:'invulnerable',duration_ms:60000});until=(await api({op:'observe',actor:admissionActor})).game_ms+60000;}
     await cheat(admissionActor,{kind:'teleport',position:{x:tower.pos.x-.1,y:tower.pos.y}});
     let e;
-    for(let n=0;n<80;n++){e=(await api({op:'inspect',actor:admissionActor})).diagnostic.entities.find(e=>e.id===tower.id);assert(e&&e.hp>0,'Ordinary assistance must not defeat a tower');if(e.hp<=200)break;await direct(0,100);await api({op:'act',actor:admissionActor,action:{command:'stop'},duration_ms:400,pauseAfter:true});}
-    assert(e.hp<=200,'Bounded ordinary assistance did not reach its declared health range');assistance.push({id:tower.id,hp:e.hp,damage:e.damage});
+    for(let n=0;n<80;n++){e=(await api({op:'inspect',actor:admissionActor})).diagnostic.entities.find(e=>e.id===tower.id);assert(e&&e.hp>0,'Ordinary assistance must not defeat a tower');if(e.hp<=700)break;await direct(0,100);await api({op:'act',actor:admissionActor,action:{command:'stop'},duration_ms:400,pauseAfter:true});}
+    assert(e.hp<=700,'Bounded ordinary assistance did not reach its declared health range');assistance.push({id:tower.id,hp:e.hp,damage:e.damage});
   }
-  await save('assistance',{method:'Before native LOAD, the direct admission participant ordinarily weakens four towers to 1–200 HP with Short Sword shots. The first tower stays at 5000 HP; native input delivers all five final defeats. Revival is qualified separately by take 7e093a7f88954a20bbde45cfb4dfe4c1.',towers:assistance});
+  await save('assistance',{method:'Before native LOAD, the direct admission participant ordinarily weakens all five towers to 1–700 HP with Short Sword shots; native input delivers all five final defeats and over a tenth of each tower HP, enough for the corpse .10-threshold loot rows. Revival is qualified separately by take 7e093a7f88954a20bbde45cfb4dfe4c1.',towers:assistance});
   await cheat(admissionActor,{kind:'teleport',position:safePosition});admitted=m;
 }
 export async function run(lobby){
   assert(admitted,'Before-navigation admission must finish before native gameplay');
   lobby.check('Realm starts without an admitted Pentaract',startedWithoutPentaract);
   let m=admitted;
-  const members=(m,kind)=>m.entities.filter(e=>e.quest===rootEntity.id&&e.kind===kind),towers=members(m,0xd5e);
+  const members=(m,kind)=>m.entities.filter(e=>e.kind===kind&&owned(m,e)),towers=members(m,0xd5e);
   lobby.check('ordinary admission retains five owned towers and an invisible controller',towers.length===5&&rootEntity.size===0);
   await save('accepted-prerequisites',{checks:[{take:'fce508e0d2f4451ea3664e8fee571f63',source:'5666cecd29f1479066494a80b9f8736e506c350c',scope:'Eleven partial checks retain activation, Eyes, projectiles, unprotected damage, red/yellow signals and contribution transfer; the take failed its pre-revival sample.'},{take:'7e093a7f88954a20bbde45cfb4dfe4c1',source:'a8e700334f44c5ac0a4c2d78ccd7e51a876a71c9',scope:'Pre-15-second corpse sample and full-HP/original-position revival passed; the take failed all-five completion.'}],scope:'Fresh prepared cooperative completion, rewards and reconnect only.'});
   const game=await lobby.join({...spec,position:{x:towers[0].pos.x-3,y:towers[0].pos.y},equipment:[0xc03,0xa2e,0xb05,0xac9]});
@@ -104,7 +112,7 @@ export async function run(lobby){
     throw Error('Native walking did not reach the observed tower');
   }
   await approach(towers[0].pos);m=await map(game.actor);
-  assert(members(m,0xd5e).length===5&&members(m,0xd60).length===0&&m.entities.find(e=>e.id===towers[0].id).hp===5000&&towers.slice(1).every(t=>{const e=m.entities.find(e=>e.id===t.id);return e.hp>0&&e.hp<=200;}),'Declared ordinary assistance must retain all five living towers');
+  assert(members(m,0xd5e).length===5&&members(m,0xd60).length===0&&towers.every(t=>{const e=m.entities.find(e=>e.id===t.id);return e.hp>0&&e.hp<=700;}),'Declared ordinary assistance must retain all five living towers');
   const packetStart=packets.length,start=await game.inspect(),v=await game.observe();
   assert.equal(v.character.stats.speed,158,'Prepared speed window expired before the bounded tower race');
   const solid=new Set(m.blocked.filter(([x,y])=>Math.abs(x-rootEntity.pos.x)<25&&Math.abs(y-rootEntity.pos.y)<25).map(p=>p.join(',')));
@@ -125,14 +133,15 @@ export async function run(lobby){
   assert(sequence.reduce((sum,s)=>sum+s.input.duration_ms,0)<=10000,'Native tower circuit exceeds the unchanged ten-second input budget');
   await game.act(sequence);
   await game.act({keys:[],duration_ms:500},{name:'pentaract-defeated',when:()=>true});m=await map(game.actor);await save('defeated',m);
-  game.check('all-five completion removes controller, towers, corpses and Eyes',!m.entities.some(e=>e.quest===rootEntity.id));
+  game.check('all-five completion removes controller, towers, corpses and Eyes',!m.entities.some(e=>e.id===rootEntity.id||owned(m,e)));
   game.check('no Ultra central tower appears',!m.entities.some(e=>e.kind===0xe01));
   const end=await game.inspect(),observerEnd=await observer.inspect();await save('completion',{start,end,observerStart,observerEnd,packets:packets.slice(packetStart)});
   game.check('native completion awards encounter XP',end.view.character.experience>start.view.character.experience);
   game.check('completion notification occurs once for the fighter',packets.slice(packetStart).filter(p=>p.id===63&&p.text==='Quest Complete!'&&p.player===end.diagnostic.player).length===1);
   game.check('contributor receives one qualified quest',end.diagnostic.character.lifetime.qualified_quests===start.diagnostic.character.lifetime.qualified_quests+1);
   game.check('noncontributor receives no qualified quest',observerEnd.diagnostic.character.lifetime.qualified_quests===observerStart.diagnostic.character.lifetime.qualified_quests);
-  const bags=m.entities.filter(e=>e.items.some(i=>i!==-1)&&towers.some(t=>Math.hypot(e.pos.x-t.pos.x,e.pos.y-t.pos.y)<.1));await save('tower-rewards',bags);
+  // XML loot bags rest up to a few tenths off the corpse (jobs ada95b69, a5d715cb: 0.19-0.67 tiles); towers stand 15 tiles apart.
+  const bags=m.entities.filter(e=>e.items.some(i=>i!==-1)&&towers.some(t=>Math.hypot(e.pos.x-t.pos.x,e.pos.y-t.pos.y)<1.5));await save('tower-rewards',bags);
   const visible=(await map(observer.actor)).entities;
   assert(bags.length,'No tower reward rolled; this take cannot verify pickup');
   game.check('private tower rewards exclude the noncontributor',bags.every(b=>(b.bag_owners.includes(end.view.session.account)||b.extra_stats.some(([stat,account])=>stat===54&&account===end.view.session.account))&&!visible.some(e=>e.id===b.id)));
@@ -145,7 +154,7 @@ export async function run(lobby){
   }
   const xp=(await game.observe()).character.experience,ended=packets.length;
   await game.act({keys:[],duration_ms:8000});await game.act({keys:[],duration_ms:8000});m=await map(game.actor);await save('finished',await game.inspect());
-  game.check('completed encounter stays removed beyond revival deadline',!m.entities.some(e=>e.quest===rootEntity.id));
+  game.check('completed encounter stays removed beyond revival deadline',!m.entities.some(e=>e.id===rootEntity.id||owned(m,e)));
   game.check('completion cannot repeat XP or qualified credit',(await game.observe()).character.experience===xp&&(await game.inspect()).diagnostic.character.lifetime.qualified_quests===end.diagnostic.character.lifetime.qualified_quests);
   game.check('no connections are sent after completion',!packets.slice(ended).some(p=>p.effect===3));
   game.check('prepared native character survives',(await game.observe()).lifecycle.alive);

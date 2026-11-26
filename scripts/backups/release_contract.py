@@ -33,8 +33,22 @@ def check(binary, data, directory, revision):
     bundle = backup.export(written / 'game.db', discord, archive, version, version, version)
     if len(bundle['game']['bot_minds']) != 2 or len(bundle['game']['trade_transactions']) != 1:
         raise RuntimeError('Release community payload missing from backup')
-    if bundle['schema'] != 24:
-        raise RuntimeError('Release backup is not schema24')
+    if bundle['schema'] != 25:
+        raise RuntimeError('Release backup is not schema 25')
+    if any(not bundle['game'][table] for table in backup.WORLD_TABLES):
+        raise RuntimeError('Release world journal fixture missing')
+    if not any(row['status'] == 0 for row in bundle['game']['world_events']):
+        raise RuntimeError('Release pending inventory journal missing')
+    if {row['status'] for row in bundle['game']['world_entitlements']} != {0, 1, 2}:
+        raise RuntimeError('Release must preserve picked, undelivered and expired entitlements')
+    if not any('compacted' in json.loads(row['payload']) for row in bundle['game']['world_events']):
+        raise RuntimeError('Release compacted settled journal event missing')
+    refused_export = directory / 'pending-world-account.json'
+    refused = subprocess.run([str(binary), '--local-save', 'export', str(written), str(data), '3', str(refused_export)], text=True, capture_output=True)
+    if refused.returncode == 0 or refused_export.exists():
+        raise RuntimeError('Portable account export dropped pending world entitlements')
+    if backup.snapshot(written / 'game.db', backup.RELOADED_GAME) != bundle['game']:
+        raise RuntimeError('Refused portable export mutated earned world state')
     if any(not bundle['game'][table] for table in backup.PORTABLE_TABLES):
         raise RuntimeError('Release portable metadata fixture must be nonempty in every table')
     if any(marker in gzip.decompress(archive.read_bytes()) for marker in [b'BACKUP_FIXTURE_SECRET', b'EMAIL_BACKUP_PRIVATE_CANARY', b'RESET_BACKUP_PRIVATE_CANARY']):

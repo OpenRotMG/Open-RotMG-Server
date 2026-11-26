@@ -1,10 +1,30 @@
 import assert from 'node:assert/strict';
-import {writeFile} from 'node:fs/promises';
+import {nativeMap} from './native-map.mjs';
+import {readFile,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {connect} from '../../scripts/record-demo.mjs';
 
 export const fixture={class:0x30e,level:5,seed:786,world:1,position:'spawn',equipment:[0xb08,0xa2e,0xb05,-1],backpack:Array(8).fill(-1),stats:[670,385,75,25,50,75,40,60]};
+export const realmSeed=106;
+export async function prepare(api){
+  const {spawn_points:[[x,y]]}=await api({op:'world_info',world:fixture.world});
+  const scout=await api({op:'spawn',spec:{...fixture,guid:'quest-scout',position:{x,y},controller:'direct',profile:null}});
+  const state=await api({op:'inspect',actor:scout.result.actor}),root=join(process.env.QA_RESULTS_DIR,'native');
+  const {origin}=JSON.parse(await readFile(join(root,'result.json'),'utf8'));
+  const headers={Authorization:'Bearer '+(await readFile(join(root,'state/control.token'),'utf8')).trim()};
+  const map=await nativeMap(origin,headers,state.diagnostic.player),blocked=new Set(map.blocked.map(p=>p.join(',')));
+  // Dwarf King, Swarm and Desert Werewolf have selected quest level five; position the player outside both the winner's local view and its 25-tile XP range.
+  const peers=map.entities.filter(e=>[0x623,0x955,0x61f].includes(e.kind));
+  for(const swarm of peers.filter(e=>e.kind===0x955))for(const [dx,dy] of [[0,32],[32,0],[-32,0],[0,-32]]){
+    const position={x:swarm.pos.x+dx,y:swarm.pos.y+dy};
+    if(position.x<1||position.y<1||blocked.has([Math.floor(position.x),Math.floor(position.y)].join(',')))continue;
+    if(peers.some(e=>e.id!==swarm.id&&Math.hypot(e.pos.x-position.x,e.pos.y-position.y)<=32))continue;
+    await writeFile(join(process.env.QA_RESULTS_DIR,'quest-prepared.json'),JSON.stringify({realmSeed,position,swarm}));
+    return {...fixture,position};
+  }
+  throw Error('No distant, naturally allocated Swarm with a clear prepared entrance');
+}
 const clients=[];
 export async function beforeNavigate({browser,signal}){
   const packets=[],streams=new Map();
@@ -51,14 +71,23 @@ export async function run(game){
   game.check('approaching quest activates the ordinary enemy',!!boss&&boss.activated!==null);
   const packetStart=clients[1].packets.length;
   for(let n=0;n<16;n++){
-    if(!(await game.inspect()).diagnostic.entities.some(o=>o.id===target.id))break;
-    await game.act({keys:[],duration_ms:500,target:{entity:target.id,camera_angle:-Math.PI/4,fire:true}});
+    const {view:{position,objects}}=await game.inspect(),visible=objects.find(o=>o.id===target.id&&o.hp>0);
+    if(!visible)break;
+    // A projectile can retire the Swarm before the controller resolves a second target snapshot.
+    const dx=visible.position.x-position.x,dy=visible.position.y-position.y;
+    const scale=50*Math.SQRT1_2/Math.max(1,50*Math.hypot(dx,dy)/110);
+    await game.act({keys:[],duration_ms:500,mouse:{x:300+(dx-dy)*scale,y:325+(dx+dy)*scale}});
   }
+  await game.act({keys:[],duration_ms:500});
   const defeated=await save('quest-defeated'),events=clients[1].packets.slice(packetStart);
+  await writeFile(join(process.env.QA_RESULTS_DIR,'quest-packets.json'),JSON.stringify(clients.map(c=>c.packets),null,2));
   game.check('native shooting defeats the assigned quest and awards XP',!defeated.diagnostic.entities.some(o=>o.id===target.id)&&defeated.view.character.experience>near.view.character.experience);
   game.check('completion notification occurs exactly once',events.filter(p=>p.id===63&&p.text==='Quest Complete!').length===1);
-  const completion=events.findIndex(p=>p.id===63&&p.text==='Quest Complete!'),reselection=events.findIndex(p=>p.id===34&&p.target!==target.id);
-  game.check('server publishes completion before reselection',completion>=0&&reselection>completion&&defeated.view.quest!==target.id);
+  const completion=events.findIndex(p=>p.id===63&&p.text==='Quest Complete!');
+  // Nearby moving quests can trade places before the defeated Swarm's final assignment.
+  const lastAssigned=events.findLastIndex(p=>p.id===34&&p.target===target.id);
+  const reselection=events.findIndex((p,i)=>i>lastAssigned&&p.id===34&&p.target!==target.id);
+  game.check('server publishes completion before reselection',completion>lastAssigned&&reselection>completion&&defeated.view.quest!==target.id);
   await game.act({keys:[],duration_ms:1500},{name:'quest-completed',when:()=>true});
   await game.act({keys:[],duration_ms:8000});
   await game.act({keys:[],duration_ms:8000});
