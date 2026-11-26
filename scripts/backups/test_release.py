@@ -1,4 +1,4 @@
-from contextlib import closing, nullcontext
+from contextlib import closing
 from copy import deepcopy
 import gzip
 import json
@@ -76,7 +76,7 @@ class ReleaseContract(unittest.TestCase):
 
     def test_actual_writer_backup_restore_and_reload(self):
         root = Path(__file__).resolve().parents[2]
-        with nullcontext(tempfile.mkdtemp(prefix='backup-release-', dir=os.environ['QA_RESULTS_DIR'])) as temporary:
+        with tempfile.TemporaryDirectory() as temporary:
             check(os.environ['OPENROTMG_BACKUP_BINARY'], root / 'data',
                   Path(temporary) / 'contract', 'a' * 40)
             with closing(sqlite3.connect(Path(temporary) / 'contract/written/game.db')) as db:
