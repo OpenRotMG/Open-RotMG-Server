@@ -468,6 +468,8 @@ pub(super) struct Steering {
     pub heading: f32,
     pub distance: f32,
     pub clearance: f32,
+    /// The middle of the train this player fights in.
+    pub cohesion: Option<Pos>,
 }
 
 /// Beyond the 15-tile pressed radius, so a recovering player stops backing off and can resume its plan.
@@ -530,8 +532,13 @@ pub(super) fn movement(
         };
         // Retain safe steering, not physical inertia; urgent avoidance stays first: https://www.red3d.com/cwr/steer/gdc99/
         let continuity = steering.map_or(0., |s| (direction - s.heading).cos() * 3.);
+        // Circling a god on its own side of the fight spread one train over 20 tiles.
+        let straying = steering
+            .and_then(|s| s.cohesion)
+            .map_or(0., |c| (point.distance(c) - 4.).max(0.) * 3.);
         let score = safety.min(4.) * 12. + separation.min(2.) * 5. + spacing + continuity + bombs
-            - crowding * 5.;
+            - crowding * 5.
+            - straying;
         if best.is_none_or(|(prior, _)| score > prior) {
             best = Some((score, point));
         }

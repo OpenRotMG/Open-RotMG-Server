@@ -9,6 +9,11 @@ const CROWD_RANGE: f32 = 12.;
 const SOLO_GATHER_RANGE: f32 = 40.;
 const SCHOOL_RANGE: f32 = 30.;
 
+pub(super) struct Train {
+    pub members: Vec<(i32, Pos)>,
+    pub centre: Pos,
+    pub aboard: bool,
+}
 pub(super) struct Crowd {
     pub knows_minimap: bool,
     pub bands: bands::Bands,
@@ -193,19 +198,63 @@ impl Crowd {
                     .total_cmp(&b.position.distance(objective))
             })
     }
+    /// Godlands crowds linked hand to hand, this player included, biggest first. Equal batches go to the one holding
+    /// the lowest id, so every farmer agrees which batch is the train without anyone being made its leader.
+    pub fn train(&self, v: &PlayerView) -> Train {
+        let mut left: Vec<_> = self
+            .markers(v)
+            .filter(|p| bands::in_godlands(v, p.position))
+            .map(|p| (p.id, p.position))
+            .chain([(v.session.player, v.position)])
+            .collect();
+        let mut batches = vec![];
+        while let Some(first) = left.pop() {
+            let mut batch = vec![first];
+            let mut linked = 0;
+            while linked < batch.len() {
+                let at = batch[linked].1;
+                let near;
+                (near, left) = left
+                    .into_iter()
+                    .partition(|q| q.1.distance(at) < CROWD_RANGE);
+                batch.extend(near);
+                linked += 1;
+            }
+            batches.push(batch);
+        }
+        let members = batches
+            .into_iter()
+            .min_by_key(|b| (std::cmp::Reverse(b.len()), b.iter().map(|p| p.0).min()))
+            .expect("the player is always in a batch");
+        let count = members.len() as f32;
+        Train {
+            centre: Pos {
+                x: members.iter().map(|p| p.1.x).sum::<f32>() / count,
+                y: members.iter().map(|p| p.1.y).sum::<f32>() / count,
+            },
+            aboard: members.iter().any(|p| p.0 == v.session.player),
+            members,
+        }
+    }
+    /// A farmer away from the train teleports into its middle.
     pub fn godlands<'a>(
         &self,
         v: &'a PlayerView,
+        train: &Train,
         clear: impl Fn(Pos) -> bool,
     ) -> Option<&'a PlayerMarker> {
-        if !self.knows_minimap || !v.map.allow_teleport {
+        if !self.knows_minimap
+            || !v.map.allow_teleport
+            || train.aboard
+            || train.centre.distance(v.position) <= 24.
+        {
             return None;
         }
         v.player_markers
             .iter()
             .filter(|p| {
                 let (x, y) = tile(p.position);
-                p.position.distance(v.position) > 24.
+                train.members.iter().any(|m| m.0 == p.id)
                     && self.bands.teleportable(v, p.position)
                     && clear(p.position)
                     // The destination can move before teleport is processed; leave room on safe Godlands ground.
@@ -214,15 +263,9 @@ impl Crowd {
                     })
             })
             .min_by(|a, b| {
-                // A train has moved on by the time a straggler lands where it stood.
-                self.walking(b.id)
-                    .is_some()
-                    .cmp(&self.walking(a.id).is_some())
-                    .then(
-                        a.position
-                            .distance(v.position)
-                            .total_cmp(&b.position.distance(v.position)),
-                    )
+                a.position
+                    .distance(train.centre)
+                    .total_cmp(&b.position.distance(train.centre))
                     .then(a.id.cmp(&b.id))
             })
     }
