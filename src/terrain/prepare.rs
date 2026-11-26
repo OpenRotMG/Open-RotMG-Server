@@ -565,14 +565,12 @@ impl ScopedLava {
             "invalid World{} lava map dimensions",
             self.world
         );
+        self.validate_support_cells(map.cells.iter())
+    }
+    fn validate_support_cells<'a>(&self, cells: impl Iterator<Item = &'a Cell>) -> Result<()> {
         let mut support = Sha256::new();
         let mut count = 0;
-        for (i, c) in map
-            .cells
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.ground == 244)
-        {
+        for (i, c) in cells.enumerate().filter(|(_, c)| c.ground == 244) {
             ensure!(
                 self.accepts(c),
                 "unapproved World{} lava cell at {},{}",
@@ -1352,6 +1350,24 @@ fn encode_reviewed(
         .enumerate()
         .map(|(i, e)| (e, i as i16))
         .collect();
+    let mut raw = wmap_header(&dict, map.width, map.height);
+    for c in &map.cells {
+        let name = match c.object {
+            Some(kind) => content.get(kind)?.name.clone(),
+            None => String::new(),
+        };
+        raw.extend(dict[&(c.ground, name, c.config.clone(), c.terrain, c.region)].to_le_bytes());
+    }
+    ensure!(
+        raw.len() <= 16 * 1024 * 1024,
+        "output exceeds expanded WMAP limit"
+    );
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    encoder.write_all(&raw)?;
+    Ok((encoder.finish()?, dict.len()))
+}
+
+fn wmap_header(dict: &BTreeMap<Entry, i16>, width: i32, height: i32) -> Vec<u8> {
     let mut raw = Vec::new();
     raw.extend((dict.len() as i16).to_le_bytes());
     for (ground, name, config, terrain, region) in dict.keys() {
@@ -1367,22 +1383,9 @@ fn encode_reviewed(
         }
         raw.extend([*terrain, *region]);
     }
-    raw.extend(map.width.to_le_bytes());
-    raw.extend(map.height.to_le_bytes());
-    for c in &map.cells {
-        let name = match c.object {
-            Some(kind) => content.get(kind)?.name.clone(),
-            None => String::new(),
-        };
-        raw.extend(dict[&(c.ground, name, c.config.clone(), c.terrain, c.region)].to_le_bytes());
-    }
-    ensure!(
-        raw.len() <= 16 * 1024 * 1024,
-        "output exceeds expanded WMAP limit"
-    );
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
-    encoder.write_all(&raw)?;
-    Ok((encoder.finish()?, dict.len()))
+    raw.extend(width.to_le_bytes());
+    raw.extend(height.to_le_bytes());
+    raw
 }
 
 #[derive(Deserialize)]
@@ -1872,6 +1875,16 @@ fn reviewed_map(
     content: &Content,
 ) -> Result<(Map, Option<ScopedLava>)> {
     let dimensions = recipe.dimensions()?;
+    let (dictionary, raw, lava) = reviewed_inputs(root, recipe, content, dimensions)?;
+    Ok((indexed_map(&raw, &dictionary, dimensions)?, lava))
+}
+
+fn reviewed_inputs(
+    root: &Path,
+    recipe: &ReviewedRecipe,
+    content: &Content,
+    dimensions: [usize; 2],
+) -> Result<(Vec<Cell>, Vec<u8>, Option<ScopedLava>)> {
     let bytes = index_bytes(dimensions)?;
     let inputs = &recipe.inputs;
     let cells = hashed_input(
@@ -1895,7 +1908,79 @@ fn reviewed_map(
     let indices = &inputs.indices;
     let compressed = hashed_input(root, &indices.path, &indices.sha256, bytes + 4096)?;
     let raw = inflate(&compressed, bytes, bytes + 4096, &indices.expanded_sha256)?;
-    Ok((indexed_map(&raw, &dictionary, dimensions)?, lava))
+    Ok((dictionary, raw, lava))
+}
+
+fn validate_reviewed_wmap(
+    root: &Path,
+    recipe: &ReviewedRecipe,
+    content: &Content,
+    bytes: &[u8],
+    dimensions: [usize; 2],
+) -> Result<(BTreeSet<u16>, Option<ScopedLava>)> {
+    let (dictionary, mut indices, lava) = reviewed_inputs(root, recipe, content, dimensions)?;
+    let index = |pair: &[u8]| u16::from_le_bytes([pair[0], pair[1]]) as usize;
+    let mut used = vec![false; dictionary.len()];
+    for (i, pair) in indices.chunks_exact(2).enumerate() {
+        *used.get_mut(index(pair)).with_context(|| {
+            let width = dimensions[0];
+            format!(
+                "UNKNOWN dictionary index {} at {},{}",
+                index(pair),
+                i % width,
+                i / width
+            )
+        })? = true;
+    }
+    if let Some(lava) = &lava {
+        lava.validate_content(content)?;
+        lava.validate_support_cells(indices.chunks_exact(2).map(|pair| &dictionary[index(pair)]))?;
+    }
+    let mut objects = BTreeSet::new();
+    let mut validated_objects = BTreeSet::new();
+    let entries = dictionary
+        .iter()
+        .zip(used)
+        .map(|(cell, used)| {
+            used.then(|| {
+                objects.extend(cell.object);
+                entry(cell, content, &mut validated_objects, lava.as_ref())
+            })
+            .transpose()
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let canonical = entries.iter().flatten().cloned().collect::<BTreeSet<_>>();
+    let dict: BTreeMap<_, _> = canonical
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| (e, i as i16))
+        .collect();
+    let remap: Vec<_> = entries
+        .iter()
+        .map(|e| e.as_ref().map(|e| dict[e].to_le_bytes()))
+        .collect();
+    for pair in indices.chunks_exact_mut(2) {
+        pair.copy_from_slice(&remap[index(pair)].context("missing used WMAP entry")?);
+    }
+    let header = wmap_header(&dict, dimensions[0] as i32, dimensions[1] as i32);
+    // CI checks the canonical compressed bytes; linking compares the audited cells without recompressing.
+    let count = header.len() + indices.len();
+    ensure!(
+        count <= 16 * 1024 * 1024,
+        "output exceeds expanded WMAP limit"
+    );
+    let mut expanded = Vec::with_capacity(count + 1);
+    let mut decoder = flate2::Decompress::new(true);
+    let status = decoder.decompress_vec(bytes, &mut expanded, flate2::FlushDecompress::Finish)?;
+    ensure!(
+        status == flate2::Status::StreamEnd
+            && decoder.total_in() as usize == bytes.len()
+            && expanded.len() == count
+            && expanded.starts_with(&header)
+            && expanded[header.len()..] == indices,
+        "pinned WMAP cells do not match the reconstructed recipe"
+    );
+    Ok((objects, lava))
 }
 
 #[derive(Debug, Serialize)]
@@ -1975,65 +2060,65 @@ pub(crate) fn compile_geometry_recipe(
         let bytes = bounded_read(&safe_path(&root, file)?, 16 * 1024 * 1024)?;
         inputs.insert(format!("realms/{file}"), sha256(&bytes));
     }
-    let (map, lava) = match &recipe {
+    let bytes = hashed_input(&root, recipe.output(), expected_output, 16 * 1024 * 1024)
+        .with_context(|| format!("pinned WMAP output {}", recipe.contract()))?;
+    let (dimensions, objects, lava, elevation, reconstructed_elevation) = match &recipe {
         Recipe::ClassicV1(r) => {
             let elevation = load_layer(&root, &r.layers.elevation)?;
             let moisture = load_layer(&root, &r.layers.moisture)?;
             let overrides = load_layer(&root, &r.layers.overrides)?;
+            let (map, _) = assemble(
+                &elevation,
+                &moisture,
+                &overrides,
+                r.width,
+                r.height,
+                r.scenery_seed,
+            )?;
+            ensure!(
+                encode(&map, content)?.0 == bytes,
+                "{} pinned WMAP differs from reconstructed recipe",
+                recipe.contract()
+            );
             (
-                assemble(
-                    &elevation,
-                    &moisture,
-                    &overrides,
-                    r.width,
-                    r.height,
-                    r.scenery_seed,
-                )?
-                .0,
+                [r.width, r.height],
+                map.cells.iter().filter_map(|c| c.object).collect(),
+                None,
+                map.elevation,
                 None,
             )
         }
         Recipe::ReviewedCellsV1(r) => {
-            reviewed_map(&root, r, content).with_context(|| recipe.contract())?
-        }
-    };
-    let bytes = match &recipe {
-        Recipe::ClassicV1(_) => encode(&map, content)?,
-        Recipe::ReviewedCellsV1(r) => encode_reviewed(&map, content, lava.as_ref(), Some(r))?,
-    }
-    .0;
-    let output_sha256 = sha256(&bytes);
-    ensure!(
-        output_sha256 == expected_output,
-        "{} regenerated output SHA-256 mismatch: expected {expected_output}, got {output_sha256}",
-        recipe.contract()
-    );
-    let reconstructed_elevation = match &recipe {
-        Recipe::ClassicV1(_) => None,
-        Recipe::ReviewedCellsV1(_) => {
+            let dimensions = r.dimensions()?;
+            let (objects, lava) = validate_reviewed_wmap(&root, r, content, &bytes, dimensions)
+                .with_context(|| recipe.contract())?;
             let source = super::elevation::SourceElevation::load(
                 data,
                 &format!("realms/{}", recipe.output()),
-                &output_sha256,
-                [map.width as usize, map.height as usize],
+                expected_output,
+                dimensions,
             )?;
             inputs.extend(source.input_sha256.clone());
-            Some(std::sync::Arc::new(source))
+            (
+                dimensions,
+                objects,
+                lava,
+                None,
+                Some(std::sync::Arc::new(source)),
+            )
         }
     };
-    let compiled = CompiledGeometryRecipe {
+    Ok(CompiledGeometryRecipe {
         recipe,
-        dimensions: [map.width as u32, map.height as u32],
-        objects: map.cells.iter().filter_map(|c| c.object).collect(),
+        dimensions: dimensions.map(|n| n as u32),
+        objects,
         input_sha256: inputs,
-        output_sha256,
+        output_sha256: expected_output.to_owned(),
         bytes: bytes.into(),
         lava,
-        elevation: map.elevation.clone(),
+        elevation,
         reconstructed_elevation,
-    };
-    compiled.validate_loaded(&map, content)?;
-    Ok(compiled)
+    })
 }
 
 pub(crate) fn run(args: &[String]) -> Result<bool> {
