@@ -1486,9 +1486,8 @@ pub(super) fn compile(
                         "height",
                     ])?;
                     e.leaf()?;
-                    let root = data_root.context(
-                        "Reconstruction requires the owned data root, not a frozen map snapshot",
-                    )?;
+                    let root = data_root
+                        .context("Reconstruction requires the owned recipe and pinned WMAP data")?;
                     let recipe = crate::terrain::prepare::compile_geometry_recipe(
                         root,
                         e.required("recipe")?,
