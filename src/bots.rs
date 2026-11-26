@@ -2172,7 +2172,14 @@ impl Brain {
             }
         }
         self.crowd.observe_gathering(v, &self.goal);
-        if approaching_godlands
+        // A farmer under way is not called back by the crowd it left.
+        let leading = farmer && self.travel.as_ref().is_some_and(|t| t.0 == Goal::Venture);
+        let train = farmer.then(|| self.crowd.train(v));
+        // Whoever goes with a walker is how a train moves on, not a straggler from the batch it left.
+        let walking_on = matches!(self.goal, Goal::Follow(id) if self.crowd.walking(id).is_some());
+        if let Some(train) = &train
+            && !leading
+            && !walking_on
             && realm_quest.is_none()
             && !committed
             && !s.threatened
@@ -2181,9 +2188,7 @@ impl Brain {
             && decision.item.is_none()
             && v.time_ms >= self.next_teleport
             && !choices.iter().any(|(score, _, _)| *score >= 95.)
-            // Live: farmers a few steps off the narrow Godlands teleported back into the pile once a minute.
-            && !bands::near_godlands(v, 24.)
-            && let Some(marker) = self.crowd.godlands(v, |p| {
+            && let Some(marker) = self.crowd.godlands(v, train, |p| {
                 !self.blocked.contains_key(&tile(p))
                     && enemies.iter().all(|e| e.position.distance(p) > 12.)
             })
@@ -2201,8 +2206,22 @@ impl Brain {
             decision.journey = Some(Journey::Regroup(marker.id));
             return Ok(decision);
         }
-        // A farmer under way is not called back by the crowd it left.
-        let leading = farmer && self.travel.as_ref().is_some_and(|t| t.0 == Goal::Venture);
+        // Live: Godlands farmers split into two or three batches; one train within a few steps of its middle farms faster.
+        if !leading
+            && !walking_on
+            && let Some(train) = train.as_ref().filter(|t| t.members.len() >= 2)
+            && v.position.distance(train.centre) > 5.
+            && let Some(&(id, position)) = train
+                .members
+                .iter()
+                .filter(|m| m.0 != v.session.player)
+                .min_by(|a, b| {
+                    a.1.distance(train.centre)
+                        .total_cmp(&b.1.distance(train.centre))
+                })
+        {
+            choices.push((70., Goal::Follow(id), position));
+        }
         // Players go where the people are; exploring alone is what is left when nobody suitable is on the minimap.
         if !committed
             // Approaching the quest's fight is the quest logic's job, landing well outside it.
@@ -2484,6 +2503,10 @@ impl Brain {
                                 + 0.5)
                                 .max(1.25),
                             clearance: self.mind.cognition.pickup_clearance,
+                            cohesion: train
+                                .as_ref()
+                                .filter(|t| t.aboard && t.members.len() >= 2)
+                                .map(|t| t.centre),
                         }),
                     );
                     self.steering =

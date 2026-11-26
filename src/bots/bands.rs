@@ -63,8 +63,20 @@ pub(super) fn leg(v: &PlayerView, course: f32, open: impl Fn(Pos) -> bool) -> Op
             .copied()
     };
     let ahead = |reach| furthest(reach).filter(|p| along(p) > 0.);
+    // Live: another Realm's Godlands pieces lie over 300 tiles apart, and its gods gathered in the piece nobody farmed.
+    let next_piece = || {
+        v.map
+            .godland_route
+            .iter()
+            .filter(|p| along(p) > 0. && open(**p))
+            .min_by(|a, b| a.distance(v.position).total_cmp(&b.distance(v.position)))
+            .copied()
+    };
     // Live: one Realm's Godlands lies in two pieces 145 tiles apart.
-    ahead(64.).or_else(|| ahead(200.)).or_else(|| furthest(64.))
+    ahead(64.)
+        .or_else(|| ahead(200.))
+        .or_else(next_piece)
+        .or_else(|| furthest(64.))
 }
 fn region(p: Pos) -> TilePoint {
     ((p.x / REGION).floor() as i16, (p.y / REGION).floor() as i16)
@@ -353,16 +365,19 @@ mod tests {
     }
 
     #[test]
-    fn a_godlands_leg_keeps_its_course_crosses_a_gap_and_turns_only_at_the_end() {
+    fn a_godlands_leg_keeps_its_course_crosses_to_the_next_piece_and_turns_only_at_the_end() {
         let (_, mut v) = quest_tests::fixture();
         let spot = |x: f32| Pos { x, y: 100.5 };
-        v.map.godland_route = Arc::new([52.5, 124.5, 148.5, 252.5, 300.5].map(spot).to_vec());
+        let route = [52.5, 124.5, 148.5, 252.5, 300.5, 700.5, 760.5];
+        v.map.godland_route = Arc::new(route.map(spot).to_vec());
         v.position = spot(100.5);
         let x = |leg: Option<Pos>| leg.map(|p| p.x);
         assert_eq!(x(leg(&v, 0., |_| true)), Some(148.5));
         assert_eq!(x(leg(&v, std::f32::consts::PI, |_| true)), Some(52.5));
         assert_eq!(x(leg(&v, 0., |p| p.x != 148.5)), Some(300.5));
         v.position = spot(300.5);
-        assert_eq!(x(leg(&v, 0., |_| true)), Some(252.5));
+        assert_eq!(x(leg(&v, 0., |_| true)), Some(700.5));
+        v.position = spot(760.5);
+        assert_eq!(x(leg(&v, 0., |_| true)), Some(700.5));
     }
 }

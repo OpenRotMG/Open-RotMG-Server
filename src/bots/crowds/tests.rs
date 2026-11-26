@@ -329,3 +329,33 @@ fn a_god_in_sight_outranks_standing_with_the_pile() {
     v.objects.push(god);
     assert_eq!(step(&mut b, &mut v, &c).goal, Goal::Hunt(40));
 }
+
+#[test]
+fn a_smaller_godlands_batch_teleports_into_the_middle_of_the_bigger_one() {
+    // Live: level 20s farmed the Godlands in two or three batches that never met.
+    for (mates, joins) in [(0, true), (2, true), (5, false)] {
+        let (c, mut v, mut b) = farmer(7, vec![]);
+        v.position.x = 100.5;
+        v.player_markers
+            .extend((0..mates).map(|i| marker(20 + i, 100.5, 57.5 + 2. * i as f32)));
+        let d = step(&mut b, &mut v, &c);
+        if joins {
+            // Marker 3 stands nearest the pile's middle with Godlands all round.
+            assert!(matches!(d.journey, Some(Journey::Regroup(3))), "{mates}");
+        } else {
+            // Equal batches: the one holding the lowest id, this player's, is the train.
+            assert!(d.journey.is_none(), "{mates}");
+        }
+    }
+}
+
+#[test]
+fn a_farmer_off_the_middle_of_its_train_closes_up() {
+    let (c, mut v, mut b) = farmer(7, vec![]);
+    v.position.x = 68.5;
+    let d = step(&mut b, &mut v, &c);
+    assert_eq!(d.goal, Goal::Follow(3));
+    assert!(d.movement.is_some_and(|p| p.x < v.position.x));
+    v.position.x = 64.5;
+    assert!(step(&mut b, &mut v, &c).movement.is_none());
+}
