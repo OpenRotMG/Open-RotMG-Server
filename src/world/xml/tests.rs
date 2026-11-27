@@ -49,7 +49,8 @@ pub(crate) fn drain_events(w: &mut World) -> Result<()> {
             let store=crate::store::Store::open(&path,&w.content)?;
             let db=rusqlite::Connection::open(&path)?;
             for p in w.players.values() {
-                let ch=&p.character;
+                // The Store holds the last committed history; shots fired since are not yet saved.
+                let ch=&crate::store::Character{lifetime:p.committed_lifetime.clone(),..p.character.clone()};
                 db.execute("INSERT OR IGNORE INTO accounts(id,guid,name) VALUES(?1,?2,?3)",rusqlite::params![ch.account,format!("world-component-{}",ch.account),ch.name])?;
                 db.execute("INSERT OR IGNORE INTO account_fame VALUES(?1,0,0)",[ch.account])?;
                 db.execute("INSERT OR IGNORE INTO vaults(account,chest,items) VALUES(?1,0,'[-1,-1,-1,-1,-1,-1,-1,-1]')",[ch.account])?;
