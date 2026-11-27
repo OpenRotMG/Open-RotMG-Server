@@ -36,16 +36,10 @@ fn kinds(b: &Behavior) -> &[u16] {
     }
 }
 impl World {
-    /// Every parented entity is in timed_ids (Tracked::set), so child counts avoid scanning Realm scenery.
-    fn xml_parented(&self) -> impl Iterator<Item = &Entity> {
-        self.timed_ids.iter().filter_map(|id| self.entities.get(id))
-    }
     fn xml_child_count(&self, parent: i32, kinds: &[u16]) -> usize {
-        self.xml_parented()
+        self.child_entities(parent)
             .filter(|e| {
-                e.parent == Some(parent)
-                    && kinds.contains(&e.kind)
-                    && (e.hp > 0 || self.content.objects[&e.kind].hp == 0)
+                kinds.contains(&e.kind) && (e.hp > 0 || self.content.objects[&e.kind].hp == 0)
             })
             .count()
             + self
@@ -56,9 +50,7 @@ impl World {
                 .count()
     }
     pub(super) fn xml_owned_count(&self, parent: i32) -> usize {
-        self.xml_parented()
-            .filter(|e| e.parent == Some(parent))
-            .count()
+        self.child_entities(parent).count()
             + self
                 .xml
                 .births

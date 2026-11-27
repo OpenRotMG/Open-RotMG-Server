@@ -200,3 +200,22 @@ fn xml_cutover_invalid_owned_key_route_does_not_reserve_or_spend() {
         );
     }
 }
+
+#[test]
+fn child_counts_follow_adoption_reparenting_and_removal() {
+    let (mut w, _, first) = fixture("<Behavior>RemainVisible</Behavior>");
+    let second = spawn(&mut w, 0x600, 60.5, 60.5);
+    let child = spawn(&mut w, 0x601, 62.5, 62.5);
+    w.set_parent(child, Some(first));
+    assert_eq!(
+        (w.xml_owned_count(first), w.xml_owned_count(second)),
+        (1, 0)
+    );
+    w.set_parent(child, Some(second));
+    assert_eq!(
+        (w.xml_owned_count(first), w.xml_owned_count(second)),
+        (0, 1)
+    );
+    w.remove_entity(child);
+    assert_eq!(w.xml_owned_count(second), 0);
+}

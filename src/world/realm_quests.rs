@@ -253,11 +253,7 @@ impl World {
                 let anchor = self.spawn_entity(anchor, pos, vec![])?;
                 self.set_quest(anchor, Some(id));
                 // The linked anchor already owns this site's preplaced child.
-                self.entities.get_mut(&id).unwrap().parent.set(
-                    Some(anchor),
-                    id,
-                    &mut self.timed_ids,
-                );
+                self.set_parent(id, Some(anchor));
             }
             Ok(())
         })()

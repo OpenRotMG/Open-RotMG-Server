@@ -145,8 +145,8 @@ impl World {
                 format!("Island actor {kind:#x} placement failed at offset {x},{y}")
             })?;
             if ownership == IslandOwnership::Defender {
+                self.set_parent(id, Some(root));
                 let e = self.entities.get_mut(&id).unwrap();
-                e.parent.set(Some(root), id, &mut self.timed_ids);
                 e.quest.set(Some(root), id, &mut self.quest_ids);
             }
         }
