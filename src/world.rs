@@ -2024,6 +2024,24 @@ impl Directory {
         destination: i32,
     ) -> Result<(i32, Vec<u8>, String)> {
         self.retire_transfer_grants();
+        // Live Nov 27: a transfer interrupted before departure kept its admission for 120 s, so every portal kicked
+        // the player. While the character is still live here, its never-departed grants are dead and replaceable.
+        if self.worlds.values().any(|w| {
+            w.players
+                .values()
+                .any(|p| p.character.account == account && p.character.id == character)
+        }) {
+            let stale: Vec<_> = self
+                .grants
+                .iter()
+                .filter(|(_, g)| g.account == account && g.authority.state() == 0)
+                .map(|(key, _)| key.clone())
+                .collect();
+            for key in stale {
+                tracing::info!(account, character, "stale transfer admission replaced");
+                self.cancel_admission(account, key)?;
+            }
+        }
         ensure!(
             self.grants.len() < 64,
             anyhow::anyhow!(CloseReason::Controller).context("transfer grant limit reached")
