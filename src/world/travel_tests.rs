@@ -129,13 +129,16 @@ fn travel_denials_bindings_expiry_and_once_only_admission() {
     d.retire_transfer_grants();
     assert!(d.grants.is_empty());
     assert!(d.worlds[&-3].admissions.is_empty());
+    let (stale_time, stale, _) = d.issue(1, 1, -3).unwrap();
     let (time, key, _) = d.issue(1, 1, -3).unwrap();
+    assert_eq!((d.grants.len(), d.worlds[&-3].admissions.len()), (1, 1));
     d.worlds
         .get_mut(&dungeon)
         .unwrap()
         .players
         .remove(&id)
         .unwrap();
+    rejects(d.consume(1, -3, stale_time, stale), "");
     let (character, arrival) = d.consume(1, -3, time, key.clone()).unwrap();
     assert_eq!(character, ch.id);
     d.admit_transfer(arrival, 1, 1, -3).unwrap();
