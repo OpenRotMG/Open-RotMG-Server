@@ -228,3 +228,13 @@ async fn death_chat_is_world_wide_once_and_only_after_successful_persistence() {
         assert!(messages(&mut inbox).is_empty());
     }
 }
+
+#[tokio::test]
+async fn broadcasts_reach_bots_but_count_only_humans() {
+    let (mut world, _store, [_, bot], mut inboxes) = fixture().await;
+    world.players.get_mut(&bot).unwrap().controller = Controller::Autonomous;
+    assert_eq!(world.broadcast_text("", "Restarting soon"), 1);
+    for inbox in &mut inboxes {
+        assert_eq!(messages(inbox), ["Restarting soon"]);
+    }
+}
