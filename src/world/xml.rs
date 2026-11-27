@@ -2,7 +2,8 @@ use super::*;
 use crate::{
     behavior::{
         self, ActionOutcome, Announcement, AnnouncementKey, Deadline, Effect, Frame, Identity,
-        Offer, Scope, Service, Step, TerminalContext, TerminalPlan, TerminalReason, Token,
+        MotionProgress, Offer, Scope, Service, Step, TerminalContext, TerminalPlan, TerminalReason,
+        Token,
     },
     content::game::{Behavior, BehaviorKind as K, Condition, Disposition, Field as F, Value},
 };
@@ -1272,13 +1273,23 @@ impl behavior::World for World {
             _ => true,
         })
     }
-    fn advance(&mut self, b: &Behavior, step: Step) -> Result<bool> {
+    fn advance(&mut self, b: &Behavior, step: Step) -> Result<MotionProgress> {
         native_validate(b)?;
         if !self.xml.motions.contains_key(&step.token) {
-            return Ok(false);
+            return Ok(MotionProgress::Idle);
         }
-        self.xml_move(b, step)
-            .with_context(|| format!("{} behavior={}", b.source, b.local))
+        let moved = self
+            .xml_move(b, step)
+            .with_context(|| format!("{} behavior={}", b.source, b.local))?;
+        Ok(if moved {
+            MotionProgress::Moving
+        } else if b.kind != K::Follow {
+            MotionProgress::Idle
+        } else if self.xml.motions.contains_key(&step.token) {
+            MotionProgress::Tracking
+        } else {
+            MotionProgress::ChaseEnded
+        })
     }
     fn apply(
         &mut self,
@@ -1315,6 +1326,12 @@ impl behavior::World for World {
                         step.delta_ms
                     )
                 });
+                if b.kind == K::Follow
+                    && matches!(attempt, Ok(false))
+                    && self.xml.motions.contains_key(&step.token)
+                {
+                    return Ok(ActionOutcome::Tracking);
+                }
                 if !matches!(attempt, Ok(true)) {
                     match prior {
                         Some(m) => {

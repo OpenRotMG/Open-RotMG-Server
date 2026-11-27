@@ -170,9 +170,18 @@ pub enum ActionOutcome {
     /// Retained native operation: freeze this actor and retry only this opportunity until applied.
     Pending,
     Applied,
+    /// Follow acquired a target without claiming its movement bucket.
+    Tracking,
     /// Explicit nondeath retirement (for example RemoveOnEmpty), never a reward-bearing defeat.
     Removed,
 }
+pub enum MotionProgress {
+    Moving,
+    Tracking,
+    ChaseEnded,
+    Idle,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Step {
     pub token: Token,
@@ -199,9 +208,8 @@ pub trait World {
     fn orders(&self, scope: Scope) -> Result<Vec<Offer>>;
     fn size(&self, scope: Scope) -> Result<f64>;
     fn ready(&self, service: Service, behavior: &Behavior, step: Step) -> Result<bool>;
-    /// Advance an already-started movement without restarting it or drawing RNG, even while cooling.
-    /// Return true only for observed ongoing movement; false allows a new start or the next bucket alternative.
-    fn advance(&mut self, behavior: &Behavior, step: Step) -> Result<bool>;
+    /// Advance without restarting the motion or claiming the bucket while tracking a stationary chase.
+    fn advance(&mut self, behavior: &Behavior, step: Step) -> Result<MotionProgress>;
     fn apply(
         &mut self,
         service: Service,
@@ -812,11 +820,19 @@ impl Actor {
                 emissions: local.emissions,
                 text_choice: None,
             };
-            if service(b.kind) == Some(Service::Movement)
-                && local.emissions > 0
-                && world.advance(b, step)?
-            {
-                return Ok(true);
+            if service(b.kind) == Some(Service::Movement) && local.emissions > 0 {
+                match world.advance(b, step)? {
+                    MotionProgress::Moving => return Ok(true),
+                    MotionProgress::Tracking => return Ok(false),
+                    MotionProgress::ChaseEnded => {
+                        local.next = self
+                            .now
+                            .checked_add(cooldown(b, &mut local.rng)?)
+                            .context("Follow cooldown deadline overflow")?;
+                        return Ok(false);
+                    }
+                    MotionProgress::Idle => {}
+                }
             }
             if b.kind != K::FollowOrders && self.now < local.next {
                 return Ok(false);
@@ -827,6 +843,7 @@ impl Actor {
             {
                 return Ok(false);
             }
+            let mut tracking = false;
             let success = match b.kind {
                 K::SetTag | K::ClearTag => {
                     let symbol = symbol(b)?;
@@ -976,6 +993,7 @@ impl Actor {
                             return Ok(false);
                         }
                         ActionOutcome::Removed => self.cleanup(world)?,
+                        ActionOutcome::Tracking => tracking = true,
                         ActionOutcome::Applied => {
                             self.waiting = None;
                         }
@@ -989,10 +1007,10 @@ impl Actor {
                             world,
                         )?;
                     }
-                    true
+                    !tracking
                 }
             };
-            if success {
+            if success || tracking {
                 if b.kind == K::Say {
                     local.opportunities = local
                         .opportunities
@@ -1003,7 +1021,7 @@ impl Actor {
                     .emissions
                     .checked_add(1)
                     .context("emission count overflow")?;
-                if b.kind != K::FollowOrders {
+                if !matches!(b.kind, K::FollowOrders | K::Follow) {
                     let cooldown = cooldown(b, &mut local.rng)?;
                     local.next = self
                         .now

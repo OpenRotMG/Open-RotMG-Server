@@ -1,7 +1,13 @@
 use super::*;
 
-fn speed(b: &Behavior) -> f64 {
+fn tiles_per_second(b: &Behavior) -> f64 {
+    // Release 7.0 MoveToward behaviors use speed * dt * 5. Buzz and Swirl use momentum rates.
     n(b, F::Speed)
+        * if matches!(b.kind, K::Buzz | K::Swirl) {
+            1.
+        } else {
+            5.
+        }
 }
 fn stop(b: &Behavior) -> f64 {
     n(b, F::Range)
@@ -136,7 +142,7 @@ impl World {
         let near = self.xml_hostile_targets(step.token.scope, self.xml_motion_target_range(b))?;
         let distance = near.first().map(|(_, p)| f64::from(e.pos.distance(*p)));
         Ok(match b.kind {
-            K::Follow => distance.is_some_and(|d| d > stop(b)),
+            K::Follow => distance.is_some(),
             K::Shadow => distance.is_some_and(|d| d > n(b, F::Range) || d > 30.),
             K::Charge | K::Buzz | K::Circle => distance.is_some(),
             K::KeepDistance => distance.is_some_and(|d| (d - n(b, F::Distance)).abs() > 0.05),
@@ -196,6 +202,7 @@ impl World {
         );
         let duration = if matches!(b.kind, K::Follow | K::Wander) {
             match value(b, F::Duration) {
+                Some(Value::Millis(0)) if b.kind == K::Follow => None,
                 Some(Value::Millis(duration)) => Some(*duration),
                 None if b.kind == K::Wander => None,
                 _ => bail!("{:?} missing or invalid compiled Duration", b.kind),
@@ -208,7 +215,7 @@ impl World {
         } else {
             0.
         };
-        let mut speed = speed(b);
+        let mut speed = tiles_per_second(b);
         if b.kind == K::Orbit {
             let rv = n(b, F::RadiusVariability);
             let upper = radius * (1. + rv);
@@ -335,7 +342,6 @@ impl World {
                     K::Follow => {
                         let gap = stop(b);
                         if f64::from(pos.distance(target)) <= gap {
-                            self.xml.motions.remove(&step.token);
                             return Ok(false);
                         }
                         goal = point(target, heading(target, pos), gap);
@@ -487,7 +493,9 @@ impl World {
                         .is_some_and(|c| self.content.sinking_grounds.contains(&c.ground))));
         }
         if distance <= 0.00001 {
-            self.xml.motions.remove(&step.token);
+            if b.kind != K::Follow {
+                self.xml.motions.remove(&step.token);
+            }
             return Ok(false);
         }
         let next = point(pos, heading(pos, goal), distance);
@@ -537,7 +545,7 @@ impl World {
             if b.kind == K::Orbit {
                 m.direction = -m.direction;
                 self.xml.motions.insert(step.token, m);
-            } else {
+            } else if b.kind != K::Follow {
                 self.xml.motions.remove(&step.token);
             }
             return Ok(false);

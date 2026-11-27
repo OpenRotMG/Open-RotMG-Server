@@ -108,6 +108,99 @@ fn fixture(body: &str) -> (World, i32, i32) {
 }
 
 #[test]
+fn recovered_realm_movement_uses_source_speed_and_gods_follow_at_seven_to_ten_tiles() {
+    let mut map = flat_map(128);
+    map.elevation = Some(vec![254; map.cells.len()].into());
+    let mut w = World::in_domain(
+        Arc::new(crate::world::test_content()),
+        Arc::new(map),
+        WorldDomain::Realm,
+    )
+    .unwrap();
+    let mut ch = Character::fresh(w.content.get(crate::content::WIZARD).unwrap()).unwrap();
+    ch.account = 1;
+    ch.id = 1;
+    let player = w.enter(ch, None).unwrap();
+    w.players.get_mut(&player).unwrap().newbie_until = 0;
+
+    for (kind, player_gap, speed, state_delay) in [
+        (0x60a, 9., 2., 0),     // Lowlands Sandsman Archer, without its anchor.
+        (0x625, 9., 7., 0),     // Midlands Ice Sprite.
+        (0x651, 9., 5., 0),     // White Demon.
+        (0x652, 9., 2., 0),     // Sprite God wanders rather than following.
+        (0x654, 9., 5., 0),     // Medusa.
+        (0x655, 9., 5., 0),     // Ent God.
+        (0x656, 9., 5., 0),     // Beholder.
+        (0x657, 9., 5., 0),     // Flying Brain.
+        (0x658, 9., 5., 0),     // Slime God.
+        (0x659, 9., 5., 0),     // Ghost God.
+        (0x91a, 6., 3.5, 2000), // Djinn follows in Wait1 after the opening Bullet1 phase.
+        (0x6d8, 9., 4., 50),    // Leviathan transitions to its opening Move.
+    ] {
+        let id = spawn(&mut w, kind, 64.5, 64.5);
+        let start = w.now;
+        let mut traveled = 0.;
+        for elapsed in (0..=1000 + state_delay).step_by(50) {
+            let old = w.entities[&id].pos;
+            w.players.get_mut(&player).unwrap().pos = Pos {
+                x: old.x + player_gap,
+                y: old.y,
+            };
+            w.now = start + elapsed;
+            w.xml_step().unwrap();
+            let pos = w.entities[&id].pos;
+            if elapsed > state_delay {
+                let step = old.distance(pos);
+                assert!(
+                    (step - speed * 0.05).abs() < 0.0001,
+                    "{kind:#x} at {elapsed}ms: {step}"
+                );
+                if speed == 5. {
+                    assert!(
+                        (pos.x - old.x - step).abs() < 0.0001,
+                        "{kind:#x} did not pursue east"
+                    );
+                }
+                traveled += step;
+            }
+        }
+        assert!(
+            (traveled - speed).abs() < 0.001,
+            "{kind:#x}: {traveled} tiles/s"
+        );
+        w.remove_entity(id);
+    }
+}
+
+#[test]
+fn follow_cools_after_target_loss_or_duration_but_tracks_inside_stop_range() {
+    for (duration, loses_target) in [("0", true), ("0.4", false)] {
+        let (mut w, player, id) = fixture(&format!(
+            r#"<Behavior range="2" speed="1" duration="{duration}" cooldown="0.2">Follow</Behavior>"#,
+        ));
+        w.players.get_mut(&player).unwrap().newbie_until = 0;
+        for (at, target_x, actor_x) in [
+            (0, 65.5, 64.5),    // Acquire within stop range, without moving.
+            (250, 70.5, 65.75), // Integrate one 250ms simulated interval.
+            (300, 66.5, 65.75), // An idle chase must not restart its duration.
+            (350, 70.5, 66.),
+            (400, if loses_target { 80. } else { 70.5 }, 66.),
+            (450, 70.5, 66.),
+            (550, 70.5, 66.),
+            (600, 70.5, 66.25),
+        ] {
+            w.players.get_mut(&player).unwrap().pos.x = target_x;
+            w.now = at;
+            w.xml_step().unwrap();
+            assert!(
+                (w.entities[&id].pos.x - actor_x).abs() < 0.0001,
+                "duration={duration} at={at}"
+            );
+        }
+    }
+}
+
+#[test]
 fn xml_runtime_world_xml_only_cooldown_state_and_birth_mutations_change_observed_services() {
     fn candidate(name: &str, cooldown: &str, state: &str, children: usize) -> World {
         let (mut w, _, _) = fixture(&format!(
