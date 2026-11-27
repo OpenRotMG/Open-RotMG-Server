@@ -127,6 +127,13 @@ fn lifecycle_clears_inputs_without_replaying_on_ready_or_replacement() {
         w.step_bot_inputs(id);
         assert!(!w.players[&id].inputs.as_ref().unwrap().fire);
     }
+    // Saving earned XP holds the player pending, yet it keeps walking and can still be steered.
+    let p = w.players.get_mut(&id).unwrap();
+    (p.pending, p.progress_started) = (true, true);
+    w.bot_inputs((id, 2, 1), Some(target), Some(target), 4)
+        .unwrap();
+    w.step_bot_inputs(id);
+    assert!(w.players[&id].pos.distance(pos) > 0.);
     w.players.remove(&id);
     ch.id = 3;
     let replacement = w.enter(ch, None).unwrap();

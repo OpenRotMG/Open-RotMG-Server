@@ -218,8 +218,9 @@ impl World {
                 && p.controller == Controller::Autonomous,
             "virtual input identity changed"
         );
+        // Live: every kill now holds its contributors pending until the durable receipt; frozen bots could not dodge or escape.
         ensure!(
-            p.active() && !p.pending,
+            p.active() && (!p.pending || p.progress_started),
             controller("virtual input player is not ready")
         );
         ensure!(
@@ -269,7 +270,8 @@ impl World {
             return;
         }
         input.translate(p.pos);
-        if p.pending {
+        // Saving earned XP must not freeze movement, as it does not for native players or abilities.
+        if p.pending && !p.progress_started {
             input.release();
             input.composition = Composition::default();
             p.bot_aim = None;
