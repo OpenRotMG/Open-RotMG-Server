@@ -6,7 +6,9 @@ use crate::{
 
 // Per World: one batched IMMEDIATE drain commits ~9,200 events/s vs ~1,060 serial (release, journal-batch-throughput,
 // Qc297a364); permits only bound plan memory, which the server-wide allocation bound below already caps.
-pub(crate) const PENDING_LIMIT: usize = 64;
+// Each defeat holds its permit until its bags are picked up or expire; live Nov 27 a busy Realm filled 64 and
+// refused every killing blow. Above the 128 live-bag cap, so bag backpressure binds first.
+pub(crate) const PENDING_LIMIT: usize = 256;
 // Server-wide: 8 retained maximum plans fit 64 MiB (journal test), whichever worlds retain them.
 pub(crate) const PENDING_ALLOCATION_LIMIT: usize = 8 * LIMITS.max_allocations.get();
 type EntitlementExpiry = (usize, i32, u64, u64);
