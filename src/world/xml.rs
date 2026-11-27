@@ -12,6 +12,7 @@ use std::sync::atomic::AtomicU64;
 pub(super) mod admission;
 mod collision;
 mod combat;
+mod environment;
 mod interest;
 mod maps;
 mod movement;
@@ -65,6 +66,7 @@ struct Published {
 pub(super) struct Runtime {
     game: Arc<crate::content::game::GameData>,
     domain: Option<WorldDomain>,
+    elevation_blocks: Option<environment::ElevationBlocks>,
     pub(super) world: u64,
     pub(super) instance: String,
     pub(super) template: Option<String>,
@@ -122,7 +124,7 @@ pub(super) struct Runtime {
     fail_next_terminal_birth_plan: bool,
 }
 impl Runtime {
-    pub(super) fn new(content: &Content, domain: Option<WorldDomain>) -> Result<Self> {
+    pub(super) fn new(content: &Content, domain: Option<WorldDomain>, map: &Map) -> Result<Self> {
         World::xml_validate_content(content)?;
         let world = NEXT_WORLD
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
@@ -130,6 +132,7 @@ impl Runtime {
         Ok(Self {
             game: content.game.as_ref().expect("validated GameData").clone(),
             domain,
+            elevation_blocks: environment::ElevationBlocks::new(map)?,
             world,
             instance: crate::store::world_events::new_id(),
             template: None,
@@ -745,13 +748,14 @@ impl World {
             scope.identity.world == self.xml.world,
             "cross-world XML scope"
         );
-        ensure!(
-            scope.identity == self.xml_identity(scope.identity.actor)?,
-            "XML full identity mismatch"
-        );
-        self.entities
-            .get(&scope.identity.actor)
-            .context("XML scope actor no longer exists")
+        let id = scope.identity.actor;
+        let actor = self.entities.get(&id).context("XML actor absent")?;
+        let identity = match self.xml.identities.get(&id) {
+            Some(identity) => *identity,
+            None => self.xml_identity(id)?,
+        };
+        ensure!(scope.identity == identity, "XML full identity mismatch");
+        Ok(actor)
     }
     pub(super) fn xml_step(&mut self) -> Result<()> {
         self.xml_check_catalog()?;
@@ -1032,39 +1036,54 @@ impl World {
     }
 
     /// Decoys draw attacks and pursuit like the nearest visible player.
-    pub(super) fn xml_hostile_targets(&self, scope: Scope, range: f64) -> Result<Vec<(i32, Pos)>> {
-        let origin = self.xml_scope(scope)?.pos;
-        let mut targets = self.xml_targets(scope, range, false)?;
-        targets.extend(
-            self.decoy_targets()
-                .filter(|(_, pos)| f64::from(pos.distance(origin)) <= range),
-        );
-        targets.sort_by(|(a, ap), (b, bp)| {
-            ap.distance(origin)
-                .total_cmp(&bp.distance(origin))
-                .then(a.cmp(b))
-        });
-        Ok(targets)
+    pub(super) fn xml_nearest_hostile_target(
+        &self,
+        origin: Pos,
+        min: f64,
+        max: f64,
+    ) -> Option<(i32, Pos)> {
+        let ranked = |id, pos: Pos| {
+            let distance = f64::from(pos.distance(origin));
+            (min <= distance && distance <= max).then_some((distance, id, pos))
+        };
+        self.players
+            .iter()
+            .filter_map(|(&id, p)| {
+                let target = ranked(id, p.pos)?;
+                (eligible(p)
+                    && p.newbie_until <= self.now
+                    && p.conditions(self.now) & crate::condition::bit(crate::condition::INVISIBLE)
+                        == 0)
+                    .then_some(target)
+            })
+            .chain(self.decoy_targets().filter_map(|(id, pos)| ranked(id, pos)))
+            .min_by(|(a, ai, _), (b, bi, _)| a.total_cmp(b).then(ai.cmp(bi)))
+            .map(|(_, id, pos)| (id, pos))
     }
     fn xml_members(&self, scope: Scope, kinds: &[u16], range: f64) -> Result<Vec<i32>> {
         let e = self.xml_scope(scope)?;
-        // Realms hold ~10^5 scenery entities; bounded searches visit only the spatial cells they can reach.
-        let candidates: Box<dyn Iterator<Item = &Entity>> =
-            if (2. * range + 3.).powi(2) < self.entities.len() as f64 {
-                let r = range as f32;
-                Box::new(self.near_entities(
-                    Pos {
-                        x: e.pos.x - r,
-                        y: e.pos.y - r,
-                    },
-                    Pos {
-                        x: e.pos.x + r,
-                        y: e.pos.y + r,
-                    },
-                ))
-            } else {
-                Box::new(self.entities.values())
-            };
+        // Actor-only selectors need not walk the Realm's roughly 10^5 scenery entities.
+        let candidates: Box<dyn Iterator<Item = &Entity>> = if !kinds.is_empty()
+            && kinds
+                .iter()
+                .all(|&kind| World::actor_kind(&self.content, kind))
+        {
+            Box::new(self.actors_in_sections(e.pos, range as f32))
+        } else if (2. * range + 3.).powi(2) < self.entities.len() as f64 {
+            let r = range as f32;
+            Box::new(self.near_entities(
+                Pos {
+                    x: e.pos.x - r,
+                    y: e.pos.y - r,
+                },
+                Pos {
+                    x: e.pos.x + r,
+                    y: e.pos.y + r,
+                },
+            ))
+        } else {
+            Box::new(self.entities.values())
+        };
         let mut ids: Vec<_> = candidates
             .filter(|other| {
                 (other.hp > 0 || self.content.objects[&other.kind].hp == 0)
@@ -1146,12 +1165,13 @@ fn eligible(p: &Player) -> bool {
 }
 
 impl behavior::World for World {
-    fn players(&self, scope: Scope) -> Result<Vec<f64>> {
+    fn player_distances(&self, scope: Scope) -> Result<impl Iterator<Item = f64>> {
+        let origin = self.xml_scope(scope)?.pos;
         Ok(self
-            .xml_targets(scope, f64::MAX, true)?
-            .iter()
-            .map(|(_, p)| f64::from(p.distance(self.entities[&scope.identity.actor].pos)))
-            .collect())
+            .players
+            .values()
+            .filter(|p| eligible(p))
+            .map(move |p| f64::from(p.pos.distance(origin))))
     }
     fn hp_fraction(&self, scope: Scope) -> Result<f64> {
         let e = self.xml_scope(scope)?;
@@ -1222,9 +1242,8 @@ impl behavior::World for World {
             .unwrap_or(&f64::from(self.xml_scope(scope)?.size)))
     }
     fn ready(&self, service: Service, b: &Behavior, step: Step) -> Result<bool> {
-        native_validate(b)?;
-        let e = self.xml_scope(step.token.scope)?;
         if service == Service::Map {
+            let e = self.xml_scope(step.token.scope)?;
             if self.xml.stamps.contains_key(&e.id) {
                 return Ok(true);
             }
@@ -1274,7 +1293,6 @@ impl behavior::World for World {
         })
     }
     fn advance(&mut self, b: &Behavior, step: Step) -> Result<MotionProgress> {
-        native_validate(b)?;
         if !self.xml.motions.contains_key(&step.token) {
             return Ok(MotionProgress::Idle);
         }
@@ -1299,7 +1317,6 @@ impl behavior::World for World {
         rng: &mut rand::rngs::StdRng,
     ) -> Result<ActionOutcome> {
         self.xml_scope(step.token.scope)?;
-        native_validate(b)?;
         if let Some(sound) = opt_n(b, F::SoundId) {
             self.xml_validate_sound(self.xml_scope(step.token.scope)?.kind, sound as u32)?;
         }
@@ -1818,142 +1835,6 @@ fn color(b: &Behavior, default: u32) -> u32 {
         Some(Value::Colors(cs)) => cs[0],
         None => default,
         other => panic!("invalid compiled color {other:?}"),
-    }
-}
-
-impl World {
-    fn xml_environment_goal(
-        &self,
-        b: &Behavior,
-        pos: Pos,
-        kind: u16,
-        scope: Scope,
-    ) -> Result<Option<Pos>> {
-        ensure!(
-            pos.x.is_finite() && pos.y.is_finite() && self.map.cell(pos.x, pos.y).is_some(),
-            "{} invalid environment search origin {},{}",
-            b.source,
-            pos.x,
-            pos.y
-        );
-        if b.kind == K::StayAbove && !admission::stay_above_applies(self.xml.domain, b)? {
-            return Ok(None);
-        }
-        let matches = |p: Pos| -> Result<bool> {
-            if b.kind == K::StayAbove {
-                let altitude = self.map.elevation_at(p.x, p.y).with_context(|| {
-                    format!(
-                        "{} map={} cell={},{} missing source elevation capability",
-                        b.source, self.name, p.x, p.y
-                    )
-                })?;
-                Ok(f64::from(altitude) >= n(b, F::MinAltitude))
-            } else if b.kind == K::Walk {
-                let c = self.map.cell(p.x, p.y).context("Walk cell absent")?;
-                let Some(Value::Grounds(gs)) = value(b, F::GroundTypes) else {
-                    bail!("Walk ground types absent")
-                };
-                Ok(gs.contains(&c.ground))
-            } else {
-                self.xml_terrain_matches(b, p, kind)
-            }
-        };
-        if b.kind != K::Walk && matches(pos)? {
-            return Ok(None);
-        }
-        let (cx, cy) = (pos.x.floor() as i32, pos.y.floor() as i32);
-        let limit = cx
-            .max(cy)
-            .max(self.map.width - 1 - cx)
-            .max(self.map.height - 1 - cy);
-        let mut best: Option<(f64, i32, i32)> = None;
-        let visit = |x: i32, y: i32, best: &mut Option<(f64, i32, i32)>| -> Result<()> {
-            let p = Pos {
-                x: x as f32 + 0.5,
-                y: y as f32 + 0.5,
-            };
-            let distance = (f64::from(p.x) - f64::from(pos.x)).powi(2)
-                + (f64::from(p.y) - f64::from(pos.y)).powi(2);
-            let candidate = (distance, y, x);
-            if distance < 0.0001 || best.is_some_and(|current| candidate >= current) {
-                return Ok(());
-            }
-            if matches(p)? && self.xml_npc_walkable(scope, p)? {
-                *best = Some(candidate);
-            }
-            Ok(())
-        };
-        for radius in 0..=limit {
-            let (left, right, top, bottom) = (cx - radius, cx + radius, cy - radius, cy + radius);
-            for y in [top, bottom] {
-                if (0..self.map.height).contains(&y) {
-                    for x in left.max(0)..=right.min(self.map.width - 1) {
-                        visit(x, y, &mut best)?;
-                    }
-                }
-                if top == bottom {
-                    break;
-                }
-            }
-            for x in [left, right] {
-                if (0..self.map.width).contains(&x) {
-                    for y in (top + 1).max(0)..=(bottom - 1).min(self.map.height - 1) {
-                        visit(x, y, &mut best)?;
-                    }
-                }
-                if left == right {
-                    break;
-                }
-            }
-            // Outside this square, at least one coordinate exceeds this lower bound; strictness preserves ties.
-            let next = [
-                (left > 0).then_some(f64::from(pos.x) - (f64::from(left) - 0.5)),
-                (right < self.map.width - 1).then_some(f64::from(right) + 1.5 - f64::from(pos.x)),
-                (top > 0).then_some(f64::from(pos.y) - (f64::from(top) - 0.5)),
-                (bottom < self.map.height - 1)
-                    .then_some(f64::from(bottom) + 1.5 - f64::from(pos.y)),
-            ]
-            .into_iter()
-            .flatten()
-            .reduce(f64::min);
-            if next
-                .is_none_or(|bound| best.is_some_and(|(distance, _, _)| distance < bound.powi(2)))
-            {
-                break;
-            }
-        }
-        Ok(best.map(|(_, y, x)| Pos {
-            x: x as f32 + 0.5,
-            y: y as f32 + 0.5,
-        }))
-    }
-    fn xml_terrain_matches(&self, b: &Behavior, pos: Pos, kind: u16) -> Result<bool> {
-        let cell = self
-            .map
-            .cell(pos.x, pos.y)
-            .context("movement destination outside map")?;
-        let terrain = match value(b, F::Terrain) {
-            Some(Value::Grounds(gs)) => gs.contains(&cell.ground),
-            Some(Value::NativeTerrain) | None => {
-                cell.terrain == self.content.objects[&kind].terrain
-            }
-            _ => bail!("invalid linked terrain"),
-        };
-        let altitude =
-            if b.fields.contains_key(&F::MinAltitude) || b.fields.contains_key(&F::MaxAltitude) {
-                let e = self.map.elevation_at(pos.x, pos.y).with_context(|| {
-                    format!(
-                        "{} missing elevation map={} cell={},{}",
-                        b.source, self.name, pos.x, pos.y
-                    )
-                })?;
-                // StayInTerrain declares either altitude bound alone; an absent bound does not constrain.
-                opt_n(b, F::MinAltitude).is_none_or(|min| f64::from(e) >= min)
-                    && opt_n(b, F::MaxAltitude).is_none_or(|max| f64::from(e) <= max)
-            } else {
-                true
-            };
-        Ok(terrain && altitude)
     }
 }
 

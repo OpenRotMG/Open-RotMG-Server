@@ -110,7 +110,13 @@ fn fixture(body: &str) -> (World, i32, i32) {
 #[test]
 fn recovered_realm_movement_uses_source_speed_and_gods_follow_at_seven_to_ten_tiles() {
     let mut map = flat_map(128);
-    map.elevation = Some(vec![254; map.cells.len()].into());
+    let mut elevation = vec![0; map.cells.len()];
+    for y in 48..80 {
+        elevation[y * 128 + 48..y * 128 + 80].fill(254);
+    }
+    elevation[16 * 128 + 32] = 254;
+    elevation[32 * 128 + 16] = 254;
+    map.elevation = Some(elevation.into());
     let mut w = World::in_domain(
         Arc::new(crate::world::test_content()),
         Arc::new(map),
@@ -170,6 +176,18 @@ fn recovered_realm_movement_uses_source_speed_and_gods_follow_at_seven_to_ten_ti
         );
         w.remove_entity(id);
     }
+
+    let id = spawn(&mut w, 0x654, 16.5, 16.5);
+    w.players.get_mut(&player).unwrap().pos = Pos { x: 16.5, y: 25.5 };
+    w.xml_step().unwrap();
+    w.now += 50;
+    w.xml_step().unwrap();
+    let pos = w.entities[&id].pos;
+    assert_eq!(
+        (pos.x, pos.y),
+        (16.625, 16.5),
+        "StayAbove breaks equal-distance cross-block ties by y before x"
+    );
 }
 
 #[test]
