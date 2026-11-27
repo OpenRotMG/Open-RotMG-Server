@@ -1765,12 +1765,20 @@ impl World {
         Ok(())
     }
     fn xml_publish_actor(&mut self, id: i32) -> Result<()> {
+        let actor = self
+            .entities
+            .get(&id)
+            .context("XML publication actor absent")?;
+        let always_visible = self.xml.visible.contains(&id);
         let missing: Vec<_> = self
             .players
             .iter()
-            .filter(|(_, p)| !p.known.contains(&id))
-            .map(|(id, _)| *id)
-            .filter(|p| self.visible_with(*p, None).contains(&id))
+            .filter(|(_, p)| {
+                !p.known.contains(&id)
+                    && (always_visible || actor.pos.distance(p.pos) < PLAYER_VIEW_RADIUS)
+                    && Self::entity_visible_to(actor, p)
+            })
+            .map(|(&player, _)| player)
             .collect();
         for p in missing {
             self.updates(p, false)?;

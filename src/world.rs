@@ -4312,6 +4312,13 @@ impl World {
     fn visible(&self, id: i32) -> BTreeSet<i32> {
         self.visible_with(id, self.quest_target(id))
     }
+    fn entity_visible_to(e: &Entity, player: &Player) -> bool {
+        e.accessible(player.character.account)
+            && player
+                .sight_tiles
+                .as_ref()
+                .is_none_or(|sight| sight.contains(&(e.pos.x as i16, e.pos.y as i16)))
+    }
     fn visible_with(&self, id: i32, quest: Option<i32>) -> BTreeSet<i32> {
         let player = &self.players[&id];
         let pos = player.pos;
@@ -4322,13 +4329,7 @@ impl World {
                     .iter()
                     .filter_map(|id| self.entities.get(id)),
             )
-            .filter(|e| e.accessible(player.character.account))
-            .filter(|e| {
-                player
-                    .sight_tiles
-                    .as_ref()
-                    .is_none_or(|sight| sight.contains(&(e.pos.x as i16, e.pos.y as i16)))
-            })
+            .filter(|e| Self::entity_visible_to(e, player))
             .map(|e| e.id)
             .chain(quest)
             .chain(
