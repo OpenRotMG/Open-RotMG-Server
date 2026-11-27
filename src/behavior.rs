@@ -170,9 +170,18 @@ pub enum ActionOutcome {
     /// Retained native operation: freeze this actor and retry only this opportunity until applied.
     Pending,
     Applied,
+    /// Follow acquired a target without claiming its movement bucket.
+    Tracking,
     /// Explicit nondeath retirement (for example RemoveOnEmpty), never a reward-bearing defeat.
     Removed,
 }
+pub enum MotionProgress {
+    Moving,
+    Tracking,
+    ChaseEnded,
+    Idle,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Step {
     pub token: Token,
@@ -189,7 +198,7 @@ pub struct Step {
 /// World queries include only live eligible actors in scope.identity.world. Parent and encounter
 /// membership are distinct, immutable ownership selectors, never nearest-encounter substitutions.
 pub trait World {
-    fn players(&self, scope: Scope) -> Result<Vec<f64>>;
+    fn player_distances(&self, scope: Scope) -> Result<impl Iterator<Item = f64>>;
     fn hp_fraction(&self, scope: Scope) -> Result<f64>;
     fn exists(&self, scope: Scope, kinds: &[u16]) -> Result<bool>;
     fn ground(&self, scope: Scope) -> Result<u8>;
@@ -199,9 +208,8 @@ pub trait World {
     fn orders(&self, scope: Scope) -> Result<Vec<Offer>>;
     fn size(&self, scope: Scope) -> Result<f64>;
     fn ready(&self, service: Service, behavior: &Behavior, step: Step) -> Result<bool>;
-    /// Advance an already-started movement without restarting it or drawing RNG, even while cooling.
-    /// Return true only for observed ongoing movement; false allows a new start or the next bucket alternative.
-    fn advance(&mut self, behavior: &Behavior, step: Step) -> Result<bool>;
+    /// Advance without restarting the motion or claiming the bucket while tracking a stationary chase.
+    fn advance(&mut self, behavior: &Behavior, step: Step) -> Result<MotionProgress>;
     fn apply(
         &mut self,
         service: Service,
@@ -693,7 +701,7 @@ impl Actor {
         }
         self.flush_admissions(world)?;
         // Publish before listeners update, including ancestor orders that survive child transitions.
-        for id in self.path.clone() {
+        for &id in &self.path {
             for order in &self.state(id)?.orders {
                 world.effect(
                     self.scope,
@@ -711,7 +719,8 @@ impl Actor {
             return Ok(success);
         }
         let definition = Arc::clone(&self.definition);
-        for id in self.path.clone() {
+        for i in 0..self.path.len() {
+            let id = self.path[i];
             let state = &definition.states[id as usize];
             for (index, transition) in state.transitions.iter().enumerate() {
                 if self
@@ -749,7 +758,8 @@ impl Actor {
     ) -> Result<bool> {
         let mut success = false;
         let definition = Arc::clone(&self.definition);
-        for id in self.path.clone().into_iter().rev() {
+        for i in (0..self.path.len()).rev() {
+            let id = self.path[i];
             let state = &definition.states[id as usize];
             for b in &state.behaviors {
                 if b.kind != K::FollowOrders
@@ -812,11 +822,19 @@ impl Actor {
                 emissions: local.emissions,
                 text_choice: None,
             };
-            if service(b.kind) == Some(Service::Movement)
-                && local.emissions > 0
-                && world.advance(b, step)?
-            {
-                return Ok(true);
+            if service(b.kind) == Some(Service::Movement) && local.emissions > 0 {
+                match world.advance(b, step)? {
+                    MotionProgress::Moving => return Ok(true),
+                    MotionProgress::Tracking => return Ok(false),
+                    MotionProgress::ChaseEnded => {
+                        local.next = self
+                            .now
+                            .checked_add(cooldown(b, &mut local.rng)?)
+                            .context("Follow cooldown deadline overflow")?;
+                        return Ok(false);
+                    }
+                    MotionProgress::Idle => {}
+                }
             }
             if b.kind != K::FollowOrders && self.now < local.next {
                 return Ok(false);
@@ -827,6 +845,7 @@ impl Actor {
             {
                 return Ok(false);
             }
+            let mut tracking = false;
             let success = match b.kind {
                 K::SetTag | K::ClearTag => {
                     let symbol = symbol(b)?;
@@ -976,6 +995,7 @@ impl Actor {
                             return Ok(false);
                         }
                         ActionOutcome::Removed => self.cleanup(world)?,
+                        ActionOutcome::Tracking => tracking = true,
                         ActionOutcome::Applied => {
                             self.waiting = None;
                         }
@@ -989,10 +1009,10 @@ impl Actor {
                             world,
                         )?;
                     }
-                    true
+                    !tracking
                 }
             };
-            if success {
+            if success || tracking {
                 if b.kind == K::Say {
                     local.opportunities = local
                         .opportunities
@@ -1003,7 +1023,7 @@ impl Actor {
                     .emissions
                     .checked_add(1)
                     .context("emission count overflow")?;
-                if b.kind != K::FollowOrders {
+                if !matches!(b.kind, K::FollowOrders | K::Follow) {
                     let cooldown = cooldown(b, &mut local.rng)?;
                     local.next = self
                         .now
@@ -1174,15 +1194,18 @@ impl Actor {
         Ok(match p {
             Predicate::After(ms) => age >= *ms,
             Predicate::PlayerWithin(proximity) => {
-                proximity.matches_eligible_distances(world.players(self.scope)?)?
+                proximity.matches_eligible_distances(world.player_distances(self.scope)?)?
             }
             Predicate::NoPlayerWithin(radius) => {
-                let distances = world.players(self.scope)?;
-                ensure!(
-                    distances.iter().all(|d| d.is_finite() && *d >= 0.),
-                    "invalid player distance"
-                );
-                distances.into_iter().all(|d| d > *radius)
+                let mut outside = true;
+                for distance in world.player_distances(self.scope)? {
+                    ensure!(
+                        distance.is_finite() && distance >= 0.,
+                        "invalid player distance"
+                    );
+                    outside &= distance > *radius;
+                }
+                outside
             }
             Predicate::HpBelow(fraction) => {
                 let hp = world.hp_fraction(self.scope)?;

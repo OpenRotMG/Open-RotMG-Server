@@ -27,7 +27,17 @@ impl World {
     }
     pub(super) fn xml_npc_walkable(&self, scope: Scope, pos: Pos) -> Result<bool> {
         let actor = self.xml_scope(scope)?;
+        let flying = self.content.objects[&actor.kind].flying;
         let allowed = self.map.cell(pos.x, pos.y).is_some_and(|cell| {
+            if flying
+                || self
+                    .content
+                    .grounds
+                    .get(&cell.ground)
+                    .is_none_or(|speed| *speed > 0.)
+            {
+                return false;
+            }
             (self.xml.unstarted.contains(&actor.id)
                 && self
                     .xml_game()
@@ -47,13 +57,7 @@ impl World {
                         .is_some_and(|d| grants_ground(d, states.iter().copied(), cell.ground))
                 })
         });
-        self.xml_geometry(
-            actor.kind,
-            pos,
-            self.content.objects[&actor.kind].flying || allowed,
-            &[actor.id],
-            None,
-        )
+        self.xml_geometry(actor.kind, pos, flying || allowed, &[actor.id], None)
     }
     pub(super) fn xml_teleport_endpoint(&self, scope: Scope, pos: Pos) -> Result<bool> {
         ensure!(

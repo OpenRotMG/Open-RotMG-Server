@@ -1,7 +1,13 @@
 use super::*;
 
-fn speed(b: &Behavior) -> f64 {
+fn tiles_per_second(b: &Behavior) -> f64 {
+    // Release 7.0 MoveToward behaviors use speed * dt * 5. Buzz and Swirl use momentum rates.
     n(b, F::Speed)
+        * if matches!(b.kind, K::Buzz | K::Swirl) {
+            1.
+        } else {
+            5.
+        }
 }
 fn stop(b: &Behavior) -> f64 {
     n(b, F::Range)
@@ -107,10 +113,8 @@ impl World {
         if actor.conditions(self.now) & crate::condition::bit(crate::condition::PARALYZED) != 0 {
             return Ok(false);
         }
-        let Some((_, target)) = self
-            .xml_hostile_targets(step.token.scope, self.xml_motion_target_range(b))?
-            .first()
-            .copied()
+        let Some((_, target)) =
+            self.xml_nearest_hostile_target(pos, 0., self.xml_motion_target_range(b))
         else {
             return Ok(false);
         };
@@ -133,14 +137,15 @@ impl World {
         if e.conditions(self.now) & crate::condition::bit(crate::condition::PARALYZED) != 0 {
             return Ok(false);
         }
-        let near = self.xml_hostile_targets(step.token.scope, self.xml_motion_target_range(b))?;
-        let distance = near.first().map(|(_, p)| f64::from(e.pos.distance(*p)));
+        let distance = || {
+            self.xml_nearest_hostile_target(e.pos, 0., self.xml_motion_target_range(b))
+                .map(|(_, pos)| f64::from(e.pos.distance(pos)))
+        };
         Ok(match b.kind {
-            K::Follow => distance.is_some_and(|d| d > stop(b)),
-            K::Shadow => distance.is_some_and(|d| d > n(b, F::Range) || d > 30.),
-            K::Charge | K::Buzz | K::Circle => distance.is_some(),
-            K::KeepDistance => distance.is_some_and(|d| (d - n(b, F::Distance)).abs() > 0.05),
-            K::StayBack => distance.is_some_and(|d| d < n(b, F::Distance)),
+            K::Follow | K::Charge | K::Buzz | K::Circle => distance().is_some(),
+            K::Shadow => distance().is_some_and(|d| d > n(b, F::Range) || d > 30.),
+            K::KeepDistance => distance().is_some_and(|d| (d - n(b, F::Distance)).abs() > 0.05),
+            K::StayBack => distance().is_some_and(|d| d < n(b, F::Distance)),
             K::StayCloseToSpawn => f64::from(e.pos.distance(e.home)) > n(b, F::Range),
             K::Orbit => self.xml_anchor(b, step.token.scope)?.is_some(),
             K::Protect => self.xml_anchor(b, step.token.scope)?.is_some_and(|a| {
@@ -160,10 +165,11 @@ impl World {
     ) -> Result<bool> {
         let e = self.xml_scope(step.token.scope)?;
         let pos = e.pos;
-        let target = self
-            .xml_hostile_targets(step.token.scope, self.xml_motion_target_range(b))?
-            .first()
-            .copied();
+        let target = if matches!(b.kind, K::Charge | K::Buzz | K::Swirl) {
+            self.xml_nearest_hostile_target(pos, 0., self.xml_motion_target_range(b))
+        } else {
+            None
+        };
         let angle = if b.kind == K::Wander {
             rng.gen_range(0.0..std::f64::consts::TAU)
         } else {
@@ -196,6 +202,7 @@ impl World {
         );
         let duration = if matches!(b.kind, K::Follow | K::Wander) {
             match value(b, F::Duration) {
+                Some(Value::Millis(0)) if b.kind == K::Follow => None,
                 Some(Value::Millis(duration)) => Some(*duration),
                 None if b.kind == K::Wander => None,
                 _ => bail!("{:?} missing or invalid compiled Duration", b.kind),
@@ -208,7 +215,7 @@ impl World {
         } else {
             0.
         };
-        let mut speed = speed(b);
+        let mut speed = tiles_per_second(b);
         if b.kind == K::Orbit {
             let rv = n(b, F::RadiusVariability);
             let upper = radius * (1. + rv);
@@ -274,7 +281,8 @@ impl World {
             self.xml.motions.remove(&step.token);
             return Ok(false);
         }
-        if e.conditions(self.now) & crate::condition::bit(crate::condition::PARALYZED) != 0 {
+        let conditions = e.conditions(self.now);
+        if conditions & crate::condition::bit(crate::condition::PARALYZED) != 0 {
             return Ok(false);
         }
         let elapsed = step.delta_ms as f64 / 1000.;
@@ -282,19 +290,17 @@ impl World {
         if b.fields.contains_key(&F::Acceleration) {
             speed = speed.min(n(b, F::Acceleration) * (step.active_ms - m.born) as f64 / 1000.);
         }
-        if e.conditions(self.now) & crate::condition::bit(crate::condition::SLOWED) != 0 {
+        if conditions & crate::condition::bit(crate::condition::SLOWED) != 0 {
             speed *= 0.5;
-        } else if e.conditions(self.now) & crate::condition::bit(crate::condition::SPEEDY) != 0 {
+        } else if conditions & crate::condition::bit(crate::condition::SPEEDY) != 0 {
             speed *= 1.5;
         }
-        let target = self
-            .xml_hostile_targets(step.token.scope, self.xml_motion_target_range(b))?
-            .first()
-            .copied();
         let mut goal = m.goal;
         match b.kind {
             K::Follow | K::Shadow | K::Buzz | K::Circle | K::KeepDistance | K::StayBack => {
-                let Some((player, mut target)) = target else {
+                let Some((player, mut target)) =
+                    self.xml_nearest_hostile_target(pos, 0., self.xml_motion_target_range(b))
+                else {
                     self.xml.motions.remove(&step.token);
                     return Ok(false);
                 };
@@ -335,7 +341,6 @@ impl World {
                     K::Follow => {
                         let gap = stop(b);
                         if f64::from(pos.distance(target)) <= gap {
-                            self.xml.motions.remove(&step.token);
                             return Ok(false);
                         }
                         goal = point(target, heading(target, pos), gap);
@@ -374,7 +379,11 @@ impl World {
                 let anchor = m
                     .anchor
                     .filter(|id| self.entities.get(id).is_some_and(|e| e.hp > 0));
-                let Some(anchor) = anchor.or(self.xml_anchor(b, step.token.scope)?) else {
+                let anchor = match anchor {
+                    Some(id) => Some(id),
+                    None => self.xml_anchor(b, step.token.scope)?,
+                };
+                let Some(anchor) = anchor else {
                     self.xml.motions.remove(&step.token);
                     return Ok(false);
                 };
@@ -487,7 +496,9 @@ impl World {
                         .is_some_and(|c| self.content.sinking_grounds.contains(&c.ground))));
         }
         if distance <= 0.00001 {
-            self.xml.motions.remove(&step.token);
+            if b.kind != K::Follow {
+                self.xml.motions.remove(&step.token);
+            }
             return Ok(false);
         }
         let next = point(pos, heading(pos, goal), distance);
@@ -537,7 +548,7 @@ impl World {
             if b.kind == K::Orbit {
                 m.direction = -m.direction;
                 self.xml.motions.insert(step.token, m);
-            } else {
+            } else if b.kind != K::Follow {
                 self.xml.motions.remove(&step.token);
             }
             return Ok(false);

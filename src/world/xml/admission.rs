@@ -29,7 +29,6 @@ pub(super) fn raw<'a>(game: &'a GameData, kind: u16, context: &str) -> Result<&'
 }
 
 pub(super) fn stay_above_applies(domain: Option<WorldDomain>, b: &Behavior) -> Result<bool> {
-    native_validate(b)?;
     match domain {
         Some(WorldDomain::Realm) => Ok(true),
         Some(WorldDomain::NonRealm) => Ok(false),

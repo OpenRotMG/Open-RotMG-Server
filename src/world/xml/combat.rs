@@ -31,10 +31,7 @@ impl World {
         } else {
             0.
         };
-        Ok(self
-            .xml_hostile_targets(step.token.scope, range)?
-            .into_iter()
-            .find(|(_, p)| f64::from(pos.distance(*p)) >= min))
+        Ok(self.xml_nearest_hostile_target(pos, min, range))
     }
     pub(super) fn xml_attack(
         &mut self,

@@ -3065,7 +3065,7 @@ impl World {
         domain: Option<WorldDomain>,
     ) -> Result<Self> {
         Self::xml_map_admission(&content, &map, domain)?;
-        let mut xml = xml::Runtime::new(&content, domain)?;
+        let mut xml = xml::Runtime::new(&content, domain, &map)?;
         let mut entities = entity_store::Entities::default();
         let mut scenery_templates = BTreeMap::new();
         let mut actor_ids = BTreeSet::new();
@@ -4358,6 +4358,13 @@ impl World {
     fn visible(&self, id: i32) -> BTreeSet<i32> {
         self.visible_with(id, self.quest_target(id))
     }
+    fn entity_visible_to(e: &Entity, player: &Player) -> bool {
+        e.accessible(player.character.account)
+            && player
+                .sight_tiles
+                .as_ref()
+                .is_none_or(|sight| sight.contains(&(e.pos.x as i16, e.pos.y as i16)))
+    }
     fn visible_with(&self, id: i32, quest: Option<i32>) -> BTreeSet<i32> {
         let player = &self.players[&id];
         let pos = player.pos;
@@ -4368,13 +4375,7 @@ impl World {
                     .iter()
                     .filter_map(|id| self.entities.get(id)),
             )
-            .filter(|e| e.accessible(player.character.account))
-            .filter(|e| {
-                player
-                    .sight_tiles
-                    .as_ref()
-                    .is_none_or(|sight| sight.contains(&(e.pos.x as i16, e.pos.y as i16)))
-            })
+            .filter(|e| Self::entity_visible_to(e, player))
             .map(|e| e.id)
             .chain(quest)
             .chain(
@@ -4904,6 +4905,10 @@ impl World {
         .filter(move |e| e.pos.distance(pos) < radius)
     }
     fn actors_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
+        self.actors_in_sections(pos, radius)
+            .filter(move |e| e.pos.distance(pos) < radius)
+    }
+    fn actors_in_sections(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
         let clamp = |v: f32, max: i32| (v as i32).clamp(0, max - 1) as usize;
         let (x0, x1) = (
             clamp(pos.x - radius - 1., self.map.width),
@@ -4916,7 +4921,6 @@ impl World {
         self.cells
             .actors_in(x0, y0, x1, y1)
             .map(|id| &self.entities[&id])
-            .filter(move |e| e.pos.distance(pos) < radius)
     }
     fn entities_at(&self, pos: Pos) -> impl Iterator<Item = &Entity> {
         self.map.cell(pos.x, pos.y).into_iter().flat_map(move |_| {
@@ -6539,12 +6543,14 @@ impl World {
         );
         let old = self.entities[&id].pos;
         let cell = |p: Pos| p.y as usize * self.map.width as usize + p.x as usize;
-        assert!(
-            self.cells.remove(cell(old), id),
-            "moving NPC missing from spatial index"
-        );
-        self.cells
-            .insert(cell(pos), id, self.actor_ids.contains(&id));
+        if cell(old) != cell(pos) {
+            assert!(
+                self.cells.remove(cell(old), id),
+                "moving NPC missing from spatial index"
+            );
+            self.cells
+                .insert(cell(pos), id, self.actor_ids.contains(&id));
+        }
         let e = self.entities.get_mut(&id).unwrap();
         e.pos = pos;
         e.last_step = Pos {
