@@ -1963,6 +1963,51 @@ impl Directory {
         );
         Ok((account, character, destination))
     }
+    /// Easy Client `/vault` and `/realm`: the account's Vault, or the most populated open Realm.
+    pub fn shortcut(&mut self, player: i32, vault: bool) -> Result<(i32, i32, i32)> {
+        let origin = self.location(player)?;
+        let p = &self.worlds[&origin].players[&player];
+        ensure!(
+            p.character.alive && p.character.hp > 0 && !p.death_pending && !p.departing,
+            controller("character cannot transfer")
+        );
+        let (account, character) = (p.character.account, p.character.id);
+        let destination = if vault {
+            self.instance("vault", Some(account), None)?
+        } else if self.content.reviewed(account) {
+            self.quietest_realm()?
+        } else {
+            self.available_realms()
+                .into_iter()
+                .max_by_key(|(id, occupancy)| (*occupancy, -id))
+                .map(|(id, _)| id)
+                .ok_or_else(|| controller("no open Realm has capacity"))?
+        };
+        ensure!(
+            destination != origin,
+            controller(if vault {
+                "You are already in your Vault."
+            } else {
+                "You are already in the most populated Realm."
+            })
+        );
+        let locked = self.realm_lockout(account, destination);
+        ensure!(
+            locked == 0,
+            anyhow::Error::new(CloseReason::Controller).context(format!(
+                "You cannot enter the Realm for another {locked} seconds."
+            ))
+        );
+        tracing::info!(
+            player,
+            account,
+            origin,
+            destination,
+            vault,
+            "Easy Client shortcut routed"
+        );
+        Ok((account, character, destination))
+    }
     /// Seconds left before `account` may enter `world`; zero unless `world` is a Realm.
     pub(crate) fn realm_lockout(&self, account: i32, world: i32) -> u64 {
         if !self.endgame.realms.contains_key(&world) {

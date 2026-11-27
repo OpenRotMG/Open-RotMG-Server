@@ -756,3 +756,19 @@ fn marked_accounts_only_enter_the_least_populated_realm() {
         assert_eq!(result.is_ok(), admitted, "{realm}: {result:?}");
     }
 }
+
+#[test]
+fn easy_shortcuts_reach_the_owned_vault_and_most_populated_realm() {
+    let mut d = directory(72);
+    let busy = d.available_realms()[1].0;
+    for account in 100..103 {
+        d.issue(account, account, busy).unwrap();
+    }
+    let mut ch = Character::fresh(d.content.get(crate::content::WIZARD).unwrap()).unwrap();
+    ch.id = 70;
+    ch.account = 7;
+    let player = d.worlds.get_mut(&-2).unwrap().enter(ch, None).unwrap();
+    assert_eq!(d.shortcut(player, false).unwrap(), (7, 70, busy));
+    let vault = d.shortcut(player, true).unwrap().2;
+    assert_eq!(d.worlds[&vault].owner, Some(7));
+}

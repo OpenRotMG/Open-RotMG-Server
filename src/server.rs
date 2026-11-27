@@ -1256,6 +1256,7 @@ struct Session {
     admission: Option<Vec<u8>>,
     initial_entry: Option<crate::world::realm_population::InitialEntryHold>,
     reconnecting: bool,
+    easy: bool,
     transfer: Option<PreparedTransfer>,
     runtime: Option<tokio::runtime::Handle>,
     diagnostics: diagnostics::ConnectionDiagnostics,
@@ -1592,6 +1593,7 @@ async fn handle_inner(
         admission,
         initial_entry,
         reconnecting,
+        easy,
         transfer: _,
         runtime,
         diagnostics,
@@ -1649,9 +1651,11 @@ async fn handle_inner(
             ensure_protocol!(n == 0 || n == 16, "invalid transfer key size");
             let key = r.take(n)?.to_vec();
             ensure_protocol!(r.i32()? == 0, "map editor JSON not supported");
-            for _ in 0..4 {
+            for _ in 0..3 {
                 r.utf()?;
             }
+            // Only the Easy Client's shortcuts depend on this self-declared platform; it grants no authority.
+            *easy = r.utf()? == "openrotmg-easy";
             r.done()?;
             let authentication = a.authentication.read().await;
             let registered = !password.is_empty();
@@ -1860,6 +1864,11 @@ async fn handle_inner(
             if text.trim().eq_ignore_ascii_case("/tutorial") {
                 crate::world::validate_chat(&text)?;
                 return reconnect(a, session, Reconnect::Tutorial, received).await;
+            }
+            let vault = text.trim().eq_ignore_ascii_case("/vault");
+            if *easy && (vault || text.trim().eq_ignore_ascii_case("/realm")) {
+                crate::world::validate_chat(&text)?;
+                return reconnect(a, session, Reconnect::Shortcut { vault }, received).await;
             }
             if let Some((kind, name)) = guilds::chat_command(&text) {
                 let id =
@@ -2350,6 +2359,7 @@ async fn handle_inner(
 
 enum Reconnect {
     Portal(Option<i32>),
+    Shortcut { vault: bool },
     Tutorial,
 }
 
@@ -2365,7 +2375,7 @@ async fn reconnect(
         .directory(move |d| {
             let portal = match &request {
                 Reconnect::Portal(portal) => *portal,
-                Reconnect::Tutorial => None,
+                Reconnect::Shortcut { .. } | Reconnect::Tutorial => None,
             };
             let (account, character, destination) = match request {
                 Reconnect::Tutorial => {
@@ -2377,15 +2387,21 @@ async fn reconnect(
                         d.initial(-1, p.character.account)?,
                     )
                 }
-                Reconnect::Portal(portal) => {
-                    if portal.is_none() && d.location(id)? == -2 {
-                        tracing::debug!(
-                            player = id,
-                            "redundant Nexus escape acknowledged without transfer"
-                        );
-                        return Ok(None);
-                    }
-                    match d.destination(id, portal) {
+                Reconnect::Portal(None) if d.location(id)? == -2 => {
+                    tracing::debug!(
+                        player = id,
+                        "redundant Nexus escape acknowledged without transfer"
+                    );
+                    return Ok(None);
+                }
+                route @ (Reconnect::Portal(_) | Reconnect::Shortcut { .. }) => {
+                    let routed = if let Reconnect::Shortcut { vault } = route {
+                        d.chat_permit(id, received)
+                            .and_then(|()| d.shortcut(id, vault))
+                    } else {
+                        d.destination(id, portal)
+                    };
+                    match routed {
                         Ok(destination) => destination,
                         Err(error) if lifecycle::rule_rejection(&error) => {
                             let message = crate::world::chat_error(&error.to_string());
