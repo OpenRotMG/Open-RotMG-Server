@@ -828,6 +828,8 @@ pub struct World {
     portal_ids: BTreeSet<i32>,
     // Superset of actors that ever received an expiry or parent; mechanic_expiry rechecks the exact predicate.
     timed_ids: BTreeSet<i32>,
+    // Live: spawners counted their children by scanning every parented actor, which overran the Realm tick budget.
+    children: BTreeMap<i32, BTreeSet<i32>>,
     // Quest roots can have neither a parent nor an expiry, so timed_ids cannot cover membership.
     quest_ids: BTreeSet<i32>,
     gun_ids: BTreeSet<i32>,
@@ -3140,6 +3142,7 @@ impl World {
             godland_route: Arc::default(),
             godland_tiles: Arc::default(),
             timed_ids: BTreeSet::new(),
+            children: BTreeMap::new(),
             quest_ids: BTreeSet::new(),
             gun_ids,
             portal_ids,
@@ -3502,6 +3505,31 @@ impl World {
         }
         Ok(id)
     }
+    pub(super) fn set_parent(&mut self, id: i32, parent: Option<i32>) {
+        let e = self.entities.get_mut(&id).expect("parented entity missing");
+        let previous = *e.parent;
+        e.parent.set(parent, id, &mut self.timed_ids);
+        if let Some(previous) = previous {
+            self.unlink_child(previous, id);
+        }
+        if let Some(parent) = parent {
+            self.children.entry(parent).or_default().insert(id);
+        }
+    }
+    fn unlink_child(&mut self, parent: i32, id: i32) {
+        let children = self.children.get_mut(&parent).expect("child index missing");
+        assert!(children.remove(&id), "indexed child missing");
+        if children.is_empty() {
+            self.children.remove(&parent);
+        }
+    }
+    pub(super) fn child_entities(&self, parent: i32) -> impl Iterator<Item = &Entity> {
+        self.children
+            .get(&parent)
+            .into_iter()
+            .flatten()
+            .map(|id| &self.entities[id])
+    }
     fn index_actor(&mut self, id: i32) {
         let e = &self.entities[&id];
         let kind = e.kind;
@@ -3510,6 +3538,9 @@ impl World {
         self.cells.insert(cell, id, actor);
         if e.parent.is_some() || e.expires.is_some() {
             self.timed_ids.insert(id);
+        }
+        if let Some(parent) = *e.parent {
+            self.children.entry(parent).or_default().insert(id);
         }
         if e.quest.is_some() {
             self.quest_ids.insert(id);
@@ -3602,6 +3633,9 @@ impl World {
         self.ability_state.objects.remove(&id);
         self.merchants.remove(&id);
         let entity = self.entities.remove(&id).expect("indexed entity missing");
+        if let Some(parent) = *entity.parent {
+            self.unlink_child(parent, id);
+        }
         if entity.population_slot.is_some() {
             let entries = self
                 .xml_game()

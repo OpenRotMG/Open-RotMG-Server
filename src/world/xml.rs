@@ -1966,8 +1966,8 @@ impl World {
         Ok((start..start + count).collect())
     }
     fn xml_own(&mut self, id: i32, parent: Option<i32>, encounter: Option<u64>) -> Result<()> {
-        let e = self.entities.get_mut(&id).context("new child absent")?;
-        e.parent.set(parent, id, &mut self.timed_ids);
+        ensure!(self.entities.contains_key(&id), "new child absent");
+        self.set_parent(id, parent);
         self.xml.identities.insert(
             id,
             Identity {
