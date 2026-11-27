@@ -4296,6 +4296,7 @@ impl World {
         }
         Some(nearest.id)
     }
+    /// Delivers to every ready player, bots included, but counts only humans.
     fn broadcast_text(&self, name: &str, text: &str) -> usize {
         let packet = chat::text_packet(name, -1, 0, text);
         let mut recipients = 0;
@@ -4305,7 +4306,7 @@ impl World {
             .filter(|p| !p.departing && p.persistence_failure.is_none())
         {
             send(p, packet.id, packet.body.clone());
-            recipients += 1;
+            recipients += usize::from(p.controller == Controller::Human);
         }
         recipients
     }
