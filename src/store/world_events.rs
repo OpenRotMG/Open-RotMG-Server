@@ -624,7 +624,9 @@ pub(super) fn finish_operation(
             "ground_dye",
         ]
         .iter()
-        .any(|key| reservation.get(key).is_some_and(|v| !v.is_null()));
+        .any(|key| reservation.get(key).is_some_and(|v| !v.is_null()))
+            // Live Nov 27: drinking a loot-bag HP/MP potion records only its effects, which locked the account.
+            || reservation["effects"].as_array().is_some_and(|e| !e.is_empty());
         let vaulted = reservation["vaults"].as_array().is_some_and(|vaults| {
             vaults.iter().any(|vault| {
                 vault["items"]
