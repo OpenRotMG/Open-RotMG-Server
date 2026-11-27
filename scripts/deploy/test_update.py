@@ -18,6 +18,20 @@ spec.loader.exec_module(update)
 
 class UpdateTest(unittest.TestCase):
 
+    def test_rehearsal_may_settle_live_world_events_only_as_origin_lost(self):
+        payload = {'event': 'e', 'kind': 'terminal', 'version': 1, 'content_fp': 'f', 'payload': 'p', 'payload_hash': 'h'}
+        before = {'world_events': [{**payload, 'status': 2, 'result': '{"allocations":1}'}],
+                  'world_entitlements': [{'event': 'e', 'ordinal': 0, 'status': 0}, {'event': 'other', 'ordinal': 0, 'status': 0}]}
+        lost = json.dumps({'reconciliation': {'disposition': 'origin_lost', 'previous_status': 2, 'previous_result': {'allocations': 1}}})
+        after = {'world_events': [{**payload, 'status': 3, 'result': lost}],
+                 'world_entitlements': [{'event': 'e', 'ordinal': 0, 'status': 2}, {'event': 'other', 'ordinal': 0, 'status': 0}]}
+        update.verify_migration(before, after)
+        for changed in [{**after, 'world_entitlements': [after['world_entitlements'][0], {'event': 'other', 'ordinal': 0, 'status': 2}]},
+                        {**after, 'world_events': [{**after['world_events'][0], 'payload': 'q'}]},
+                        {**after, 'world_events': [{**after['world_events'][0], 'result': lost.replace('"previous_status": 2', '"previous_status": 1')}]}]:
+            with self.assertRaises(RuntimeError):
+                update.verify_migration(before, changed)
+
     def test_superseded_restart_cancels_only_an_advertised_countdown(self):
         config = {'bind': '127.0.0.1:18923'}
         metadata = {'revision': 'a' * 40, 'manifest': {}}
