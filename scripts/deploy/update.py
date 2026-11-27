@@ -260,7 +260,32 @@ def rows(path):
         return {table: [dict(row) for row in db.execute('SELECT * FROM "' + table.replace('"', '""') + '" ORDER BY 1')] for table in tables}
 
 
+def accept_origin_loss(before, after):
+    # The rehearsal never hosts the copied Store's live worlds, so it settles their in-flight events as origin-lost,
+    # exactly as the real restart will; live loot made this fail most deploys after the XML runtime.
+    current = {row['event']: row for row in after.get('world_events', [])}
+    lost = set()
+    for row in before.get('world_events', []):
+        new = current.get(row['event'])
+        if new is None or row['status'] == 3 or new['status'] != 3:
+            continue
+        reconciliation = json.loads(new['result'])['reconciliation']
+        require({k: v for k, v in new.items() if k not in ('status', 'result')}
+                == {k: v for k, v in row.items() if k not in ('status', 'result')}
+                and reconciliation['previous_status'] == row['status']
+                and reconciliation['previous_result'] == (row['result'] and json.loads(row['result']))
+                and reconciliation['disposition'] in ('origin_lost', 'aborted_origin_lost', 'committed_effect_origin_lost'),
+                f'World event {row["event"]} changed without an origin-loss reconciliation')
+        lost.add(row['event'])
+    events = [current[row['event']] if row['event'] in lost else row for row in before.get('world_events', [])]
+    entitlements = [{**row, 'status': 2} if row['event'] in lost and row['status'] == 0 else row
+                     for row in before.get('world_entitlements', [])]
+    return {**before, **({'world_events': events} if 'world_events' in before else {}),
+            **({'world_entitlements': entitlements} if 'world_entitlements' in before else {})}
+
+
 def verify_migration(before, after):
+    before = accept_origin_loss(before, after)
     # Only old lazy Vaults gain intentionally provisioned rows; current paid state is never repaired.
     if 'vaults' in before and all('vault_mask' not in row for row in before.get('accounts', [])):
         existing = {row['account'] for row in before['vaults']}
