@@ -149,7 +149,6 @@ impl World {
                     .context("pending event has no eligible type")?,
             );
         }
-        let owned = self.summon_occupancy();
         let entry_children: BTreeMap<u16, usize> = self
             .event_reserves
             .iter()
@@ -169,10 +168,8 @@ impl World {
                             .cells
                             .iter()
                             .any(|(index, _)| *index == root_index);
-                // Admission is not a reservation: actual initial-group dispatch rechecks its budget.
+                // Use the same budget as XML births; the old summon-only cap counted ordinary fauna too.
                 Some(event.root.kind) == self.event_choice
-                    && owned + 1 + event.children.len() + entry_children[&event.root.kind]
-                        <= self.summon_limit()
                     && self.xml_live_count() + 1 + event.children.len() + entry_children[&event.root.kind]
                         <= xml::ACTOR_LIMIT
                     && self.players.values().all(|p| {

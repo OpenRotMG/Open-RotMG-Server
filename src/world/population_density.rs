@@ -135,6 +135,21 @@ impl World {
         self.population_counts[terrain as usize] += 1;
         Ok(())
     }
+    // Source minions and death releases may outlive the parent that admitted them.
+    pub(super) fn population_origin(&self, entity: &Entity) -> Option<u8> {
+        entity
+            .population_slot
+            .map(|slot| self.population_terrain(&self.population[slot]))
+            .or_else(|| self.population_children.get(&entity.id).copied())
+    }
+    pub(super) fn mark_population_child(&mut self, id: i32, terrain: Option<u8>) {
+        if let Some(terrain) = terrain
+            && self.content.objects[&self.entities[&id].kind].enemy
+        {
+            assert!(self.entities[&id].population_slot.is_none());
+            assert!(self.population_children.insert(id, terrain).is_none());
+        }
+    }
     pub(super) fn place_population_solo(&mut self, kind: u16, pos: Pos) -> Result<i32> {
         let entity = self.spawn_entity(kind, pos, vec![])?;
         let slot = self.population.len();
@@ -393,10 +408,18 @@ impl World {
                 self.population_terrain(slot) == terrain && self.oryx_counts_slot(*i, slot)
             })
             .filter_map(|(_, slot)| slot.entity)
+            .chain(
+                self.population_children
+                    .iter()
+                    .filter_map(|(&id, &origin)| (origin == terrain).then_some(id)),
+            )
             .collect()
     }
     pub(super) fn oryx_counts(&self) -> [usize; 13] {
         let mut counts = [0; 13];
+        for &terrain in self.population_children.values() {
+            counts[terrain as usize] += 1;
+        }
         for (i, slot) in self.population.iter().enumerate() {
             if slot.entity.is_some() && self.oryx_counts_slot(i, slot) {
                 counts[self.population_terrain(slot) as usize] += 1;
@@ -512,6 +535,37 @@ fn gods_lured_off_the_godlands_leave_once_nobody_sees_them() -> Result<()> {
         .collect();
     assert_eq!(left.len(), 2);
     assert!(left.iter().all(|p| p.distance(lured) > 1.));
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn slime_death_births_count_against_ordinary_replenishment() -> Result<()> {
+    let (mut world, _) = movement_tests::fixture(0x18, false);
+    let kind = 0x20e;
+    let terrain = world.population_habitat(kind)?;
+    let pos = Pos { x: 30.5, y: 30.5 };
+    Arc::make_mut(&mut world.map).cells[30 * 32 + 30].terrain = terrain;
+    let region = &mut world.population_regions[terrain as usize];
+    region.target = 1;
+    region.kinds = vec![kind];
+    region.sites = vec![pos];
+    let root = world.place_population_solo(kind, pos)?;
+    world.defeat_entity(root)?;
+    xml::tests::drain_events(&mut world)?;
+    assert!(!world.entities.contains_key(&root));
+    let children = world.oryx_counted(terrain);
+    assert_eq!(children.len(), 4, "source split survives the original root");
+    assert!(children.iter().all(|id| world.entities[id].kind == 0x20f));
+    for _ in 0..10 {
+        world.fill_population(terrain)?;
+        assert_eq!(world.oryx_counted(terrain), children);
+        assert_eq!(world.oryx_counts()[terrain as usize], children.len());
+    }
+    for id in children {
+        world.remove_entity(id);
+    }
+    assert_eq!(world.oryx_counts()[terrain as usize], 0);
     Ok(())
 }
 

@@ -242,6 +242,7 @@ impl World {
             "stamp shared population budget changed"
         );
         let mut ids = self.xml_reserve_ids(stamp.births)?.into_iter();
+        let population_terrain = self.population_origin(&self.entities[&owner.actor]);
         for c in stamp.changes {
             let object_changed = c.object.is_some() || c.clear_object;
             for id in c.remove {
@@ -276,7 +277,7 @@ impl World {
                     self.insert_entity_with_id(id, kind, pos, vec![])
                         .expect("preflighted stamp admission");
                 }
-                self.xml_own(id, Some(owner.actor), owner.encounter)
+                self.xml_own(id, Some(owner.actor), owner.encounter, population_terrain)
                     .expect("preflighted stamp ownership");
                 self.xml_activate_publication(id)
                     .expect("preflighted stamp portal activation");

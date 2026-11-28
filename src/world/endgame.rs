@@ -1553,6 +1553,28 @@ fn pending_event_does_not_block_other_defeats_in_the_realm_cycle() {
         assert!(directory.endgame.realms[&-3].cycle.admits() && world.admission_open);
         assert_eq!(directory.endgame.realms[&1].cycle.remaining, other);
     }
+    let world = directory.worlds.get_mut(&-3).unwrap();
+    world.players.clear();
+    let &parent = world
+        .population
+        .iter()
+        .find_map(|slot| slot.entity.as_ref())
+        .unwrap();
+    let pos = world.entities[&parent].pos;
+    for _ in 0..1024 {
+        let child = world.spawn_entity(0x20f, pos, vec![]).unwrap();
+        world.set_parent(child, Some(parent));
+    }
+    directory.endgame_step(&[-3]);
+    let world = &directory.worlds[&-3];
+    assert_eq!(world.event_waiting, None);
+    assert_eq!(world.event_reserves.len(), reserves - 1);
+    assert!(
+        !directory.endgame.realms[&-3]
+            .cycle
+            .remaining
+            .contains(&defeated[0])
+    );
 }
 
 #[cfg(test)]

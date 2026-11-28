@@ -35,17 +35,6 @@ impl World {
         Ok(gained)
     }
 
-    pub(super) fn summon_limit(&self) -> usize {
-        // The native population safety budget leaves room for concurrent Realm encounters.
-        self.xml_world_template()
-            .and_then(|w| w.services.summon_limit.as_ref())
-            .map_or(1024, |service| service.value)
-    }
-
-    pub(super) fn summon_occupancy(&self) -> usize {
-        self.summon_count()
-    }
-
     #[cfg(test)]
     pub(super) fn area_damage(
         &mut self,
