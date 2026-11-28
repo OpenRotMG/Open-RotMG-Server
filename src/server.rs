@@ -16,7 +16,9 @@ use crate::{
     crypto::Keys,
     store::{InventoryWrite, Store, xml_escape},
     wire::{self, Codec, Packet, Reader, Writer},
-    world::{Action, Handle, InventoryPlan, Pos, Slot, TradeAction, TradePlan, World},
+    world::{
+        Action, DepartureOutcome, Handle, InventoryPlan, Pos, Slot, TradeAction, TradePlan, World,
+    },
 };
 use anyhow::{Context, Result, bail, ensure};
 use axum::{
@@ -1561,7 +1563,7 @@ async fn handle(
             .player
             .context("prepared transfer lost its avatar")?;
         lifecycle::finalize_transfer(a, id, transfer.reservation)?
-            .wait()
+            .wait_transfer()
             .await?;
         session.player = None;
         // Admission must be released before RECONNECT can reach an immediate replacement HELLO.
@@ -2917,15 +2919,19 @@ pub(crate) async fn depart(a: &App, id: i32) -> Result<()> {
         .await
 }
 enum DepartureStep {
-    Save(crate::store::Character),
+    Save(crate::store::Character, Option<Vec<u8>>),
     Progress(crate::store::Character),
     Death(crate::store::Character, String),
     Waiting,
 }
 async fn depart_inner(a: &App, id: i32) -> Result<()> {
-    depart_inner_with_transfer(a, id, None).await
+    depart_inner_with_transfer(a, id, None).await.map(|_| ())
 }
-async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> Result<()> {
+async fn depart_inner_with_transfer(
+    a: &App,
+    id: i32,
+    key: Option<Vec<u8>>,
+) -> Result<DepartureOutcome> {
     a.world
         .for_player(id)
         .call(move |w| w.stop_controller(id))
@@ -2951,8 +2957,8 @@ async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> R
         let step = a
             .world
             .directory(move |d| {
-                if let Some(ch) = d.begin_source_departure(id, transfer.as_deref())? {
-                    return Ok(DepartureStep::Save(ch));
+                if let Some((ch, transfer)) = d.begin_source_departure(id, transfer)? {
+                    return Ok(DepartureStep::Save(ch, transfer));
                 }
                 let scope = d.location(id)?;
                 let w = d.worlds.get_mut(&scope).unwrap();
@@ -2970,7 +2976,7 @@ async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> R
                 Ok(DepartureStep::Waiting)
             })
             .await?;
-        let ch = match step {
+        let (ch, transfer) = match step {
             DepartureStep::Progress(snapshot) => {
                 persist_progress_inner(a, id, snapshot).await?;
                 continue;
@@ -2983,16 +2989,11 @@ async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> R
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 continue;
             }
-            DepartureStep::Save(ch) => ch,
+            DepartureStep::Save(ch, transfer) => (ch, transfer),
         };
         let retirement = lifecycle::retirement(a, ch.account, id)?;
         lifecycle::stage(Stage::Store);
         let snapshot = ch.clone();
-        if let Some(key) = key.clone() {
-            a.world
-                .directory(move |d| d.accept_source_write(id, &key))
-                .await?;
-        }
         let result = if ch.alive {
             a.store
                 .progress(ch)
@@ -3002,11 +3003,12 @@ async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> R
             Ok(())
         };
         lifecycle::stage(Stage::Publication);
-        a.world
+        let outcome = a
+            .world
             .directory(move |d| {
                 let scope = d.location(id)?;
                 d.worlds.get_mut(&scope).unwrap().committed(id, result)?;
-                d.finish_source_departure(id, snapshot, key)
+                d.finish_source_departure(id, snapshot, transfer)
             })
             .await?;
         lifecycle::stage(Stage::Retirement);
@@ -3018,7 +3020,7 @@ async fn depart_inner_with_transfer(a: &App, id: i32, key: Option<Vec<u8>>) -> R
             })
             .await?;
         lifecycle::stage(Stage::Settled);
-        return Ok(());
+        return Ok(outcome);
     }
 }
 #[derive(Deserialize)]
