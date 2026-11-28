@@ -1309,7 +1309,7 @@ pub(super) async fn launch(
                                 dialogue::cancel(&mut pending);
                                 ready_reply = None;
                                 dialogue::end_agreement(&app, &mut brain, "world changed").await;
-                                lifecycle::finalize_transfer(&app, id,reservation)?.wait().await?;
+                                lifecycle::finalize_transfer(&app, id,reservation)?.wait_transfer().await?;
                                 let previous = view.session.character;
                                 let plan = std::mem::take(&mut brain.plan);
                                 let sought = brain.mind.market.sought;

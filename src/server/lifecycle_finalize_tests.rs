@@ -338,6 +338,109 @@ async fn lifecycle_finalize_real_socket_manual_and_resurrection_transfer_retire_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn finalization_retires_origin_when_reserved_grant_disappears() {
+    for after_save in [false, true] {
+        let (_, a) = account_actions::tests::fixture();
+        a.world.clock.set_paused(true);
+        let account = a.store.list("lost-transfer-grant".into()).await.unwrap().id;
+        let ch = a
+            .store
+            .create(account, a.content.get(WIZARD).unwrap())
+            .await
+            .unwrap();
+        let character = ch.id;
+        let owner = a.claim_session(account).unwrap();
+        let bind = lifecycle::binding(&a, account).unwrap();
+        let (packets, _inbox) = mpsc::channel(64);
+        let (lost, _loss) = tokio::sync::watch::channel(None);
+        let (player, time, key, reservation, expected) = a
+            .world
+            .directory(move |d| {
+                let w = d.worlds.get_mut(&-3).unwrap();
+                let player = w.enter(
+                    ch,
+                    Some(crate::world::Output {
+                        packets,
+                        lost,
+                        trace: None,
+                    }),
+                )?;
+                bind(player)?;
+                let loaded = &mut w.players.get_mut(&player).unwrap().character;
+                loaded.lifetime.tiles += 7;
+                loaded.hp -= 3;
+                let expected = loaded.clone();
+                let (time, key, _) = d.issue(account, character, -2)?;
+                let reservation = d.reserve_transfer(key.clone())?;
+                Ok((player, time, key, reservation, expected))
+            })
+            .await
+            .unwrap();
+        let cancel = || {
+            let key = key.clone();
+            a.world.directory(move |d| d.cancel_admission(account, key))
+        };
+        let transfer = if after_save {
+            let (assists_ready, release_assists) = a.store.lifecycle_test_pause_reply();
+            let transfer = lifecycle::finalize_transfer(&a, player, reservation).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), assists_ready)
+                .await
+                .unwrap()
+                .unwrap();
+            let (saved, release) = a.store.lifecycle_test_pause_reply();
+            release_assists.send(()).unwrap();
+            tokio::time::timeout(Duration::from_secs(5), saved)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                a.world
+                    .for_player(player)
+                    .call(move |w| Ok(w.players[&player].pending))
+                    .await
+                    .unwrap()
+            );
+            cancel().await.unwrap();
+            assert!(
+                a.claim(account)
+                    .err()
+                    .unwrap()
+                    .is::<lifecycle::AccountBusy>()
+            );
+            release.send(()).unwrap();
+            transfer
+        } else {
+            cancel().await.unwrap();
+            lifecycle::finalize_transfer(&a, player, reservation).unwrap()
+        };
+        let disconnect = owner.close(&a, CloseReason::Transport).unwrap().unwrap();
+        let cancelled = transfer.wait_transfer().await.unwrap_err();
+        assert_eq!(
+            cancelled.to_string(),
+            "transfer cancelled; origin session retired"
+        );
+        let result = disconnect.wait().await;
+        let origin = a
+            .world
+            .directory(move |d| Ok(d.location(player).ok()))
+            .await
+            .unwrap();
+        let admitted = a.claim(account).is_ok();
+        assert!(
+            result.is_ok() && origin.is_none() && admitted,
+            "after_save={after_save}: disconnect={result:?}, avatar_world={origin:?}, account_reusable={admitted}"
+        );
+        assert_eq!(a.store.load(account, character).await.unwrap(), expected);
+        assert!(
+            a.world
+                .directory(move |d| Ok(d.consume(account, -2, time, key).is_err()))
+                .await
+                .unwrap()
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn client_entry_rejects_debug_worlds_without_changing_saved_character() {
     let (dir, a) = account_actions::tests::fixture();
     a.world.clock.set_paused(true);

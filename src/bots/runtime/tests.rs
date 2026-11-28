@@ -87,7 +87,7 @@ async fn drain_waits_for_accepted_bot_reentry_after_source_save() {
         .unwrap();
     lifecycle::finalize_transfer(&app, id, reservation)
         .unwrap()
-        .wait()
+        .wait_transfer()
         .await
         .unwrap();
     let saved = app.store.load(account, character).await.unwrap();

@@ -50,7 +50,7 @@ impl std::fmt::Display for Stage {
     }
 }
 
-type Completion = Option<std::result::Result<(), String>>;
+type Completion<T = ()> = Option<std::result::Result<T, String>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CloseReason {
@@ -101,12 +101,12 @@ impl std::error::Error for NestedFinalization {}
 struct Finalization {
     avatar: i32,
     transfer: Option<Vec<u8>>,
-    done: tokio::sync::watch::Receiver<Completion>,
+    done: tokio::sync::watch::Receiver<Completion<DepartureOutcome>>,
 }
 struct FinalizationGuard {
     registry: Arc<Mutex<BTreeMap<i32, Claim>>>,
     expected: Vec<(i32, Arc<()>)>,
-    completion: tokio::sync::watch::Sender<Completion>,
+    completion: tokio::sync::watch::Sender<Completion<DepartureOutcome>>,
     transfer: Option<crate::world::TransferReservation>,
     finished: bool,
     #[cfg(test)]
@@ -130,9 +130,19 @@ impl Drop for FinalizationGuard {
         }
     }
 }
-pub(crate) struct Finalized(tokio::sync::watch::Receiver<Completion>);
+pub(crate) struct Finalized(tokio::sync::watch::Receiver<Completion<DepartureOutcome>>);
 impl Finalized {
-    pub(crate) async fn wait(mut self) -> Result<()> {
+    pub(crate) async fn wait(self) -> Result<()> {
+        self.outcome().await.map(|_| ())
+    }
+    pub(crate) async fn wait_transfer(self) -> Result<()> {
+        ensure!(
+            self.outcome().await? == DepartureOutcome::TransferReady,
+            "transfer cancelled; origin session retired"
+        );
+        Ok(())
+    }
+    async fn outcome(mut self) -> Result<DepartureOutcome> {
         loop {
             if let Some(result) = self.0.borrow().clone() {
                 return result.map_err(anyhow::Error::msg);
@@ -871,7 +881,7 @@ fn begin_finalization(
             )
         });
         if let Some(transfer) = &mut guard.transfer {
-            if result.is_ok() {
+            if matches!(result, Ok(DepartureOutcome::TransferReady)) {
                 transfer.disarm();
             } else {
                 transfer.revoke();

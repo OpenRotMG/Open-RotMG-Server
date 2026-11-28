@@ -964,6 +964,11 @@ impl Drop for TransferReservation {
         self.revoke();
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DepartureOutcome {
+    Retired,
+    TransferReady,
+}
 pub(crate) struct TransferArrival {
     key: Vec<u8>,
     authority: TransferAuthority,
@@ -2215,16 +2220,6 @@ impl Directory {
             armed: true,
         })
     }
-    pub(crate) fn accept_source_write(&mut self, id: i32, key: &[u8]) -> Result<()> {
-        self.validate_source_exit(id, key)?;
-        let grant = self.grants.get(key).context("source write grant missing")?;
-        // This transition owns the uncancellable write; cancellation cannot promise to undo accepted SQL.
-        grant.authority.transition(
-            TRANSFER_WRITE,
-            TRANSFER_RESERVED,
-            TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED,
-        )
-    }
     pub(crate) fn retire_replacement(
         &mut self,
         arrival: TransferArrival,
@@ -2300,87 +2295,91 @@ impl Directory {
         }
         Ok(())
     }
-    fn validate_source_exit(
+    fn accept_source_write(
         &self,
+        source: i32,
         id: i32,
         key: &[u8],
     ) -> Result<Option<crate::dungeon::HistoricalDungeon>> {
-        let source = self.location(id)?;
-        let p = &self.worlds[&source].players[&id];
         let grant = self
             .grants
             .get(key)
             .context("source transfer grant missing")?;
+        ensure!(grant.expires > self.tick, "source transfer grant expired");
         ensure!(
-            grant.account == p.character.account
-                && grant.character == p.character.id
-                && grant.authority.state()
-                    & (TRANSFER_REVOKED | TRANSFER_WRITE | TRANSFER_CONSUMED | TRANSFER_DEPARTED)
-                    == 0
-                && grant.authority.state() & TRANSFER_RESERVED != 0
-                && grant.expires > self.tick,
-            "source transfer grant stale or foreign"
+            grant.authority.state() & TRANSFER_REVOKED == 0,
+            "source transfer grant revoked"
         );
         self.validate_exit_destination(grant)?;
-        match &grant.exit {
-            None => Ok(None),
-            Some(exit) => {
-                ensure!(
-                    exit.source == source
-                        && exit.player == id
-                        && p.character.alive
-                        && !p.death_pending
-                        && self.worlds[&source]
-                            .entities
-                            .get(&exit.portal)
-                            .is_some_and(|e| e.published && e.pos.distance(p.pos) <= 2.),
-                    "earned exit source changed"
-                );
-                Ok(Some(exit.dungeon))
-            }
+        if let Some(exit) = &grant.exit {
+            let world = &self.worlds[&source];
+            let p = &world.players[&id];
+            ensure!(
+                exit.source == source
+                    && exit.player == id
+                    && p.character.alive
+                    && !p.death_pending
+                    && world
+                        .entities
+                        .get(&exit.portal)
+                        .is_some_and(|e| e.published && e.pos.distance(p.pos) <= 2.),
+                "earned exit source changed"
+            );
         }
+        // Cancellation after acceptance cannot undo the earned exit in the owned SQL write.
+        grant.authority.transition(
+            TRANSFER_WRITE,
+            TRANSFER_RESERVED,
+            TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED,
+        )?;
+        Ok(grant.exit.as_ref().map(|exit| exit.dungeon))
     }
     pub(crate) fn begin_source_departure(
         &mut self,
         id: i32,
-        key: Option<&[u8]>,
-    ) -> Result<Option<Character>> {
+        key: Option<Vec<u8>>,
+    ) -> Result<Option<(Character, Option<Vec<u8>>)>> {
         let source = self.location(id)?;
-        if let Some(key) = key {
+        if let Some(grant) = key.as_ref().and_then(|key| self.grants.get_mut(key)) {
             let p = &self.worlds[&source].players[&id];
+            let state = grant.authority.state();
+            ensure!(
+                grant.account == p.character.account
+                    && grant.character == p.character.id
+                    && state & (TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED) == 0
+                    && state & TRANSFER_RESERVED != 0,
+                "source transfer grant is foreign or already accepted"
+            );
             if p.death_pending || !p.character.alive {
-                let grant = self
-                    .grants
-                    .get_mut(key)
-                    .context("dying source transfer grant missing")?;
-                grant.authority.transition(
-                    0,
-                    0,
-                    TRANSFER_WRITE | TRANSFER_DEPARTED | TRANSFER_CONSUMED,
-                )?;
                 grant.exit = None;
             }
         }
-        let exit = key
-            .map(|key| self.validate_source_exit(id, key))
-            .transpose()?
-            .flatten();
-        let w = self.worlds.get_mut(&source).unwrap();
-        let Some(mut snapshot) = w.begin_departure(id)? else {
+        let Some(mut snapshot) = self.worlds.get_mut(&source).unwrap().begin_departure(id)? else {
             return Ok(None);
         };
-        if let Some(exit) = exit {
-            snapshot.lifetime.realm_exits.insert(exit);
-        }
-        w.players.get_mut(&id).unwrap().departure_snapshot = Some(snapshot.clone());
-        Ok(Some(snapshot))
+        let key = key.filter(|key| match self.accept_source_write(source, id, key) {
+            Ok(exit) => {
+                if let Some(exit) = exit {
+                    snapshot.lifetime.realm_exits.insert(exit);
+                    self.worlds.get_mut(&source).unwrap().players.get_mut(&id).unwrap().departure_snapshot =
+                        Some(snapshot.clone());
+                }
+                true
+            }
+            Err(error) => {
+                tracing::warn!(player=id, account=snapshot.account, character=snapshot.id, origin=source, %error,
+                    "source transfer cancelled before save; retiring in origin");
+                false
+            }
+        });
+        Ok(Some((snapshot, key)))
     }
     pub(crate) fn finish_source_departure(
         &mut self,
         id: i32,
         snapshot: Character,
         key: Option<Vec<u8>>,
-    ) -> Result<()> {
+    ) -> Result<DepartureOutcome> {
         let source = self.location(id)?;
         ensure!(
             self.worlds[&source].players[&id]
@@ -2389,36 +2388,9 @@ impl Directory {
                 == Some(&snapshot),
             "source departure snapshot changed"
         );
-        if let Some(key) = key.as_ref() {
-            let grant = self
-                .grants
-                .get(key)
-                .context("committed source transfer grant missing")?;
-            self.validate_exit_destination(grant)?;
-            let grant = self
-                .grants
-                .get_mut(key)
-                .context("committed source transfer grant missing")?;
-            ensure!(
-                grant.account == snapshot.account
-                    && grant.character == snapshot.id
-                    && grant.authority.state() & (TRANSFER_REVOKED | TRANSFER_CONSUMED) == 0
-                    && grant.authority.state() & TRANSFER_DEPARTED == 0,
-                "committed source transfer binding changed"
-            );
-            grant.authority.transition(
-                TRANSFER_DEPARTED,
-                TRANSFER_WRITE,
-                TRANSFER_DEPARTED | TRANSFER_CONSUMED,
-            )?;
-        }
-        if let Some(key) = key.as_ref() {
-            let witness = self.capture_dungeon_entry(id, key);
-            self.grants
-                .get_mut(key)
-                .context("departed grant missing")?
-                .entry_witness = witness;
-        }
+        let witness = key
+            .as_deref()
+            .and_then(|key| self.capture_dungeon_entry(id, key));
         let prepared_departure = self.prepared_seed.is_some()
             && snapshot.alive
             && snapshot.hp > 0
@@ -2439,7 +2411,38 @@ impl Directory {
                 }
             }
         }
-        Ok(())
+        let Some(key) = key else {
+            return Ok(DepartureOutcome::Retired);
+        };
+        let publish: Result<()> = (|| {
+            let grant = self
+                .grants
+                .get(&key)
+                .context("committed source transfer grant missing")?;
+            ensure!(
+                grant.account == snapshot.account && grant.character == snapshot.id,
+                "committed source transfer binding changed"
+            );
+            ensure!(
+                grant.expires > self.tick,
+                "committed source transfer grant expired"
+            );
+            self.validate_exit_destination(grant)?;
+            let grant = self.grants.get_mut(&key).unwrap();
+            grant.authority.transition(
+                TRANSFER_DEPARTED,
+                TRANSFER_WRITE,
+                TRANSFER_DEPARTED | TRANSFER_CONSUMED,
+            )?;
+            grant.entry_witness = witness;
+            Ok(())
+        })();
+        if let Err(error) = publish {
+            tracing::warn!(player=id, account=snapshot.account, character=snapshot.id, origin=source, %error,
+                "source transfer cancelled after save; retired in origin");
+            return Ok(DepartureOutcome::Retired);
+        }
+        Ok(DepartureOutcome::TransferReady)
     }
     pub fn consume(
         &mut self,
@@ -7322,15 +7325,13 @@ mod prepared_native_transition_tests {
                 })
         }
         async fn depart(&mut self, key: Option<Vec<u8>>) {
-            let snapshot = self
+            let (snapshot, accepted) = self
                 .d
-                .begin_source_departure(self.player, key.as_deref())
+                .begin_source_departure(self.player, key.clone())
                 .unwrap()
                 .unwrap();
+            assert_eq!(accepted, key);
             assert_eq!(self.phase().as_deref(), Some("source_retiring"));
-            if let Some(key) = &key {
-                self.d.accept_source_write(self.player, key).unwrap();
-            }
             let persisted = self.store.progress(snapshot.clone()).await;
             self.d
                 .worlds
