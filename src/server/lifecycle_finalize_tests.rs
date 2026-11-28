@@ -357,14 +357,7 @@ async fn finalization_retires_origin_when_reserved_grant_disappears() {
             .world
             .directory(move |d| {
                 let w = d.worlds.get_mut(&-3).unwrap();
-                let player = w.enter(
-                    ch,
-                    Some(crate::world::Output {
-                        packets,
-                        lost,
-                        trace: None,
-                    }),
-                )?;
+                let player = w.enter(ch, Some(crate::world::Output { packets, lost }))?;
                 bind(player)?;
                 let loaded = &mut w.players.get_mut(&player).unwrap().character;
                 loaded.lifetime.tiles += 7;
