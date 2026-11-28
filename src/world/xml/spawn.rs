@@ -6,6 +6,7 @@ pub(super) struct Birth {
     pub at: u64,
     pub id: i32,
     pub identity: Identity,
+    population_terrain: Option<u8>,
     pub kind: u16,
     pub pos: Pos,
 }
@@ -180,6 +181,7 @@ impl World {
             self.xml_publish_actor(parent)?;
         }
         let ids = self.xml_reserve_ids(births.len())?;
+        let population_terrain = self.population_origin(&self.entities[&parent]);
         for ((kind, p), id) in births.into_iter().zip(ids) {
             if b.kind == K::ObjectToss {
                 self.xml.births.push(Birth {
@@ -198,6 +200,7 @@ impl World {
                         parent: Some(parent),
                         encounter: step.token.scope.identity.encounter,
                     },
+                    population_terrain,
                     kind,
                     pos: p,
                 });
@@ -205,8 +208,13 @@ impl World {
             } else {
                 self.insert_entity_with_id(id, kind, p, vec![])
                     .expect("preflighted XML child");
-                self.xml_own(id, Some(parent), step.token.scope.identity.encounter)
-                    .expect("preflighted XML ownership");
+                self.xml_own(
+                    id,
+                    Some(parent),
+                    step.token.scope.identity.encounter,
+                    population_terrain,
+                )
+                .expect("preflighted XML ownership");
             }
         }
         *rng = draw;
@@ -247,8 +255,13 @@ impl World {
             let birth = self.xml.births.remove(index);
             self.insert_entity_with_id(birth.id, birth.kind, birth.pos, vec![])
                 .expect("preflighted thrown birth");
-            self.xml_own(birth.id, birth.identity.parent, birth.identity.encounter)
-                .expect("reserved thrown ownership");
+            self.xml_own(
+                birth.id,
+                birth.identity.parent,
+                birth.identity.encounter,
+                birth.population_terrain,
+            )
+            .expect("reserved thrown ownership");
         }
         Ok(())
     }
@@ -317,11 +330,17 @@ impl World {
             return Ok(ActionOutcome::Blocked);
         }
         let ids = self.xml_reserve_ids(count)?;
+        let population_terrain = self.population_origin(&self.entities[&host]);
         for ((kind, p), id) in births.into_iter().zip(&ids) {
             self.insert_entity_with_id(*id, kind, p, vec![])
                 .expect("preflighted protector");
-            self.xml_own(*id, Some(host), step.token.scope.identity.encounter)
-                .expect("preflighted protector ownership");
+            self.xml_own(
+                *id,
+                Some(host),
+                step.token.scope.identity.encounter,
+                population_terrain,
+            )
+            .expect("preflighted protector ownership");
         }
         let protectors = Protectors {
             behavior: b.clone(),
@@ -402,11 +421,9 @@ impl World {
             let Some(&Value::Millis(cooldown)) = value(&p.behavior, F::Cooldown) else {
                 bail!("unmaterialized MaintainProtectors cooldown host={host}")
             };
-            let pos = self
-                .entities
-                .get(&host)
-                .context("protector host absent")?
-                .pos;
+            let entity = self.entities.get(&host).context("protector host absent")?;
+            let pos = entity.pos;
+            let population_terrain = self.population_origin(entity);
             if self.now.is_multiple_of(200) && p.slots.len() > 1 {
                 self.xml_protector_streams(token, host, pos, &dead);
             }
@@ -459,8 +476,13 @@ impl World {
                         let id = self.xml_reserve_ids(1)?[0];
                         self.insert_entity_with_id(id, kind, at, vec![])
                             .expect("preflighted protector corpse");
-                        self.xml_own(id, Some(host), token.scope.identity.encounter)
-                            .expect("preflighted protector corpse ownership");
+                        self.xml_own(
+                            id,
+                            Some(host),
+                            token.scope.identity.encounter,
+                            population_terrain,
+                        )
+                        .expect("preflighted protector corpse ownership");
                         self.entities.get_mut(&id).unwrap().damage = record;
                         corpses.push(id);
                     }
@@ -501,8 +523,13 @@ impl World {
                         let id = self.xml_reserve_ids(1)?[0];
                         self.insert_entity_with_id(id, kind, at, vec![])
                             .expect("preflighted protector respawn");
-                        self.xml_own(id, Some(host), token.scope.identity.encounter)
-                            .expect("preflighted protector respawn ownership");
+                        self.xml_own(
+                            id,
+                            Some(host),
+                            token.scope.identity.encounter,
+                            population_terrain,
+                        )
+                        .expect("preflighted protector respawn ownership");
                         p.slots[slot] = id;
                         p.records[slot].clear();
                     }

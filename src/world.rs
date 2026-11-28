@@ -870,6 +870,7 @@ pub struct World {
     camps: Vec<population::Camp>,
     population_regions: [population_density::Region; 13],
     population_counts: [usize; 13],
+    population_children: BTreeMap<i32, u8>,
     population_next: u64,
     reproduction: BTreeMap<(i32, usize), u64>,
     summon_waits: BTreeSet<i32>,
@@ -3244,6 +3245,7 @@ impl World {
             camps: vec![],
             population_regions: std::array::from_fn(|_| population_density::Region::default()),
             population_counts: [0; 13],
+            population_children: BTreeMap::new(),
             population_next: 10000,
             reproduction: BTreeMap::new(),
             summon_waits: BTreeSet::new(),
@@ -3730,6 +3732,7 @@ impl World {
                 .checked_sub(1)
                 .expect("population count underflow");
         }
+        self.population_children.remove(&id);
         self.xml_forget(id);
         self.bag_expiry.remove(&id);
         if let Some(camp) = entity.camp {
@@ -4891,18 +4894,6 @@ impl World {
     fn snapshot_portal(content: &Content, kind: u16) -> bool {
         content.objects[&kind].is_portal()
     }
-    fn summon_entities(&self) -> impl Iterator<Item = &Entity> {
-        self.timed_ids
-            .union(&self.quest_ids)
-            .map(|id| &self.entities[id])
-            .filter(|e| e.parent.is_some() || e.quest.is_some())
-    }
-    fn summon_count(&self) -> usize {
-        self.summon_entities()
-            .filter(|e| self.actor_ids.contains(&e.id))
-            .count()
-    }
-
     fn entities_near(&self, pos: Pos, radius: f32) -> impl Iterator<Item = &Entity> {
         self.near_entities(
             Pos {
@@ -7050,7 +7041,7 @@ impl World {
                 self.realm_tick_mean = Some((Instant::now(), mean_us));
             }
             tracing::info!(world_id,world=%self.name, entities=self.entities.len(), actors=self.actor_ids.len(),
-                bullets=self.bullets.len(),compact_entities=self.entities.shared(),scenery_promotions=self.entities.promotions,spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
+                ordinary_children=self.population_children.len(),bullets=self.bullets.len(),compact_entities=self.entities.shared(),scenery_promotions=self.entities.promotions,spatial_cells=self.cells.len(),known_entities=self.players.values().map(|p|p.known.len()).sum::<usize>(),
                 native_lag=%serde_json::json!(self.players.iter().filter(|(_,p)|p.controller==Controller::Human).map(|(id,p)|serde_json::json!({"player":id,"metrics":p.native_lag.snapshot(Instant::now(),false)})).collect::<Vec<_>>()),
                 pending_shoot_acks=self.players.values().map(|p|p.shoot_acks.len()).sum::<usize>(),
                 weapon_tick_records=self.players.values().map(|p|p.weapon_ticks.len()).sum::<usize>(),

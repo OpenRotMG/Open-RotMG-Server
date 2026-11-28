@@ -1871,8 +1871,15 @@ impl World {
             .map_err(|_| anyhow::anyhow!("XML entity IDs exhausted"))?;
         Ok((start..start + count).collect())
     }
-    fn xml_own(&mut self, id: i32, parent: Option<i32>, encounter: Option<u64>) -> Result<()> {
+    fn xml_own(
+        &mut self,
+        id: i32,
+        parent: Option<i32>,
+        encounter: Option<u64>,
+        population_terrain: Option<u8>,
+    ) -> Result<()> {
         ensure!(self.entities.contains_key(&id), "new child absent");
+        self.mark_population_child(id, population_terrain);
         self.set_parent(id, parent);
         self.xml.identities.insert(
             id,
@@ -2159,6 +2166,7 @@ impl World {
         }
         let heir = self.xml_quest_heir(&births);
         let successor = e.quest.is_some() && heir.is_some();
+        let population_terrain = self.population_origin(&e);
         for (index, ((kind, p, replacement), id)) in births.into_iter().zip(ids).enumerate() {
             let event = self.xml.terminals[&e.id].event.id.clone();
             self.xml_insert_publication(id, kind, p, &event)
@@ -2174,6 +2182,7 @@ impl World {
                     Some(e.id)
                 },
                 identity.encounter,
+                population_terrain,
             )
             .expect("preflighted terminal ownership");
             self.xml_activate_publication(id)
