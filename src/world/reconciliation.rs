@@ -90,7 +90,8 @@ impl Player {
             .fold(current, |dex, (_, _, past)| dex.max(*past))
     }
     pub(super) fn remember_weapon_tick(&mut self, dex: i32) {
-        if self.controller != Controller::Human {
+        // A departing player has no client left to acknowledge ticks.
+        if self.controller != Controller::Human || self.departing {
             return;
         }
         if self.weapon_ticks.len() == ACK_LIMIT {

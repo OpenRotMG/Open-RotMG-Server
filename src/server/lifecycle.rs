@@ -803,38 +803,42 @@ fn begin_finalization(
     let work = async move {
         let mut stop_acknowledged = false;
         let result = AssertUnwindSafe(async {
-            tokio::time::timeout(
-                std::time::Duration::from_secs(15),
-                FINALIZING.scope((), async {
-                    stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
-                    stop_acknowledged = true;
-                    while !super::settle_giver_credits(&app, avatar).await? {
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let save = FINALIZING.scope((), async {
+                stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
+                stop_acknowledged = true;
+                while !super::settle_giver_credits(&app, avatar).await? {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                let result =
+                    self::account(&app, vec![account], "finalization", move |app| async move {
+                        super::depart_inner_with_transfer(&app, avatar, transfer_key).await
+                    })
+                    .await;
+                if let Err(error) = &result {
+                    fail_owned(
+                        &app.owners,
+                        &expected,
+                        "finalization",
+                        Stage::Retirement,
+                        format!("reason={reason}: {error:#}"),
+                    );
+                    if !stop_acknowledged {
+                        stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
+                        stop_acknowledged = true;
+                        wait_pending(&app, account, &expected[0].1).await?;
                     }
-                    let result =
-                        self::account(&app, vec![account], "finalization", move |app| async move {
-                            super::depart_inner_with_transfer(&app, avatar, transfer_key).await
-                        })
-                        .await;
-                    if let Err(error) = &result {
-                        fail_owned(
-                            &app.owners,
-                            &expected,
-                            "finalization",
-                            Stage::Retirement,
-                            format!("reason={reason}: {error:#}"),
-                        );
-                        if !stop_acknowledged {
-                            stop_owned_avatar(&app, account, &expected[0].1, avatar).await?;
-                            stop_acknowledged = true;
-                            wait_pending(&app, account, &expected[0].1).await?;
-                        }
-                    }
-                    result
-                }),
-            )
-            .await
-            .context("finalization deadline exceeded; accepted work remains owned")?
+                }
+                result
+            });
+            tokio::pin!(save);
+            // Abandoning a slow save stranded the account until restart; finishing it releases the player.
+            tokio::select! {
+                result = &mut save => result,
+                () = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                    tracing::warn!(account, avatar, %reason, "finalization still saving after 15s");
+                    save.await
+                }
+            }
         })
         .catch_unwind()
         .await;
