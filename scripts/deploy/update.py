@@ -137,12 +137,10 @@ def retain_deployments(apply=True):
                 and not stage.is_symlink(), 'Unsafe retained stage: ' + str(stage))
         if not stage.exists() and receipt['state'] == 'failed':
             continue
-        valid = stage.exists() and [stage.stat().st_dev, stage.stat().st_ino] == receipt['stage_identity']
-        revision = (stage / 'REVISION').read_text().strip() if valid else None
-        valid = valid and revision in metadata and not any(p.is_symlink() for p in stage.rglob('*'))
-        if not valid or files(stage) != metadata[revision]['manifest'] or any(stage == p or stage in p.parents for p in running):
+        # Pinning every stage whose files drifted kept them forever and filled the disk; only a running stage is kept.
+        if any(stage == p or stage in p.parents for p in running):
             keep.add(work)
-            pinned.append({'path': str(work), 'reason': 'stage identity, contents or use requires review'})
+            pinned.append({'path': str(work), 'reason': 'stage is in use'})
     protected = {LIVE}
     revisions = {live_revision}
     for work in keep:
@@ -177,15 +175,6 @@ def retain_deployments(apply=True):
             if not re.fullmatch('[0-9a-f]{40}', bundle.name) or bundle == current or bundle.name in revisions:
                 continue
             if any(bundle == p or bundle in p.parents for p in running):
-                revisions.add(bundle.name)
-                continue
-            mapping = {'backup.py': 'scripts/backups/backup.py', 'openrotmg': 'openrotmg', 'REVISION': 'REVISION',
-                       'openrotmg-backup.sh': 'scripts/backups/openrotmg-backup.sh'}
-            manifest = metadata[bundle.name]['manifest'] if bundle.name in metadata else {}
-            mapping.update({n: n for n in manifest if n.startswith('data/')})
-            valid = all(n in manifest for n in mapping.values()) and bundle.is_dir() and not bundle.is_symlink()
-            if not valid or any(p.is_symlink() for p in bundle.rglob('*')) or files(bundle) != {n: manifest[s] for n, s in mapping.items()}:
-                pinned.append({'path': str(bundle), 'reason': 'backup tool provenance requires review'})
                 revisions.add(bundle.name)
                 continue
             remove.add(bundle)

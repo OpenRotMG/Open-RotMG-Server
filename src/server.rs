@@ -3343,12 +3343,42 @@ pub(crate) async fn reconcile_world_origins(
     store.reconcile_confirmed_lost_events(absent).await
 }
 /// Runs about once a minute, or again next tick while a full batch shows a backlog.
-async fn prune_journal_history(a: &App, live: Vec<String>, ids: Vec<String>) -> Result<()> {
+/// Each step scans the whole journal table, so running reconciliation every persistence tick saturated the Store thread.
+async fn journal_maintenance(
+    a: &App,
+    live: Vec<String>,
+    ids: Vec<String>,
+) -> Result<Vec<(String, String)>> {
     static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
     let now = i64::try_from(std::time::UNIX_EPOCH.elapsed()?.as_secs())?;
     if now < NEXT.load(std::sync::atomic::Ordering::Relaxed) {
-        return Ok(());
+        return Ok(Vec::new());
     }
+    NEXT.store(now + 60, std::sync::atomic::Ordering::Relaxed);
+    let reconciled = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        reconcile_world_origins(&a.store, &a.world, live.clone()),
+    )
+    .await
+    .with_context(|| format!("Store reconciliation deadline unresolved; original live journal events={ids:?} retained"))??;
+    match prune_journal_history(a, live, ids, now).await {
+        Ok(backlog) if backlog || reconciled.len() >= 8 => {
+            NEXT.store(now, std::sync::atomic::Ordering::Relaxed)
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(error=%format_args!("{error:#}"),"journal retention failed; history retained")
+        }
+    }
+    Ok(reconciled)
+}
+/// Returns whether a full batch shows a remaining backlog.
+async fn prune_journal_history(
+    a: &App,
+    live: Vec<String>,
+    ids: Vec<String>,
+    now: i64,
+) -> Result<bool> {
     let compacted = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         a.store.compact_settled_world_events(ids.clone()),
@@ -3361,10 +3391,7 @@ async fn prune_journal_history(a: &App, live: Vec<String>, ids: Vec<String>) -> 
     )
     .await
     .context("journal retention Store timeout; history retained")??;
-    if pruned.max(compacted) < crate::store::world_events::JOURNAL_PRUNE_BATCH {
-        NEXT.store(now + 60, std::sync::atomic::Ordering::Relaxed);
-    }
-    Ok(())
+    Ok(pruned.max(compacted) >= crate::store::world_events::JOURNAL_PRUNE_BATCH)
 }
 /// Returns whether terminal journal events were drained, so the caller can poll again without the full idle delay.
 pub(crate) async fn persistence_tick(a: &App) -> Result<bool> {
@@ -3429,10 +3456,7 @@ pub(crate) async fn persistence_tick(a: &App) -> Result<bool> {
             ids.extend(events);
         }
     }
-    let reconciled=tokio::time::timeout(std::time::Duration::from_secs(10),reconcile_world_origins(&a.store,&a.world,live.clone())).await.with_context(||format!("Store reconciliation deadline unresolved; original live journal events={ids:?} retained"))??;
-    if let Err(error) = prune_journal_history(a, live, ids).await {
-        tracing::error!(error=%format_args!("{error:#}"),"journal retention failed; history retained");
-    }
+    let reconciled = journal_maintenance(a, live, ids).await?;
     a.world
         .directory(move |d| {
             d.retire_lost_inventory_events(reconciled.into_iter().map(|(id, _)| id).collect())
