@@ -326,11 +326,29 @@ impl World {
                     });
                 }
             }
+            // Release 7.0 behavior.cc:2317-2326 sends AOE at detonation; 123.5.1 renders the landing ring from it.
+            let (effect, seconds) = match blast.effect {
+                Some((effect, ms)) if ms > 0 => (effect, ms as f32 / 1000.),
+                _ => (0, 0.),
+            };
+            let mut out = Writer::new();
+            out.f32(blast.pos.x)
+                .f32(blast.pos.y)
+                .f32(blast.radius)
+                .i16(blast.damage as i16)
+                .u8(effect)
+                .f32(seconds)
+                .i16(blast.kind as i16);
             let targets: Vec<_> = self
                 .players
                 .iter()
-                .filter(|(_, p)| eligible(p) && p.pos.distance(blast.pos) <= blast.radius)
-                .map(|(id, _)| *id)
+                .filter_map(|(&id, p)| {
+                    let distance = p.pos.distance(blast.pos);
+                    if p.active() && distance < blast.radius + PLAYER_VIEW_RADIUS {
+                        send(p, wire::AOE, out.0.clone());
+                    }
+                    (eligible(p) && distance <= blast.radius).then_some(id)
+                })
                 .collect();
             for id in targets {
                 self.xml_hurt_player(
