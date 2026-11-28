@@ -210,7 +210,7 @@
     {"kind":3522,"bounds":[648,1444,21,55],"spawn":[658,1471],"support":147,"chest":[658,1471]},
     {"kind":1656,"bounds":[398,743,25,25],"spawn":[410,755],"support":46,"chest":[411,755]}
   ]},
-  {"layout":"classic-world-05-reconstruction","sha256":"c6daa9af6a24e958de538f76a58cd1f957ca6bc837b8252e564d62f789f7710b","sites":[
+  {"layout":"classic-world-05-reconstruction","sha256":"9fd8d8afc2da54b51be6e9e9b2e0bd8b26665d956a88267dcbd4dc3575cd2649","sites":[
     {"kind":2335,"bounds":[870,418,27,27],"spawn":[883,431],"support":29},
     {"kind":2335,"bounds":[1078,478,29,29],"spawn":[1092,492],"support":59},
     {"kind":2335,"bounds":[923,561,27,27],"spawn":[936,574],"support":44},
