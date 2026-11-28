@@ -36,14 +36,7 @@ fn chamber() -> (Directory, i32, Vec<mpsc::Receiver<Packet>>, [i32; 3]) {
             d.worlds
                 .get_mut(&world)
                 .unwrap()
-                .enter(
-                    ch,
-                    Some(Output {
-                        trace: None,
-                        packets,
-                        lost,
-                    }),
-                )
+                .enter(ch, Some(Output { packets, lost }))
                 .unwrap(),
         );
         receivers.push(inbox);

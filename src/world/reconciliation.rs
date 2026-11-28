@@ -104,16 +104,6 @@ impl Player {
             }
             return;
         }
-        if self
-            .weapon_ticks
-            .back()
-            .is_none_or(|(_, weapon, previous_dex)| {
-                *weapon != self.character.items[0] || *previous_dex != dex
-            })
-            && let Some(trace) = self.tx.as_ref().and_then(|o| o.trace.as_ref())
-        {
-            trace.event("weapon_advertised",None,None,serde_json::json!({"tick":self.tick,"weapon":self.character.items[0],"dex":dex,"state_revision":self.audit_revision}));
-        }
         self.weapon_ticks
             .push_back((self.tick, self.character.items[0], dex));
     }

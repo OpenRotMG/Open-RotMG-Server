@@ -643,7 +643,6 @@ fn public_diagnostics(report: &Value) -> Value {
 }
 fn audit_report(
     report: &Value,
-    session: u64,
     account: Option<i32>,
     player: i32,
     closing: bool,
@@ -670,7 +669,7 @@ fn audit_report(
     let coverage = json!({"tick_buckets_omitted":trim("/history",6,false),"lag_buckets_omitted":trim("/native_lag/history",6,true),"browser_samples_omitted":trim("/browser_history",12,true)});
     crate::audit::record(
         "diagnostics",
-        json!({"session":session,"account":account,"player":player,"closing":closing,"context_status":context_status,"context_request_ms":context_request_ms,"coverage":coverage,"transport":report["transport"],"values":values}),
+        json!({"account":account,"player":player,"closing":closing,"context_status":context_status,"context_request_ms":context_request_ms,"coverage":coverage,"transport":report["transport"],"values":values}),
     );
 }
 
@@ -680,7 +679,6 @@ pub(super) async fn audit_session(a: &App, session: &super::Session) {
     let Some(player) = session.player else {
         return;
     };
-    let trace_session = session.trace.session();
     let account = session.account.as_ref().map(|o| o.id);
     let mut report = json!({"created_at_unix_ms":unix_ms(),"server_source_revision":a.diagnostics.source_revision,"server_binary_sha256":a.diagnostics.binary_sha256,"protocol_build":"123.5.1","connection":session.diagnostics.snapshot()});
     let Ok(permit) = SLOTS
@@ -688,7 +686,7 @@ pub(super) async fn audit_session(a: &App, session: &super::Session) {
         .clone()
         .try_acquire_owned()
     else {
-        audit_report(&report, trace_session, account, player, false, "busy", 0.);
+        audit_report(&report, account, player, false, "busy", 0.);
         return;
     };
     let a = a.clone();
@@ -711,7 +709,6 @@ pub(super) async fn audit_session(a: &App, session: &super::Session) {
         };
         audit_report(
             &report,
-            trace_session,
             account,
             player,
             false,
@@ -727,7 +724,6 @@ pub(super) async fn disconnect(
     dropped_account: Option<i32>,
     connection: &ConnectionDiagnostics,
     transport: Value,
-    trace_session: u64,
 ) {
     // Capture before departure removes the player; never create a public bug report or gold reward.
     let mut report = json!({"created_at_unix_ms":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock before epoch").as_millis(),
@@ -754,7 +750,6 @@ pub(super) async fn disconnect(
     }
     audit_report(
         &report,
-        trace_session,
         dropped_account,
         player,
         true,

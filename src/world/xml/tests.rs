@@ -117,16 +117,7 @@ fn medusa_grenade_sends_throw_then_aoe_and_applies_damage_on_landing() {
     ch.id = 1;
     let (packets, mut inbox) = mpsc::channel(64);
     let (lost, _) = watch::channel(None);
-    let player = w
-        .enter(
-            ch,
-            Some(Output {
-                trace: None,
-                packets,
-                lost,
-            }),
-        )
-        .unwrap();
+    let player = w.enter(ch, Some(Output { packets, lost })).unwrap();
     let target = w.players[&player].pos;
     let hp = w.players[&player].character.hp;
     let defense = w.defense(player).unwrap();
