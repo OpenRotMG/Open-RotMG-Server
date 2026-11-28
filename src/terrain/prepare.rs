@@ -2207,6 +2207,29 @@ pub(crate) fn run(args: &[String]) -> Result<bool> {
 }
 
 #[test]
+fn world05_white_floor_preserves_exact_source_support() -> Result<()> {
+    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
+    let content = Content::load(&data)?;
+    let bytes = std::fs::read(data.join("realms/classic-world-05-reconstruction.wmap"))?;
+    let map = Map::decode_realm_cells(&bytes, &content, [2100, 2100])?;
+    let mut support = Vec::new();
+    for (i, cell) in map.cells.iter().enumerate() {
+        assert_ne!(cell.ground, 0xe5, "Dream Tile at index {i}");
+        if cell.ground == 0x74 {
+            assert!(cell.object.is_none() && cell.config.is_empty());
+            assert_eq!((cell.terrain, cell.region), (0, 0));
+            support.extend((i as u32).to_le_bytes());
+        }
+    }
+    assert_eq!(support.len(), 64 * 4);
+    assert_eq!(
+        sha256(&support),
+        "0123d9aff1d585bf22eca2d0fc6ad27857720687b32ad815fa39a84f6cf7ca20"
+    );
+    Ok(())
+}
+
+#[test]
 fn world05_legacy_and_playable_lava_capabilities_remain_distinct() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("data/realms");
     let Recipe::ReviewedCellsV1(recipe) = read_recipe(&root, "world05.json")? else {
