@@ -102,7 +102,6 @@ pub(crate) mod view;
 pub use trade::{TradeAction, TradePlan};
 #[derive(Clone)]
 pub struct Output {
-    pub trace: Option<crate::audit::Trace>,
     pub packets: mpsc::Sender<Packet>,
     pub lost: watch::Sender<Option<&'static str>>,
 }
@@ -3025,11 +3024,7 @@ pub(crate) fn send(p: &Player, id: u8, body: Vec<u8>) {
     spectator::publish(p, id, &body);
     let packet_bytes = body.len();
     if let Some(tx) = &p.tx {
-        let attempt_us = tx.trace.as_ref().map(crate::audit::Trace::stamp);
         let result = tx.packets.try_send(Packet { id, body });
-        if let Some(trace) = &tx.trace {
-            trace.event("enqueue_result",Some(id),None,serde_json::json!({"attempt_us":attempt_us,"body_bytes":packet_bytes,"returned_ok":result.is_ok(),"observed_queue":tx.packets.max_capacity()-tx.packets.capacity()}));
-        }
         if let Err(error) = result {
             lose(
                 &tx.lost,
@@ -4003,10 +3998,6 @@ impl World {
         self.rng = draw;
         if let Some(key) = admission {
             self.admissions.remove(&key);
-        }
-        let p = &self.players[&id];
-        if let Some(trace) = p.tx.as_ref().and_then(|o| o.trace.as_ref()) {
-            trace.bind([p.character.account, p.character.id, id], &self.name);
         }
         let mut o = Writer::new();
         o.i32(id).i32(char_id);
@@ -7292,14 +7283,7 @@ mod prepared_native_transition_tests {
                 .worlds
                 .get_mut(&-3)
                 .unwrap()
-                .enter(
-                    ch.clone(),
-                    Some(Output {
-                        trace: None,
-                        packets,
-                        lost,
-                    }),
-                )
+                .enter(ch.clone(), Some(Output { packets, lost }))
                 .unwrap();
             while inbox.try_recv().is_ok() {}
             Self {

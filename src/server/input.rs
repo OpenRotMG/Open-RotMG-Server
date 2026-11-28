@@ -15,7 +15,7 @@ use tokio::{
 };
 
 pub(super) enum Incoming {
-    Command(Packet, Instant, OwnedSemaphorePermit, u64),
+    Command(Packet, Instant, OwnedSemaphorePermit),
     Ping(Bytes),
 }
 pub(super) struct InputTask {
@@ -42,7 +42,6 @@ pub(super) fn receive<S, E>(
     mut stream: S,
     lost: watch::Sender<Option<&'static str>>,
     clock: crate::clock::Clock,
-    trace: crate::audit::Trace,
 ) -> (mpsc::Receiver<Incoming>, InputTask)
 where
     S: Stream<Item = Result<Message, E>> + Send + Unpin + 'static,
@@ -59,14 +58,11 @@ where
         let mut count = 0usize;
         let mut types = [0u32; 256];
         let mut dispatched = 0;
-        let mut frame_number = 0;
         while let Some(message) = stream.next().await {
             *received_frame.lock().expect("input diagnostics poisoned") = Some(Instant::now());
             let received = clock.now();
             let inputs = match message {
                 Ok(Message::Binary(frame)) => {
-                    frame_number += 1;
-                    let received_us = trace.stamp();
                     let packets = match codec.feed(&frame) {
                         Ok(packets) => packets,
                         Err(error) => {
@@ -75,12 +71,6 @@ where
                             return;
                         }
                     };
-                    trace.event(
-                        "frame",
-                        None,
-                        Some(frame_number),
-                        serde_json::json!({"bytes":frame.len(),"packets":packets.len(),"received_us":received_us}),
-                    );
                     if window.elapsed().as_secs() >= 1 {
                         window = Instant::now();
                         count = 0;
@@ -112,8 +102,7 @@ where
                                 return;
                             }
                         };
-                        let sequence = trace.received(&packet, frame_number, received_us);
-                        inputs.push(Incoming::Command(packet, received, permit, sequence));
+                        inputs.push(Incoming::Command(packet, received, permit));
                     }
                     inputs
                 }

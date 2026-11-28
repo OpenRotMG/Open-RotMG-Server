@@ -1479,14 +1479,7 @@ async fn realm_close_token_starts_the_ordinary_closure_once() {
     let (packets, mut inbox) = mpsc::channel(64);
     let (lost, _) = watch::channel(None);
     let player = world
-        .enter(
-            character.clone(),
-            Some(Output {
-                trace: None,
-                packets,
-                lost,
-            }),
-        )
+        .enter(character.clone(), Some(Output { packets, lost }))
         .unwrap();
     while inbox.try_recv().is_ok() {}
     directory.worlds.insert(-3, world);
@@ -1615,14 +1608,7 @@ async fn earthquake_sends_marked_players_to_the_nexus_instead_of_the_castle() {
             let (lost, _) = watch::channel(None);
             inboxes.push(inbox);
             world
-                .enter(
-                    character.clone(),
-                    Some(Output {
-                        trace: None,
-                        packets,
-                        lost,
-                    }),
-                )
+                .enter(character.clone(), Some(Output { packets, lost }))
                 .unwrap()
         })
         .collect();
