@@ -108,6 +108,81 @@ fn fixture(body: &str) -> (World, i32, i32) {
 }
 
 #[test]
+fn medusa_grenade_sends_throw_then_aoe_and_applies_damage_on_landing() {
+    let mut w = flat_nonrealm(Arc::new(crate::world::test_content()));
+    let mut ch = Character::fresh(w.content.get(0x307).unwrap()).unwrap();
+    ch.base[0] = 500;
+    ch.hp = ch.base[0];
+    ch.account = 1;
+    ch.id = 1;
+    let (packets, mut inbox) = mpsc::channel(64);
+    let (lost, _) = watch::channel(None);
+    let player = w
+        .enter(
+            ch,
+            Some(Output {
+                trace: None,
+                packets,
+                lost,
+            }),
+        )
+        .unwrap();
+    let target = w.players[&player].pos;
+    let hp = w.players[&player].character.hp;
+    let defense = w.defense(player).unwrap();
+    let medusa = spawn(&mut w, 0x654, target.x - 5., target.y);
+    let mut drain = || std::iter::from_fn(|| inbox.try_recv().ok()).collect::<Vec<_>>();
+    drain();
+
+    w.now = 50;
+    w.xml_step().unwrap();
+    let packets = drain();
+    let (throw_index, thrown) = packets
+        .iter()
+        .enumerate()
+        .find(|(_, p)| p.id == wire::SHOW_EFFECT)
+        .expect("throw packet");
+    assert!(packets[..throw_index].iter().any(|p| p.id == wire::UPDATE));
+    let mut effect = wire::Reader::new(&thrown.body);
+    assert_eq!(effect.u8().unwrap(), 4);
+    assert_eq!(effect.i32().unwrap(), medusa);
+    assert_eq!(effect.f32().unwrap(), target.x);
+    assert_eq!(effect.f32().unwrap(), target.y);
+    effect.take(8).unwrap();
+    assert_eq!(effect.i32().unwrap() as u32, 0xffff0000);
+    effect.done().unwrap();
+    assert!(packets.iter().all(|p| p.id != wire::AOE));
+
+    w.remove_entity(medusa);
+    w.now += 1499;
+    w.xml_step().unwrap();
+    assert_eq!(w.players[&player].character.hp, hp);
+    assert!(drain().iter().all(|p| p.id != wire::AOE));
+    w.now += 1;
+    w.xml_step().unwrap();
+    assert_eq!(
+        w.players[&player].character.hp,
+        hp - crate::condition::damage(150, defense, 0, false)
+    );
+    let packets = drain();
+    let impacts: Vec<_> = packets.iter().filter(|p| p.id == wire::AOE).collect();
+    assert_eq!(
+        impacts.len(),
+        1,
+        "Medusa damage landed without the native AOE packet"
+    );
+    let mut impact = wire::Reader::new(&impacts[0].body);
+    assert_eq!(impact.f32().unwrap(), target.x);
+    assert_eq!(impact.f32().unwrap(), target.y);
+    assert_eq!(impact.f32().unwrap(), 4.);
+    assert_eq!(impact.i16().unwrap(), 150);
+    assert_eq!(impact.u8().unwrap(), 0);
+    assert_eq!(impact.f32().unwrap(), 0.);
+    assert_eq!(impact.i16().unwrap(), 0x654);
+    impact.done().unwrap();
+}
+
+#[test]
 fn recovered_realm_movement_uses_source_speed_and_gods_follow_at_seven_to_ten_tiles() {
     let mut map = flat_map(128);
     let mut elevation = vec![0; map.cells.len()];
